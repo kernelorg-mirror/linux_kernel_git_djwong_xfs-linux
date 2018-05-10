@@ -1761,6 +1761,8 @@ xfs_fs_fill_super(
  out_close_devices:
 	xfs_close_devices(mp);
  out_free_fsname:
+	sb->s_fs_info = NULL;
+	sb->s_op = NULL;
 	xfs_free_fsname(mp);
 	kfree(mp);
  out:
@@ -1787,6 +1789,9 @@ xfs_fs_put_super(
 	xfs_destroy_percpu_counters(mp);
 	xfs_destroy_mount_workqueues(mp);
 	xfs_close_devices(mp);
+
+	sb->s_fs_info = NULL;
+	sb->s_op = NULL;
 	xfs_free_fsname(mp);
 	kfree(mp);
 }
@@ -1806,6 +1811,12 @@ xfs_fs_nr_cached_objects(
 	struct super_block	*sb,
 	struct shrink_control	*sc)
 {
+	/*
+	 * Don't do anything until the filesystem is fully set up, or in the
+	 * process of being torn down due to a mount failure.
+	 */
+	if (!sb->s_fs_info)
+		return 0;
 	return xfs_reclaim_inodes_count(XFS_M(sb));
 }
 
