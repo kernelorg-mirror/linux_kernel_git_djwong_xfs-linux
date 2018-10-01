@@ -1,6 +1,8 @@
+.. SPDX-License-Identifier: GPL-2.0
 
-The SGI XFS Filesystem
-======================
+=======================
+XFS General Information
+=======================
 
 XFS is a high performance journaling filesystem which originated
 on the SGI IRIX platform.  It is completely multi-threaded, can
@@ -9,10 +11,8 @@ variable block sizes, is extent based, and makes extensive use of
 Btrees (directories, extents, free space) to aid both performance
 and scalability.
 
-Refer to the documentation at https://xfs.wiki.kernel.org/
-for further details.  This implementation is on-disk compatible
-with the IRIX version of XFS.
-
+Refer to the documentation in the kernel git tree for further details.
+This implementation is on-disk compatible with the IRIX version of XFS.
 
 Mount Options
 =============
@@ -34,8 +34,7 @@ default behaviour.
 	to the file. Specifying a fixed allocsize value turns off
 	the dynamic behaviour.
 
-  attr2
-  noattr2
+  attr2 or noattr2
 	The options enable/disable an "opportunistic" improvement to
 	be made in the way inline extended attributes are stored
 	on-disk.  When the new form is used for the first time when
@@ -51,8 +50,7 @@ default behaviour.
 	CRC enabled filesystems always use the attr2 format, and so
 	will reject the noattr2 mount option if it is set.
 
-  discard
-  nodiscard (*)
+  discard or nodiscard (*)
 	Enable/disable the issuing of commands to let the block
 	device reclaim space freed by the filesystem.  This is
 	useful for SSD devices, thinly provisioned LUNs and virtual
@@ -63,8 +61,7 @@ default behaviour.
 	mount option because the performance impact of this option
 	is quite severe.
 
-  grpid/bsdgroups
-  nogrpid/sysvgroups (*)
+  grpid or nogrpid (*); and bsdgroups or sysvgroups (*)
 	These options define what group ID a newly created file
 	gets.  When grpid is set, it takes the group ID of the
 	directory in which it is created; otherwise it takes the
@@ -78,15 +75,13 @@ default behaviour.
 	across the entire filesystem rather than just on directories
 	configured to use it.
 
-  ikeep
-  noikeep (*)
+  ikeep or noikeep (*)
 	When ikeep is specified, XFS does not delete empty inode
 	clusters and keeps them around on disk.  When noikeep is
 	specified, empty inode clusters are returned to the free
 	space pool.
 
-  inode32
-  inode64 (*)
+  inode32 or inode64 (*)
 	When inode32 is specified, it indicates that XFS limits
 	inode creation to locations which will not result in inode
 	numbers with more than 32 bits of significance.
@@ -94,7 +89,7 @@ default behaviour.
 	When inode64 is specified, it indicates that XFS is allowed
 	to create inodes at any location in the filesystem,
 	including those which will result in inode numbers occupying
-	more than 32 bits of significance. 
+	more than 32 bits of significance.
 
 	inode32 is provided for backwards compatibility with older
 	systems and applications, since 64 bits inode numbers might
@@ -104,8 +99,7 @@ default behaviour.
 	option should be specified.
 
 
-  largeio
-  nolargeio (*)
+  largeio or nolargeio (*)
 	If "nolargeio" is specified, the optimal I/O reported in
 	st_blksize by stat(2) will be as small as possible to allow
 	user applications to avoid inefficient read/modify/write
@@ -221,22 +215,24 @@ default behaviour.
 Deprecated Mount Options
 ========================
 
+  ============================= ================
   Name				Removal Schedule
-  ----				----------------
-
+  ============================= ================
+  ============================= ================
 
 Removed Mount Options
 =====================
 
+  ============================= =======
   Name				Removed
-  ----				-------
+  ============================= =======
   delaylog/nodelaylog		v4.0
   ihashsize			v4.0
   irixsgid			v4.0
   osyncisdsync/osyncisosync	v4.0
   barrier			v4.19
   nobarrier			v4.19
-
+  ============================= =======
 
 sysctls
 =======
@@ -256,8 +252,7 @@ The following sysctls are available for the XFS filesystem:
 	references and returns timed-out AGs back to the free stream
 	pool.
 
-  fs.xfs.speculative_prealloc_lifetime
-		(Units: seconds   Min: 1  Default: 300  Max: 86400)
+  fs.xfs.speculative_prealloc_lifetime  (Units: seconds   Min: 1  Default: 300  Max: 86400)
 	The interval at which the background scanning for inodes
 	with unused speculative preallocation runs. The scan
 	removes unused preallocation from clean inodes and releases
@@ -268,14 +263,21 @@ The following sysctls are available for the XFS filesystem:
 	This will generate detailed messages & backtraces for filesystem
 	shutdowns, for example.  Current threshold values are:
 
+                ======================= =====
+                Symbol                  Value
+                ======================= =====
 		XFS_ERRLEVEL_OFF:       0
 		XFS_ERRLEVEL_LOW:       1
 		XFS_ERRLEVEL_HIGH:      5
+                ======================= =====
 
   fs.xfs.panic_mask		(Min: 0  Default: 0  Max: 255)
 	Causes certain error conditions to call BUG(). Value is a bitmask;
 	OR together the tags which represent errors which should cause panics:
 
+                =============================== ==========
+                Symbol                          Value
+                =============================== ==========
 		XFS_NO_PTAG                     0
 		XFS_PTAG_IFLUSH                 0x00000001
 		XFS_PTAG_LOGRES                 0x00000002
@@ -285,6 +287,7 @@ The following sysctls are available for the XFS filesystem:
 		XFS_PTAG_SHUTDOWN_IOERROR       0x00000020
 		XFS_PTAG_SHUTDOWN_LOGERROR      0x00000040
 		XFS_PTAG_FSBLOCK_ZERO           0x00000080
+                =============================== ==========
 
 	This option is intended for debugging only.
 
@@ -340,11 +343,12 @@ None at present.
 Removed Sysctls
 ===============
 
+  ============================= =======
   Name				Removed
-  ----				-------
+  ============================= =======
   fs.xfs.xfsbufd_centisec	v4.0
   fs.xfs.age_buffer_centisecs	v4.0
-
+  ============================= =======
 
 Error handling
 ==============
@@ -353,18 +357,18 @@ XFS can act differently according to the type of error found during its
 operation. The implementation introduces the following concepts to the error
 handler:
 
- -failure speed:
+ - failure speed:
 	Defines how fast XFS should propagate an error upwards when a specific
 	error is found during the filesystem operation. It can propagate
 	immediately, after a defined number of retries, after a set time period,
 	or simply retry forever.
 
- -error classes:
+ - error classes:
 	Specifies the subsystem the error configuration will apply to, such as
 	metadata IO or memory allocation. Different subsystems will have
 	different error handlers for which behaviour can be configured.
 
- -error handlers:
+ - error handlers:
 	Defines the behavior for a specific error.
 
 The filesystem behavior during an error can be set via sysfs files. Each

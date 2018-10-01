@@ -75,6 +75,7 @@ configure specific aspects of kernel behavior to your liking.
    thunderbolt
    LSM/index
    mm/index
+   xfs
 
 .. only::  subproject and html
 
