@@ -1,0 +1,1688 @@
+.. SPDX-License-Identifier: CC-BY-SA-4.0
+
+Directories
+-----------
+
+    **Note**
+
+    Only v2 directories covered here. v1 directories are obsolete.
+
+    **Note**
+
+    The term "block" in this section will refer to directory blocks, not
+    filesystem blocks unless otherwise specified.
+
+The size of a "directory block" is defined by the
+`superblock’s <#superblocks>`__ sb\_dirblklog value. The size in bytes =
+sb\_blocksize × 2\ :sup:`sb\_dirblklog`. For example, if sb\_blocksize = 4096
+and sb\_dirblklog = 2, the directory block size is 16384 bytes. Directory
+blocks are always allocated in multiples based on sb\_dirblklog. Directory
+blocks cannot be more that 65536 bytes in size.
+
+All directory entries contain the following "data":
+
+-  The entry’s name (counted string consisting of a single byte namelen
+   followed by name consisting of an array of 8-bit chars without a NULL
+   terminator).
+
+-  The entry’s absolute `inode number <#inode-numbers>`__, which are always 64
+   bits (8 bytes) in size except a special case for shortform directories.
+
+-  An offset or tag used for iterative readdir calls.
+
+-  If the XFS\_SB\_FEAT\_INCOMPAT\_FTYPE feature flag is set, each directory
+   entry contains an ftype field that caches the inode’s type to avoid having
+   to perform an inode lookup.
+
+.. list-table::
+   :widths: 28 52
+   :header-rows: 1
+
+   * - Flag
+     - Description
+
+   * - XFS_DIR3_FT_UNKNOWN
+     - Entry points to an unknown inode type.  This should never appear on
+       disk.
+
+   * - XFS_DIR3_FT_REG_FILE
+     - Entry points to a file.
+
+   * - XFS_DIR3_FT_DIR
+     - Entry points to another directory.
+
+   * - XFS_DIR3_FT_CHRDEV
+     - Entry points to a character device.
+
+   * - XFS_DIR3_FT_BLKDEV
+     - Entry points to a block device.
+
+   * - XFS_DIR3_FT_FIFO
+     - Entry points to a FIFO.
+
+   * - XFS_DIR3_FT_SOCK
+     - Entry points to a socket.
+
+   * - XFS_DIR3_FT_SYMLINK
+     - Entry points to a symbolic link.
+
+   * - XFS_DIR3_FT_WHT
+     - Entry points to an overlayfs whiteout file.  This (as far as the author
+       knows) has never appeared on disk.
+
+Table: ftype values
+
+All non-shortform directories also contain two additional structures:
+"leaves"
+and "freespace indexes".
+
+-  Leaves contain the sorted hashed name value (xfs\_da\_hashname() in
+   xfs\_da\_btree.c) and associated "address" which points to the
+   effective offset into the directory’s data structures. Leaves are used to
+   optimise lookup operations.
+
+-  Freespace indexes contain free space/empty entry tracking for quickly
+   finding an appropriately sized location for new entries. They maintain the
+   largest free space for each "data" block.
+
+A few common types are used for the directory structures:
+
+.. code:: c
+
+    typedef __uint16_t xfs_dir2_data_off_t;
+    typedef __uint32_t xfs_dir2_dataptr_t;
+
+Short Form Directories
+~~~~~~~~~~~~~~~~~~~~~~
+
+-  Directory entries are stored within the inode.
+
+-  The only data stored is the name, inode number, and offset. No "leaf" or
+   "freespace index" information is required as an inode can only store a
+   few entries.
+
+-  "." is not stored (as it’s in the inode itself), and ".." is a
+   dedicated parent field in the header.
+
+-  The number of directories that can be stored in an inode depends on the
+   `inode <#on-disk-inode>`__ size, the number of entries, the length of the
+   entry names, and extended attribute data.
+
+-  Once the number of entries exceeds the space available in the inode, the
+   format is converted to a `block directory <#block-directories>`__.
+
+-  Shortform directory data is packed as tightly as possible on the disk with
+   the remaining space zeroed:
+
+.. code:: c
+
+    typedef struct xfs_dir2_sf {
+         xfs_dir2_sf_hdr_t         hdr;
+         xfs_dir2_sf_entry_t       list[1];
+    } xfs_dir2_sf_t;
+
+**hdr**
+    Short form directory header.
+
+**list**
+    An array of variable-length directory entry records.
+
+.. code:: c
+
+    typedef struct xfs_dir2_sf_hdr {
+         __uint8_t                 count;
+         __uint8_t                 i8count;
+         xfs_dir2_inou_t           parent;
+    } xfs_dir2_sf_hdr_t;
+
+**count**
+    Number of directory entries.
+
+**i8count**
+    Number of directory entries requiring 64-bit entries, if any inode numbers
+    require 64-bits. Zero otherwise.
+
+**parent**
+    The absolute inode number of this directory’s parent.
+
+.. code:: c
+
+    typedef struct xfs_dir2_sf_entry {
+         __uint8_t                 namelen;
+         xfs_dir2_sf_off_t         offset;
+         __uint8_t                 name[1];
+         __uint8_t                 ftype;
+         xfs_dir2_inou_t           inumber;
+    } xfs_dir2_sf_entry_t;
+
+**namelen**
+    Length of the name, in bytes.
+
+**offset**
+    Offset tag used to assist with directory iteration.
+
+**name**
+    The name of the directory entry. The entry is not NULL-terminated.
+
+**ftype**
+    The type of the inode. This is used to avoid reading the inode while
+    iterating a directory. The XFS\_SB\_VERSION2\_FTYPE feature must be set,
+    or this field will not be present.
+
+**inumber**
+    The inode number that this entry points to. The length is either 32 or 64
+    bits, depending on whether icount or i8count, respectively, are set in the
+    header.
+
+.. figure:: images/39.png
+   :alt: Short form directory layout
+
+   Short form directory layout
+
+-  Inode numbers are stored using 4 or 8 bytes depending on whether all the
+   inode numbers for the directory fit in 4 bytes (32 bits) or not. If all
+   inode numbers fit in 4 bytes, the header’s count value specifies the number
+   of entries in the directory and i8count will be zero. If any inode number
+   exceeds 4 bytes, all inode numbers will be 8 bytes in size and the header’s
+   i8count value specifies the number of entries requiring larger inodes.
+   i4count is still the number of entries. The following union covers the
+   shortform inode number structure:
+
+.. code:: c
+
+    typedef struct { __uint8_t i[8]; } xfs_dir2_ino8_t;
+    typedef struct { __uint8_t i[4]; } xfs_dir2_ino4_t;
+    typedef union {
+         xfs_dir2_ino8_t           i8;
+         xfs_dir2_ino4_t           i4;
+    } xfs_dir2_inou_t;
+
+xfs\_db Short Form Directory Example
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A directory is created with 4 files, all inode numbers fitting within 4 bytes:
+
+::
+
+    xfs_db> inode <inode#>
+    xfs_db> p
+    core.magic = 0x494e
+    core.mode = 040755
+    core.version = 1
+    core.format = 1 (local)
+    core.nlinkv1 = 2
+    ...
+    core.size = 94
+    core.nblocks = 0
+    core.extsize = 0
+    core.nextents = 0
+    ...
+    u.sfdir2.hdr.count = 4
+    u.sfdir2.hdr.i8count = 0
+    u.sfdir2.hdr.parent.i4 = 128              /* parent = root inode */
+    u.sfdir2.list[0].namelen = 15
+    u.sfdir2.list[0].offset = 0x30
+    u.sfdir2.list[0].name = "frame000000.tst"
+    u.sfdir2.list[0].inumber.i4 = 25165953
+    u.sfdir2.list[1].namelen = 15
+    u.sfdir2.list[1].offset = 0x50
+    u.sfdir2.list[1].name = "frame000001.tst"
+    u.sfdir2.list[1].inumber.i4 = 25165954
+    u.sfdir2.list[2].namelen = 15
+    u.sfdir2.list[2].offset = 0x70
+    u.sfdir2.list[2].name = "frame000002.tst"
+    u.sfdir2.list[2].inumber.i4 = 25165955
+    u.sfdir2.list[3].namelen = 15
+    u.sfdir2.list[3].offset = 0x90
+    u.sfdir2.list[3].name = "frame000003.tst"
+    u.sfdir2.list[3].inumber.i4 = 25165956
+
+The raw data on disk with the first entry highlighted. The six byte header
+precedes the first entry:
+
+::
+
+    xfs_db> type text
+    xfs_db> p
+    00: 49 4e 41 ed 01 01 00 02 00 00 00 00 00 00 00 00 INA.............
+    10: 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 02 ................
+    20: 44 ad 3a 83 1d a9 4a d0 44 ad 3a ab 0b c7 a7 d0 D.....J.D.......
+    30: 44 ad 3a ab 0b c7 a7 d0 00 00 00 00 00 00 00 5e D...............
+    40: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................
+    50: 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 00 ................
+    60: ff ff ff ff 04 00 00 00 00 80 0f 00 30 66 72 61 ............0fra
+    70: 6d 65 30 30 30 30 30 30 2e 74 73 74 01 80 00 81 me000000.tst....
+    80: 0f 00 50 66 72 61 6d 65 30 30 30 30 30 31 2e 74 ..Pframe000001.t
+    90: 73 74 01 80 00 82 0f 00 70 66 72 61 6d 65 30 30 st......pframe00
+    a0: 30 30 30 32 2e 74 73 74 01 80 00 83 0f 00 90 66 0002.tst........
+    b0: 72 61 6d 65 30 30 30 30 30 33 2e 74 73 74 01 80 rame000003.tst..
+    cO: 00 84 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................
+
+Next, an entry is deleted (frame000001.tst), and any entries after the deleted
+entry are moved or compacted to "cover" the hole:
+
+::
+
+    xfs_db> inode <inode#>
+    xfs_db> p
+    core.magic = 0x494e
+    core.mode = 040755
+    core.version = 1
+    core.format = 1 (local)
+    core.nlinkv1 = 2
+    ...
+    core.size = 72
+    core.nblocks = 0
+    core.extsize = 0
+    core.nextents = 0
+    ...
+    u.sfdir2.hdr.count = 3
+    u.sfdir2.hdr.i8count = 0
+    u.sfdir2.hdr.parent.i4 = 128
+    u.sfdir2.list[0].namelen = 15
+    u.sfdir2.list[0].offset = 0x30
+    u.sfdir2.list[0].name = "frame000000.tst"
+    u.sfdir2.list[0].inumber.i4 = 25165953
+    u.sfdir2.list[1].namelen = 15
+    u.sfdir2.list[1].offset = 0x70
+    u.sfdir2.list[1].name = "frame000002.tst"
+    u.sfdir2.list[1].inumber.i4 = 25165955
+    u.sfdir2.list[2].namelen = 15
+    u.sfdir2.list[2].offset = 0x90
+    u.sfdir2.list[2].name = "frame000003.tst"
+    u.sfdir2.list[2].inumber.i4 = 25165956
+
+Raw disk data, the space beyond the shortform entries is invalid and could be
+non-zero:
+
+::
+
+    xfs_db> type text
+    xfs_db> p
+    00: 49  4e 41 ed 01 01 00 02 00 00 00 00 00 00 00 00 INA.............
+    10: 00  00 00 02 00 00 00 00 00 00 00 00 00 00 00 03 ................
+    20: 44  b2 45 a2 09 fd e4 50 44 b2 45 a3 12 ee b5 d0 D.E....PD.E.....
+    30: 44  b2 45 a3 12 ee b5 d0 00 00 00 00 00 00 00 48 D.E............H
+    40: 00  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................
+    50: 00  00 00 02 00 00 00 00 00 00 00 00 00 00 00 00 ................
+    60: ff  ff ff ff 03 00 00 00 00 80 0f 00 30 66 72 61 ............0fra
+    70: 6d  65 30 30 30 30 30 30 2e 74 73 74 01 80 00 81 me000000.tst....
+    80: 0f  00 70 66 72 61 6d 65 30 30 30 30 30 32 2e 74 ..pframe000002.t
+    90: 73  74 01 80 00 83 0f 00 90 66 72 61 6d 65 30 30 st.......frame00
+    a0: 30  30 30 33 2e 74 73 74 01 80 00 84 0f 00 90 66 0003.tst.......f
+    b0: 72  61 6d 65 30 30 30 30 30 33 2e 74 73 74 01 80 rame000003.tst..
+    c0: 00  84 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................
+
+This is an example of mixed 4-byte and 8-byte inodes in a directory:
+
+::
+
+    xfs_db> inode 1024
+    xfs_db> p
+    core.magic = 0x494e
+    core.mode = 040755
+    core.version = 3
+    core.format = 1 (local)
+    core.nlinkv2 = 9
+    ...
+    core.size = 125
+    core.nblocks = 0
+    core.extsize = 0
+    core.nextents = 0
+    ...
+    u3.sfdir3.hdr.count = 7
+    u3.sfdir3.hdr.i8count = 4
+    u3.sfdir3.hdr.parent.i8 = 1024
+    u3.sfdir3.list[0].namelen = 3
+    u3.sfdir3.list[0].offset = 0x60
+    u3.sfdir3.list[0].name = "git"
+    u3.sfdir3.list[0].inumber.i8 = 1027
+    u3.sfdir3.list[0].filetype = 2
+    u3.sfdir3.list[1].namelen = 4
+    u3.sfdir3.list[1].offset = 0x70
+    u3.sfdir3.list[1].name = "home"
+    u3.sfdir3.list[1].inumber.i8 = 13422826546
+    u3.sfdir3.list[1].filetype = 2
+    u3.sfdir3.list[2].namelen = 10
+    u3.sfdir3.list[2].offset = 0x80
+    u3.sfdir3.list[2].name = "mike"
+    u3.sfdir3.list[2].inumber.i8 = 4299308032
+    u3.sfdir3.list[2].filetype = 2
+    u3.sfdir3.list[3].namelen = 3
+    u3.sfdir3.list[3].offset = 0x98
+    u3.sfdir3.list[3].name = "mtr"
+    u3.sfdir3.list[3].inumber.i8 = 13433252916
+    u3.sfdir3.list[3].filetype = 2
+    u3.sfdir3.list[4].namelen = 3
+    u3.sfdir3.list[4].offset = 0xa8
+    u3.sfdir3.list[4].name = "vms"
+    u3.sfdir3.list[4].inumber.i8 = 16647516355
+    u3.sfdir3.list[4].filetype = 2
+    u3.sfdir3.list[5].namelen = 5
+    u3.sfdir3.list[5].offset = 0xb8
+    u3.sfdir3.list[5].name = "rsync"
+    u3.sfdir3.list[5].inumber.i8 = 3494912
+    u3.sfdir3.list[5].filetype = 2
+    u3.sfdir3.list[6].namelen = 3
+    u3.sfdir3.list[6].offset = 0xd0
+    u3.sfdir3.list[6].name = "tmp"
+    u3.sfdir3.list[6].inumber.i8 = 1593379
+    u3.sfdir3.list[6].filetype = 2
+
+Block Directories
+~~~~~~~~~~~~~~~~~
+
+When the shortform directory space exceeds the space in an inode, the
+directory data is moved into a new single directory block outside the inode.
+The inode’s format is changed from "local" to "extent" Following is a
+list of points about block directories.
+
+-  All directory data is stored within the one directory block, including
+   "." and
+   ".." entries which are mandatory.
+
+-  The block also contains "leaf" and "freespace index" information.
+
+-  The location of the block is defined by the inode’s in-core `extent
+   list <#extent-list>`__: the di\_u.u\_bmx[0] value. The file offset in the
+   extent must always be zero and the length = (directory block size /
+   filesystem block size). The block number points to the filesystem block
+   containing the directory data.
+
+-  Block directory data is stored in the following structures:
+
+.. code:: c
+
+    #define XFS_DIR2_DATA_FD_COUNT 3
+    typedef struct xfs_dir2_block {
+         xfs_dir2_data_hdr_t        hdr;
+         xfs_dir2_data_union_t      u[1];
+         xfs_dir2_leaf_entry_t      leaf[1];
+         xfs_dir2_block_tail_t      tail;
+    } xfs_dir2_block_t;
+
+**hdr**
+    Directory block header. On a v5 filesystem this is
+    xfs\_dir3\_data\_hdr\_t.
+
+**u**
+    Union of directory and unused entries.
+
+**leaf**
+    Hash values of the entries in this block.
+
+**tail**
+    Bookkeeping for the leaf entries.
+
+.. code:: c
+
+    typedef struct xfs_dir2_data_hdr {
+         __uint32_t                 magic;
+         xfs_dir2_data_free_t       bestfree[XFS_DIR2_DATA_FD_COUNT];
+    } xfs_dir2_data_hdr_t;
+
+**magic**
+    Magic number for this directory block.
+
+**bestfree**
+    An array pointing to free regions in the directory block.
+
+On a v5 filesystem, directory and attribute blocks are formatted with v3
+headers, which contain extra data:
+
+.. code:: c
+
+    struct xfs_dir3_blk_hdr {
+         __be32                     magic;
+         __be32                     crc;
+         __be64                     blkno;
+         __be64                     lsn;
+         uuid_t                     uuid;
+         __be64                     owner;
+    };
+
+**magic**
+    Magic number for this directory block.
+
+**crc**
+    Checksum of the directory block.
+
+**blkno**
+    Block number of this directory block.
+
+**lsn**
+    Log sequence number of the last write to this block.
+
+**uuid**
+    The UUID of this block, which must match either sb\_uuid or sb\_meta\_uuid
+    depending on which features are set.
+
+**owner**
+    The inode number that this directory block belongs to.
+
+.. code:: c
+
+    struct xfs_dir3_data_hdr {
+         struct xfs_dir3_blk_hdr    hdr;
+         xfs_dir2_data_free_t       best_free[XFS_DIR2_DATA_FD_COUNT];
+         __be32                     pad;
+    };
+
+**hdr**
+    The v5 directory/attribute block header.
+
+**best\_free**
+    An array pointing to free regions in the directory block.
+
+**pad**
+    Padding to maintain a 64-bit alignment.
+
+Within the block, data structures are as follows:
+
+.. code:: c
+
+    typedef struct xfs_dir2_data_free {
+         xfs_dir2_data_off_t        offset;
+         xfs_dir2_data_off_t        length;
+    } xfs_dir2_data_free_t;
+
+**offset**
+    Block offset of a free block, in bytes.
+
+**length**
+    Length of the free block, in bytes.
+
+Space inside the directory block can be used for directory entries or unused
+entries.  This is signified via a union of the two types:
+
+.. code:: c
+
+    typedef union {
+         xfs_dir2_data_entry_t      entry;
+         xfs_dir2_data_unused_t     unused;
+    } xfs_dir2_data_union_t;
+
+**entry**
+    A directory entry.
+
+**unused**
+    An unused entry.
+
+.. code:: c
+
+    typedef struct xfs_dir2_data_entry {
+         xfs_ino_t                  inumber;
+         __uint8_t                  namelen;
+         __uint8_t                  name[1];
+         __uint8_t                  ftype;
+         xfs_dir2_data_off_t        tag;
+    } xfs_dir2_data_entry_t;
+
+**inumber**
+    The inode number that this entry points to.
+
+**namelen**
+    Length of the name, in bytes.
+
+**name**
+    The name associated with this entry.
+
+**ftype**
+    The type of the inode. This is used to avoid reading the inode while
+    iterating a directory. The XFS\_SB\_VERSION2\_FTYPE feature must be set,
+    or this field will not be present.
+
+**tag**
+    Starting offset of the entry, in bytes. This is used for directory
+    iteration.
+
+.. code:: c
+
+    typedef struct xfs_dir2_data_unused {
+         __uint16_t                 freetag;  /* 0xffff */
+         xfs_dir2_data_off_t        length;
+         xfs_dir2_data_off_t        tag;
+    } xfs_dir2_data_unused_t;
+
+**freetag**
+    Magic number signifying that this is an unused entry.  Must be 0xFFFF.
+
+**length**
+    Length of this unused entry, in bytes.
+
+**tag**
+    Starting offset of the entry, in bytes.
+
+.. code:: c
+
+    typedef struct xfs_dir2_leaf_entry {
+         xfs_dahash_t               hashval;
+         xfs_dir2_dataptr_t         address;
+    } xfs_dir2_leaf_entry_t;
+
+**hashval**
+    Hash value of the name of the directory entry.  This is used to speed up
+    entry lookups.
+
+**address**
+    Block offset of the entry, in eight byte units.
+
+.. code:: c
+
+    typedef struct xfs_dir2_block_tail {
+         __uint32_t                 count;
+         __uint32_t                 stale;
+    } xfs_dir2_block_tail_t;
+
+**count**
+    Number of leaf entries.
+
+**stale**
+    Number of free leaf entries.
+
+Following is a diagram of how these pieces fit together for a block directory.
+
+.. ifconfig:: builder != 'latex'
+
+   .. figure:: images/43.png
+      :alt: Block directory layout
+
+      Block directory layout
+
+.. ifconfig:: builder == 'latex'
+
+   .. figure:: images/43.png
+      :scale: 45%
+      :alt: Block directory layout
+
+      Block directory layout
+
+-  The magic number in the header is "XD2B" (0x58443242), or "XDB3"
+   (0x58444233) on a v5 filesystem.
+
+-  The tag in the xfs\_dir2\_data\_entry\_t structure stores its offset from
+   the start of the block.
+
+-  The start of a free space region is marked with the
+   xfs\_dir2\_data\_unused\_t structure where the freetag is 0xffff. The
+   freetag and length overwrites the inumber for an entry. The tag is located
+   at length - sizeof(tag) from the start of the unused entry on-disk.
+
+-  The bestfree array in the header points to as many as three of the largest
+   spaces of free space within the block for storing new entries sorted by
+   largest to third largest. If there are less than 3 empty regions, the
+   remaining bestfree elements are zeroed. The offset specifies the offset
+   from the start of the block in bytes, and the length specifies the size of
+   the free space in bytes. The location each points to must contain the above
+   xfs\_dir2\_data\_unused\_t structure. As a block cannot exceed 64KB in
+   size, each is a 16-bit value. bestfree is used to optimise the time
+   required to locate space to create an entry. It saves scanning through the
+   block to find a location suitable for every entry created.
+
+-  The tail structure specifies the number of elements in the leaf array and
+   the number of stale entries in the array. The tail is always located at the
+   end of the block. The leaf data immediately precedes the tail structure.
+
+-  The leaf array, which grows from the end of the block just before the tail
+   structure, contains an array of hash/address pairs for quickly looking up a
+   name by a hash value. Hash values are covered by the introduction to
+   directories. The address on-disk is the offset into the block divided by 8
+   (XFS\_DIR2\_DATA\_ALIGN). Hash/address pairs are stored on disk to optimise
+   lookup speed for large directories. If they were not stored, the hashes
+   would have to be calculated for all entries each time a lookup occurs in a
+   directory.
+
+xfs\_db Block Directory Example
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A directory is created with 8 entries, directory block size = filesystem block
+size:
+
+::
+
+    xfs_db> sb 0
+    xfs_db> p
+    magicnum = 0x58465342
+    blocksize = 4096
+    ...
+    dirblklog = 0
+    ...
+    xfs_db> inode <inode#>
+    xfs_db> p
+    core.magic = 0x494e
+    core.mode = 040755
+    core.version = 1
+    core.format = 2 (extents)
+    core.nlinkv1 = 2
+    ...
+    core.size = 4096
+    core.nblocks = 1
+    core.extsize = 0
+    core.nextents = 1
+    ...
+    u.bmx[0] = [startoff,startblock,blockcount,extentflag] 0:[0,2097164,1,0]
+
+Go to the "startblock" and show the raw disk data:
+
+::
+
+    xfs_db> dblock 0
+    xfs_db> type text
+    xfs_db> p
+    000: 58 44 32 42 01 30 0e 78 00 00 00 00 00 00 00 00 XD2B.0.x........
+    010: 00 00 00 00 02 00 00 80 01 2e 00 00 00 00 00 10 ................
+    020: 00 00 00 00 00 00 00 80 02 2e 2e 00 00 00 00 20 ................
+    030: 00 00 00 00 02 00 00 81 0f 66 72 61 6d 65 30 30 .........frame00
+    040: 30 30 30 30 2e 74 73 74 80 8e 59 00 00 00 00 30 0000.tst..Y....0
+    050: 00 00 00 00 02 00 00 82 0f 66 72 61 6d 65 30 30 .........frame00
+    060: 30 30 30 31 2e 74 73 74 d0 ca 5c 00 00 00 00 50 0001.tst.......P
+    070: 00 00 00 00 02 00 00 83 0f 66 72 61 6d 65 30 30 .........frame00
+    080: 30 30 30 32 2e 74 73 74 00 00 00 00 00 00 00 70 0002.tst.......p
+    090: 00 00 00 00 02 00 00 84 0f 66 72 61 6d 65 30 30 .........frame00
+    0a0: 30 30 30 33 2e 74 73 74 00 00 00 00 00 00 00 90 0003.tst........
+    0b0: 00 00 00 00 02 00 00 85 0f 66 72 61 6d 65 30 30 .........frame00
+    0c0: 30 30 30 34 2e 74 73 74 00 00 00 00 00 00 00 b0 0004.tst........
+    0d0: 00 00 00 00 02 00 00 86 0f 66 72 61 6d 65 30 30 .........frame00
+    0e0: 30 30 30 35 2e 74 73 74 00 00 00 00 00 00 00 d0 0005.tst........
+    0f0: 00 00 00 00 02 00 00 87 0f 66 72 61 6d 65 30 30 .........frame00
+    100: 30 30 30 36 2e 74 73 74 00 00 00 00 00 00 00 f0 0006.tst........
+    110: 00 00 00 00 02 00 00 88 0f 66 72 61 6d 65 30 30 .........frame00
+    120: 30 30 30 37 2e 74 73 74 00 00 00 00 00 00 01 10 0007.tst........
+    130: ff ff 0e 78 00 00 00 00 00 00 00 00 00 00 00 00 ...x............
+
+The "leaf" and "tail" structures are stored at the end of the block, so
+as the directory grows, the middle is filled in:
+
+::
+
+    fa0: 00 00 00 00 00 00 01 30 00 00 00 2e 00 00 00 02 .......0........
+    fb0: 00 00 17 2e 00 00 00 04 83 a0 40 b4 00 00 00 0e ................
+    fc0: 93 a0 40 b4 00 00 00 12 a3 a0 40 b4 00 00 00 06 ................
+    fd0: b3 a0 40 b4 00 00 00 0a c3 a0 40 b4 00 00 00 1e ................
+    fe0: d3 a0 40 b4 00 00 00 22 e3 a0 40 b4 00 00 00 16 ................
+    ff0: f3 a0 40 b4 00 00 00 1a 00 00 00 0a 00 00 00 00 ................
+
+In a readable format:
+
+::
+
+    xfs_db> type dir2
+    xfs_db> p
+    bhdr.magic = 0x58443242
+    bhdr.bestfree[0].offset = 0x130
+    bhdr.bestfree[0].length = 0xe78
+    bhdr.bestfree[1].offset = 0
+    bhdr.bestfree[1].length = 0
+    bhdr.bestfree[2].offset = 0
+    bhdr.bestfree[2].length = 0
+    bu[0].inumber = 33554560
+    bu[0].namelen = 1
+    bu[0].name = "."
+    bu[0].tag = 0x10
+    bu[1].inumber = 128
+    bu[1].namelen = 2
+    bu[1].name = ".."
+    bu[1].tag = 0x20
+    bu[2].inumber = 33554561
+    bu[2].namelen = 15
+    bu[2].name = "frame000000.tst"
+    bu[2].tag = 0x30
+    bu[3].inumber = 33554562
+    bu[3].namelen = 15
+    bu[3].name = "frame000001.tst"
+    bu[3].tag = 0x50
+    ...
+    bu[8].inumber = 33554567
+    bu[8].namelen = 15
+    bu[8].name = "frame000006.tst"
+    bu[8].tag = 0xf0
+    bu[9].inumber = 33554568
+    bu[9].namelen = 15
+    bu[9].name = "frame000007.tst"
+    bu[9].tag = 0x110
+    bu[10].freetag = 0xffff
+    bu[10].length = 0xe78
+    bu[10].tag = 0x130
+    bleaf[0].hashval = 0x2e
+    bleaf[0].address = 0x2
+    bleaf[1].hashval = 0x172e
+    bleaf[1].address = 0x4
+    bleaf[2].hashval = 0x83a040b4
+    bleaf[2].address = 0xe
+    ...
+    bleaf[8].hashval = 0xe3a040b4
+    bleaf[8].address = 0x16
+    bleaf[9].hashval = 0xf3a040b4
+    bleaf[9].address = 0x1a
+    btail.count = 10
+    btail.stale = 0
+
+    **Note**
+
+    For block directories, all xfs\_db fields are preceded with "b".
+
+For a simple lookup example, the hash of frame000000.tst is 0xb3a040b4.
+Looking up that value, we get an address of 0x6. Multiply that by 8, it
+becomes offset 0x30 and the inode at that point is 33554561.
+
+When we remove an entry from the middle (frame000004.tst), we can see how the
+freespace details are adjusted:
+
+::
+
+    bhdr.magic = 0x58443242
+    bhdr.bestfree[0].offset = 0x130
+    bhdr.bestfree[0].length = 0xe78
+    bhdr.bestfree[1].offset = 0xb0
+    bhdr.bestfree[1].length = 0x20
+    bhdr.bestfree[2].offset = 0
+    bhdr.bestfree[2].length = 0
+    ...
+    bu[5].inumber = 33554564
+    bu[5].namelen = 15
+    bu[5].name = "frame000003.tst"
+    bu[5].tag = 0x90
+    bu[6].freetag = 0xffff
+    bu[6].length = 0x20
+    bu[6].tag = 0xb0
+    bu[7].inumber = 33554566
+    bu[7].namelen = 15
+    bu[7].name = "frame000005.tst"
+    bu[7].tag = 0xd0
+    ...
+    bleaf[7].hashval = 0xd3a040b4
+    bleaf[7].address = 0x22
+    bleaf[8].hashval = 0xe3a040b4
+    bleaf[8].address = 0
+    bleaf[9].hashval = 0xf3a040b4
+    bleaf[9].address = 0x1a
+    btail.count = 10
+    btail.stale = 1
+
+A new "bestfree" value is added for the entry, the start of the entry is
+marked as unused with 0xffff (which overwrites the inode number for an actual
+entry), and the length of the space. The tag remains intact at the
+offset+length - sizeof(tag). The address for the hash is also cleared. The
+affected areas are highlighted below:
+
+::
+
+    090: 00 00 00 00 02 00 00 84 0f 66 72 61 6d 65 30 30 ..........frame00
+    0a0: 30 30 30 33 2e 74 73 74 00 00 00 00 00 00 00 90 0003.tst.........
+    0b0: ff ff 00 20 02 00 00 85 0f 66 72 61 6d 65 30 30 ..........frame00
+    0c0: 30 30 30 34 2e 74 73 74 00 00 00 00 00 00 00 b0 0004.tst.........
+    0d0: 00 00 00 00 02 00 00 86 0f 66 72 61 6d 65 30 30 ..........frame00
+    0e0: 30 30 30 35 2e 74 73 74 00 00 00 00 00 00 00 0d 0005.tst.........
+    ...
+    fb0: 00 00 17 2e 00 00 00 04 83 a0 40 b4 00 00 00 0e .................
+    fc0: 93 a0 40 b4 00 00 00 12 a3 a0 40 b4 00 00 00 06 .................
+    fd0: b3 a0 40 b4 00 00 00 0a c3 a0 40 b4 00 00 00 1e .................
+    fe0: d3 a0 40 b4 00 00 00 22 e3 a0 40 b4 00 00 00 00 .................
+    ff0: f3 a0 40 b4 00 00 00 1a 00 00 00 0a 00 00 00 01 .................
+
+Leaf Directories
+~~~~~~~~~~~~~~~~
+
+Once a Block Directory has filled the block, the directory data is changed
+into a new format. It still uses `extents <#data-extents>`__ and the same
+basic structures, but the "data" and "leaf" are split up into their own
+extents. The "leaf" information only occupies one extent. As "leaf"
+information is more compact than
+"data" information, more than one "data" extent is common.
+
+-  Block to Leaf conversions retain the existing block for the data entries
+   and allocate a new block for the leaf and freespace index information.
+
+-  As with all directories, data blocks must start at logical offset zero.
+
+-  The "leaf" block has a special offset defined by
+   XFS\_DIR2\_LEAF\_OFFSET. Currently, this is 32GB and in the extent view, a
+   block offset of 32GB / sb\_blocksize. On a 4KB block filesystem, this is
+   0x800000 (8388608 decimal).
+
+-  Blocks with directory entries
+   ("data" extents) have the magic number "X2D2" (0x58443244), or
+   "XDD3" (0x58444433) on a v5 filesystem.
+
+-  The "data" extents have a new header (no "leaf" data):
+
+.. code:: c
+
+    typedef struct xfs_dir2_data {
+         xfs_dir2_data_hdr_t       hdr;
+         xfs_dir2_data_union_t     u[1];
+    } xfs_dir2_data_t;
+
+**hdr**
+    Data block header. On a v5 filesystem, this field is struct
+    xfs\_dir3\_data\_hdr.
+
+**u**
+    Union of directory and unused entries, exactly the same as in a block
+    directory.
+
+-  The "leaf" extent uses the following structures:
+
+.. code:: c
+
+    typedef struct xfs_dir2_leaf {
+         xfs_dir2_leaf_hdr_t       hdr;
+         xfs_dir2_leaf_entry_t     ents[1];
+         xfs_dir2_data_off_t       bests[1];
+         xfs_dir2_leaf_tail_t      tail;
+    } xfs_dir2_leaf_t;
+
+**hdr**
+    Directory leaf header. On a v5 filesystem this is struct
+    xfs\_dir3\_leaf\_hdr\_t.
+
+**ents**
+    Hash values of the entries in this block.
+
+**bests**
+    An array pointing to free regions in the directory block.
+
+**tail**
+    Bookkeeping for the leaf entries.
+
+.. code:: c
+
+    typedef struct xfs_dir2_leaf_hdr {
+         xfs_da_blkinfo_t          info;
+         __uint16_t                count;
+         __uint16_t                stale;
+    } xfs_dir2_leaf_hdr_t;
+
+**info**
+    Leaf btree block header.
+
+**count**
+    Number of leaf entries.
+
+**stale**
+    Number of stale/zeroed leaf entries.
+
+.. code:: c
+
+    struct xfs_dir3_leaf_hdr {
+         struct xfs_da3_blkinfo    info;
+         __uint16_t                count;
+         __uint16_t                stale;
+         __be32                    pad;
+    };
+
+**info**
+    Leaf B+tree block header.
+
+**count**
+    Number of leaf entries.
+
+**stale**
+    Number of stale/zeroed leaf entries.
+
+**pad**
+    Padding to maintain alignment rules.
+
+.. code:: c
+
+    typedef struct xfs_dir2_leaf_tail {
+         __uint32_t                bestcount;
+    } xfs_dir2_leaf_tail_t;
+
+**bestcount**
+    Number of best free entries.
+
+-  The magic number of the leaf block is XFS\_DIR2\_LEAF1\_MAGIC (0xd2f1); on
+   a v5 filesystem it is XFS\_DIR3\_LEAF1\_MAGIC (0x3df1).
+
+-  The size of the ents array is specified by hdr.count.
+
+-  The size of the bests array is specified by the tail.bestcount, which is
+   also the number of "data" blocks for  the directory. The bests array
+   maintains each data block’s bestfree[0].length value.
+
+.. ifconfig:: builder != 'latex'
+
+   .. figure:: images/48.png
+      :alt: Leaf directory free entry detail
+
+      Leaf directory free entry detail
+
+.. ifconfig:: builder == 'latex'
+
+   .. figure:: images/48.png
+      :scale: 40%
+      :alt: Leaf directory free entry detail
+
+      Leaf directory free entry detail
+
+xfs\_db Leaf Directory Example
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For this example, a directory was created with 256 entries (frame000000.tst to
+frame000255.tst). Some files were deleted (frame00005\*, frame00018\* and
+frame000240.tst) to show free list characteristics.
+
+::
+
+    xfs_db> inode <inode#>
+    xfs_db> p
+    core.magic = 0x494e
+    core.mode = 040755
+    core.version = 1
+    core.format = 2 (extents)
+    core.nlinkv1 = 2
+    ...
+    core.size = 12288
+    core.nblocks = 4
+    core.extsize = 0
+    core.nextents = 3
+    ...
+    u.bmx[0-2] = [startoff,startblock,blockcount,extentflag]
+              0:[0,4718604,1,0]
+              1:[1,4718610,2,0]
+              2:[8388608,4718605,1,0]
+
+As can be seen in this example, three blocks are used for
+"data" in two extents,
+and the "leaf" extent has a logical offset of 8388608 blocks (32GB).
+
+Examining the first block:
+
+::
+
+    xfs_db> dblock 0
+    xfs_db> type dir2
+    xfs_db> p
+    dhdr.magic = 0x58443244
+    dhdr.bestfree[0].offset = 0x670
+    dhdr.bestfree[0].length = 0x140
+    dhdr.bestfree[1].offset = 0xff0
+    dhdr.bestfree[1].length = 0x10
+    dhdr.bestfree[2].offset = 0
+    dhdr.bestfree[2].length = 0
+    du[0].inumber = 75497600
+    du[0].namelen = 1
+    du[0].name = "."
+    du[0].tag = 0x10
+    du[1].inumber = 128
+    du[1].namelen = 2
+    du[1].name = ".."
+    du[1].tag = 0x20
+    du[2].inumber = 75497601
+    du[2].namelen = 15
+    du[2].name = "frame000000.tst"
+    du[2].tag = 0x30
+    du[3].inumber = 75497602
+    du[3].namelen = 15
+    du[3].name = "frame000001.tst"
+    du[3].tag = 0x50
+    ...
+    du[51].inumber = 75497650
+    du[51].namelen = 15
+    du[51].name = "frame000049.tst"
+    du[51].tag = 0x650
+    du[52].freetag = 0xffff
+    du[52].length = 0x140
+    du[52].tag = 0x670
+    du[53].inumber = 75497661
+    du[53].namelen = 15
+    du[53].name = "frame000060.tst"
+    du[53].tag = 0x7b0
+    ...
+    du[118].inumber = 75497758
+    du[118].namelen = 15
+    du[118].name = "frame000125.tst"
+    du[118].tag = 0xfd0
+    du[119].freetag = 0xffff
+    du[119].length = 0x10
+    du[119].tag = 0xff0
+
+    **Note**
+
+    The xfs\_db field output is preceded by a "d" for "data".
+
+The next "data" block:
+
+::
+
+    xfs_db> dblock 1
+    xfs_db> type dir2
+    xfs_db> p
+    dhdr.magic = 0x58443244
+    dhdr.bestfree[0].offset = 0x6d0
+    dhdr.bestfree[0].length = 0x140
+    dhdr.bestfree[1].offset = 0xe50
+    dhdr.bestfree[1].length = 0x20
+    dhdr.bestfree[2].offset = 0xff0
+    dhdr.bestfree[2].length = 0x10
+    du[0].inumber = 75497759
+    du[0].namelen = 15
+    du[0].name = "frame000126.tst"
+    du[0].tag = 0x10
+    ...
+    du[53].inumber = 75497844
+    du[53].namelen = 15
+    du[53].name = "frame000179.tst"
+    du[53].tag = 0x6b0
+    du[54].freetag = 0xffff
+    du[54].length = 0x140
+    du[54].tag = 0x6d0
+    du[55].inumber = 75497855
+    du[55].namelen = 15
+    du[55].name = "frame000190.tst"
+    du[55].tag = 0x810
+    ...
+    du[104].inumber = 75497904
+    du[104].namelen = 15
+    du[104].name = "frame000239.tst"
+    du[104].tag = 0xe30
+    du[105].freetag = 0xffff
+    du[105].length = 0x20
+    du[105].tag = 0xe50
+    du[106].inumber = 75497906
+    du[106].namelen = 15
+    du[106].name = "frame000241.tst"
+    du[106].tag = 0xe70
+    ...
+    du[117].inumber = 75497917
+    du[117].namelen = 15
+    du[117].name = "frame000252.tst"
+    du[117].tag = 0xfd0
+    du[118].freetag = 0xffff
+    du[118].length = 0x10
+    du[118].tag = 0xff0
+
+And the last data block:
+
+::
+
+    xfs_db> dblock 2
+    xfs_db> type dir2
+    xfs_db> p
+    dhdr.magic = 0x58443244
+    dhdr.bestfree[0].offset = 0x70
+    dhdr.bestfree[0].length = 0xf90
+    dhdr.bestfree[1].offset = 0
+    dhdr.bestfree[1].length = 0
+    dhdr.bestfree[2].offset = 0
+    dhdr.bestfree[2].length = 0
+    du[0].inumber = 75497918
+    du[0].namelen = 15
+    du[0].name = "frame000253.tst"
+    du[0].tag = 0x10
+    du[1].inumber = 75497919
+    du[1].namelen = 15
+    du[1].name = "frame000254.tst"
+    du[1].tag = 0x30
+    du[2].inumber = 75497920
+    du[2].namelen = 15
+    du[2].name = "frame000255.tst"
+    du[2].tag = 0x50
+    du[3].freetag = 0xffff
+    du[3].length = 0xf90
+    du[3].tag = 0x70
+
+Examining the "leaf" block (with the fields preceded by an "l" for
+"leaf"):
+
+::
+
+    xfs_db> dblock 8388608
+    xfs_db> type dir2
+    xfs_db> p
+    lhdr.info.forw = 0
+    lhdr.info.back = 0
+    lhdr.info.magic = 0xd2f1
+    lhdr.count = 258
+    lhdr.stale = 0
+    lbests[0-2] = 0:0x10 1:0x10 2:0xf90
+    lents[0].hashval = 0x2e
+    lents[0].address = 0x2
+    lents[1].hashval = 0x172e
+    lents[1].address = 0x4
+    lents[2].hashval = 0x23a04084
+    lents[2].address = 0x116
+    ...
+    lents[257].hashval = 0xf3a048bc
+    lents[257].address = 0x366
+    ltail.bestcount = 3
+
+Note how the lbests array correspond with the bestfree[0].length values in the
+"data" blocks:
+
+::
+
+    xfs_db> dblock 0
+    xfs_db> type dir2
+    xfs_db> p
+    dhdr.magic = 0x58443244
+    dhdr.bestfree[0].offset = 0xff0
+    dhdr.bestfree[0].length = 0x10
+    ...
+    xfs_db> dblock 1
+    xfs_db> type dir2
+    xfs_db> p
+    dhdr.magic = 0x58443244
+    dhdr.bestfree[0].offset = 0xff0
+    dhdr.bestfree[0].length = 0x10
+    ...
+    xfs_db> dblock 2
+    xfs_db> type dir2
+    xfs_db> p
+    dhdr.magic = 0x58443244
+    dhdr.bestfree[0].offset = 0x70
+    dhdr.bestfree[0].length = 0xf90
+
+Now after the entries have been deleted:
+
+::
+
+    xfs_db> dblock 8388608
+    xfs_db> type dir2
+    xfs_db> p
+    lhdr.info.forw = 0
+    lhdr.info.back = 0
+    lhdr.info.magic = 0xd2f1
+    lhdr.count = 258
+    lhdr.stale = 21
+    lbests[0-2] = 0:0x140 1:0x140 2:0xf90
+    lents[0].hashval = 0x2e
+    lents[0].address = 0x2
+    lents[1].hashval = 0x172e
+    lents[1].address = 0x4
+    lents[2].hashval = 0x23a04084
+    lents[2].address = 0x116
+    ...
+
+As can be seen, the lbests values have been update to contain each
+hdr.bestfree[0].length values. The leaf’s hdr.stale value has also been
+updated to specify the number of stale entries in the array. The stale entries
+have an address of zero.
+
+TODO: Need an example for where new entries get inserted with several large
+free spaces.
+
+Node Directories
+~~~~~~~~~~~~~~~~
+
+When the "leaf" information fills a block, the extents undergo another
+separation. All "freeindex" information moves into its own extent. Like
+Leaf Directories, the
+"leaf" block maintained the best free space information for
+each "data" block. This is not possible with more than one leaf.
+
+-  The "data" blocks stay the same as leaf directories.
+
+-  After the "freeindex" data moves to its own block, it is possible for
+   the leaf data to fit within a single leaf block. This single leaf block has
+   a magic number of XFS\_DIR2\_LEAFN\_MAGIC (0xd2ff) or on a v5 filesystem,
+   XFS\_DIR3\_LEAFN\_MAGIC (0x3dff).
+
+-  The "leaf" blocks eventually change into a B+tree with the generic B+tree
+   header pointing to directory "leaves" as described in `Leaf
+   Directories <#leaf-directories>`__. Blocks with leaf data still have the
+   LEAFN\_MAGIC magic number as outlined above. The top-level tree blocks are
+   called "nodes" and have a magic number of XFS\_DA\_NODE\_MAGIC
+   (0xfebe), or on a v5 filesystem, XFS\_DA3\_NODE\_MAGIC (0x3ebe).
+
+-  Distinguishing between a combined leaf/freeindex block (LEAF1\_MAGIC), a
+   leaf-only block (LEAFN\_MAGIC), and a btree node block (NODE\_MAGIC) can
+   only be done by examining the magic number.
+
+-  The new "freeindex" block(s) only contains the bests for each data
+   block.
+
+-  The freeindex block uses the following structures:
+
+.. code:: c
+
+    typedef struct xfs_dir2_free_hdr {
+         __uint32_t                magic;
+         __int32_t                 firstdb;
+         __int32_t                 nvalid;
+         __int32_t                 nused;
+    } xfs_dir2_free_hdr_t;
+
+**magic**
+    The magic number of the free block, "XD2F" (0x0x58443246).
+
+**firstdb**
+    The starting directory block number for the bests array.
+
+**nvalid**
+    Number of valid elements in the bests array. This number must correspond
+    with the number of directory blocks can fit under the inode di\_size.
+
+**nused**
+    Number of used elements in the bests array. This number must correspond
+    with the number of directory blocks actually mapped under the inode
+    di\_size.
+
+.. code:: c
+
+    typedef struct xfs_dir2_free {
+         xfs_dir2_free_hdr_t       hdr;
+         xfs_dir2_data_off_t       bests[1];
+    } xfs_dir2_free_t;
+
+**hdr**
+    Free block header.
+
+**bests**
+    An array specifying the best free counts in each directory data block.
+
+-  On a v5 filesystem, the freeindex block uses the following structures:
+
+.. code:: c
+
+    struct xfs_dir3_free_hdr {
+         struct xfs_dir3_blk_hdr   hdr;
+         __int32_t                 firstdb;
+         __int32_t                 nvalid;
+         __int32_t                 nused;
+         __int32_t                 pad;
+    };
+
+**hdr**
+    v3 directory block header. The magic number is "XDF3" (0x0x58444633).
+
+**firstdb**
+    The starting directory block number for the bests array.
+
+**nvalid**
+    Number of valid elements in the bests array. This number must correspond
+    with the number of directory blocks can fit under the inode di\_size.
+
+**nused**
+    Number of used elements in the bests array. This number must correspond
+    with the number of directory blocks actually mapped under the inode
+    di\_size.
+
+**pad**
+    Padding to maintain alignment.
+
+.. code:: c
+
+    struct xfs_dir3_free {
+         xfs_dir3_free_hdr_t       hdr;
+         __be16                    bests[1];
+    };
+
+**hdr**
+    Free block header.
+
+**bests**
+    An array specifying the best free counts in each directory data block.
+
+-  The location of the leaf blocks can be in any order, the only way to
+   determine the appropriate is by the node block hash/before values. Given a
+   hash to look up, you read the node’s btree array and first hashval in the
+   array that exceeds the given hash and it can then be found in the block
+   pointed to by the before value.
+
+-  The freeindex’s bests array starts from the end of the block and grows to
+   the start of the block.
+
+-  When an data block becomes unused (ie. all entries in it have been
+   deleted), the block is freed, the data extents contain a hole, and the
+   freeindex’s hdr.nused value is decremented and the associated bests[] entry
+   is set to 0xffff.
+
+-  As the first data block always contains "." and "..", it’s invalid for
+   the directory to have a hole at the start.
+
+-  The freeindex’s hdr.nused should always be the same as the number of
+   allocated data directory blocks containing name/inode data and will always
+   be less than or equal to hdr.nvalid. The value of hdr.nvalid should be the
+   same as the index of the last data directory block plus one (i.e. when the
+   last data block is freed, nused and nvalid are decremented).
+
+.. ifconfig:: builder != 'latex'
+
+   .. figure:: images/54.png
+      :alt: Node directory layout
+
+      Node directory layout
+
+.. ifconfig:: builder == 'latex'
+
+   .. figure:: images/54.png
+      :scale: 40%
+      :alt: Node directory layout
+
+      Node directory layout
+
+xfs\_db Node Directory Example
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+With the node directory examples, we are using a filesystems with 4KB block
+size, and a 16KB directory size. The directory has over 2000 entries:
+
+::
+
+    xfs_db> sb 0
+    xfs_db> p
+    magicnum = 0x58465342
+    blocksize = 4096
+    ...
+    dirblklog = 2
+    ...
+    xfs_db> inode <inode#>
+    xfs_db> p
+    core.magic = 0x494e
+    core.mode = 040755
+    core.version = 1
+    core.format = 2 (extents)
+    ...
+    core.size = 81920
+    core.nblocks = 36
+    core.extsize = 0
+    core.nextents = 8
+    ...
+    u.bmx[0-7] = [startoff,startblock,blockcount,extentflag] 0:[0,7368,4,0]
+    1:[4,7408,4,0] 2:[8,7444,4,0] 3:[12,7480,4,0] 4:[16,7520,4,0]
+    5:[8388608,7396,4,0] 6:[8388612,7524,8,0] 7:[16777216,7516,4,0]
+
+As can already be observed, all extents are allocated is multiples of 4
+blocks.
+
+Blocks 0 to 19 (16+4-1) are used for directory data blocks. Looking at blocks
+16-19, we can seen that it’s the same as the single-leaf format, except the
+length values are a lot larger to accommodate the increased directory block
+size:
+
+::
+
+    xfs_db> dblock 16
+    xfs_db> type dir2
+    xfs_db> p
+    dhdr.magic = 0x58443244
+    dhdr.bestfree[0].offset = 0xb0
+    dhdr.bestfree[0].length = 0x3f50
+    dhdr.bestfree[1].offset = 0
+    dhdr.bestfree[1].length = 0
+    dhdr.bestfree[2].offset = 0
+    dhdr.bestfree[2].length = 0
+    du[0].inumber = 120224
+    du[0].namelen = 15
+    du[0].name = "frame002043.tst"
+    du[0].tag = 0x10
+    du[1].inumber = 120225
+    du[1].namelen = 15
+    du[1].name = "frame002044.tst"
+    du[1].tag = 0x30
+    du[2].inumber = 120226
+    du[2].namelen = 15
+    du[2].name = "frame002045.tst"
+    du[2].tag = 0x50
+    du[3].inumber = 120227
+    du[3].namelen = 15
+    du[3].name = "frame002046.tst"
+    du[3].tag = 0x70
+    du[4].inumber = 120228
+    du[4].namelen = 15
+    du[4].name = "frame002047.tst"
+    du[4].tag = 0x90
+    du[5].freetag = 0xffff
+    du[5].length = 0x3f50
+    du[5].tag = 0
+
+Next, the "node" block, the fields are preceded with 'n' for node blocks:
+
+::
+
+    xfs_db> dblock 8388608
+    xfs_db> type dir2
+    xfs_db> p
+    nhdr.info.forw = 0
+    nhdr.info.back = 0
+    nhdr.info.magic = 0xfebe
+    nhdr.count = 2
+    nhdr.level = 1
+    nbtree[0-1] = [hashval,before] 0:[0xa3a440ac,8388616] 1:[0xf3a440bc,8388612]
+
+The two following leaf blocks were allocated as part of the directory’s
+conversion to node format. All hashes less than 0xa3a440ac are located at
+directory offset 8,388,616, and hashes less than 0xf3a440bc are located at
+directory offset 8,388,612. Hashes greater or equal to 0xf3a440bc don’t exist
+in this directory.
+
+::
+
+    xfs_db> dblock 8388616
+    xfs_db> type dir2
+    xfs_db> p
+    lhdr.info.forw = 8388612
+    lhdr.info.back = 0
+    lhdr.info.magic = 0xd2ff
+    lhdr.count = 1023
+    lhdr.stale = 0
+    lents[0].hashval = 0x2e
+    lents[0].address = 0x2
+    lents[1].hashval = 0x172e
+    lents[1].address = 0x4
+    lents[2].hashval = 0x23a04084
+    lents[2].address = 0x116
+    ...
+    lents[1021].hashval = 0xa3a440a4
+    lents[1021].address = 0x1fa2
+    lents[1022].hashval = 0xa3a440ac
+    lents[1022].address = 0x1fca
+    xfs_db> dblock 8388612
+    xfs_db> type dir2
+    xfs_db> p
+    lhdr.info.forw = 0
+    lhdr.info.back = 8388616
+    lhdr.info.magic = 0xd2ff
+    lhdr.count = 1027
+    lhdr.stale = 0
+    lents[0].hashval = 0xa3a440b4
+    lents[0].address = 0x1f52
+    lents[1].hashval = 0xa3a440bc
+    lents[1].address = 0x1f7a
+    ...
+    lents[1025].hashval = 0xf3a440b4
+    lents[1025].address = 0x1f66
+    lents[1026].hashval = 0xf3a440bc
+    lents[1026].address = 0x1f8e
+
+An example lookup using xfs\_db:
+
+::
+
+    xfs_db> hash frame001845.tst
+    0xf3a26094
+
+Doing a binary search through the array, we get address 0x1ce6, which is
+offset 0xe730. Each fsblock is 4KB in size (0x1000), so it will be offset
+0x730 into directory offset 14. From the extent map, this will be fsblock
+7482:
+
+::
+
+    xfs_db> fsblock 7482
+    xfs_db> type text
+    xfs_db> p
+    ...
+    730: 00 00 00 00 00 01 d4 da 0f 66 72 61 6d 65 30 30 .........frame00
+    740: 31 38 34 35 2e 74 73 74 00 00 00 00 00 00 27 30 1845.tst.......0
+
+Looking at the freeindex information (fields with an 'f' tag):
+
+::
+
+    xfs_db> fsblock 7516
+    xfs_db> type dir2
+    xfs_db> p
+    fhdr.magic = 0x58443246
+    fhdr.firstdb = 0
+    fhdr.nvalid = 5
+    fhdr.nused = 5
+    fbests[0-4] = 0:0x10 1:0x10 2:0x10 3:0x10 4:0x3f50
+
+Like the Leaf Directory, each of the fbests values correspond to each data
+block’s bestfree[0].length value.
+
+The fbests array is highlighted in a raw block dump:
+
+::
+
+    xfs_db> type text
+    xfs_db> p
+    000: 58 44 32 46 00 00 00 00 00 00 00 05 00 00 00 05 XD2F............
+    010: 00 10 00 10 00 10 00 10 3f 50 00 00 1f 01 ff ff .........P......
+
+TODO: Example with a hole in the middle
+
+B+tree Directories
+~~~~~~~~~~~~~~~~~~
+
+When the extent map in an inode grows beyond the inode’s space, the inode
+format is changed to a
+"btree". The inode contains a filesystem block point to the
+B+tree extent map for the directory’s blocks. The B+tree extents contain the
+extent map for the "data", "node", "leaf", and "freeindex"
+information as described in Node Directories.
+
+Refer to the previous section on B+tree `Data Extents <#b-tree-extent-list>`__
+for more information on XFS B+tree extents.
+
+The following properties apply to both node and B+tree directories:
+
+-  The node/leaf trees can be more than one level deep.
+
+-  More than one freeindex block may exist, but this will be quite rare. It
+   would required hundreds of thousand files with quite long file names (or
+   millions with shorter names) to get a second freeindex block.
+
+xfs\_db B+tree Directory Example
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A directory has been created with 200,000 entries with each entry being 100
+characters long. The filesystem block size and directory block size are 4KB:
+
+::
+
+    xfs_db> inode <inode#>
+    xfs_db> p
+    core.magic = 0x494e
+    core.mode = 040755
+    core.version = 1
+    core.format = 3 (btree)
+    ...
+    core.size = 22757376
+    core.nblocks = 6145
+    core.extsize = 0
+    core.nextents = 234
+    core.naextents = 0
+    core.forkoff = 0
+    ...
+    u.bmbt.level = 1
+    u.bmbt.numrecs = 1
+    u.bmbt.keys[1] = [startoff] 1:[0]
+    u.bmbt.ptrs[1] = 1:89
+    xfs_db> fsblock 89
+    xfs_db> type bmapbtd
+    xfs_db> p
+    magic = 0x424d4150
+    level = 0
+    numrecs = 234
+    leftsib = null
+    rightsib = null
+    recs[1-234] = [startoff,startblock,blockcount,extentflag]
+       1:[0,53,1,0] 2:[1,55,13,0] 3:[14,69,1,0] 4:[15,72,13,0]
+       5:[28,86,2,0] 6:[30,90,21,0] 7:[51,112,1,0] 8:[52,114,11,0]
+       ...
+       125:[5177,902,15,0] 126:[5192,918,6,0] 127:[5198,524786,358,0]
+       128:[8388608,54,1,0] 129:[8388609,70,2,0] 130:[8388611,85,1,0]
+       ...
+       229:[8389164,917,1,0] 230:[8389165,924,19,0] 231:[8389184,944,9,0]
+       232:[16777216,68,1,0] 233:[16777217,7340114,1,0] 234:[16777218,5767362,1,0]
+
+We have 128 extents and a total of 5555 blocks being used to store name/inode
+pairs. With only about 2000 values that can be stored in the freeindex block,
+3 blocks have been allocated for this information. The firstdb field specifies
+the starting directory block number for each array:
+
+::
+
+    xfs_db> dblock 16777216
+    xfs_db> type dir2
+    xfs_db> p
+    fhdr.magic = 0x58443246
+    fhdr.firstdb = 0
+    fhdr.nvalid = 2040
+    fhdr.nused = 2040
+    fbests[0-2039] = ...
+    xfs_db> dblock 16777217
+    xfs_db> type dir2
+    xfs_db> p
+    fhdr.magic = 0x58443246
+    fhdr.firstdb = 2040
+    fhdr.nvalid = 2040
+    fhdr.nused = 2040
+    fbests[0-2039] = ...
+    xfs_db> dblock 16777218
+    xfs_db> type dir2
+    xfs_db> p
+    fhdr.magic = 0x58443246
+    fhdr.firstdb = 4080
+    fhdr.nvalid = 1476
+    fhdr.nused = 1476
+    fbests[0-1475] = ...
+
+Looking at the root node in the node block, it’s a pretty deep tree:
+
+::
+
+    xfs_db> dblock 8388608
+    xfs_db> type dir2
+    xfs_db> p
+    nhdr.info.forw = 0
+    nhdr.info.back = 0
+    nhdr.info.magic = 0xfebe
+    nhdr.count = 2
+    nhdr.level = 2
+    nbtree[0-1] = [hashval,before] 0:[0x6bbf6f39,8389121] 1:[0xfbbf7f79,8389120]
+    xfs_db> dblock 8389121
+    xfs_db> type dir2
+    xfs_db> p
+    nhdr.info.forw = 8389120
+    nhdr.info.back = 0
+    nhdr.info.magic = 0xfebe
+    nhdr.count = 263
+    nhdr.level = 1
+    nbtree[0-262] = ... 262:[0x6bbf6f39,8388928]
+    xfs_db> dblock 8389120
+    xfs_db> type dir2
+    xfs_db> p
+    nhdr.info.forw = 0
+    nhdr.info.back = 8389121
+    nhdr.info.magic = 0xfebe
+    nhdr.count = 319
+    nhdr.level = 1
+    nbtree[0-318] = [hashval,before] 0:[0x70b14711,8388919] ...
+
+The leaves at each the end of a node always point to the end leaves in
+adjacent nodes. Directory block 8388928 has a forward pointer to block 8388919
+and block 8388919 has a previous pointer to block 8388928, as highlighted in
+the following example:
+
+::
+
+    xfs_db> dblock 8388928
+    xfs_db> type dir2
+    xfs_db> p
+    lhdr.info.forw = 8388919
+    lhdr.info.back = 8388937
+    lhdr.info.magic = 0xd2ff
+    ...
+
+    xfs_db> dblock 8388919
+    xfs_db> type dir2
+    xfs_db> p
+    lhdr.info.forw = 8388706
+    lhdr.info.back = 8388928
+    lhdr.info.magic = 0xd2ff
+    ...
