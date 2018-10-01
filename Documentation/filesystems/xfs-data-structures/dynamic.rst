@@ -4,3 +4,4 @@ Dynamic Allocated Structures
 ============================
 
 .. include:: ondisk_inode.rst
+.. include:: data_extents.rst
