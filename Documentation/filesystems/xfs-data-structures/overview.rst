@@ -46,3 +46,4 @@ latency.
 .. include:: self_describing_metadata.rst
 .. include:: delayed_logging.rst
 .. include:: reflink.rst
+.. include:: reconstruction.rst
