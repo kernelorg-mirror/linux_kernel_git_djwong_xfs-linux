@@ -42,3 +42,5 @@ filesystem operations can be carried out atomically in the case of a crash.
 Furthermore, there is the concept of a real-time device wherein allocations
 are tracked more simply and in larger chunks to reduce jitter in allocation
 latency.
+
+.. include:: self_describing_metadata.rst
