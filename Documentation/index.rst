@@ -115,6 +115,7 @@ subprojects.
    :maxdepth: 2
 
    filesystems/ext4/index
+   filesystems/xfs-data-structures/index
 
 Translations
 ------------
