@@ -49,3 +49,4 @@ latency.
 .. include:: reconstruction.rst
 .. include:: common_types.rst
 .. include:: magic.rst
+.. include:: testing.rst
