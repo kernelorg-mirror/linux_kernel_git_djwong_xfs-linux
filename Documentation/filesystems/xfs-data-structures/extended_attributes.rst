@@ -1,0 +1,933 @@
+.. SPDX-License-Identifier: CC-BY-SA-4.0
+
+Extended Attributes
+-------------------
+
+Extended attributes enable users and administrators to attach (name: value)
+pairs to inodes within the XFS filesystem. They could be used to store
+meta-information about the file.
+
+Attribute names can be up to 256 bytes in length, terminated by the first 0
+byte. The intent is that they be printable ASCII (or other character set)
+names for the attribute. The values can contain up to 64KB of arbitrary binary
+data. Some XFS internal attributes (eg. parent pointers) use non-printable
+names for the attribute.
+
+Access Control Lists (ACLs) and Data Migration Facility (DMF) use extended
+attributes to store their associated metadata with an inode.
+
+XFS uses two disjoint attribute name spaces associated with every inode. These
+are the root and user address spaces. The root address space is accessible
+only to the superuser, and then only by specifying a flag argument to the
+function call. Other users will not see or be able to modify attributes in the
+root address space. The user address space is protected by the normal file
+permissions mechanism, so the owner of the file can decide who is able to see
+and/or modify the value of attributes on any particular file.
+
+To view extended attributes from the command line, use the getfattr command.
+To set or delete extended attributes, use the setfattr command. ACLs control
+should use the getfacl and setfacl commands.
+
+XFS attributes supports three namespaces: "user", "trusted" (or "root" using
+IRIX terminology), and "secure".
+
+See the section about `extended attributes <#extended-attribute-versions>`__
+in the inode for instructions on how to calculate the location of the
+attributes.
+
+The following four sections describe each of the on-disk formats.
+
+Short Form Attributes
+~~~~~~~~~~~~~~~~~~~~~
+
+When the all extended attributes can fit within the inode’s attribute fork,
+the inode’s di\_aformat is set to "local" and the attributes are stored in
+the inode’s literal area starting at offset di\_forkoff × 8.
+
+Shortform attributes use the following structures:
+
+.. code:: c
+
+    typedef struct xfs_attr_shortform {
+         struct xfs_attr_sf_hdr {
+               __be16               totsize;
+               __u8                 count;
+         } hdr;
+         struct xfs_attr_sf_entry {
+               __uint8_t            namelen;
+               __uint8_t            valuelen;
+               __uint8_t            flags;
+               __uint8_t            nameval[1];
+         } list[1];
+    } xfs_attr_shortform_t;
+    typedef struct xfs_attr_sf_hdr xfs_attr_sf_hdr_t;
+    typedef struct xfs_attr_sf_entry xfs_attr_sf_entry_t;
+
+**totsize**
+    Total size of the attribute structure in bytes.
+
+**count**
+    The number of entries that can be found in this structure.
+
+**namelen** and **valuelen**
+    These values specify the size of the two byte arrays containing the name
+    and value pairs. valuelen is zero for extended attributes with no value.
+
+**nameval[]**
+    A single array whose size is the sum of namelen and valuelen. The names
+    and values are not null terminated on-disk. The value immediately follows
+    the name in the array.
+
+.. _attribute-flags:
+
+**flags**
+    A combination of the following:
+
+.. list-table::
+   :widths: 28 52
+   :header-rows: 1
+
+   * - Flag
+     - Description
+
+   * - 0
+     - The attribute's namespace is "user".
+
+   * - XFS_ATTR_ROOT
+     - The attribute's namespace is "trusted".
+
+   * - XFS_ATTR_SECURE
+     - The attribute's namespace is "secure".
+
+   * - XFS_ATTR_INCOMPLETE
+     - This attribute is being modified.
+
+   * - XFS_ATTR_LOCAL
+     - The attribute value is contained within this block.
+
+Table: Attribute Namespaces
+
+.. figure:: images/64.png
+   :alt: Short form attribute layout
+
+   Short form attribute layout
+
+xfs\_db Short Form Attribute Example
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A file is created and two attributes are set:
+
+::
+
+    # setfattr -n user.empty few_attr
+    # setfattr -n trusted.trust -v val1 few_attr
+
+Using xfs\_db, we dump the inode:
+
+::
+
+    xfs_db> inode <inode#>
+    xfs_db> p
+    core.magic = 0x494e
+    core.mode = 0100644
+    ...
+    core.naextents = 0
+    core.forkoff = 15
+    core.aformat = 1 (local)
+    ...
+    a.sfattr.hdr.totsize = 24
+    a.sfattr.hdr.count = 2
+    a.sfattr.list[0].namelen = 5
+    a.sfattr.list[0].valuelen = 0
+    a.sfattr.list[0].root = 0
+    a.sfattr.list[0].secure = 0
+    a.sfattr.list[0].name = "empty"
+    a.sfattr.list[1].namelen = 5
+    a.sfattr.list[1].valuelen = 4
+    a.sfattr.list[1].root = 1
+    a.sfattr.list[1].secure = 0
+    a.sfattr.list[1].name = "trust"
+    a.sfattr.list[1].value = "val1"
+
+We can determine the actual inode offset to be 220 (15 x 8 + 100) or 0xdc.
+Examining the raw dump, the second attribute is highlighted:
+
+::
+
+    xfs_db> type text
+    xfs_db> p
+    09: 49 4e 81 a4 01 02 00 01 00 00 00 00 00 00 00 00 IN..............
+    10: 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 02 ................
+    20: 44 be 19 be 38 d1 26 98 44 be 1a be 38 d1 26 98 D...8...D...8...
+    30: 44 be 1a e1 3a 9a ea 18 00 00 00 00 00 00 00 04 D...............
+    40: 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 01 ................
+    50: 00 00 0f 01 00 00 00 00 00 00 00 00 00 00 00 00 ................
+    60: ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 12 ................
+    70: 53 a0 00 01 00 00 00 00 00 00 00 00 00 00 00 00 ................
+    80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................
+    90: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................
+    a0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................
+    b0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................
+    c0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................
+    d0: 00 00 00 00 00 00 00 00 00 00 00 00 00 18 02 00 ................
+                                               ^^ hdr.totsize = 0x18
+    e0: 05 00 00 65 6d 70 74 79 05 04 02 74 72 75 73 74 ...empty...trust
+    f0: 76 61 6c 31 00 00 00 00 00 00 00 00 00 00 00 00 val1............
+
+Adding another attribute with attr1, the format is converted to extents and
+di\_forkoff remains unchanged (and all those zeros in the dump above remain
+unused):
+
+::
+
+    xfs_db> inode <inode#>
+    xfs_db> p
+    ...
+    core.naextents = 1
+    core.forkoff = 15
+    core.aformat = 2 (extents)
+    ...
+    a.bmx[0] = [startoff,startblock,blockcount,extentflag] 0:[0,37534,1,0]
+
+Performing the same steps with attr2, adding one attribute at a time, you can
+see di\_forkoff change as attributes are added:
+
+::
+
+    xfs_db> inode <inode#>
+    xfs_db> p
+    ...
+    core.naextents = 0
+    core.forkoff = 15
+    core.aformat = 1 (local)
+    ...
+    a.sfattr.hdr.totsize = 17
+    a.sfattr.hdr.count = 1
+    a.sfattr.list[0].namelen = 10
+    a.sfattr.list[0].valuelen = 0
+    a.sfattr.list[0].root = 0
+    a.sfattr.list[0].secure = 0
+    a.sfattr.list[0].name = "empty_attr"
+
+Attribute added:
+
+::
+
+    xfs_db> p
+    ...
+    core.naextents = 0
+    core.forkoff = 15
+    core.aformat = 1 (local)
+    ...
+    a.sfattr.hdr.totsize = 31
+    a.sfattr.hdr.count = 2
+    a.sfattr.list[0].namelen = 10
+    a.sfattr.list[0].valuelen = 0
+    a.sfattr.list[0].root = 0
+    a.sfattr.list[0].secure = 0
+    a.sfattr.list[0].name = "empty_attr"
+    a.sfattr.list[1].namelen = 7
+    a.sfattr.list[1].valuelen = 4
+    a.sfattr.list[1].root = 1
+    a.sfattr.list[1].secure = 0
+    a.sfattr.list[1].name = "trust_a"
+    a.sfattr.list[1].value = "val1"
+
+Another attribute is added:
+
+::
+
+    xfs_db> p
+    ...
+    core.naextents = 0
+    core.forkoff = 13
+    core.aformat = 1 (local)
+    ...
+    a.sfattr.hdr.totsize = 52
+    a.sfattr.hdr.count = 3
+    a.sfattr.list[0].namelen = 10
+    a.sfattr.list[0].valuelen = 0
+    a.sfattr.list[0].root = 0
+    a.sfattr.list[0].secure = 0
+    a.sfattr.list[0].name = "empty_attr"
+    a.sfattr.list[1].namelen = 7
+    a.sfattr.list[1].valuelen = 4
+    a.sfattr.list[1].root = 1
+    a.sfattr.list[1].secure = 0
+    a.sfattr.list[1].name = "trust_a"
+    a.sfattr.list[1].value = "val1"
+    a.sfattr.list[2].namelen = 6
+    a.sfattr.list[2].valuelen = 12
+    a.sfattr.list[2].root = 0
+    a.sfattr.list[2].secure = 0
+    a.sfattr.list[2].name = "second"
+    a.sfattr.list[2].value = "second_value"
+
+One more is added:
+
+::
+
+    xfs_db> p
+    core.naextents = 0
+    core.forkoff = 10
+    core.aformat = 1 (local)
+    ...
+    a.sfattr.hdr.totsize = 69
+    a.sfattr.hdr.count = 4
+    a.sfattr.list[0].namelen = 10
+    a.sfattr.list[0].valuelen = 0
+    a.sfattr.list[0].root = 0
+    a.sfattr.list[0].secure = 0
+    a.sfattr.list[0].name = "empty_attr"
+    a.sfattr.list[1].namelen = 7
+    a.sfattr.list[1].valuelen = 4
+    a.sfattr.list[1].root = 1
+    a.sfattr.list[1].secure = 0
+    a.sfattr.list[1].name = "trust_a"
+    a.sfattr.list[1].value = "val1"
+    a.sfattr.list[2].namelen = 6
+    a.sfattr.list[2].valuelen = 12
+    a.sfattr.list[2].root = 0
+    a.sfattr.list[2].secure = 0
+    a.sfattr.list[2].name = "second"
+    a.sfattr.list[2].value = "second_value"
+    a.sfattr.list[3].namelen = 6
+    a.sfattr.list[3].valuelen = 8
+    a.sfattr.list[3].root = 0
+    a.sfattr.list[3].secure = 1
+    a.sfattr.list[3].name = "policy"
+    a.sfattr.list[3].value = "contents"
+
+A raw dump is shown to compare with the attr1 dump on a prior page, the header
+is highlighted:
+
+::
+
+    xfs_db> type text
+    xfs_db> p
+    00: 49 4e 81 a4 01 02 00 01 00 00 00 00 00 00 00 00 IN..............
+    10: 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 05 ................
+    20: 44 be 24 cd 0f b0 96 18 44 be 24 cd 0f b0 96 18 D.......D.......
+    30: 44 be 2d f5 01 62 7a 18 00 00 00 00 00 00 00 04 D....bz.........
+    40: 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 01 ................
+    50: 00 00 0a 01 00 00 00 00 00 00 00 00 00 00 00 00 ................
+    60: ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 01 ................
+    70: 41 c0 00 01 00 00 00 00 00 00 00 00 00 00 00 00 A...............
+    80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................
+    90: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................
+    a0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................
+    b0: 00 00 00 00 00 45 04 00 0a 00 00 65 6d 70 74 79 .....E.....empty
+    c0: 5f 61 74 74 72 07 04 02 74 72 75 73 74 5f 61 76 .attr...trust.av
+    d0: 61 6c 31 06 0c 00 73 65 63 6f 6e 64 73 65 63 6f all...secondseco
+    e0: 6e 64 5f 76 61 6c 75 65 06 08 04 70 6f 6c 69 63 nd.value...polic
+    f0: 79 63 6f 6e 74 65 6e 74 73 64 5f 76 61 6c 75 65 ycontentsd.value
+
+It can be clearly seen that attr2 allows many more attributes to be stored in
+an inode before they are moved to another filesystem block.
+
+Leaf Attributes
+~~~~~~~~~~~~~~~
+
+When an inode’s attribute fork space is used up with shortform attributes and
+more are added, the attribute format is migrated to "extents".
+
+Extent based attributes use hash/index pairs to speed up an attribute lookup.
+The first part of the "leaf" contains an array of fixed size hash/index
+pairs with the flags stored as well. The remaining part of the leaf block
+contains the array name/value pairs, where each element varies in length.
+
+Each leaf is based on the xfs\_da\_blkinfo\_t block header declared in the
+section about `directories <#directory-attribute-block-header>`__. On a v5
+filesystem, the block header is xfs\_da3\_blkinfo\_t. The structure
+encapsulating all other structures in the attribute block is
+xfs\_attr\_leafblock\_t.
+
+The structures involved are:
+
+.. code:: c
+
+    typedef struct xfs_attr_leaf_map {
+         __be16                     base;
+         __be16                     size;
+    } xfs_attr_leaf_map_t;
+
+**base**
+    Block offset of the free area, in bytes.
+
+**size**
+    Size of the free area, in bytes.
+
+.. code:: c
+
+    typedef struct xfs_attr_leaf_hdr {
+         xfs_da_blkinfo_t           info;
+         __be16                     count;
+         __be16                     usedbytes;
+         __be16                     firstused;
+         __u8                       holes;
+         __u8                       pad1;
+         xfs_attr_leaf_map_t        freemap[3];
+    } xfs_attr_leaf_hdr_t;
+
+**info**
+    Directory/attribute block header.
+
+**count**
+    Number of entries.
+
+**usedbytes**
+    Number of bytes used in the leaf block.
+
+**firstused**
+    Block offset of the first entry in use, in bytes.
+
+**holes**
+    Set to 1 if block compaction is necessary.
+
+**pad1**
+    Padding to maintain alignment to 64-bit boundaries.
+
+.. code:: c
+
+    typedef struct xfs_attr_leaf_entry {
+         __be32                     hashval;
+         __be16                     nameidx;
+         __u8                       flags;
+         __u8                       pad2;
+    } xfs_attr_leaf_entry_t;
+    ----
+
+**hashval**
+    Hash value of the attribute name.
+
+**nameidx**
+    Block offset of the name entry, in bytes.
+
+**flags**
+    Attribute flags, as specified `above <#attribute-flags>`__.
+
+**pad2**
+    Pads the structure to 64-bit boundaries.
+
+.. code:: c
+
+    typedef struct xfs_attr_leaf_name_local {
+         __be16                     valuelen;
+         __u8                       namelen;
+         __u8                       nameval[1];
+    } xfs_attr_leaf_name_local_t;
+
+**valuelen**
+    Length of the value, in bytes.
+
+**namelen**
+    Length of the name, in bytes.
+
+**nameval**
+    The name and the value. String values are not zero-terminated.
+
+.. code:: c
+
+    typedef struct xfs_attr_leaf_name_remote {
+         __be32                     valueblk;
+         __be32                     valuelen;
+         __u8                       namelen;
+         __u8                       name[1];
+    } xfs_attr_leaf_name_remote_t;
+
+**valueblk**
+    The logical block in the attribute map where the value is located.
+
+**valuelen**
+    Length of the value, in bytes.
+
+**namelen**
+    Length of the name, in bytes.
+
+**nameval**
+    The name. String values are not zero-terminated.
+
+.. code:: c
+
+    typedef struct xfs_attr_leafblock  {
+         xfs_attr_leaf_hdr_t           hdr;
+         xfs_attr_leaf_entry_t         entries[1];
+         xfs_attr_leaf_name_local_t    namelist;
+         xfs_attr_leaf_name_remote_t   valuelist;
+    } xfs_attr_leafblock_t;
+
+**hdr**
+    Attribute block header.
+
+**entries**
+    A variable-length array of attribute entries.
+
+**namelist**
+    A variable-length array of descriptors of local attributes. The location
+    and size of these entries is determined dynamically.
+
+**valuelist**
+    A variable-length array of descriptors of remote attributes. The location
+    and size of these entries is determined dynamically.
+
+On a v5 filesystem, the header becomes xfs\_da3\_blkinfo\_t to accomodate the
+extra metadata integrity fields:
+
+.. code:: c
+
+    typedef struct xfs_attr3_leaf_hdr {
+         xfs_da3_blkinfo_t          info;
+         __be16                     count;
+         __be16                     usedbytes;
+         __be16                     firstused;
+         __u8                       holes;
+         __u8                       pad1;
+         xfs_attr_leaf_map_t        freemap[3];
+         __be32                     pad2;
+    } xfs_attr3_leaf_hdr_t;
+
+
+    typedef struct xfs_attr3_leafblock  {
+         xfs_attr3_leaf_hdr_t          hdr;
+         xfs_attr_leaf_entry_t         entries[1];
+         xfs_attr_leaf_name_local_t    namelist;
+         xfs_attr_leaf_name_remote_t   valuelist;
+    } xfs_attr3_leafblock_t;
+
+Each leaf header uses the magic number XFS\_ATTR\_LEAF\_MAGIC (0xfbee). On a
+v5 filesystem, the magic number is XFS\_ATTR3\_LEAF\_MAGIC (0x3bee).
+
+The hash/index elements in the entries[] array are packed from the top of the
+block. Name/values grow from the bottom but are not packed. The freemap
+contains run-length-encoded entries for the free bytes after the entries[]
+array, but only the three largest runs are stored (smaller runs are dropped).
+When the freemap doesn’t show enough space for an allocation, the name/value
+area is compacted and allocation is tried again. If there still isn’t enough
+space, then the block is split. The name/value structures (both local and
+remote versions) must be 32-bit aligned.
+
+For attributes with small values (ie. the value can be stored within the
+leaf), the XFS\_ATTR\_LOCAL flag is set for the attribute. The entry details
+are stored using the xfs\_attr\_leaf\_name\_local\_t structure. For large
+attribute values that cannot be stored within the leaf, separate filesystem
+blocks are allocated to store the value. They use the
+xfs\_attr\_leaf\_name\_remote\_t structure. See `Remote
+Values <#remote-attribute-values>`__ for more information.
+
+.. ifconfig:: builder != 'latex'
+
+   .. figure:: images/69.png
+      :alt: Leaf attribute layout
+
+      Leaf attribute layout
+
+.. ifconfig:: builder == 'latex'
+
+   .. figure:: images/69.png
+      :scale: 45%
+      :alt: Leaf attribute layout
+
+      Leaf attribute layout
+
+Both local and remote entries can be interleaved as they are only addressed by
+the hash/index entries. The flag is stored with the hash/index pairs so the
+appropriate structure can be used.
+
+Since duplicate hash keys are possible, for each hash that matches during a
+lookup, the actual name string must be compared.
+
+An "incomplete" bit is also used for attribute flags. It shows that an
+attribute is in the middle of being created and should not be shown to the
+user if we crash during the time that the bit is set. The bit is cleared when
+attribute has finished being set up. This is done because some large
+attributes cannot be created inside a single transaction.
+
+xfs\_db Leaf Attribute Example
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A single 30KB extended attribute is added to an inode:
+
+::
+
+    xfs_db> inode <inode#>
+    xfs_db> p
+    ...
+    core.nblocks = 9
+    core.nextents = 0
+    core.naextents = 1
+    core.forkoff = 15
+    core.aformat = 2 (extents)
+    ...
+    a.bmx[0] = [startoff,startblock,blockcount,extentflag]
+              0:[0,37535,9,0]
+    xfs_db> ablock 0
+    xfs_db> p
+    hdr.info.forw = 0
+    hdr.info.back = 0
+    hdr.info.magic = 0xfbee
+    hdr.count = 1
+    hdr.usedbytes = 20
+    hdr.firstused = 4076
+    hdr.holes = 0
+    hdr.freemap[0-2] = [base,size] 0:[40,4036] 1:[0,0] 2:[0,0]
+    entries[0] = [hashval,nameidx,incomplete,root,secure,local]
+              0:[0xfcf89d4f,4076,0,0,0,0]
+    nvlist[0].valueblk = 0x1
+    nvlist[0].valuelen = 30692
+    nvlist[0].namelen = 8
+    nvlist[0].name = "big_attr"
+
+Attribute blocks 1 to 8 (filesystem blocks 37536 to 37543) contain the raw
+binary value data for the attribute.
+
+Index 4076 (0xfec) is the offset into the block where the name/value
+information is. As can be seen by the value, it’s at the end of the block:
+
+::
+
+    xfs_db> type text
+    xfs_db> p
+
+    000: 00 00 00 00  00 00 00 00 fb ee 00 00 00 01 00 14 ................
+    010: 0f ec 00 00  00 28 0f c4 00 00 00 00 00 00 00 00 ................
+    020: fc f8 9d 4f  0f ec 00 00 00 00 00 00 00 00 00 00 ...O............
+    030: 00 00 00 00  00 00 00 00 00 00 00 00 00 00 00 00 ................
+    ...
+    fe0: 00 00 00 00  00 00 00 00 00 00 00 00 00 00 00 01 ................
+    ff0: 00 00 77 e4  08 62 69 67 5f 61 74 74 72 00 00 00 ..w..big.attr...
+
+A 30KB attribute and a couple of small attributes are added to a file:
+
+::
+
+    xfs_db> inode <inode#>
+    xfs_db> p
+    ...
+    core.nblocks = 10
+    core.extsize = 0
+    core.nextents = 1
+    core.naextents = 2
+    core.forkoff = 15
+    core.aformat = 2 (extents)
+    ...
+    u.bmx[0] = [startoff,startblock,blockcount,extentflag]
+              0:[0,81857,1,0]
+    a.bmx[0-1] = [startoff,startblock,blockcount,extentflag]
+              0:[0,81858,1,0]
+              1:[1,182398,8,0]
+    xfs_db> ablock 0
+    xfs_db> p
+    hdr.info.forw = 0
+    hdr.info.back = 0
+    hdr.info.magic = 0xfbee
+    hdr.count = 3
+    hdr.usedbytes = 52
+    hdr.firstused = 4044
+    hdr.holes = 0
+    hdr.freemap[0-2] = [base,size] 0:[56,3988] 1:[0,0] 2:[0,0]
+    entries[0-2] = [hashval,nameidx,incomplete,root,secure,local]
+              0:[0x1e9d3934,4044,0,0,0,1]
+              1:[0x1e9d3937,4060,0,0,0,1]
+              2:[0xfcf89d4f,4076,0,0,0,0]
+    nvlist[0].valuelen = 6
+    nvlist[0].namelen = 5
+    nvlist[0].name = "attr2"
+    nvlist[0].value = "value2"
+    nvlist[1].valuelen = 6
+    nvlist[1].namelen = 5
+    nvlist[1].name = "attr1"
+    nvlist[1].value = "value1"
+    nvlist[2].valueblk = 0x1
+    nvlist[2].valuelen = 30692
+    nvlist[2].namelen = 8
+    nvlist[2].name = "big_attr"
+
+As can be seen in the entries array, the two small attributes have the local
+flag set and the values are printed.
+
+A raw disk dump shows the attributes. The last attribute added is highlighted
+(offset 4044 or 0xfcc):
+
+::
+
+    000: 00 00 00 00 00 00 00 00 fb ee 00 00 00 03 00 34 ...............4
+    010: 0f cc 00 00 00 38 0f 94 00 00 00 00 00 00 00 00 .....8..........
+    020: 1e 9d 39 34 0f cc 01 00 1e 9d 39 37 0f dc 01 00 ..94......97....
+    030: fc f8 9d 4f 0f ec 00 00 00 00 00 00 00 00 00 00 ...0............
+    040: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00.................
+    ...
+    fc0: 00 00 00 00 00 00 00 00 00 00 00 00 00 06 05 61 ...............a
+    fd0: 74 74 72 32 76 61 6c 75 65 32 00 00 00 06 05 61 ttr2value2.....a
+    fe0: 74 74 72 31 76 61 6c 75 65 31 00 00 00 00 00 01 ttr1value1......
+    ff0: 00 00 77 e4 08 62 69 67 5f 61 74 74 72 00 00 00 ..w..big.attr...
+
+Node Attributes
+~~~~~~~~~~~~~~~
+
+When the number of attributes exceeds the space that can fit in one filesystem
+block (ie. hash, flag, name and local values), the first attribute block
+becomes the root of a B+tree where the leaves contain the hash/name/value
+information that was stored in a single leaf block. The inode’s attribute
+format itself remains extent based. The nodes use the xfs\_da\_intnode\_t or
+xfs\_da3\_intnode\_t structures introduced in the section about
+`directories <#directory-attribute-internal-node>`__.
+
+The location of the attribute leaf blocks can be in any order. The only way to
+find an attribute is by walking the node block hash/before values. Given a
+hash to look up, search the node’s btree array for the first hashval in the
+array that exceeds the given hash. The entry is in the block pointed to by the
+before value.
+
+Each attribute node block has a magic number of XFS\_DA\_NODE\_MAGIC (0xfebe).
+On a v5 filesystem this is XFS\_DA3\_NODE\_MAGIC (0x3ebe).
+
+.. figure:: images/72.png
+   :alt: Node attribute layout
+
+   Node attribute layout
+
+xfs\_db Node Attribute Example
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+An inode with 1000 small attributes with the naming "attribute\_n" where
+'n' is a number:
+
+::
+
+    xfs_db> inode <inode#>
+    xfs_db> p
+    ...
+    core.nblocks = 15
+    core.nextents = 0
+    core.naextents = 1
+    core.forkoff = 15
+    core.aformat = 2 (extents)
+    ...
+    a.bmx[0] = [startoff,startblock,blockcount,extentflag] 0:[0,525144,15,0]
+    xfs_db> ablock 0
+    xfs_db> p
+    hdr.info.forw = 0
+    hdr.info.back = 0
+    hdr.info.magic = 0xfebe
+    hdr.count = 14
+    hdr.level = 1
+    btree[0-13] = [hashval,before]
+              0:[0x3435122d,1]
+              1:[0x343550a9,14]
+              2:[0x343553a6,13]
+              3:[0x3436122d,12]
+              4:[0x343650a9,8]
+              5:[0x343653a6,7]
+              6:[0x343691af,6]
+              7:[0x3436d0ab,11]
+              8:[0x3436d3a7,10]
+              9:[0x3437122d,9]
+              10:[0x3437922e,3]
+              11:[0x3437d22a,5]
+              12:[0x3e686c25,4]
+              13:[0x3e686fad,2]
+
+The hashes are in ascending order in the btree array, and if the hash for the
+attribute we are looking up is before the entry, we go to the addressed
+attribute block.
+
+For example, to lookup attribute "attribute\_267":
+
+::
+
+    xfs_db> hash attribute_267
+    0x3437d1a8
+
+In the root btree node, this falls between 0x3437922e and 0x3437d22a,
+therefore leaf 11 or attribute block 5 will contain the entry.
+
+::
+
+    xfs_db> ablock 5
+    xfs_db> p
+    hdr.info.forw = 4
+    hdr.info.back = 3
+    hdr.info.magic = 0xfbee
+    hdr.count = 96
+    hdr.usedbytes = 2688
+    hdr.firstused = 1408
+    hdr.holes = 0
+    hdr.freemap[0-2] = [base,size] 0:[800,608] 1:[0,0] 2:[0,0]
+    entries[0.95] = [hashval,nameidx,incomplete,root,secure,local]
+              0:[0x3437922f,4068,0,0,0,1]
+              1:[0x343792a6,4040,0,0,0,1]
+              2:[0x343792a7,4012,0,0,0,1]
+              3:[0x343792a8,3984,0,0,0,1]
+              ...
+              82:[0x3437d1a7,2892,0,0,0,1]
+              83:[0x3437d1a8,2864,0,0,0,1]
+              84:[0x3437d1a9,2836,0,0,0,1]
+              ...
+              95:[0x3437d22a,2528,0,0,0,1]
+    nvlist[0].valuelen = 10
+    nvlist[0].namelen = 13
+    nvlist[0].name = "attribute_310"
+    nvlist[0].value = "value_316\d"
+    nvlist[1].valuelen = 16
+    nvlist[1].namelen = 13
+    nvlist[1].name = "attribute_309"
+    nvlist[1].value = "value_309\d"
+    nvlist[2].valuelen = 10
+    nvlist[2].namelen = 13
+    nvlist[2].name = "attribute_308"
+    nvlist[2].value = "value_308\d"
+    nvlist[3].valuelen = 10
+    nvlist[3].namelen = 13
+    nvlist[3].name = "attribute_307"
+    nvlist[3].value = "value_307\d"
+    ...
+    nvlist[82].valuelen = 10
+    nvlist[82].namelen = 13
+    nvlist[82].name = "attribute_268"
+    nvlist[82].value = "value_268\d"
+    nvlist[83].valuelen = 10
+    nvlist[83].namelen = 13
+    nvlist[83].name = "attribute_267"
+    nvlist[83].value = "value_267\d"
+    nvlist[84].valuelen = 10
+    nvlist[84].namelen = 13
+    nvlist[84].name = "attribute_266"
+    nvlist[84].value = "value_266\d"
+    ...
+
+Each of the hash entries has XFS\_ATTR\_LOCAL flag set (1), which means the
+attribute’s value follows immediately after the name. Raw disk of the
+name/value pair at offset 2864 (0xb30), highlighted with "value\_267"
+following immediately after the name:
+
+::
+
+    b00: 62 75 74 65 5f 32 36 35 76 61 6c 75 65 5f 32 36 bute.265value.26
+    b10: 35 0a 00 00 00 0a 0d 61 74 74 72 69 62 75 74 65 5......attribute
+    b20: 51 32 36 36 76 61 6c 75 65 5f 32 36 36 0a 00 00 .266value.266...
+    b30: 00 0a 0d 61 74 74 72 69 62 75 74 65 5f 32 36 37 ...attribute.267
+    b40: 76 61 6c 75 65 5f 32 36 37 0a 00 00 00 0a 0d 61 value.267......a
+    b50: 74 74 72 69 62 75 74 65 5f 32 36 38 76 61 6c 75 ttribute.268va1u
+    b60: 65 5f 32 36 38 0a 00 00 00 0a 0d 61 74 74 72 69 e.268......attri
+    b70: 62 75 74 65 5f 32 36 39 76 61 6c 75 65 5f 32 36 bute.269value.26
+
+Each entry starts on a 32-bit (4 byte) boundary, therefore the highlighted
+entry has 2 unused bytes after it.
+
+B+tree Attributes
+~~~~~~~~~~~~~~~~~
+
+When the attribute’s extent map in an inode grows beyond the available space,
+the inode’s attribute format is changed to a "btree". The inode contains
+root node of the extent B+tree which then address the leaves that contains the
+extent arrays for the attribute data. The attribute data itself in the
+allocated filesystem blocks use the same layout and structures as described in
+`Node Attributes <#node-attributes>`__.
+
+Refer to the previous section on `B+tree Data Extents <#b-tree-extent-list>`__
+for more information on XFS B+tree extents.
+
+xfs\_db B+tree Attribute Example
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Added 2000 attributes with 729 byte values to a file:
+
+::
+
+    xfs_db> inode <inode#>
+    xfs_db> p
+    ...
+    core.nblocks = 640
+    core.extsize = 0
+    core.nextents = 1
+    core.naextents = 274
+    core.forkoff = 15
+    core.aformat = 3 (btree)
+    ...
+    a.bmbt.level = 1
+    a.bmbt.numrecs = 2
+    a.bmbt.keys[1-2] = [startoff] 1:[0] 2:[219]
+    a.bmbt.ptrs[1-2] = 1:83162 2:109968
+    xfs_db> fsblock 83162
+    xfs_db> type bmapbtd
+    xfs_db> p
+    magic = 0x424d4150
+    level = 0
+    numrecs = 127
+    leftsib = null
+    rightsib = 109968
+    recs[1-127] = [startoff,startblock,blockcount,extentflag]
+              1:[0,81870,1,0]
+              ...
+    xfs_db> fsblock 109968
+    xfs_db> type bmapbtd
+    xfs_db> p
+    magic = 0x424d4150
+    level = 0
+    numrecs = 147
+    leftsib = 83162
+    rightsib = null
+    recs[1-147] = [startoff,startblock,blockcount,extentflag]
+              ...
+                                 (which is fsblock 81870)
+    xfs_db> ablock 0
+    xfs_db> p
+    hdr.info.forw = 0
+    hdr.info.back = 0
+    hdr.info.magic = 0xfebe
+    hdr.count = 2
+    hdr.level = 2
+    btree[0-1] = [hashval,before] 0:[0x343612a6,513] 1:[0x3e686fad,512]
+
+The extent B+tree has two leaves that specify the 274 extents used for the
+attributes. Looking at the first block, it can be seen that the attribute
+B+tree is two levels deep. The two blocks at offset 513 and 512 (ie. access
+using the ablock command) are intermediate xfs\_da\_intnode\_t nodes that
+index all the attribute leaves.
+
+Remote Attribute Values
+~~~~~~~~~~~~~~~~~~~~~~~
+
+On a v5 filesystem, all remote value blocks start with this header:
+
+.. code:: c
+
+    struct xfs_attr3_rmt_hdr {
+        __be32  rm_magic;
+        __be32  rm_offset;
+        __be32  rm_bytes;
+        __be32  rm_crc;
+        uuid_t  rm_uuid;
+        __be64  rm_owner;
+        __be64  rm_blkno;
+        __be64  rm_lsn;
+    };
+
+**rm\_magic**
+    Specifies the magic number for the remote value block: "XARM"
+    (0x5841524d).
+
+**rm\_offset**
+    Offset of the remote value data, in bytes.
+
+**rm\_bytes**
+    Number of bytes used to contain the remote value data.
+
+**rm\_crc**
+    Checksum of the remote value block.
+
+**rm\_uuid**
+    The UUID of this block, which must match either sb\_uuid or sb\_meta\_uuid
+    depending on which features are set.
+
+**rm\_owner**
+    The inode number that this remote value block belongs to.
+
+**rm\_blkno**
+    Disk block number of this remote value block.
+
+**rm\_lsn**
+    Log sequence number of the last write to this block.
+
+Filesystems formatted prior to v5 do not have this header in the remote block.
+Value data begins immediately at offset zero.
