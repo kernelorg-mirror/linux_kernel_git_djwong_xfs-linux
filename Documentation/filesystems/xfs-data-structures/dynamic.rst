@@ -7,3 +7,4 @@ Dynamic Allocated Structures
 .. include:: data_extents.rst
 .. include:: directories.rst
 .. include:: extended_attributes.rst
+.. include:: symbolic_links.rst
