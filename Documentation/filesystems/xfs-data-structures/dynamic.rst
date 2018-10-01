@@ -2,3 +2,5 @@
 
 Dynamic Allocated Structures
 ============================
+
+.. include:: ondisk_inode.rst
