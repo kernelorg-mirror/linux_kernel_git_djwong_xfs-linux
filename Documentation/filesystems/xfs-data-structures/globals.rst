@@ -2,3 +2,5 @@
 
 Global Structures
 =================
+
+.. include:: btrees.rst
