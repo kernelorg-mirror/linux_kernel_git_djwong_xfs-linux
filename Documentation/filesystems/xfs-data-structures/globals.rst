@@ -7,3 +7,4 @@ Global Structures
 .. include:: dabtrees.rst
 .. include:: allocation_groups.rst
 .. include:: journaling_log.rst
+.. include:: internal_inodes.rst
