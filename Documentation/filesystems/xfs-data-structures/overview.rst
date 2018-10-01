@@ -47,3 +47,5 @@ latency.
 .. include:: delayed_logging.rst
 .. include:: reflink.rst
 .. include:: reconstruction.rst
+.. include:: common_types.rst
+.. include:: magic.rst
