@@ -44,3 +44,4 @@ are tracked more simply and in larger chunks to reduce jitter in allocation
 latency.
 
 .. include:: self_describing_metadata.rst
+.. include:: delayed_logging.rst
