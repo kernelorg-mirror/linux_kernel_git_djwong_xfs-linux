@@ -1381,3 +1381,4 @@ None of the XFS per-AG B+trees are involved with real time files. It is not
 possible for real time files to share data blocks.
 
 .. include:: rmapbt.rst
+.. include:: refcountbt.rst
