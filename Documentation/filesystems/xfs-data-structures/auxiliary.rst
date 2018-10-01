@@ -2,3 +2,5 @@
 
 Auxiliary Data Structures
 =========================
+
+.. include:: metadump.rst
