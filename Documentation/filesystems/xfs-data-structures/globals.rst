@@ -4,3 +4,4 @@ Global Structures
 =================
 
 .. include:: btrees.rst
+.. include:: dabtrees.rst
