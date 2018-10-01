@@ -5,3 +5,4 @@ Global Structures
 
 .. include:: btrees.rst
 .. include:: dabtrees.rst
+.. include:: allocation_groups.rst
