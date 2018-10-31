@@ -163,6 +163,7 @@ xchk_iallocbt_check_cluster_ifree(
 	xfs_ino_t			fsino;
 	xfs_agino_t			agino;
 	unsigned int			offset;
+	unsigned int			cluster_ioff;
 	bool				irec_free;
 	bool				ino_inuse;
 	bool				freemask_ok;
@@ -175,11 +176,13 @@ xchk_iallocbt_check_cluster_ifree(
 	 * Given an inobt record, an offset of a cluster within the record,
 	 * and an offset of an inode within a cluster, compute which fs inode
 	 * we're talking about and the offset of the inode record within the
-	 * inode buffer.
+	 * inode buffer, being careful about inobt records that don't align
+	 * with the start of the inode buffer when block sizes are large.
 	 */
 	agino = irec->ir_startino + chunk_ioff + loop_ioff;
 	fsino = XFS_AGINO_TO_INO(mp, bs->cur->bc_private.a.agno, agino);
-	offset = loop_ioff * mp->m_sb.sb_inodesize;
+	cluster_ioff = XFS_INO_TO_OFFSET(mp, irec->ir_startino + chunk_ioff);
+	offset = (cluster_ioff + loop_ioff) * mp->m_sb.sb_inodesize;
 	dip = xfs_buf_offset(bp, offset);
 	irec_free = (irec->ir_free & XFS_INOBT_MASK(chunk_ioff + loop_ioff));
 
