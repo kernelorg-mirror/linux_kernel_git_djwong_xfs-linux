@@ -295,9 +295,13 @@ xchk_iallocbt_check_cluster(
 	return error;
 }
 
-/* Make sure the free mask is consistent with what the inodes think. */
+/*
+ * For all the inode clusters that could map to this inobt record, make sure
+ * that the holemask makes sense and that the allocation status of each inode
+ * matches the freemask.
+ */
 STATIC int
-xchk_iallocbt_check_freemask(
+xchk_iallocbt_check_clusters(
 	struct xchk_btree		*bs,
 	struct xchk_iallocbt		*iabt,
 	struct xfs_inobt_rec_incore	*irec)
@@ -305,6 +309,13 @@ xchk_iallocbt_check_freemask(
 	unsigned int			chunk_ioff;
 	int				error = 0;
 
+	/*
+	 * For the common case where this inobt record maps to multiple inode
+	 * clusters this will call _check_cluster for each cluster.
+	 *
+	 * For the case that multiple inobt records map to a single cluster,
+	 * this will call _check_cluster once.
+	 */
 	for (chunk_ioff = 0;
 	     chunk_ioff < XFS_INODES_PER_CHUNK;
 	     chunk_ioff += iabt->inodes_per_cluster) {
@@ -399,7 +410,7 @@ xchk_iallocbt_rec(
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 
 check_freemask:
-	error = xchk_iallocbt_check_freemask(bs, iabt, &irec);
+	error = xchk_iallocbt_check_clusters(bs, iabt, &irec);
 	if (error)
 		goto out;
 
