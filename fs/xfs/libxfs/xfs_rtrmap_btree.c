@@ -25,6 +25,7 @@
 #include "xfs_extent_busy.h"
 #include "xfs_ag_resv.h"
 #include "xfs_bmap.h"
+#include "xfs_imeta.h"
 
 /*
  * Realtime Reverse map btree.
@@ -744,4 +745,46 @@ xfs_rtrmapbt_to_disk(
 		dmxr = be16_to_cpu(rblock->bb_numrecs);
 		memcpy(trp, frp, sizeof(*frp) * dmxr);
 	}
+}
+
+/*
+ * Create a realtime rmap btree inode.  The caller must clean up @ic and
+ * release the inode stored in @ipp (if it isn't NULL) regardless of the return
+ * value.
+ */
+int
+xfs_rtrmapbt_create(
+	struct xfs_trans	**tpp,
+	struct xfs_imeta_end	*ic,
+	struct xfs_inode	**ipp)
+{
+	struct xfs_mount	*mp = (*tpp)->t_mountp;
+	struct xfs_inode	*ip;
+	struct xfs_btree_block	*block;
+	xfs_ino_t		ino = NULLFSINO;
+	int			error;
+
+	*ipp = NULL;
+	error = xfs_imeta_lookup(mp, &XFS_IMETA_RTRMAPBT, &ino);
+	if (error)
+		return error;
+	if (ino != NULLFSINO)
+		return -EEXIST;
+
+	error = xfs_imeta_create(tpp, &XFS_IMETA_RTRMAPBT, S_IFREG, ipp, ic);
+	if (error)
+		return error;
+
+	ip = *ipp;
+	ip->i_d.di_format = XFS_DINODE_FMT_RMAP;
+	ASSERT(ip->i_df.if_broot_bytes == 0);
+	ASSERT(ip->i_df.if_bytes == 0);
+	ip->i_df.if_broot_bytes = XFS_RTRMAP_BROOT_SPACE_CALC(0, 0);
+	ip->i_df.if_broot = kmem_alloc(ip->i_df.if_broot_bytes,
+			KM_SLEEP | KM_NOFS);
+	block = ip->i_df.if_broot;
+	block->bb_numrecs = cpu_to_be16(0);
+	block->bb_level = cpu_to_be16(0);
+	xfs_trans_log_inode(*tpp, ip, XFS_ILOG_CORE | XFS_ILOG_DBROOT);
+	return 0;
 }
