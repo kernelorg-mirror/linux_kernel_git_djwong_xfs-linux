@@ -137,6 +137,7 @@ xchk_quota(struct xfs_scrub *sc)
 	return -ENOENT;
 }
 #endif
+int xchk_fscounters(struct xfs_scrub *sc);
 
 /* cross-referencing helpers */
 void xchk_xref_is_used_space(struct xfs_scrub *sc, xfs_agblock_t agbno,
@@ -164,5 +165,11 @@ void xchk_xref_is_used_rt_space(struct xfs_scrub *sc, xfs_rtblock_t rtbno,
 
 bool xchk_xattr_set_map(struct xfs_scrub *sc, unsigned long *map,
 		unsigned int start, unsigned int len);
+
+struct xchk_fscounters {
+	uint64_t		icount;
+	uint64_t		ifree;
+	uint64_t		fdblocks;
+};
 
 #endif	/* __XFS_SCRUB_SCRUB_H__ */
