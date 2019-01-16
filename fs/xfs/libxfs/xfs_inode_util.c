@@ -369,8 +369,7 @@ xfs_ialloc(
 	 * Call the space management code to pick
 	 * the on-disk inode to be allocated.
 	 */
-	error = xfs_dialloc(tp, pip ? pip->i_ino : 0, args->mode,
-			    ialloc_context, &ino);
+	error = xfs_dialloc(tp, pip, args->mode, ialloc_context, &ino);
 	if (error)
 		return error;
 	if (*ialloc_context || ino == NULLFSINO) {
