@@ -50,6 +50,7 @@ struct xfs_fsop_geom;
 /* Observable health issues for realtime volume metadata. */
 #define XFS_HEALTH_RT_BITMAP	(1 << 0)  /* realtime bitmap */
 #define XFS_HEALTH_RT_SUMMARY	(1 << 1)  /* realtime summary */
+#define XFS_HEALTH_RT_RMAPBT	(1 << 2)  /* realtime rmapbt */
 
 /* Observable health issues for AG metadata. */
 #define XFS_HEALTH_AG_SB	(1 << 0)  /* superblock */
@@ -85,7 +86,8 @@ struct xfs_fsop_geom;
 				 XFS_HEALTH_FS_PQUOTA)
 
 #define XFS_HEALTH_RT_PRIMARY	(XFS_HEALTH_RT_BITMAP | \
-				 XFS_HEALTH_RT_SUMMARY)
+				 XFS_HEALTH_RT_SUMMARY | \
+				 XFS_HEALTH_RT_RMAPBT)
 
 #define XFS_HEALTH_AG_PRIMARY	(XFS_HEALTH_AG_SB | \
 				 XFS_HEALTH_AG_AGF | \

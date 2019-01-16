@@ -324,6 +324,8 @@ xfs_fsop_geom_health(
 		geo->health |= XFS_FSOP_GEOM_HEALTH_RT_BITMAP;
 	if (sick & XFS_HEALTH_RT_SUMMARY)
 		geo->health |= XFS_FSOP_GEOM_HEALTH_RT_SUMMARY;
+	if (sick & XFS_HEALTH_RT_RMAPBT)
+		geo->health |= XFS_FSOP_GEOM_HEALTH_RT_RMAPBT;
 }
 
 /* Fill out ag geometry health info. */

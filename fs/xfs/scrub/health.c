@@ -46,6 +46,7 @@ static const unsigned int xchk_type_to_health_flag[XFS_SCRUB_TYPE_NR] = {
 	[XFS_SCRUB_TYPE_GQUOTA]		= XFS_HEALTH_FS_GQUOTA,
 	[XFS_SCRUB_TYPE_PQUOTA]		= XFS_HEALTH_FS_PQUOTA,
 	[XFS_SCRUB_TYPE_FSCOUNTERS]	= XFS_HEALTH_FS_COUNTERS,
+	[XFS_SCRUB_TYPE_RTRMAPBT]	= XFS_HEALTH_RT_RMAPBT,
 };
 
 /* Return the health status mask for this scrub type. */
@@ -160,6 +161,7 @@ xchk_mark_sick(
 		break;
 	case XFS_SCRUB_TYPE_RTBITMAP:
 	case XFS_SCRUB_TYPE_RTSUM:
+	case XFS_SCRUB_TYPE_RTRMAPBT:
 		xfs_rt_mark_sick(sc->mp, mask);
 		break;
 	default:
@@ -210,6 +212,7 @@ xchk_mark_healthy(
 		break;
 	case XFS_SCRUB_TYPE_RTBITMAP:
 	case XFS_SCRUB_TYPE_RTSUM:
+	case XFS_SCRUB_TYPE_RTRMAPBT:
 		xfs_rt_mark_healthy(sc->mp, mask);
 		break;
 	case XFS_SCRUB_TYPE_HEALTHY:
