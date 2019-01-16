@@ -44,7 +44,8 @@ xchk_setup_xattr(
 	 * hold three copies of the xattr free space bitmap.  (Not both at
 	 * the same time.)
 	 */
-	sz = max_t(size_t, XATTR_SIZE_MAX, 3 * sizeof(long) *
+	sz = max_t(size_t, XATTR_SIZE_MAX + XATTR_NAME_MAX + 1,
+			3 * sizeof(long) *
 			BITS_TO_LONGS(sc->mp->m_attr_geo->blksize));
 	sc->buf = kmem_zalloc_large(sz, KM_SLEEP);
 	if (!sc->buf)
@@ -136,7 +137,7 @@ fail_xref:
  * Within a char, the lowest bit of the char represents the byte with
  * the smallest address
  */
-STATIC bool
+bool
 xchk_xattr_set_map(
 	struct xfs_scrub	*sc,
 	unsigned long		*map,
