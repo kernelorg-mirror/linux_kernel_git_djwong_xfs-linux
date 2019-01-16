@@ -166,6 +166,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   inode_repair.o \
 				   refcount_repair.o \
 				   repair.o \
+				   symlink_repair.o \
 				   )
 endif
 endif
