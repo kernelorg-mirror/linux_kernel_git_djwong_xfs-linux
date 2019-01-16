@@ -1942,6 +1942,7 @@ xfs_iunlink(
 	struct xfs_buf		*ibp;
 	struct xfs_perag	*pag;
 	xfs_agnumber_t		agno;
+	xfs_agino_t		next_agino;
 	xfs_agino_t		agino;
 	short			bucket_index;
 	int			offset;
@@ -1966,13 +1967,19 @@ xfs_iunlink(
 	agi = XFS_BUF_TO_AGI(agibp);
 
 	/*
-	 * Get the index into the agi hash table for the
-	 * list this inode will go on.
+	 * Get the index into the agi hash table for the list this inode will
+	 * go on.  Make sure the pointer isn't garbage and that this inode
+	 * isn't already on the list.
 	 */
-	ASSERT(agi->agi_unlinked[bucket_index]);
-	ASSERT(be32_to_cpu(agi->agi_unlinked[bucket_index]) != agino);
+	next_agino = be32_to_cpu(agi->agi_unlinked[bucket_index]);
+	if (next_agino == agino ||
+	    (next_agino != NULLAGINO &&
+	     !xfs_verify_agino(mp, agno, next_agino))) {
+		error = -EFSCORRUPTED;
+		goto out_unlock;
+	}
 
-	if (agi->agi_unlinked[bucket_index] != cpu_to_be32(NULLAGINO)) {
+	if (next_agino != NULLAGINO) {
 		/*
 		 * There is already another inode in the bucket we need
 		 * to add ourselves to.  Add us at the front of the list.
@@ -2054,18 +2061,18 @@ xfs_iunlink_remove(
 	agi = XFS_BUF_TO_AGI(agibp);
 
 	/*
-	 * Get the index into the agi hash table for the
-	 * list this inode will go on.
+	 * Get the index into the agi hash table for the list this inode will
+	 * go on.  Make sure the head pointer isn't garbage.
 	 */
-	if (!xfs_verify_agino(mp, agno,
-			be32_to_cpu(agi->agi_unlinked[bucket_index]))) {
+	next_agino = be32_to_cpu(agi->agi_unlinked[bucket_index]);
+	if (!xfs_verify_agino(mp, agno, next_agino)) {
 		XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 				agi, sizeof(*agi));
 		error = -EFSCORRUPTED;
 		goto out_unlock;
 	}
 
-	if (be32_to_cpu(agi->agi_unlinked[bucket_index]) == agino) {
+	if (next_agino == agino) {
 		/*
 		 * We're at the head of the list.  Get the inode's on-disk
 		 * buffer to see if there is anyone after us on the list.
@@ -2107,7 +2114,6 @@ xfs_iunlink_remove(
 		/*
 		 * We need to search the list for the inode being freed.
 		 */
-		next_agino = be32_to_cpu(agi->agi_unlinked[bucket_index]);
 		last_ibp = NULL;
 		while (next_agino != agino) {
 			struct xfs_imap	imap;
