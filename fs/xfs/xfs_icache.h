@@ -55,7 +55,7 @@ int xfs_reclaim_inodes(struct xfs_mount *mp, int mode);
 int xfs_reclaim_inodes_count(struct xfs_mount *mp);
 long xfs_reclaim_inodes_nr(struct xfs_mount *mp, int nr_to_scan);
 
-void xfs_inode_set_reclaim_tag(struct xfs_inode *ip);
+void xfs_inode_set_reclaim_tag(struct xfs_inode *ip, bool need_inactive);
 
 void xfs_inode_set_eofblocks_tag(struct xfs_inode *ip);
 void xfs_inode_clear_eofblocks_tag(struct xfs_inode *ip);
@@ -121,5 +121,11 @@ int xfs_icache_inode_is_allocated(struct xfs_mount *mp, struct xfs_trans *tp,
 
 void xfs_icache_disable_reclaim(struct xfs_mount *mp);
 void xfs_icache_enable_reclaim(struct xfs_mount *mp);
+
+void xfs_inactive_worker(struct work_struct *work);
+int xfs_inactive_inodes(struct xfs_mount *mp, struct xfs_eofblocks *eofb);
+void xfs_inactive_force(struct xfs_mount *mp);
+void xfs_inactive_deactivate(struct xfs_mount *mp);
+int xfs_inactive_free_quota(struct xfs_inode *ip);
 
 #endif
