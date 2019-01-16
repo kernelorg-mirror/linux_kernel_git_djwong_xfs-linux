@@ -16,13 +16,20 @@
 #include "xfs_trans.h"
 #include "xfs_sb.h"
 #include "xfs_inode.h"
+#include "xfs_icache.h"
 #include "xfs_inode_fork.h"
 #include "xfs_alloc.h"
 #include "xfs_bmap.h"
+#include "xfs_bmap_util.h"
+#include "xfs_ialloc.h"
+#include "xfs_ialloc_btree.h"
 #include "xfs_quota.h"
 #include "xfs_qm.h"
 #include "xfs_dquot.h"
 #include "xfs_dquot_item.h"
+#include "xfs_trans_space.h"
+#include "xfs_error.h"
+#include "xfs_errortag.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
@@ -37,6 +44,11 @@
  * verifiers complain about, cap any counters or limits that make no sense,
  * and schedule a quotacheck if we had to fix anything.  We also repair any
  * data fork extent records that don't apply to metadata files.
+ *
+ * Online quotacheck is fairly straightforward.  We engage a repair freeze,
+ * zero all the dquots, and scan every inode in the system to recalculate the
+ * appropriate quota charges.  Finally, we log all the dquots to disk and
+ * set the _CHKD flags.
  */
 
 struct xrep_quota_info {
@@ -312,6 +324,268 @@ out:
 	return error;
 }
 
+/* Online Quotacheck */
+
+/*
+ * Add this inode's resource usage to the dquot.  We adjust the in-core and
+ * the (cached) on-disk copies of the counters and leave the dquot dirty.  A
+ * subsequent pass through the dquots logs them all to disk.  Fortunately we
+ * froze the filesystem before starting so at least we don't have to deal
+ * with chown/chproj races.
+ */
+STATIC int
+xrep_quotacheck_dqadjust(
+	struct xfs_scrub	*sc,
+	struct xfs_inode	*ip,
+	uint			type,
+	xfs_qcnt_t		nblks,
+	xfs_qcnt_t		rtblks)
+{
+	struct xfs_mount	*mp = sc->mp;
+	struct xfs_dquot	*dqp;
+	xfs_dqid_t		id;
+	int			error;
+
+	/* Try to read in the dquot. */
+	id = xfs_qm_id_for_quotatype(ip, type);
+	error = xfs_qm_dqget(mp, id, type, false, &dqp);
+	if (error == -ENOENT) {
+		/* Allocate a dquot using our special transaction. */
+		error = xfs_qm_dqget_alloc(&sc->tp, id, type, &dqp);
+		if (error)
+			return error;
+		error = xfs_trans_roll_inode(&sc->tp, sc->ip);
+	}
+	if (error) {
+		/*
+		 * Shouldn't be able to turn off quotas here.
+		 */
+		ASSERT(error != -ESRCH);
+		ASSERT(error != -ENOENT);
+		return error;
+	}
+
+	/*
+	 * Adjust the inode count and the block count to reflect this inode's
+	 * resource usage.
+	 */
+	be64_add_cpu(&dqp->q_core.d_icount, 1);
+	dqp->q_res_icount++;
+	if (nblks) {
+		be64_add_cpu(&dqp->q_core.d_bcount, nblks);
+		dqp->q_res_bcount += nblks;
+	}
+	if (rtblks) {
+		be64_add_cpu(&dqp->q_core.d_rtbcount, rtblks);
+		dqp->q_res_rtbcount += rtblks;
+	}
+
+	/*
+	 * Set default limits, adjust timers (since we changed usages)
+	 *
+	 * There are no timers for the default values set in the root dquot.
+	 */
+	if (dqp->q_core.d_id) {
+		xfs_qm_adjust_dqlimits(mp, dqp);
+		xfs_qm_adjust_dqtimers(mp, &dqp->q_core);
+	}
+
+	dqp->dq_flags |= XFS_DQ_DIRTY;
+	xfs_qm_dqput(dqp);
+	return 0;
+}
+
+/* Record this inode's quota use. */
+STATIC int
+xrep_quotacheck_inode(
+	struct xfs_scrub	*sc,
+	uint			dqtype,
+	struct xfs_inode	*ip)
+{
+	struct xfs_ifork	*ifp;
+	xfs_filblks_t		rtblks = 0;	/* total rt blks */
+	xfs_qcnt_t		nblks;
+	int			error;
+
+	/* Count the realtime blocks. */
+	if (XFS_IS_REALTIME_INODE(ip)) {
+		ifp = XFS_IFORK_PTR(ip, XFS_DATA_FORK);
+
+		if (!(ifp->if_flags & XFS_IFEXTENTS)) {
+			error = xfs_iread_extents(sc->tp, ip, XFS_DATA_FORK);
+			if (error)
+				return error;
+		}
+
+		xfs_bmap_count_leaves(ifp, &rtblks);
+	}
+
+	nblks = (xfs_qcnt_t)ip->i_d.di_nblocks - rtblks;
+
+	/* Adjust the dquot. */
+	return xrep_quotacheck_dqadjust(sc, ip, dqtype, nblks, rtblks);
+}
+
+struct xrep_quotacheck {
+	struct xfs_scrub	*sc;
+	uint			dqtype;
+};
+
+/* Iterate all the inodes in an AG group. */
+STATIC int
+xrep_quotacheck_inobt(
+	struct xfs_btree_cur		*cur,
+	union xfs_btree_rec		*rec,
+	void				*priv)
+{
+	struct xfs_inobt_rec_incore	irec;
+	struct xfs_mount		*mp = cur->bc_mp;
+	struct xfs_inode		*ip = NULL;
+	struct xrep_quotacheck		*rq = priv;
+	xfs_ino_t			ino;
+	xfs_agino_t			agino;
+	int				chunkidx;
+	int				error = 0;
+
+	xfs_inobt_btrec_to_irec(mp, rec, &irec);
+
+	for (chunkidx = 0, agino = irec.ir_startino;
+	     chunkidx < XFS_INODES_PER_CHUNK;
+	     chunkidx++, agino++) {
+		bool	inuse;
+
+		/* Skip if this inode is free */
+		if (XFS_INOBT_MASK(chunkidx) & irec.ir_free)
+			continue;
+		ino = XFS_AGINO_TO_INO(mp, cur->bc_private.a.agno, agino);
+		if (xfs_is_quota_inode(&mp->m_sb, ino))
+			continue;
+
+		/* Back off and try again if an inode is being reclaimed */
+		error = xfs_icache_inode_is_allocated(mp, NULL, ino, &inuse);
+		if (error == -EAGAIN)
+			return -EDEADLOCK;
+
+		/*
+		 * Grab inode for scanning.  We cannot use DONTCACHE here
+		 * because we already have a transaction so the iput must not
+		 * trigger inode reclaim (which might allocate a transaction
+		 * to clean up posteof blocks).
+		 */
+		error = xfs_iget(mp, NULL, ino, 0, XFS_ILOCK_EXCL, &ip);
+		if (error)
+			return error;
+
+		error = xrep_quotacheck_inode(rq->sc, rq->dqtype, ip);
+		xfs_iunlock(ip, XFS_ILOCK_EXCL);
+		xfs_irele(ip);
+		if (error)
+			return error;
+	}
+
+	return 0;
+}
+
+/* Zero a dquot prior to regenerating the counts. */
+static int
+xrep_quotacheck_zero_dquot(
+	struct xfs_dquot	*dq,
+	uint			dqtype,
+	void			*priv)
+{
+	dq->q_res_bcount -= be64_to_cpu(dq->q_core.d_bcount);
+	dq->q_core.d_bcount = 0;
+	dq->q_res_icount -= be64_to_cpu(dq->q_core.d_icount);
+	dq->q_core.d_icount = 0;
+	dq->q_res_rtbcount -= be64_to_cpu(dq->q_core.d_rtbcount);
+	dq->q_core.d_rtbcount = 0;
+	dq->dq_flags |= XFS_DQ_DIRTY;
+	return 0;
+}
+
+/* Log a dirty dquot after we regenerated the counters. */
+static int
+xrep_quotacheck_log_dquot(
+	struct xfs_dquot	*dq,
+	uint			dqtype,
+	void			*priv)
+{
+	struct xfs_scrub	*sc = priv;
+	int			error;
+
+	xfs_trans_dqjoin(sc->tp, dq);
+	xfs_trans_log_dquot(sc->tp, dq);
+	error = xfs_trans_roll(&sc->tp);
+	xfs_dqlock(dq);
+	return error;
+}
+
+/* Execute an online quotacheck. */
+STATIC int
+xrep_quotacheck(
+	struct xfs_scrub	*sc,
+	uint			dqtype)
+{
+	struct xrep_quotacheck	rq;
+	struct xfs_mount	*mp = sc->mp;
+	struct xfs_buf		*bp;
+	struct xfs_btree_cur	*cur;
+	xfs_agnumber_t		ag;
+	uint			flag;
+	int			error;
+
+	/*
+	 * Commit the transaction so that we can allocate new quota ip
+	 * mappings if we have to.  If we crash after this point, the sb
+	 * still has the CHKD flags cleared, so mount quotacheck will fix
+	 * all of this up.
+	 */
+	error = xfs_trans_commit(sc->tp);
+	sc->tp = NULL;
+	if (error)
+		return error;
+
+	/* Zero all the quota items. */
+	error = xfs_qm_dqiterate(mp, dqtype, xrep_quotacheck_zero_dquot,
+			sc);
+	if (error)
+		goto out;
+
+	rq.sc = sc;
+	rq.dqtype = dqtype;
+
+	/* Iterate all AGs for inodes. */
+	for (ag = 0; ag < mp->m_sb.sb_agcount; ag++) {
+		error = xfs_ialloc_read_agi(mp, NULL, ag, &bp);
+		if (error)
+			goto out;
+		cur = xfs_inobt_init_cursor(mp, NULL, bp, ag, XFS_BTNUM_INO);
+		error = xfs_btree_query_all(cur, xrep_quotacheck_inobt, &rq);
+		xfs_btree_del_cursor(cur, error);
+		xfs_buf_relse(bp);
+		if (error)
+			goto out;
+	}
+
+	/* Log dquots. */
+	error = xchk_trans_alloc(sc, 0);
+	if (error)
+		goto out;
+	error = xfs_qm_dqiterate(mp, dqtype, xrep_quotacheck_log_dquot, sc);
+	if (error)
+		goto out;
+
+	/* Set quotachecked flag. */
+	flag = xfs_quota_chkd_flag(dqtype);
+	sc->mp->m_qflags |= flag;
+	spin_lock(&sc->mp->m_sb_lock);
+	sc->mp->m_sb.sb_qflags |= flag;
+	spin_unlock(&sc->mp->m_sb_lock);
+	xfs_log_sb(sc->tp);
+out:
+	return error;
+}
+
 /*
  * Go fix anything in the quota items that we could have been mad about.  Now
  * that we've checked the quota inode data fork we have to drop ILOCK_EXCL to
@@ -332,8 +606,10 @@ xrep_quota_problems(
 		return error;
 
 	/* Make a quotacheck happen. */
-	if (rqi.need_quotacheck)
+	if (rqi.need_quotacheck ||
+	    XFS_TEST_ERROR(false, sc->mp, XFS_ERRTAG_FORCE_SCRUB_REPAIR))
 		xrep_force_quotacheck(sc, dqtype);
+
 	return 0;
 }
 
@@ -343,6 +619,7 @@ xrep_quota(
 	struct xfs_scrub	*sc)
 {
 	uint			dqtype;
+	uint			flag;
 	int			error;
 
 	dqtype = xchk_quota_to_dqtype(sc);
@@ -358,6 +635,20 @@ xrep_quota(
 
 	/* Fix anything the dquot verifiers complain about. */
 	error = xrep_quota_problems(sc, dqtype);
+	if (error)
+		goto out;
+
+	/* Do we need a quotacheck?  Did we need one? */
+	flag = xfs_quota_chkd_flag(dqtype);
+	if (!(flag & sc->mp->m_qflags)) {
+		/* We need to freeze the fs before we can scan inodes. */
+		if (!(sc->flags & XCHK_FS_FROZEN)) {
+			error = -EDEADLOCK;
+			goto out;
+		}
+
+		error = xrep_quotacheck(sc, dqtype);
+	}
 out:
 	return error;
 }
