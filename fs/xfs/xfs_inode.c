@@ -1842,6 +1842,62 @@ xfs_inode_iadjust(
 	xfs_qm_iadjust(ip, direction, inodes, dblocks, rblocks);
 }
 
+/* Clean up inode inactivation. */
+void
+xfs_inode_inactivation_cleanup(
+	struct xfs_inode	*ip)
+{
+	int			ret;
+
+	/*
+	 * Undo the pending-inactivation counter updates since we're bringing
+	 * this inode back to life.
+	 */
+	ret = xfs_qm_dqattach(ip);
+	if (ret)
+		xfs_err(ip->i_mount, "error %d reactivating inode quota", ret);
+
+	xfs_inode_iadjust(ip, -1);
+}
+
+/* Prepare inode for inactivation. */
+void
+xfs_inode_inactivation_prep(
+	struct xfs_inode	*ip)
+{
+	int			ret;
+
+	/*
+	 * If this inode is unlinked (and now unreferenced) we need to dispose
+	 * of it in the on disk metadata.
+	 *
+	 * Bump generation so that the inode can't be opened by handle now that
+	 * the last external references has dropped.  Bulkstat won't return
+	 * inodes with zero nlink so nobody will ever find this inode again.
+	 * Then add this inode & blocks to the counts of things that will be
+	 * freed during the next inactivation run.
+	 */
+	if (VFS_I(ip)->i_nlink == 0)
+		VFS_I(ip)->i_generation++;
+
+	/*
+	 * Increase the pending-inactivation counters so that the fs looks like
+	 * it's free.
+	 */
+	ret = xfs_qm_dqattach(ip);
+	if (ret)
+		xfs_err(ip->i_mount, "error %d inactivating inode quota", ret);
+
+	xfs_inode_iadjust(ip, 1);
+
+	/*
+	 * Detach dquots just in case someone tries a quotaoff while
+	 * the inode is waiting on the inactive list.  We'll reattach
+	 * them (if needed) when inactivating the inode.
+	 */
+	xfs_qm_dqdetach(ip);
+}
+
 /*
  * Returns true if we need to update the on-disk metadata before we can free
  * the memory used by this inode.  Updates include freeing post-eof
@@ -1933,6 +1989,16 @@ xfs_inactive(
 	if (mp->m_flags & XFS_MOUNT_RDONLY)
 		return;
 
+	/*
+	 * Re-attach dquots prior to freeing EOF blocks or CoW staging extents.
+	 * We dropped the dquot prior to inactivation (because quotaoff can't
+	 * resurrect inactive inodes to force-drop the dquot) so we /must/
+	 * do this before touching any block mappings.
+	 */
+	error = xfs_qm_dqattach(ip);
+	if (error)
+		return;
+
 	/* Try to clean out the cow blocks if there are any. */
 	if (xfs_inode_has_cow_data(ip))
 		xfs_reflink_cancel_cow_range(ip, 0, NULLFILEOFF, true);
@@ -1957,10 +2023,6 @@ xfs_inactive(
 	    (ip->i_d.di_size != 0 || XFS_ISIZE(ip) != 0 ||
 	     ip->i_d.di_nextents > 0 || ip->i_delayed_blks > 0))
 		truncate = 1;
-
-	error = xfs_qm_dqattach(ip);
-	if (error)
-		return;
 
 	if (S_ISLNK(VFS_I(ip)->i_mode))
 		error = xfs_inactive_symlink(ip);
