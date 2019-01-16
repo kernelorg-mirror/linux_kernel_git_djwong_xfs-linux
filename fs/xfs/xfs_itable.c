@@ -54,6 +54,12 @@ xfs_bulkstat_one_int(
 	if (error)
 		goto out_free;
 
+	if (xfs_is_metadata_inode(ip)) {
+		xfs_iunlock(ip, XFS_ILOCK_SHARED);
+		xfs_irele(ip);
+		goto out_free;
+	}
+
 	ASSERT(ip != NULL);
 	ASSERT(ip->i_imap.im_blkno != 0);
 	inode = VFS_I(ip);
