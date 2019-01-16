@@ -75,6 +75,7 @@ struct xfs_scrub {
 
 	bool				try_harder;
 	bool				has_quotaofflock;
+	bool				reset_perag_resv;
 
 	/* State tracking for single-AG operations. */
 	struct xchk_ag			sa;
