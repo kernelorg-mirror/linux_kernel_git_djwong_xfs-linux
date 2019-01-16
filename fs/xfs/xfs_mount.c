@@ -679,6 +679,16 @@ xfs_mountfs_imeta(
 {
 	int			error;
 
+	/* Load the metadata directory inode into memory. */
+	if (xfs_sb_version_hasmetadir(&mp->m_sb)) {
+		error = xfs_imeta_iget(mp, mp->m_sb.sb_metadirino,
+				XFS_DIR3_FT_DIR, &mp->m_metadirip);
+		if (error) {
+			xfs_warn(mp, "Failed metadir ino init: %d", error);
+			return error;
+		}
+	}
+
 	error = xfs_imeta_mount(mp);
 	if (error) {
 		xfs_warn(mp, "Failed to load metadata inode info, error %d",
@@ -928,7 +938,7 @@ xfs_mountfs(
 
 	error = xfs_mountfs_imeta(mp);
 	if (error)
-		goto out_log_dealloc;
+		goto out_free_metadir;
 
 	/*
 	 * Get and sanity-check the root inode.
@@ -940,7 +950,7 @@ xfs_mountfs(
 		xfs_warn(mp,
 			"Failed to read root inode 0x%llx, error %d",
 			sbp->sb_rootino, -error);
-		goto out_log_dealloc;
+		goto out_free_metadir;
 	}
 
 	ASSERT(rip != NULL);
@@ -1086,6 +1096,9 @@ xfs_mountfs(
 	xfs_irele(rip);
 	/* Clean out dquots that might be in memory after quotacheck. */
 	xfs_qm_unmount(mp);
+ out_free_metadir:
+	if (mp->m_metadirip)
+		xfs_imeta_irele(mp->m_metadirip);
 	/*
 	 * Cancel all delayed reclaim work and reclaim the inodes directly.
 	 * We have to do this /after/ rtunmount and qm_unmount because those
@@ -1149,6 +1162,9 @@ xfs_unmountfs(
 	xfs_qm_unmount_quotas(mp);
 	xfs_rtunmount_inodes(mp);
 	xfs_irele(mp->m_rootip);
+
+	if (mp->m_metadirip)
+		xfs_imeta_irele(mp->m_metadirip);
 
 	/*
 	 * We can potentially deadlock here if we have an inode cluster
