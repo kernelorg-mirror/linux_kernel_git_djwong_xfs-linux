@@ -99,6 +99,7 @@ int xchk_parent(struct xfs_scrub *sc);
 #ifdef CONFIG_XFS_RT
 int xchk_rtbitmap(struct xfs_scrub *sc);
 int xchk_rtsummary(struct xfs_scrub *sc);
+int xchk_rtrmapbt(struct xfs_scrub *sc);
 #else
 static inline int
 xchk_rtbitmap(struct xfs_scrub *sc)
@@ -107,6 +108,11 @@ xchk_rtbitmap(struct xfs_scrub *sc)
 }
 static inline int
 xchk_rtsummary(struct xfs_scrub *sc)
+{
+	return -ENOENT;
+}
+static inline int
+xchk_rtrmapbt(struct xfs_scrub *sc)
 {
 	return -ENOENT;
 }
