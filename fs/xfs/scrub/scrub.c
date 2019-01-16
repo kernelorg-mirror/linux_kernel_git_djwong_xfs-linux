@@ -362,6 +362,13 @@ static const struct xchk_meta_ops meta_scrub_ops[] = {
 		.scrub	= xchk_fscounters,
 		.repair	= xrep_fscounters,
 	},
+	[XFS_SCRUB_TYPE_RTRMAPBT] = {	/* realtime rmapbt */
+		.type	= ST_FS,
+		.setup	= xchk_setup_rtrmapbt,
+		.scrub	= xchk_rtrmapbt,
+		.has	= xfs_sb_version_hasrtrmapbt,
+		.repair	= xrep_notsupported,
+	},
 };
 
 /* This isn't a stable feature, warn once per day. */
