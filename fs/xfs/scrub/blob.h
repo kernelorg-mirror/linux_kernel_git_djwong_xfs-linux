@@ -7,10 +7,11 @@
 #define __XFS_SCRUB_BLOB_H__
 
 struct xblob {
-	struct list_head	list;
+	struct file	*filp;
+	loff_t		last_offset;
 };
 
-typedef void			*xblob_cookie;
+typedef loff_t		xblob_cookie;
 
 struct xblob *xblob_init(void);
 void xblob_destroy(struct xblob *blob);
