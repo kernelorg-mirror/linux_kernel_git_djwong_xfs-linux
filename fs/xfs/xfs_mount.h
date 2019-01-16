@@ -391,6 +391,7 @@ typedef struct xfs_perag {
 
 	/* unlinked inode info; lock AGI to access */
 	unsigned int		pagi_unlinked_count;
+	struct rhashtable	pagi_unlinked_hash;
 } xfs_perag_t;
 
 static inline struct xfs_ag_resv *

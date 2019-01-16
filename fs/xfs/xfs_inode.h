@@ -500,4 +500,13 @@ extern struct kmem_zone	*xfs_inode_zone;
 
 bool xfs_inode_verify_forks(struct xfs_inode *ip);
 
+int xfs_iunlink_init(struct xfs_perag *pag);
+void xfs_iunlink_destroy(struct xfs_perag *pag);
+xfs_agino_t xfs_iunlink_lookup_backref(struct xfs_perag *pag,
+		xfs_agino_t agino);
+int xfs_iunlink_add_backref(struct xfs_perag *pag, xfs_agino_t prev_agino,
+		xfs_agino_t this_agino);
+int xfs_iunlink_change_backref(struct xfs_perag *pag, xfs_agino_t prev_agino,
+		xfs_agino_t this_agino);
+
 #endif	/* __XFS_INODE_H__ */
