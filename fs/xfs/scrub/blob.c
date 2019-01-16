@@ -8,38 +8,48 @@
 #include "xfs_shared.h"
 #include "scrub/array.h"
 #include "scrub/blob.h"
+#include "scrub/xfile.h"
 
 /*
  * XFS Blob Storage
  * ================
- * Stores and retrieves blobs using a list.  Objects are appended to
- * the list and the pointer is returned as a magic cookie for retrieval.
+ * Stores and retrieves blobs using a memfd object.  Objects are appended to
+ * the file and the offset is returned as a magic cookie for retrieval.
  */
 
 #define XB_KEY_MAGIC	0xABAADDAD
 struct xb_key {
-	struct list_head	list;
 	uint32_t		magic;
 	uint32_t		size;
+	loff_t			offset;
 	/* blob comes after here */
 } __attribute__((packed));
-
-#define XB_KEY_SIZE(sz)	(sizeof(struct xb_key) + (sz))
 
 /* Initialize a blob storage object. */
 struct xblob *
 xblob_init(void)
 {
 	struct xblob	*blob;
+	struct file	*filp;
 	int		error;
+
+	filp = xfile_create("blob storage");
+	if (!filp)
+		return ERR_PTR(-ENOMEM);
+	if (IS_ERR(filp))
+		return ERR_CAST(filp);
 
 	error = -ENOMEM;
 	blob = kmem_alloc(sizeof(struct xblob), KM_NOFS | KM_MAYFAIL);
 	if (!blob)
-		return ERR_PTR(error);
+		goto out_filp;
 
-	INIT_LIST_HEAD(&blob->list);
+	blob->filp = filp;
+	blob->last_offset = PAGE_SIZE;
 	return blob;
+out_filp:
+	fput(filp);
+	return ERR_PTR(error);
 }
 
 /* Destroy a blob storage object. */
@@ -47,12 +57,7 @@ void
 xblob_destroy(
 	struct xblob	*blob)
 {
-	struct xb_key	*key, *n;
-
-	list_for_each_entry_safe(key, n, &blob->list, list) {
-		list_del(&key->list);
-		kmem_free(key);
-	}
+	xfile_destroy(blob->filp);
 	kmem_free(blob);
 }
 
@@ -64,19 +69,24 @@ xblob_get(
 	void		*ptr,
 	uint32_t	size)
 {
-	struct xb_key	*key = (struct xb_key *)cookie;
+	struct xb_key	key;
+	loff_t		pos = cookie;
+	int		error;
 
-	if (key->magic != XB_KEY_MAGIC) {
+	error = xfile_io(blob->filp, XFILE_IO_READ, &pos, &key, sizeof(key));
+	if (error)
+		return error;
+
+	if (key.magic != XB_KEY_MAGIC || key.offset != cookie) {
 		ASSERT(0);
 		return -ENODATA;
 	}
-	if (size < key->size) {
+	if (size < key.size) {
 		ASSERT(0);
 		return -EFBIG;
 	}
 
-	memcpy(ptr, key + 1, key->size);
-	return 0;
+	return xfile_io(blob->filp, XFILE_IO_READ, &pos, ptr, key.size);
 }
 
 /* Store a blob. */
@@ -87,19 +97,28 @@ xblob_put(
 	void		*ptr,
 	uint32_t	size)
 {
-	struct xb_key	*key;
+	struct xb_key	key = {
+		.offset = blob->last_offset,
+		.magic = XB_KEY_MAGIC,
+		.size = size,
+	};
+	loff_t		pos = blob->last_offset;
+	int		error;
 
-	key = kmem_alloc(XB_KEY_SIZE(size), KM_NOFS | KM_MAYFAIL);
-	if (!key)
-		return -ENOMEM;
+	error = xfile_io(blob->filp, XFILE_IO_WRITE, &pos, &key, sizeof(key));
+	if (error)
+		goto out_err;
 
-	INIT_LIST_HEAD(&key->list);
-	list_add_tail(&key->list, &blob->list);
-	key->magic = XB_KEY_MAGIC;
-	key->size = size;
-	memcpy(key + 1, ptr, size);
-	*cookie = (xblob_cookie)key;
+	error = xfile_io(blob->filp, XFILE_IO_WRITE, &pos, ptr, size);
+	if (error)
+		goto out_err;
+
+	*cookie = blob->last_offset;
+	blob->last_offset = pos;
 	return 0;
+out_err:
+	xfile_discard(blob->filp, blob->last_offset, pos - 1);
+	return -ENOMEM;
 }
 
 /* Free a blob. */
@@ -108,14 +127,19 @@ xblob_free(
 	struct xblob	*blob,
 	xblob_cookie	cookie)
 {
-	struct xb_key	*key = (struct xb_key *)cookie;
+	struct xb_key	key;
+	loff_t		pos = cookie;
+	int		error;
 
-	if (key->magic != XB_KEY_MAGIC) {
+	error = xfile_io(blob->filp, XFILE_IO_READ, &pos, &key, sizeof(key));
+	if (error)
+		return error;
+
+	if (key.magic != XB_KEY_MAGIC || key.offset != cookie) {
 		ASSERT(0);
 		return -ENODATA;
 	}
-	key->magic = 0;
-	list_del(&key->list);
-	kmem_free(key);
+
+	xfile_discard(blob->filp, cookie, cookie + sizeof(key) + key.size - 1);
 	return 0;
 }
