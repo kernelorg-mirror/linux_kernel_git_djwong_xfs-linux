@@ -909,6 +909,7 @@ xchk_disable_reclaim(
 {
 	sc->flags |= XCHK_RECLAIM_DISABLED;
 	xfs_icache_disable_reclaim(sc->mp);
+	xfs_inactive_cancel_work(sc->mp);
 }
 
 /* Unpause background reclamation and inactivation. */
@@ -916,6 +917,7 @@ void
 xchk_enable_reclaim(
 	struct xfs_scrub	*sc)
 {
+	xfs_inactive_schedule_work(sc->mp, 0);
 	xfs_icache_enable_reclaim(sc->mp);
 	sc->flags &= ~XCHK_RECLAIM_DISABLED;
 }

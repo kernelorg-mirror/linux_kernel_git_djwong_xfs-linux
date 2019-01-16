@@ -127,5 +127,7 @@ int xfs_inactive_inodes(struct xfs_mount *mp, struct xfs_eofblocks *eofb);
 void xfs_inactive_force(struct xfs_mount *mp);
 void xfs_inactive_deactivate(struct xfs_mount *mp);
 int xfs_inactive_free_quota(struct xfs_inode *ip);
+void xfs_inactive_cancel_work(struct xfs_mount *mp);
+void xfs_inactive_schedule_work(struct xfs_mount *mp, unsigned long delay);
 
 #endif
