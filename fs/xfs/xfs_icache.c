@@ -1004,9 +1004,9 @@ xfs_inode_ag_iterator_tag(
 
 /*
  * Grab the inode for reclaim exclusively.
- * Return 0 if we grabbed it, non-zero otherwise.
+ * Return true if we grabbed it, false otherwise.
  */
-STATIC int
+STATIC bool
 xfs_reclaim_inode_grab(
 	struct xfs_inode	*ip,
 	int			flags)
@@ -1015,7 +1015,7 @@ xfs_reclaim_inode_grab(
 
 	/* quick check for stale RCU freed inode */
 	if (!ip->i_ino)
-		return 1;
+		return false;
 
 	/*
 	 * If we are asked for non-blocking operation, do unlocked checks to
@@ -1024,7 +1024,7 @@ xfs_reclaim_inode_grab(
 	 */
 	if ((flags & SYNC_TRYLOCK) &&
 	    __xfs_iflags_test(ip, XFS_IFLOCK | XFS_IRECLAIM))
-		return 1;
+		return false;
 
 	/*
 	 * The radix tree lock here protects a thread in xfs_iget from racing
@@ -1041,11 +1041,11 @@ xfs_reclaim_inode_grab(
 	    __xfs_iflags_test(ip, XFS_IRECLAIM)) {
 		/* not a reclaim candidate. */
 		spin_unlock(&ip->i_flags_lock);
-		return 1;
+		return false;
 	}
 	__xfs_iflags_set(ip, XFS_IRECLAIM);
 	spin_unlock(&ip->i_flags_lock);
-	return 0;
+	return true;
 }
 
 /*
@@ -1224,20 +1224,104 @@ out:
 }
 
 /*
+ * Walk the RECLAIM tagged inodes in this AG looking for inodes to inactivate.
+ */
+STATIC int
+xfs_reclaim_inodes_pag(
+	struct xfs_perag	*pag,
+	int			sync_flags,
+	bool			(*grab_fn)(struct xfs_inode *ip,
+					   int sync_flags),
+	int			(*execute_fn)(struct xfs_inode *ip,
+					      struct xfs_perag *pag,
+					      int sync_flags),
+	int			*nr_to_scan,
+	bool			*done)
+{
+	struct xfs_mount	*mp = pag->pag_mount;
+	unsigned long		first_index = 0;
+	int			nr_found = 0;
+	int			last_error = 0;
+	int			error;
+
+	do {
+		struct xfs_inode *batch[XFS_LOOKUP_BATCH];
+		int	i;
+
+		rcu_read_lock();
+		nr_found = radix_tree_gang_lookup_tag(&pag->pag_ici_root,
+				(void **)batch, first_index, XFS_LOOKUP_BATCH,
+				XFS_ICI_RECLAIM_TAG);
+		if (!nr_found) {
+			*done = true;
+			rcu_read_unlock();
+			break;
+		}
+
+		/*
+		 * Grab the inodes before we drop the lock. if we found
+		 * nothing, nr == 0 and the loop will be skipped.
+		 */
+		for (i = 0; i < nr_found; i++) {
+			struct xfs_inode *ip = batch[i];
+
+			if (*done || !grab_fn(ip, sync_flags))
+				batch[i] = NULL;
+
+			/*
+			 * Update the index for the next lookup. Catch
+			 * overflows into the next AG range which can occur if
+			 * we have inodes in the last block of the AG and we
+			 * are currently pointing to the last inode.
+			 *
+			 * Because we may see inodes that are from the wrong AG
+			 * due to RCU freeing and reallocation, only update the
+			 * index if it lies in this AG. It was a race that lead
+			 * us to see this inode, so another lookup from the
+			 * same index will not find it again.
+			 */
+			if (XFS_INO_TO_AGNO(mp, ip->i_ino) != pag->pag_agno)
+				continue;
+			first_index = XFS_INO_TO_AGINO(mp, ip->i_ino + 1);
+			if (first_index < XFS_INO_TO_AGINO(mp, ip->i_ino))
+				*done = true;
+		}
+
+		/* unlock now we've grabbed the inodes. */
+		rcu_read_unlock();
+
+		for (i = 0; i < nr_found; i++) {
+			if (!batch[i])
+				continue;
+			error = execute_fn(batch[i], pag, sync_flags);
+			if (error && last_error != -EFSCORRUPTED)
+				last_error = error;
+		}
+
+		*nr_to_scan -= XFS_LOOKUP_BATCH;
+
+		cond_resched();
+
+	} while (nr_found && !*done && *nr_to_scan > 0);
+
+	return last_error;
+}
+
+/*
  * Walk the AGs and reclaim the inodes in them. Even if the filesystem is
  * corrupted, we still want to try to reclaim all the inodes. If we don't,
  * then a shut down during filesystem unmount reclaim walk leak all the
  * unreclaimed inodes.
  */
 STATIC int
-xfs_reclaim_inodes_ag(
+__xfs_reclaim_inodes(
 	struct xfs_mount	*mp,
 	int			flags,
 	int			*nr_to_scan)
 {
 	struct xfs_perag	*pag;
-	int			error = 0;
 	int			last_error = 0;
+	int			error;
 	xfs_agnumber_t		ag;
 	int			trylock = flags & SYNC_TRYLOCK;
 	int			skipped;
@@ -1247,8 +1331,7 @@ restart:
 	skipped = 0;
 	while ((pag = xfs_perag_get_tag(mp, ag, XFS_ICI_RECLAIM_TAG))) {
 		unsigned long	first_index = 0;
-		int		done = 0;
-		int		nr_found = 0;
+		bool		done = false;
 
 		ag = pag->pag_agno + 1;
 
@@ -1262,70 +1345,11 @@ restart:
 		} else
 			mutex_lock(&pag->pag_ici_reclaim_lock);
 
-		do {
-			struct xfs_inode *batch[XFS_LOOKUP_BATCH];
-			int	i;
-
-			rcu_read_lock();
-			nr_found = radix_tree_gang_lookup_tag(
-					&pag->pag_ici_root,
-					(void **)batch, first_index,
-					XFS_LOOKUP_BATCH,
-					XFS_ICI_RECLAIM_TAG);
-			if (!nr_found) {
-				done = 1;
-				rcu_read_unlock();
-				break;
-			}
-
-			/*
-			 * Grab the inodes before we drop the lock. if we found
-			 * nothing, nr == 0 and the loop will be skipped.
-			 */
-			for (i = 0; i < nr_found; i++) {
-				struct xfs_inode *ip = batch[i];
-
-				if (done || xfs_reclaim_inode_grab(ip, flags))
-					batch[i] = NULL;
-
-				/*
-				 * Update the index for the next lookup. Catch
-				 * overflows into the next AG range which can
-				 * occur if we have inodes in the last block of
-				 * the AG and we are currently pointing to the
-				 * last inode.
-				 *
-				 * Because we may see inodes that are from the
-				 * wrong AG due to RCU freeing and
-				 * reallocation, only update the index if it
-				 * lies in this AG. It was a race that lead us
-				 * to see this inode, so another lookup from
-				 * the same index will not find it again.
-				 */
-				if (XFS_INO_TO_AGNO(mp, ip->i_ino) !=
-								pag->pag_agno)
-					continue;
-				first_index = XFS_INO_TO_AGINO(mp, ip->i_ino + 1);
-				if (first_index < XFS_INO_TO_AGINO(mp, ip->i_ino))
-					done = 1;
-			}
-
-			/* unlock now we've grabbed the inodes. */
-			rcu_read_unlock();
-
-			for (i = 0; i < nr_found; i++) {
-				if (!batch[i])
-					continue;
-				error = xfs_reclaim_inode(batch[i], pag, flags);
-				if (error && last_error != -EFSCORRUPTED)
-					last_error = error;
-			}
-
-			*nr_to_scan -= XFS_LOOKUP_BATCH;
-
-			cond_resched();
-
-		} while (nr_found && !done && *nr_to_scan > 0);
+		error = xfs_reclaim_inodes_pag(pag, flags,
+				xfs_reclaim_inode_grab, xfs_reclaim_inode,
+				nr_to_scan, &done);
+		if (error && last_error != -EFSCORRUPTED)
+			last_error = error;
 
 		if (trylock && !done)
 			pag->pag_ici_reclaim_cursor = first_index;
@@ -1356,7 +1380,7 @@ xfs_reclaim_inodes(
 {
 	int		nr_to_scan = INT_MAX;
 
-	return xfs_reclaim_inodes_ag(mp, mode, &nr_to_scan);
+	return __xfs_reclaim_inodes(mp, mode, &nr_to_scan);
 }
 
 /*
@@ -1377,7 +1401,7 @@ xfs_reclaim_inodes_nr(
 	xfs_reclaim_work_queue(mp);
 	xfs_ail_push_all(mp->m_ail);
 
-	return xfs_reclaim_inodes_ag(mp, SYNC_TRYLOCK | SYNC_WAIT, &nr_to_scan);
+	return __xfs_reclaim_inodes(mp, SYNC_TRYLOCK | SYNC_WAIT, &nr_to_scan);
 }
 
 /*
