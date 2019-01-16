@@ -14,6 +14,7 @@ struct xfs_bitmap_range {
 
 struct xfs_bitmap {
 	struct list_head	list;
+	xfs_fsblock_t		weight;
 };
 
 void xfs_bitmap_init(struct xfs_bitmap *bitmap);
@@ -32,5 +33,6 @@ int xfs_bitmap_set_btcur_path(struct xfs_bitmap *bitmap,
 		struct xfs_btree_cur *cur);
 int xfs_bitmap_set_btblocks(struct xfs_bitmap *bitmap,
 		struct xfs_btree_cur *cur);
+uint64_t xfs_bitmap_hweight(struct xfs_bitmap *bitmap);
 
 #endif	/* __XFS_SCRUB_BITMAP_H__ */
