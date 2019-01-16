@@ -324,6 +324,7 @@ xfs_rtrmapbt_verify(
 	struct xfs_mount	*mp = bp->b_target->bt_mount;
 	struct xfs_btree_block	*block = XFS_BUF_TO_BLOCK(bp);
 	xfs_failaddr_t		fa;
+	xfs_ino_t		ino = XFS_RMAP_OWN_UNKNOWN;
 	int			level;
 
 	if (block->bb_magic != cpu_to_be32(XFS_RTRMAP_CRC_MAGIC))
@@ -331,7 +332,9 @@ xfs_rtrmapbt_verify(
 
 	if (!xfs_sb_version_hasrmapbt(&mp->m_sb))
 		return __this_address;
-	fa = xfs_btree_lblock_v5hdr_verify(bp, XFS_RMAP_OWN_UNKNOWN);
+	if (mp->m_rrmapip)
+		ino = mp->m_rrmapip->i_ino;
+	fa = xfs_btree_lblock_v5hdr_verify(bp, ino);
 	if (fa)
 		return fa;
 	level = be16_to_cpu(block->bb_level);
