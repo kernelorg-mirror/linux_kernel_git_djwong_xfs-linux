@@ -26,6 +26,7 @@
 #include "xfs_trace.h"
 #include "xfs_icache.h"
 #include "xfs_cksum.h"
+#include "xfs_imeta.h"
 
 /*
  * The global quota manager. There is only one of these for the entire
@@ -742,6 +743,18 @@ xfs_qm_destroy_quotainfo(
 	mp->m_quotainfo = NULL;
 }
 
+static inline const struct xfs_imeta_path *
+xfs_qflags_to_imeta(
+	unsigned int	qflags)
+{
+	if (qflags & XFS_QMOPT_UQUOTA)
+		return &XFS_IMETA_USRQUOTA;
+	else if (qflags & XFS_QMOPT_GQUOTA)
+		return &XFS_IMETA_GRPQUOTA;
+	else
+		return &XFS_IMETA_PRJQUOTA;
+}
+
 /*
  * Switch the group and project quota in-core inode pointers if needed.
  *
@@ -749,6 +762,12 @@ xfs_qm_destroy_quotainfo(
  * between gquota and pquota. If the on-disk superblock has GQUOTA and the
  * filesystem is now mounted with PQUOTA, just use sb_gquotino for sb_pquotino
  * and vice-versa.
+ *
+ * We tolerate the direct manipulation of the in-core sb quota inode pointers
+ * here because calling xfs_imeta_log is only really required for filesystems
+ * with the metadata directory feature.  That feature requires a v5 superblock,
+ * which always supports simultaneous group and project quotas, so we'll never
+ * get here.
  */
 STATIC int
 xfs_qm_qino_switch(
@@ -783,8 +802,13 @@ xfs_qm_qino_switch(
 	if (error)
 		return error;
 
-	mp->m_sb.sb_gquotino = NULLFSINO;
-	mp->m_sb.sb_pquotino = NULLFSINO;
+	if (flags & XFS_QMOPT_PQUOTA) {
+		mp->m_sb.sb_gquotino = NULLFSINO;
+		mp->m_sb.sb_pquotino = ino;
+	} else if (flags & XFS_QMOPT_GQUOTA) {
+		mp->m_sb.sb_gquotino = ino;
+		mp->m_sb.sb_pquotino = NULLFSINO;
+	}
 	*need_alloc = false;
 	return 0;
 }
@@ -795,35 +819,25 @@ xfs_qm_qino_switch(
  */
 STATIC int
 xfs_qm_qino_alloc(
-	xfs_mount_t	*mp,
-	xfs_inode_t	**ip,
-	uint		flags)
+	struct xfs_mount		*mp,
+	struct xfs_inode		**ip,
+	uint				flags)
 {
-	struct xfs_ialloc_args	args = {
-		.nlink	= 1,
-		.mode	= S_IFREG,
-	};
-	xfs_trans_t	*tp;
-	int		error;
-	bool		need_alloc = true;
+	struct xfs_imeta_end		ic;
+	struct xfs_trans		*tp;
+	const struct xfs_imeta_path	*path = xfs_qflags_to_imeta(flags);
+	int				error;
+	bool				need_alloc = true;
 
 	*ip = NULL;
 	error = xfs_qm_qino_switch(mp, ip, flags, &need_alloc);
 	if (error)
 		return error;
 
-	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_create,
-			XFS_QM_QINOCREATE_SPACE_RES(mp), 0, 0, &tp);
+	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_imeta_create,
+			xfs_imeta_create_space_res(mp), 0, 0, &tp);
 	if (error)
 		return error;
-
-	if (need_alloc) {
-		error = xfs_dir_ialloc(&tp, &args, ip);
-		if (error) {
-			xfs_trans_cancel(tp);
-			return error;
-		}
-	}
 
 	/*
 	 * Make the changes in the superblock, and log those too.
@@ -842,22 +856,27 @@ xfs_qm_qino_alloc(
 		/* qflags will get updated fully _after_ quotacheck */
 		mp->m_sb.sb_qflags = mp->m_qflags & XFS_ALL_QUOTA_ACCT;
 	}
-	if (flags & XFS_QMOPT_UQUOTA)
-		mp->m_sb.sb_uquotino = (*ip)->i_ino;
-	else if (flags & XFS_QMOPT_GQUOTA)
-		mp->m_sb.sb_gquotino = (*ip)->i_ino;
-	else
-		mp->m_sb.sb_pquotino = (*ip)->i_ino;
 	spin_unlock(&mp->m_sb_lock);
 	xfs_log_sb(tp);
+
+	if (need_alloc) {
+		error = xfs_imeta_create(&tp, path, S_IFREG, ip, &ic);
+		if (error) {
+			xfs_trans_cancel(tp);
+			xfs_imeta_end_update(mp, &ic, error);
+			return error;
+		}
+	}
 
 	error = xfs_trans_commit(tp);
 	if (error) {
 		ASSERT(XFS_FORCED_SHUTDOWN(mp));
 		xfs_alert(mp, "%s failed (error %d)!", __func__, error);
 	}
-	if (need_alloc)
+	if (need_alloc) {
+		xfs_imeta_end_update(mp, &ic, error);
 		xfs_finish_inode_setup(*ip);
+	}
 	return error;
 }
 
