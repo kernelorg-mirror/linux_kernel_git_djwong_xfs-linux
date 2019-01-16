@@ -979,3 +979,148 @@ xfs_scrub_fs_thaw(
 	mutex_unlock(&sc->mp->m_scrub_freeze);
 	return error;
 }
+
+/* Decide if we're going to grab this inode for iteration. */
+STATIC int
+xfs_scrub_foreach_live_inode_ag_grab(
+	struct xfs_inode	*ip)
+{
+	struct inode		*inode = VFS_I(ip);
+
+	ASSERT(rcu_read_lock_held());
+
+	/*
+	 * Check for stale RCU freed inode
+	 *
+	 * If the inode has been reallocated, it doesn't matter if it's not in
+	 * the AG we are walking - we are walking for writeback, so if it
+	 * passes all the "valid inode" checks and is dirty, then we'll write
+	 * it back anyway.  If it has been reallocated and still being
+	 * initialised, the XFS_INEW check below will catch it.
+	 */
+	spin_lock(&ip->i_flags_lock);
+	if (!ip->i_ino)
+		goto out_unlock_noent;
+
+	/* Avoid new or reclaimable inodes. Leave for reclaim code to flush */
+	if (__xfs_iflags_test(ip, XFS_INEW | XFS_IRECLAIMABLE | XFS_IRECLAIM))
+		goto out_unlock_noent;
+	spin_unlock(&ip->i_flags_lock);
+
+	/* Nothing to sync during shutdown */
+	if (XFS_FORCED_SHUTDOWN(ip->i_mount))
+		return -EFSCORRUPTED;
+
+	/* If we can't grab the inode, it must on it's way to reclaim. */
+	if (!igrab(inode))
+		return -ENOENT;
+
+	/* inode is valid */
+	return 0;
+
+out_unlock_noent:
+	spin_unlock(&ip->i_flags_lock);
+	return -ENOENT;
+}
+
+#define XFS_LOOKUP_BATCH 32
+/*
+ * Iterate all in-core inodes of an AG.  We will not wait for inodes that are
+ * new or reclaimable, and the filesystem should be frozen by the caller.
+ */
+STATIC int
+xfs_scrub_foreach_live_inode_ag(
+	struct xfs_scrub	*sc,
+	struct xfs_perag	*pag,
+	int			(*execute)(struct xfs_inode *ip, void *priv),
+	void			*priv)
+{
+	struct xfs_mount	*mp = sc->mp;
+	uint32_t		first_index = 0;
+	int			done = 0;
+	int			nr_found = 0;
+	int			error = 0;
+
+	do {
+		struct xfs_inode *batch[XFS_LOOKUP_BATCH];
+		int		i;
+
+		rcu_read_lock();
+
+		nr_found = radix_tree_gang_lookup(&pag->pag_ici_root,
+				(void **)batch, first_index, XFS_LOOKUP_BATCH);
+		if (!nr_found) {
+			rcu_read_unlock();
+			break;
+		}
+
+		/*
+		 * Grab the inodes before we drop the lock. if we found
+		 * nothing, nr == 0 and the loop will be skipped.
+		 */
+		for (i = 0; i < nr_found; i++) {
+			struct xfs_inode *ip = batch[i];
+
+			if (done || xfs_scrub_foreach_live_inode_ag_grab(ip))
+				batch[i] = NULL;
+
+			/*
+			 * Update the index for the next lookup. Catch
+			 * overflows into the next AG range which can occur if
+			 * we have inodes in the last block of the AG and we
+			 * are currently pointing to the last inode.
+			 *
+			 * Because we may see inodes that are from the wrong AG
+			 * due to RCU freeing and reallocation, only update the
+			 * index if it lies in this AG. It was a race that lead
+			 * us to see this inode, so another lookup from the
+			 * same index will not find it again.
+			 */
+			if (XFS_INO_TO_AGNO(mp, ip->i_ino) != pag->pag_agno)
+				continue;
+			first_index = XFS_INO_TO_AGINO(mp, ip->i_ino + 1);
+			if (first_index < XFS_INO_TO_AGINO(mp, ip->i_ino))
+				done = 1;
+		}
+
+		/* unlock now we've grabbed the inodes. */
+		rcu_read_unlock();
+
+		for (i = 0; i < nr_found; i++) {
+			if (!batch[i])
+				continue;
+			if (!error)
+				error = execute(batch[i], priv);
+			xfs_irele(batch[i]);
+		}
+
+		if (error)
+			break;
+	} while (nr_found && !done);
+
+	return error;
+}
+
+/*
+ * Iterate all in-core inodes.  We will not wait for inodes that are
+ * new or reclaimable, and the filesystem should be frozen by the caller.
+ */
+int
+xfs_scrub_foreach_live_inode(
+	struct xfs_scrub	*sc,
+	int			(*execute)(struct xfs_inode *ip, void *priv),
+	void			*priv)
+{
+	struct xfs_mount	*mp = sc->mp;
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+	int			error = 0;
+
+	for (agno = 0; agno < mp->m_sb.sb_agcount && !error; agno++) {
+		pag = xfs_perag_get(mp, agno);
+		error = xfs_scrub_foreach_live_inode_ag(sc, pag, execute, priv);
+		xfs_perag_put(pag);
+	}
+
+	return error;
+}
