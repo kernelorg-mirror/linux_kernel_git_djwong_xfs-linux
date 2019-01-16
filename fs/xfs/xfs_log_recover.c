@@ -5078,12 +5078,22 @@ xlog_recover_process_one_iunlink(
 	agino = be32_to_cpu(dip->di_next_unlinked);
 	xfs_buf_relse(ibp);
 
-	/* Make sure the in-core data knows about this unlinked inode. */
+	/*
+	 * Make sure the in-core data knows about this unlinked inode.  Since
+	 * our iunlinks recovery basically just deletes the head of a bucket
+	 * list until the bucket is empty, we need only to add the backref from
+	 * the current list item to the next one, if this isn't the list tail.
+	 */
 	pag = xfs_perag_get(mp, agno);
 	mutex_lock(&pag->pagi_unlinked_lock);
 	pag->pagi_unlinked_count++;
+	if (agino != NULLAGINO)
+		error = xfs_iunlink_add_backref(pag, XFS_INO_TO_AGINO(mp, ino),
+				agino);
 	mutex_unlock(&pag->pagi_unlinked_lock);
 	xfs_perag_put(pag);
+	if (error)
+		goto fail_iput;
 
 	/*
 	 * Prevent any DMAPI event from being sent when the reference on
