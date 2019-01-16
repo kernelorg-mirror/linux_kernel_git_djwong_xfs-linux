@@ -88,6 +88,13 @@ typedef struct xfs_mount {
 	 */
 	struct percpu_counter	m_delalloc_blks;
 
+	/* Count of inodes waiting for inactivation. */
+	struct percpu_counter	m_iinactive;
+	/* Count of data device blocks waiting for inactivation. */
+	struct percpu_counter	m_dinactive;
+	/* Coult of realtime device blocks waiting for inactivation. */
+	struct percpu_counter	m_rinactive;
+
 	struct xfs_buf		*m_sb_bp;	/* buffer for superblock */
 	char			*m_fsname;	/* filesystem name */
 	int			m_fsname_len;	/* strlen of fs name */
