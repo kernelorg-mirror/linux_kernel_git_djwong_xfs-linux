@@ -113,6 +113,7 @@ xchk_setup_quota(struct xfs_scrub *sc, struct xfs_inode *ip)
 #endif
 int xchk_setup_fscounters(struct xfs_scrub *sc, struct xfs_inode *ip);
 
+int xchk_rt_init(struct xfs_scrub *sc, struct xchk_ag *sa);
 void xchk_ag_free(struct xfs_scrub *sc, struct xchk_ag *sa);
 int xchk_ag_init(struct xfs_scrub *sc, xfs_agnumber_t agno,
 		struct xchk_ag *sa);

@@ -249,11 +249,30 @@ xchk_bmap_rt_extent_xref(
 	struct xfs_btree_cur	*cur,
 	struct xfs_bmbt_irec	*irec)
 {
+	struct xfs_mount	*mp = info->sc->mp;
+	int			error;
+
 	if (info->sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
 		return;
 
+	xfs_ilock(mp->m_rbmip, XFS_ILOCK_EXCL | XFS_ILOCK_RTBITMAP);
+	if (mp->m_rrmapip)
+		xfs_ilock(mp->m_rrmapip, XFS_ILOCK_EXCL | XFS_ILOCK_RTSUM);
+
+	error = xchk_rt_init(info->sc, &info->sc->sa);
+	if (!xchk_fblock_process_error(info->sc, info->whichfork,
+			irec->br_startoff, &error))
+		goto out_unlock;
+
 	xchk_xref_is_used_rt_space(info->sc, irec->br_startblock,
 			irec->br_blockcount);
+	xchk_bmap_xref_rmap(info, irec, irec->br_startblock);
+
+	xchk_ag_free(info->sc, &info->sc->sa);
+out_unlock:
+	if (mp->m_rrmapip)
+		xfs_iunlock(mp->m_rrmapip, XFS_ILOCK_EXCL);
+	xfs_iunlock(mp->m_rbmip, XFS_ILOCK_EXCL);
 }
 
 /* Cross-reference a single datadev extent record. */
