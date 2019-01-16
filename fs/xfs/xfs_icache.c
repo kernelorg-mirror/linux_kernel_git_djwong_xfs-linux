@@ -27,6 +27,79 @@
 #include <linux/freezer.h>
 #include <linux/iversion.h>
 
+STATIC bool
+xfs_inode_match_id(
+	struct xfs_inode	*ip,
+	struct xfs_eofblocks	*eofb)
+{
+	if ((eofb->eof_flags & XFS_EOF_FLAGS_UID) &&
+	    !uid_eq(VFS_I(ip)->i_uid, eofb->eof_uid))
+		return false;
+
+	if ((eofb->eof_flags & XFS_EOF_FLAGS_GID) &&
+	    !gid_eq(VFS_I(ip)->i_gid, eofb->eof_gid))
+		return false;
+
+	if ((eofb->eof_flags & XFS_EOF_FLAGS_PRID) &&
+	    xfs_get_projid(ip) != eofb->eof_prid)
+		return false;
+
+	return true;
+}
+
+/*
+ * A union-based inode filtering algorithm. Process the inode if any of the
+ * criteria match. This is for global/internal scans only.
+ */
+STATIC bool
+xfs_inode_match_id_union(
+	struct xfs_inode	*ip,
+	struct xfs_eofblocks	*eofb)
+{
+	if ((eofb->eof_flags & XFS_EOF_FLAGS_UID) &&
+	    uid_eq(VFS_I(ip)->i_uid, eofb->eof_uid))
+		return true;
+
+	if ((eofb->eof_flags & XFS_EOF_FLAGS_GID) &&
+	    gid_eq(VFS_I(ip)->i_gid, eofb->eof_gid))
+		return true;
+
+	if ((eofb->eof_flags & XFS_EOF_FLAGS_PRID) &&
+	    xfs_get_projid(ip) == eofb->eof_prid)
+		return true;
+
+	return false;
+}
+
+/*
+ * Does this inode match the given parameters?  If no parameters are specified
+ * then all inodes are matches.
+ */
+STATIC bool
+xfs_inode_matches_eofb(
+	struct xfs_inode	*ip,
+	struct xfs_eofblocks	*eofb)
+{
+	bool			match;
+
+	if (!eofb)
+		return true;
+
+	if (eofb->eof_flags & XFS_EOF_FLAGS_UNION)
+		match = xfs_inode_match_id_union(ip, eofb);
+	else
+		match = xfs_inode_match_id(ip, eofb);
+	if (!match)
+		return false;
+
+	/* skip the inode if the file size is too small */
+	if (eofb->eof_flags & XFS_EOF_FLAGS_MINFILESIZE &&
+	    XFS_ISIZE(ip) < eofb->eof_min_file_size)
+		return false;
+
+	return true;
+}
+
 /*
  * Allocate and initialise an xfs_inode.
  */
@@ -1432,50 +1505,6 @@ xfs_reclaim_inodes_count(
 }
 
 STATIC int
-xfs_inode_match_id(
-	struct xfs_inode	*ip,
-	struct xfs_eofblocks	*eofb)
-{
-	if ((eofb->eof_flags & XFS_EOF_FLAGS_UID) &&
-	    !uid_eq(VFS_I(ip)->i_uid, eofb->eof_uid))
-		return 0;
-
-	if ((eofb->eof_flags & XFS_EOF_FLAGS_GID) &&
-	    !gid_eq(VFS_I(ip)->i_gid, eofb->eof_gid))
-		return 0;
-
-	if ((eofb->eof_flags & XFS_EOF_FLAGS_PRID) &&
-	    xfs_get_projid(ip) != eofb->eof_prid)
-		return 0;
-
-	return 1;
-}
-
-/*
- * A union-based inode filtering algorithm. Process the inode if any of the
- * criteria match. This is for global/internal scans only.
- */
-STATIC int
-xfs_inode_match_id_union(
-	struct xfs_inode	*ip,
-	struct xfs_eofblocks	*eofb)
-{
-	if ((eofb->eof_flags & XFS_EOF_FLAGS_UID) &&
-	    uid_eq(VFS_I(ip)->i_uid, eofb->eof_uid))
-		return 1;
-
-	if ((eofb->eof_flags & XFS_EOF_FLAGS_GID) &&
-	    gid_eq(VFS_I(ip)->i_gid, eofb->eof_gid))
-		return 1;
-
-	if ((eofb->eof_flags & XFS_EOF_FLAGS_PRID) &&
-	    xfs_get_projid(ip) == eofb->eof_prid)
-		return 1;
-
-	return 0;
-}
-
-STATIC int
 xfs_inode_free_eofblocks(
 	struct xfs_inode	*ip,
 	int			flags,
@@ -1483,7 +1512,6 @@ xfs_inode_free_eofblocks(
 {
 	int ret = 0;
 	struct xfs_eofblocks *eofb = args;
-	int match;
 
 	if (!xfs_can_free_eofblocks(ip, false)) {
 		/* inode could be preallocated or append-only */
@@ -1500,19 +1528,8 @@ xfs_inode_free_eofblocks(
 	    mapping_tagged(VFS_I(ip)->i_mapping, PAGECACHE_TAG_DIRTY))
 		return 0;
 
-	if (eofb) {
-		if (eofb->eof_flags & XFS_EOF_FLAGS_UNION)
-			match = xfs_inode_match_id_union(ip, eofb);
-		else
-			match = xfs_inode_match_id(ip, eofb);
-		if (!match)
-			return 0;
-
-		/* skip the inode if the file size is too small */
-		if (eofb->eof_flags & XFS_EOF_FLAGS_MINFILESIZE &&
-		    XFS_ISIZE(ip) < eofb->eof_min_file_size)
-			return 0;
-	}
+	if (!xfs_inode_matches_eofb(ip, eofb))
+		return 0;
 
 	/*
 	 * If the caller is waiting, return -EAGAIN to keep the background
@@ -1772,25 +1789,13 @@ xfs_inode_free_cowblocks(
 	void			*args)
 {
 	struct xfs_eofblocks	*eofb = args;
-	int			match;
 	int			ret = 0;
 
 	if (!xfs_prep_free_cowblocks(ip))
 		return 0;
 
-	if (eofb) {
-		if (eofb->eof_flags & XFS_EOF_FLAGS_UNION)
-			match = xfs_inode_match_id_union(ip, eofb);
-		else
-			match = xfs_inode_match_id(ip, eofb);
-		if (!match)
-			return 0;
-
-		/* skip the inode if the file size is too small */
-		if (eofb->eof_flags & XFS_EOF_FLAGS_MINFILESIZE &&
-		    XFS_ISIZE(ip) < eofb->eof_min_file_size)
-			return 0;
-	}
+	if (!xfs_inode_matches_eofb(ip, eofb))
+		return 0;
 
 	/* Free the CoW blocks */
 	xfs_ilock(ip, XFS_IOLOCK_EXCL);
