@@ -501,16 +501,9 @@ xfs_vn_getattr(
 	if (XFS_FORCED_SHUTDOWN(mp))
 		return -EIO;
 
+	generic_fillattr(inode, stat);
 	stat->size = XFS_ISIZE(ip);
-	stat->dev = inode->i_sb->s_dev;
-	stat->mode = inode->i_mode;
-	stat->nlink = inode->i_nlink;
-	stat->uid = inode->i_uid;
-	stat->gid = inode->i_gid;
 	stat->ino = ip->i_ino;
-	stat->atime = inode->i_atime;
-	stat->mtime = inode->i_mtime;
-	stat->ctime = inode->i_ctime;
 	stat->blocks =
 		XFS_FSB_TO_BB(mp, ip->i_d.di_nblocks + ip->i_delayed_blks);
 
@@ -533,7 +526,6 @@ xfs_vn_getattr(
 	case S_IFBLK:
 	case S_IFCHR:
 		stat->blksize = BLKDEV_IOSIZE;
-		stat->rdev = inode->i_rdev;
 		break;
 	default:
 		if (XFS_IS_REALTIME_INODE(ip)) {
