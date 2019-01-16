@@ -1560,7 +1560,7 @@ xfs_refcount_alloc_cow_extent(
 		return error;
 
 	/* Add rmap entry */
-	return xfs_rmap_alloc_extent(tp, fsb, len, XFS_RMAP_OWN_COW);
+	return xfs_rmap_alloc_extent(tp, fsb, len, XFS_RMAP_OWN_COW, false);
 }
 
 /* Forget a CoW staging event in the refcount btree. */
@@ -1577,7 +1577,7 @@ xfs_refcount_free_cow_extent(
 		return 0;
 
 	/* Remove rmap entry */
-	error = xfs_rmap_free_extent(tp, fsb, len, XFS_RMAP_OWN_COW);
+	error = xfs_rmap_free_extent(tp, fsb, len, XFS_RMAP_OWN_COW, false);
 	if (error)
 		return error;
 
