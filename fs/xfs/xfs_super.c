@@ -1116,6 +1116,24 @@ xfs_fs_sync_fs(
 	if (!wait)
 		return 0;
 
+	/*
+	 * If we're in the middle of freezing the filesystem, this is our last
+	 * chance to run regular transactions.  Clear all the COW staging
+	 * extents so that we can freeze the filesystem with as little recovery
+	 * work to do at the next mount as possible.  It's safe to do this
+	 * without locking inodes because the freezer code flushed all the
+	 * dirty data from the page cache and locked out writes and page faults.
+	 */
+	if (sb->s_writers.frozen == SB_FREEZE_PAGEFAULT) {
+		int		error;
+
+		error = xfs_icache_free_cowblocks(mp, NULL);
+		if (error) {
+			xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_INCORE);
+			return error;
+		}
+	}
+
 	xfs_log_force(mp, XFS_LOG_SYNC);
 	if (laptop_mode) {
 		/*

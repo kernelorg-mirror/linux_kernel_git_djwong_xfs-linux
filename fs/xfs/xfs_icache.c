@@ -2168,6 +2168,7 @@ xfs_inode_free_cowblocks(
 	void			*args)
 {
 	struct xfs_eofblocks	*eofb = args;
+	uint			lock_mode = 0;
 	int			ret = 0;
 
 	if (!xfs_prep_free_cowblocks(ip))
@@ -2176,9 +2177,15 @@ xfs_inode_free_cowblocks(
 	if (!xfs_inode_matches_eofb(ip, eofb))
 		return 0;
 
-	/* Free the CoW blocks */
-	xfs_ilock(ip, XFS_IOLOCK_EXCL);
-	xfs_ilock(ip, XFS_MMAPLOCK_EXCL);
+	/*
+	 * Free the CoW blocks.  We don't need to lock the inode if we're in
+	 * the process of freezing the filesystem because we've already locked
+	 * out writes and page faults.
+	 */
+	if (ip->i_mount->m_super->s_writers.frozen == SB_UNFROZEN)
+		lock_mode = XFS_IOLOCK_EXCL | XFS_MMAPLOCK_EXCL;
+	if (lock_mode)
+		xfs_ilock(ip, lock_mode);
 
 	/*
 	 * Check again, nobody else should be able to dirty blocks or change
@@ -2187,8 +2194,8 @@ xfs_inode_free_cowblocks(
 	if (xfs_prep_free_cowblocks(ip))
 		ret = xfs_reflink_cancel_cow_range(ip, 0, NULLFILEOFF, false);
 
-	xfs_iunlock(ip, XFS_MMAPLOCK_EXCL);
-	xfs_iunlock(ip, XFS_IOLOCK_EXCL);
+	if (lock_mode)
+		xfs_iunlock(ip, lock_mode);
 
 	return ret;
 }
