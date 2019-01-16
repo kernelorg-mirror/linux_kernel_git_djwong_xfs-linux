@@ -142,6 +142,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   common.o \
 				   dabtree.o \
 				   dir.o \
+				   fscounters.o \
 				   ialloc.o \
 				   inode.o \
 				   parent.o \
@@ -164,6 +165,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   bitmap.o \
 				   blob.o \
 				   bmap_repair.o \
+				   fscounters_repair.o \
 				   ialloc_repair.o \
 				   inode_repair.o \
 				   refcount_repair.o \
