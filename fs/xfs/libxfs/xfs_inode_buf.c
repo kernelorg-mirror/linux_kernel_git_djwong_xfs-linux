@@ -408,6 +408,12 @@ xfs_dinode_verify_fork(
 			return __this_address;
 		}
 		break;
+	case XFS_DINODE_FMT_RMAP:
+		if (!xfs_sb_version_hasrtrmapbt(&mp->m_sb))
+			return __this_address;
+		if (!(dip->di_flags2 & be64_to_cpu(XFS_DIFLAG2_METADATA)))
+			return __this_address;
+		break;
 	default:
 		return __this_address;
 	}
