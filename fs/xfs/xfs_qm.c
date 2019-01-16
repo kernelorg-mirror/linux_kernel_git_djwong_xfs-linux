@@ -427,6 +427,19 @@ xfs_qm_dquot_isolate(
 		goto out_miss_busy;
 
 	/*
+	 * An inode is on the inactive list waiting to release its resources,
+	 * so remove this dquot from the freelist and try again.  We detached
+	 * the dquot from the NEEDS_INACTIVE inode so that quotaoff won't
+	 * deadlock on inactive inodes holding dquots.
+	 */
+	if (dqp->q_ina_total > 0) {
+		xfs_dqunlock(dqp);
+		trace_xfs_dqreclaim_inactive(dqp);
+		list_lru_isolate(lru, &dqp->q_lru);
+		return LRU_REMOVED;
+	}
+
+	/*
 	 * This dquot has acquired a reference in the meantime remove it from
 	 * the freelist and try again.
 	 */

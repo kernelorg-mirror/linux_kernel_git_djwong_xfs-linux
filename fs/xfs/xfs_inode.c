@@ -41,6 +41,8 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_reflink.h"
 #include "xfs_dir2_priv.h"
+#include "xfs_dquot_item.h"
+#include "xfs_dquot.h"
 
 kmem_zone_t *xfs_inode_zone;
 
@@ -1836,6 +1838,8 @@ xfs_inode_iadjust(
 	percpu_counter_add(&mp->m_iinactive, inodes);
 	percpu_counter_add(&mp->m_dinactive, dblocks);
 	percpu_counter_add(&mp->m_rinactive, rblocks);
+
+	xfs_qm_iadjust(ip, direction, inodes, dblocks, rblocks);
 }
 
 /*
