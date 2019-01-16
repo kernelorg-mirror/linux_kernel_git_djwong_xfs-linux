@@ -2030,6 +2030,8 @@ xfs_iunlink(
 	ASSERT(VFS_I(ip)->i_mode != 0);
 	ASSERT(xfs_verify_ino(mp, ip->i_ino));
 
+	trace_xfs_iunlink(ip);
+
 	agno = XFS_INO_TO_AGNO(mp, ip->i_ino);
 	agino = XFS_INO_TO_AGINO(mp, ip->i_ino);
 	bucket_index = agino % XFS_AGI_UNLINKED_BUCKETS;
@@ -2198,6 +2200,8 @@ xfs_iunlink_remove(
 	xfs_agino_t		next_agino;
 	short			bucket_index;
 	int			error;
+
+	trace_xfs_iunlink_remove(ip);
 
 	if (!xfs_verify_ino(mp, ip->i_ino))
 		return -EFSCORRUPTED;
