@@ -399,7 +399,7 @@ xrep_xattr_recover(
 }
 
 /* Free all the attribute fork blocks and delete the fork. */
-STATIC int
+int
 xrep_xattr_reset_btree(
 	struct xfs_scrub	*sc)
 {
