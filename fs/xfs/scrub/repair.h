@@ -55,6 +55,8 @@ int xrep_find_ag_btree_roots(struct xfs_scrub *sc, struct xfs_buf *agf_bp,
 void xrep_force_quotacheck(struct xfs_scrub *sc, uint dqtype);
 int xrep_ino_dqattach(struct xfs_scrub *sc);
 int xrep_reset_perag_resv(struct xfs_scrub *sc);
+int xrep_xattr_reset_btree(struct xfs_scrub *sc);
+int xrep_metadata_inode_forks(struct xfs_scrub *sc);
 
 /* Metadata repairers */
 
@@ -71,6 +73,11 @@ int xrep_bmap_data(struct xfs_scrub *sc);
 int xrep_bmap_attr(struct xfs_scrub *sc);
 int xrep_symlink(struct xfs_scrub *sc);
 int xrep_xattr(struct xfs_scrub *sc);
+#ifdef CONFIG_XFS_QUOTA
+int xrep_quota(struct xfs_scrub *sc);
+#else
+# define xrep_quota			xrep_notsupported
+#endif /* CONFIG_XFS_QUOTA */
 
 #else
 
@@ -113,6 +120,7 @@ xrep_reset_perag_resv(
 #define xrep_bmap_attr			xrep_notsupported
 #define xrep_symlink			xrep_notsupported
 #define xrep_xattr			xrep_notsupported
+#define xrep_quota			xrep_notsupported
 
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
