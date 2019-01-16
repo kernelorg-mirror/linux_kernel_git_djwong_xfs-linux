@@ -22,6 +22,8 @@
 #include "xfs_dquot_item.h"
 #include "xfs_dquot.h"
 #include "xfs_reflink.h"
+#include "xfs_da_format.h"
+#include "xfs_dir2.h"
 
 #include <linux/kthread.h>
 #include <linux/freezer.h>
@@ -910,6 +912,31 @@ xfs_icache_inode_is_allocated(
 
 	*inuse = !!(VFS_I(ip)->i_mode);
 	xfs_irele(ip);
+	return 0;
+}
+
+/* Get a metadata inode.  The ftype must match exactly. */
+int
+xfs_imeta_iget(
+	struct xfs_mount	*mp,
+	xfs_ino_t		ino,
+	unsigned char		ftype,
+	struct xfs_inode	**ipp)
+{
+	struct xfs_inode	*ip;
+	int			error;
+
+	error = xfs_iget(mp, NULL, ino, XFS_IGET_UNTRUSTED, 0, &ip);
+	if (error)
+		return error;
+
+	if (ftype == XFS_DIR3_FT_UNKNOWN ||
+	    xfs_mode_to_ftype(VFS_I(ip)->i_mode) != ftype) {
+		xfs_irele(ip);
+		return -EFSCORRUPTED;
+	}
+
+	*ipp = ip;
 	return 0;
 }
 
