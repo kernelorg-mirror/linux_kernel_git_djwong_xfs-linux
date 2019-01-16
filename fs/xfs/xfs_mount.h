@@ -153,7 +153,6 @@ typedef struct xfs_mount {
 						     trimming */
 	struct delayed_work	m_cowblocks_work; /* background cow blocks
 						     trimming */
-	struct delayed_work	m_inactive_work; /* background inode inactive */
 	bool			m_update_sb;	/* sb needs update in mount */
 	int64_t			m_low_space[XFS_LOWSP_MAX];
 						/* low free space thresholds */
@@ -391,6 +390,9 @@ typedef struct xfs_perag {
 	struct xfs_ag_resv	pag_meta_resv;
 	/* Blocks reserved for the reverse mapping btree. */
 	struct xfs_ag_resv	pag_rmapbt_resv;
+
+	/* background inode inactivation */
+	struct delayed_work	pag_inactive_work;
 
 	/* reference count */
 	uint8_t			pagf_refcount_level;
