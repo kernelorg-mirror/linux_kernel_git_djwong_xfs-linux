@@ -43,6 +43,7 @@ void xfs_setup_inode(struct xfs_inode *ip);
 void xfs_trans_ichgtime(struct xfs_trans *tp, struct xfs_inode *ip, int flags);
 int xfs_ialloc_iget(struct xfs_trans *tp, xfs_ino_t ino,
 		    struct xfs_inode **ipp);
+int xfs_dir_ialloc_roll(struct xfs_trans **tpp);
 
 int xfs_ialloc(struct xfs_trans *tp, const struct xfs_ialloc_args *args,
 	       struct xfs_buf **ialloc_context, struct xfs_inode **ipp);
