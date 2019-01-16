@@ -236,12 +236,12 @@ xfs_reclaim_work_queue(
 /* Queue a new inode inactivation pass if there are reclaimable inodes. */
 static void
 xfs_inactive_work_queue(
-	struct xfs_mount        *mp)
+	struct xfs_perag	*pag)
 {
 	rcu_read_lock();
-	if (radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_RECLAIM_TAG))
-		queue_delayed_work(mp->m_inactive_workqueue,
-				&mp->m_inactive_work,
+	if (pag->pag_ici_inactive)
+		queue_delayed_work(pag->pag_mount->m_inactive_workqueue,
+				&pag->pag_inactive_work,
 				msecs_to_jiffies(xfs_syncd_centisecs / 6 * 10));
 	rcu_read_unlock();
 }
@@ -322,7 +322,7 @@ xfs_perag_set_inactive_tag(
 	 * take a while, so we allow the deferral of an already-scheduled
 	 * inactivation on the grounds that we prefer batching.
 	 */
-	xfs_inactive_work_queue(mp);
+	xfs_inactive_work_queue(pag);
 
 	trace_xfs_perag_set_reclaim(mp, pag->pag_agno, -1, _RET_IP_);
 }
@@ -1702,6 +1702,37 @@ xfs_inactive_inode(
 }
 
 /*
+ * Inactivate the inodes in an AG. Even if the filesystem is corrupted, we
+ * still need to clear the INACTIVE iflag so that we can move on to reclaiming
+ * the inode.
+ */
+static int
+xfs_inactive_inodes_pag(
+	struct xfs_perag	*pag,
+	struct xfs_eofblocks	*eofb)
+{
+	int			nr_to_scan = INT_MAX;
+	bool			done = false;
+
+	return xfs_reclaim_inodes_pag(pag, eofb, 0, xfs_inactive_inode_grab,
+			xfs_inactive_inode, &nr_to_scan, &done);
+}
+
+/* Does this pag have inactive inodes? */
+static inline bool
+xfs_pag_has_inactive(
+	struct xfs_perag	*pag)
+{
+	unsigned int		inactive;
+
+	spin_lock(&pag->pag_ici_lock);
+	inactive = pag->pag_ici_inactive;
+	spin_unlock(&pag->pag_ici_lock);
+
+	return inactive > 0;
+}
+
+/*
  * Walk the AGs and reclaim the inodes in them. Even if the filesystem is
  * corrupted, we still need to clear the INACTIVE iflag so that we can move
  * on to reclaiming the inode.
@@ -1730,15 +1761,12 @@ xfs_inactive_inodes(
 
 	agno = 0;
 	while ((pag = xfs_perag_get_tag(mp, agno, XFS_ICI_RECLAIM_TAG))) {
-		int		nr_to_scan = INT_MAX;
-		bool		done = false;
-
 		agno = pag->pag_agno + 1;
-		error = xfs_reclaim_inodes_pag(pag, eofb, 0,
-				xfs_inactive_inode_grab, xfs_inactive_inode,
-				&nr_to_scan, &done);
-		if (error && last_error != -EFSCORRUPTED)
-			last_error = error;
+		if (xfs_pag_has_inactive(pag)) {
+			error = xfs_inactive_inodes_pag(pag, eofb);
+			if (error && last_error != -EFSCORRUPTED)
+				last_error = error;
+		}
 		xfs_perag_put(pag);
 	}
 
@@ -1751,35 +1779,102 @@ void
 xfs_inactive_worker(
 	struct work_struct	*work)
 {
-	struct xfs_mount	*mp = container_of(to_delayed_work(work),
-					struct xfs_mount, m_inactive_work);
+	struct xfs_perag	*pag = container_of(to_delayed_work(work),
+					struct xfs_perag, pag_inactive_work);
+	struct xfs_mount	*mp = pag->pag_mount;
 	int			error;
 
-	error = xfs_inactive_inodes(mp, NULL);
+	/*
+	 * We want to skip inode inactivation while the filesystem is frozen
+	 * because we don't want the inactivation thread to block while taking
+	 * sb_intwrite.  Therefore, we try to take sb_write for the duration
+	 * of the inactive scan -- a freeze attempt will block until we're
+	 * done here, and if the fs is past stage 1 freeze we'll bounce out
+	 * until things unfreeze.  If the fs goes down while frozen we'll
+	 * still have log recovery to clean up after us.
+	 */
+	if (!sb_start_write_trylock(mp->m_super))
+		return;
+
+	error = xfs_inactive_inodes_pag(pag, NULL);
 	if (error && error != -EAGAIN)
 		xfs_err(mp, "inode inactivation failed, error %d", error);
-	xfs_inactive_work_queue(mp);
+
+	sb_end_write(mp->m_super);
+	xfs_inactive_work_queue(pag);
 }
 
-/* Flush all inode inactivation work that might be queued. */
+/* Cancel all queued inactivation work. */
+static void
+xfs_inactive_cancel_work(
+	struct xfs_mount	*mp)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno = 0;
+
+	while ((pag = xfs_perag_get_tag(mp, agno, XFS_ICI_RECLAIM_TAG))) {
+		agno = pag->pag_agno + 1;
+		cancel_delayed_work_sync(&pag->pag_inactive_work);
+		xfs_perag_put(pag);
+	}
+	flush_workqueue(mp->m_inactive_workqueue);
+}
+
+/* Reschedule background inactivation work. */
+static void
+xfs_inactive_schedule_work(
+	struct xfs_mount	*mp,
+	unsigned long		delay)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno = 0;
+
+	while ((pag = xfs_perag_get_tag(mp, agno, XFS_ICI_RECLAIM_TAG))) {
+		agno = pag->pag_agno + 1;
+		if (xfs_pag_has_inactive(pag))
+			queue_delayed_work(mp->m_inactive_workqueue,
+					&pag->pag_inactive_work, delay);
+		xfs_perag_put(pag);
+	}
+}
+
+/* Wait for all background inactivation work to finish. */
+static void
+xfs_inactive_flush(
+	struct xfs_mount	*mp)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno = 0;
+
+	while ((pag = xfs_perag_get_tag(mp, agno, XFS_ICI_RECLAIM_TAG))) {
+		agno = pag->pag_agno + 1;
+		if (xfs_pag_has_inactive(pag))
+			flush_delayed_work(&pag->pag_inactive_work);
+		xfs_perag_put(pag);
+	}
+}
+
+/*
+ * Start all inactivation work immediately and then wait for it to finish.
+ */
 void
 xfs_inactive_force(
 	struct xfs_mount	*mp)
 {
-	queue_delayed_work(mp->m_inactive_workqueue, &mp->m_inactive_work, 0);
-	flush_delayed_work(&mp->m_inactive_work);
+	xfs_inactive_schedule_work(mp, 0);
+	xfs_inactive_flush(mp);
 }
 
 /*
- * Flush all inode inactivation work that might be queued and make sure the
- * delayed work item is not queued.
+ * Cancel all queued inode inactivation work and flush any inodes that still
+ * need to be processed.  The caller is responsible for making sure that any
+ * subsequent inode releases are inactivated properly.
  */
 void
 xfs_inactive_deactivate(
 	struct xfs_mount	*mp)
 {
-	cancel_delayed_work_sync(&mp->m_inactive_work);
-	flush_workqueue(mp->m_inactive_workqueue);
+	xfs_inactive_cancel_work(mp);
 	xfs_inactive_inodes(mp, NULL);
 }
 
