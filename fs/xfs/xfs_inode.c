@@ -2168,36 +2168,6 @@ xfs_finish_rename(
 }
 
 /*
- * xfs_cross_rename()
- *
- * responsible for handling RENAME_EXCHANGE flag in renameat2() sytemcall
- */
-STATIC int
-xfs_cross_rename(
-	struct xfs_trans	*tp,
-	struct xfs_inode	*dp1,
-	struct xfs_name		*name1,
-	struct xfs_inode	*ip1,
-	struct xfs_inode	*dp2,
-	struct xfs_name		*name2,
-	struct xfs_inode	*ip2,
-	int			spaceres)
-{
-	int			error;
-
-	error = xfs_dir_exchange(tp, dp1, name1, ip1, dp2, name2, ip2,
-			spaceres);
-	if (error)
-		goto out_trans_abort;
-
-	return xfs_finish_rename(tp);
-
-out_trans_abort:
-	xfs_trans_cancel(tp);
-	return error;
-}
-
-/*
  * xfs_rename_alloc_whiteout()
  *
  * Return a referenced, unlinked, unlocked inode that that can be used as a
@@ -2337,12 +2307,12 @@ xfs_rename(
 
 	/* RENAME_EXCHANGE is unique from here on. */
 	if (flags & RENAME_EXCHANGE)
-		return xfs_cross_rename(tp, src_dp, src_name, src_ip,
-					target_dp, target_name, target_ip,
-					spaceres);
-
-	error = xfs_dir_rename(tp, src_dp, src_name, src_ip, target_dp,
-			target_name, target_ip, spaceres, wip);
+		error = xfs_dir_exchange(tp, src_dp, src_name, src_ip,
+					 target_dp, target_name, target_ip,
+					 spaceres);
+	else
+		error = xfs_dir_rename(tp, src_dp, src_name, src_ip, target_dp,
+				       target_name, target_ip, spaceres, wip);
 	if (error)
 		goto out_trans_cancel;
 
