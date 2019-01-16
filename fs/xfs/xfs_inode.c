@@ -1900,6 +1900,7 @@ xfs_iunlink(
 	struct xfs_dinode	*dip;
 	struct xfs_buf		*agibp;
 	struct xfs_buf		*ibp;
+	struct xfs_perag	*pag;
 	xfs_agnumber_t		agno = XFS_INO_TO_AGNO(mp, ip->i_ino);
 	xfs_agino_t		agino = XFS_INO_TO_AGINO(mp, ip->i_ino);
 	short			bucket_index = agino % XFS_AGI_UNLINKED_BUCKETS;
@@ -1907,11 +1908,12 @@ xfs_iunlink(
 	int			error;
 
 	ASSERT(VFS_I(ip)->i_mode != 0);
+	pag = xfs_perag_get(mp, agno);
 
 	/* Get the agi buffer first.  It ensures lock ordering on the list. */
 	error = xfs_read_agi(mp, tp, agno, &agibp);
 	if (error)
-		return error;
+		goto out;
 	agi = XFS_BUF_TO_AGI(agibp);
 
 	/*
@@ -1931,7 +1933,7 @@ xfs_iunlink(
 		error = xfs_imap_to_bp(mp, tp, &ip->i_imap, &dip, &ibp,
 				       0, 0);
 		if (error)
-			return error;
+			goto out;
 
 		ASSERT(dip->di_next_unlinked == cpu_to_be32(NULLAGINO));
 		dip->di_next_unlinked = agi->agi_unlinked[bucket_index];
@@ -1956,7 +1958,10 @@ xfs_iunlink(
 		(sizeof(xfs_agino_t) * bucket_index);
 	xfs_trans_log_buf(tp, agibp, offset,
 			  (offset + sizeof(xfs_agino_t) - 1));
-	return 0;
+	pag->pagi_unlinked_count++;
+out:
+	xfs_perag_put(pag);
+	return error;
 }
 
 /*
@@ -1974,6 +1979,7 @@ xfs_iunlink_remove(
 	struct xfs_buf		*ibp;
 	struct xfs_buf		*last_ibp;
 	struct xfs_dinode	*last_dip = NULL;
+	struct xfs_perag	*pag;
 	xfs_ino_t		next_ino;
 	xfs_agnumber_t		agno = XFS_INO_TO_AGNO(mp, ip->i_ino);
 	xfs_agino_t		agino = XFS_INO_TO_AGINO(mp, ip->i_ino);
@@ -1983,10 +1989,12 @@ xfs_iunlink_remove(
 	int			last_offset = 0;
 	int			error;
 
+	pag = xfs_perag_get(mp, agno);
+
 	/* Get the agi buffer first.  It ensures lock ordering on the list. */
 	error = xfs_read_agi(mp, tp, agno, &agibp);
 	if (error)
-		return error;
+		goto out;
 	agi = XFS_BUF_TO_AGI(agibp);
 
 	/*
@@ -1997,7 +2005,8 @@ xfs_iunlink_remove(
 			be32_to_cpu(agi->agi_unlinked[bucket_index]))) {
 		XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 				agi, sizeof(*agi));
-		return -EFSCORRUPTED;
+		error = -EFSCORRUPTED;
+		goto out;
 	}
 
 	if (be32_to_cpu(agi->agi_unlinked[bucket_index]) == agino) {
@@ -2013,7 +2022,7 @@ xfs_iunlink_remove(
 		if (error) {
 			xfs_warn(mp, "%s: xfs_imap_to_bp returned error %d.",
 				__func__, error);
-			return error;
+			goto out;
 		}
 		next_agino = be32_to_cpu(dip->di_next_unlinked);
 		ASSERT(next_agino != 0);
@@ -2062,7 +2071,7 @@ xfs_iunlink_remove(
 				xfs_warn(mp,
 	"%s: xfs_imap returned error %d.",
 					 __func__, error);
-				return error;
+				goto out;
 			}
 
 			error = xfs_imap_to_bp(mp, tp, &imap, &last_dip,
@@ -2071,7 +2080,7 @@ xfs_iunlink_remove(
 				xfs_warn(mp,
 	"%s: xfs_imap_to_bp returned error %d.",
 					__func__, error);
-				return error;
+				goto out;
 			}
 
 			last_offset = imap.im_boffset;
@@ -2080,7 +2089,8 @@ xfs_iunlink_remove(
 				XFS_CORRUPTION_ERROR(__func__,
 						XFS_ERRLEVEL_LOW, mp,
 						last_dip, sizeof(*last_dip));
-				return -EFSCORRUPTED;
+				error = -EFSCORRUPTED;
+				goto out;
 			}
 		}
 
@@ -2093,7 +2103,7 @@ xfs_iunlink_remove(
 		if (error) {
 			xfs_warn(mp, "%s: xfs_imap_to_bp(2) returned error %d.",
 				__func__, error);
-			return error;
+			goto out;
 		}
 		next_agino = be32_to_cpu(dip->di_next_unlinked);
 		ASSERT(next_agino != 0);
@@ -2128,7 +2138,10 @@ xfs_iunlink_remove(
 				  (offset + sizeof(xfs_agino_t) - 1));
 		xfs_inobp_check(mp, last_ibp);
 	}
-	return 0;
+	pag->pagi_unlinked_count--;
+out:
+	xfs_perag_put(pag);
+	return error;
 }
 
 /*

@@ -5054,6 +5054,7 @@ xlog_recover_process_one_iunlink(
 	struct xfs_buf			*ibp;
 	struct xfs_dinode		*dip;
 	struct xfs_inode		*ip;
+	struct xfs_perag		*pag;
 	xfs_ino_t			ino;
 	int				error;
 
@@ -5076,6 +5077,11 @@ xlog_recover_process_one_iunlink(
 	/* setup for the next pass */
 	agino = be32_to_cpu(dip->di_next_unlinked);
 	xfs_buf_relse(ibp);
+
+	/* Make sure the in-core data knows about this unlinked inode. */
+	pag = xfs_perag_get(mp, agno);
+	pag->pagi_unlinked_count++;
+	xfs_perag_put(pag);
 
 	/*
 	 * Prevent any DMAPI event from being sent when the reference on
