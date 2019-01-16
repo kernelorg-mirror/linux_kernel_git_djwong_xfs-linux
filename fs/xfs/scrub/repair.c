@@ -969,3 +969,23 @@ xrep_ino_dqattach(
 
 	return error;
 }
+
+/*
+ * Reinitialize the per-AG block reservation for the AG we just fixed.
+ */
+int
+xrep_reset_perag_resv(
+	struct xfs_scrub	*sc)
+{
+	int			error;
+
+	ASSERT(sc->ops->type == ST_PERAG);
+	ASSERT(sc->tp);
+
+	error = xfs_ag_resv_free(sc->sa.pag);
+	if (error)
+		goto out;
+	error = xfs_ag_resv_init(sc->sa.pag, sc->tp);
+out:
+	return error;
+}
