@@ -1071,7 +1071,7 @@ static inline void xfs_dinode_put_rdev(struct xfs_dinode *dip, xfs_dev_t rdev)
 #define	XFS_INO_MASK(k)			(uint32_t)((1ULL << (k)) - 1)
 #define	XFS_INO_OFFSET_BITS(mp)		(mp)->m_sb.sb_inopblog
 #define	XFS_INO_AGBNO_BITS(mp)		(mp)->m_sb.sb_agblklog
-#define	XFS_INO_AGINO_BITS(mp)		(mp)->m_agino_log
+#define	XFS_INO_AGINO_BITS(mp)		((mp)->m_ino_geo.ig_agino_log)
 #define	XFS_INO_AGNO_BITS(mp)		(mp)->m_agno_log
 #define	XFS_INO_BITS(mp)		\
 	XFS_INO_AGNO_BITS(mp) + XFS_INO_AGINO_BITS(mp)
@@ -1693,5 +1693,36 @@ struct xfs_acl {
 #define SGI_ACL_DEFAULT		"SGI_ACL_DEFAULT"
 #define SGI_ACL_FILE_SIZE	(sizeof(SGI_ACL_FILE)-1)
 #define SGI_ACL_DEFAULT_SIZE	(sizeof(SGI_ACL_DEFAULT)-1)
+
+struct xfs_ino_geometry {
+	/* Maximum inode count in this filesystem. */
+	uint64_t	ig_maxicount;
+
+	/* Minimum inode buffer size, in bytes. */
+	unsigned int	ig_min_cluster_size;
+
+	/* Inode cluster sizes, adjusted to be at least 1 fsb. */
+	unsigned int	ig_inodes_per_cluster;
+	unsigned int	ig_blocks_per_cluster;
+
+	/* Inode cluster alignment. */
+	unsigned int	ig_cluster_align;
+	unsigned int	ig_cluster_align_inodes;
+
+	unsigned int	ig_inobt_mxr[2]; /* max inobt btree records */
+	unsigned int	ig_inobt_mnr[2]; /* min inobt btree records */
+	unsigned int	ig_in_maxlevels; /* max inobt btree levels. */
+
+	/* Minimum inode allocation size */
+	unsigned int	ig_ialloc_inos;
+	unsigned int	ig_ialloc_blks;
+
+	/* Minimum inode blocks for a sparse allocation. */
+	unsigned int	ig_ialloc_min_blks;
+
+	unsigned int	ig_inoalign_mask;/* mask sb_inoalignmt if used */
+	unsigned int	ig_agino_log;	/* #bits for agino in inum */
+	unsigned int	ig_sinoalign;	/* stripe unit inode alignment */
+};
 
 #endif /* __XFS_FORMAT_H__ */
