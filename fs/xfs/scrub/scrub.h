@@ -66,6 +66,12 @@ struct xfs_scrub {
 	bool				has_quotaofflock;
 	bool				reset_perag_resv;
 
+	/*
+	 * Do we own the current scrub freeze?  It is critical that we
+	 * release it before exiting to userspace!
+	 */
+	bool				fs_frozen;
+
 	/* State tracking for single-AG operations. */
 	struct xchk_ag			sa;
 };
