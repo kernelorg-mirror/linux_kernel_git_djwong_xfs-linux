@@ -3423,6 +3423,9 @@ TRACE_EVENT(xfs_iunlink_update_dinode,
 		  __entry->new_ptr)
 );
 
+DEFINE_INODE_EVENT(xfs_iunlink);
+DEFINE_INODE_EVENT(xfs_iunlink_remove);
+
 #endif /* _TRACE_XFS_H */
 
 #undef TRACE_INCLUDE_PATH
