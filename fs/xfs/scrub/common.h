@@ -105,6 +105,7 @@ xchk_setup_quota(struct xfs_scrub *sc, struct xfs_inode *ip)
 	return -ENOENT;
 }
 #endif
+int xchk_setup_fscounters(struct xfs_scrub *sc, struct xfs_inode *ip);
 
 void xchk_ag_free(struct xfs_scrub *sc, struct xchk_ag *sa);
 int xchk_ag_init(struct xfs_scrub *sc, xfs_agnumber_t agno,
@@ -148,5 +149,8 @@ static inline bool xfs_scrub_needs_repair(struct xfs_scrub_metadata *sm)
 			       XFS_SCRUB_OFLAG_PREEN);
 }
 uint xchk_quota_to_dqtype(struct xfs_scrub *sc);
+
+int xfs_scrub_foreach_live_inode(struct xfs_scrub *sc,
+		int (*execute)(struct xfs_inode *ip, void *priv), void *priv);
 
 #endif	/* __XFS_SCRUB_COMMON_H__ */
