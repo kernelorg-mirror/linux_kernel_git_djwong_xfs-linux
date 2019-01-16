@@ -340,6 +340,9 @@ xfs_corruption_error(
 /*
  * Warnings specifically for verifier errors.  Differentiate CRC vs. invalid
  * values, and omit the stack trace unless the error level is tuned high.
+ *
+ * NOTE: Some callers might be calling the verifiers directly (rather than
+ * through the b_ops structure) so bp->b_ops may be NULL.
  */
 void
 xfs_buf_verifier_error(
@@ -359,7 +362,7 @@ xfs_buf_verifier_error(
 
 	xfs_alert(mp, "Metadata %s detected at %pS, %s block 0x%llx %s",
 		  bp->b_error == -EFSBADCRC ? "CRC error" : "corruption",
-		  fa, bp->b_ops->name, bp->b_bn, name);
+		  fa, bp->b_ops ? bp->b_ops->name : "unknown", bp->b_bn, name);
 
 	xfs_alert(mp, "Unmount and run xfs_repair");
 
