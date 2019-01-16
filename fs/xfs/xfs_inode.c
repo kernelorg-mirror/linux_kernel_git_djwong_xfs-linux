@@ -1181,6 +1181,7 @@ xfs_create(
 	if (error == -ENOSPC) {
 		/* flush outstanding delalloc blocks and retry */
 		xfs_flush_inodes(mp);
+		xfs_inactive_force(mp);
 		error = xfs_trans_alloc(mp, tres, resblks, 0, 0, &tp);
 	}
 	if (error)

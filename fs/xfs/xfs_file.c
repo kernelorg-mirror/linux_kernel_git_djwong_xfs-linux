@@ -654,6 +654,9 @@ write_retry:
 		enospc = xfs_inode_free_quota_cowblocks(ip);
 		if (enospc)
 			goto write_retry;
+		enospc = xfs_inactive_free_quota(ip);
+		if (enospc)
+			goto write_retry;
 		iolock = 0;
 	} else if (ret == -ENOSPC && !enospc) {
 		struct xfs_eofblocks eofb = {0};
@@ -665,6 +668,7 @@ write_retry:
 		eofb.eof_flags = XFS_EOF_FLAGS_SYNC;
 		xfs_icache_free_eofblocks(ip->i_mount, &eofb);
 		xfs_icache_free_cowblocks(ip->i_mount, &eofb);
+		xfs_inactive_force(ip->i_mount);
 		goto write_retry;
 	}
 
@@ -936,6 +940,7 @@ xfs_file_remap_range(
 	struct xfs_mount	*mp = src->i_mount;
 	loff_t			remapped = 0;
 	xfs_extlen_t		cowextsize;
+	bool			can_retry = true;
 	int			ret;
 
 	if (remap_flags & ~(REMAP_FILE_DEDUP | REMAP_FILE_ADVISORY))
@@ -955,8 +960,14 @@ xfs_file_remap_range(
 
 	trace_xfs_reflink_remap_range(src, pos_in, len, dest, pos_out);
 
+retry:
 	ret = xfs_reflink_remap_blocks(src, pos_in, dest, pos_out, len,
 			&remapped);
+	if ((ret == -EDQUOT || ret == -ENOSPC) && can_retry) {
+		can_retry = false;
+		xfs_inactive_force(mp);
+		goto retry;
+	}
 	if (ret)
 		goto out_unlock;
 
