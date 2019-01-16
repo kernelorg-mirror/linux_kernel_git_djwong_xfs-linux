@@ -57,12 +57,14 @@
 /* Static metadata inode paths */
 static const char *rtbitmap_path[]	= {"realtime", "0.bitmap"};
 static const char *rtsummary_path[]	= {"realtime", "0.summary"};
+static const char *rtrmapbt_path[]	= {"realtime", "0.rmap"};
 static const char *usrquota_path[]	= {"quota", "user"};
 static const char *grpquota_path[]	= {"quota", "group"};
 static const char *prjquota_path[]	= {"quota", "project"};
 
 XFS_IMETA_DEFINE_PATH(XFS_IMETA_RTBITMAP,	rtbitmap_path);
 XFS_IMETA_DEFINE_PATH(XFS_IMETA_RTSUMMARY,	rtsummary_path);
+XFS_IMETA_DEFINE_PATH(XFS_IMETA_RTRMAPBT,	rtrmapbt_path);
 XFS_IMETA_DEFINE_PATH(XFS_IMETA_USRQUOTA,	usrquota_path);
 XFS_IMETA_DEFINE_PATH(XFS_IMETA_GRPQUOTA,	grpquota_path);
 XFS_IMETA_DEFINE_PATH(XFS_IMETA_PRJQUOTA,	prjquota_path);
