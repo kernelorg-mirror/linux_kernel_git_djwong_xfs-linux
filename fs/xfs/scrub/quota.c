@@ -29,7 +29,7 @@
 #include "scrub/trace.h"
 
 /* Convert a scrub type code to a DQ flag, or return 0 if error. */
-static inline uint
+uint
 xchk_quota_to_dqtype(
 	struct xfs_scrub	*sc)
 {
