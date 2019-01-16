@@ -143,6 +143,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   common.o \
 				   dabtree.o \
 				   dir.o \
+				   fscounters.o \
 				   health.o \
 				   ialloc.o \
 				   inode.o \
@@ -166,6 +167,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   bitmap.o \
 				   blob.o \
 				   bmap_repair.o \
+				   fscounters_repair.o \
 				   ialloc_repair.o \
 				   inode_repair.o \
 				   refcount_repair.o \

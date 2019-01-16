@@ -45,6 +45,7 @@ static const unsigned int xchk_type_to_health_flag[XFS_SCRUB_TYPE_NR] = {
 	[XFS_SCRUB_TYPE_UQUOTA]		= XFS_HEALTH_FS_UQUOTA,
 	[XFS_SCRUB_TYPE_GQUOTA]		= XFS_HEALTH_FS_GQUOTA,
 	[XFS_SCRUB_TYPE_PQUOTA]		= XFS_HEALTH_FS_PQUOTA,
+	[XFS_SCRUB_TYPE_FSCOUNTERS]	= XFS_HEALTH_FS_COUNTERS,
 };
 
 /* Return the health status mask for this scrub type. */
