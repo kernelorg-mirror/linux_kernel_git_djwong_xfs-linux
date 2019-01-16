@@ -27,6 +27,7 @@
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
+#include "scrub/repair.h"
 
 /* Convert a scrub type code to a DQ flag, or return 0 if error. */
 uint
@@ -64,12 +65,31 @@ xchk_setup_quota(
 	mutex_lock(&sc->mp->m_quotainfo->qi_quotaofflock);
 	if (!xfs_this_quota_on(sc->mp, dqtype))
 		return -ENOENT;
+
+	/*
+	 * Freeze out anything that can alter an inode because we reconstruct
+	 * the quota counts by iterating all the inodes in the system.
+	 */
+	if ((sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) &&
+	    ((sc->flags & XCHK_TRY_HARDER) || XFS_QM_NEED_QUOTACHECK(sc->mp))) {
+		error = xchk_fs_freeze(sc);
+		if (error)
+			return error;
+	}
+
 	error = xchk_setup_fs(sc, ip);
 	if (error)
 		return error;
 	sc->ip = xfs_quota_inode(sc->mp, dqtype);
-	xfs_ilock(sc->ip, XFS_ILOCK_EXCL);
 	sc->ilock_flags = XFS_ILOCK_EXCL;
+	/*
+	 * Pretend to be an ILOCK parent to shut up lockdep if we're going to
+	 * do a full inode scan of the fs.  Quota inodes do not count towards
+	 * quota accounting, so we shouldn't deadlock on ourselves.
+	 */
+	if (sc->flags & XCHK_FS_FROZEN)
+		sc->ilock_flags |= XFS_ILOCK_PARENT;
+	xfs_ilock(sc->ip, sc->ilock_flags);
 	return 0;
 }
 
