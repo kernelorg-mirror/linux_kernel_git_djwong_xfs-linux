@@ -2023,6 +2023,7 @@ xfs_iunlink(
 
 	ASSERT(VFS_I(ip)->i_mode != 0);
 	pag = xfs_perag_get(mp, agno);
+	trace_xfs_iunlink(ip);
 
 	/* Get the agi buffer first.  It ensures lock ordering on the list. */
 	error = xfs_read_agi(mp, tp, agno, &agibp);
@@ -2188,6 +2189,7 @@ xfs_iunlink_remove(
 	int			error;
 
 	pag = xfs_perag_get(mp, agno);
+	trace_xfs_iunlink_remove(ip);
 
 	/* Get the agi buffer first.  It ensures lock ordering on the list. */
 	error = xfs_read_agi(mp, tp, agno, &agibp);
