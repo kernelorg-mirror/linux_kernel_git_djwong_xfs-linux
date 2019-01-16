@@ -160,6 +160,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   agheader_repair.o \
 				   alloc_repair.o \
 				   array.o \
+				   attr_repair.o \
 				   bitmap.o \
 				   blob.o \
 				   bmap_repair.o \
