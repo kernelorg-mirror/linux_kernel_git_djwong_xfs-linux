@@ -66,11 +66,11 @@ xfs_make_iptr(struct xfs_mount *mp, struct xfs_buf *b, int o)
  */
 int					/* error */
 xfs_dialloc(
-	struct xfs_trans *tp,		/* transaction pointer */
-	xfs_ino_t	parent,		/* parent inode (directory) */
-	umode_t		mode,		/* mode bits for new inode */
-	struct xfs_buf	**agbp,		/* buf for a.g. inode header */
-	xfs_ino_t	*inop);		/* inode number allocated */
+	struct xfs_trans	*tp,	/* transaction pointer */
+	struct xfs_inode	*pip,	/* parent inode (directory) */
+	umode_t			mode,	/* mode bits for new inode */
+	struct xfs_buf		**agbp,	/* buf for a.g. inode header */
+	xfs_ino_t		*inop);	/* inode number allocated */
 
 /*
  * Free disk inode.  Carefully avoids touching the incore inode, all
