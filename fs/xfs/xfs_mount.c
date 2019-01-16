@@ -1073,6 +1073,7 @@ xfs_mountfs(
 	 * qm_unmount_quotas and therefore rely on qm_unmount to release the
 	 * quota inodes.
 	 */
+	xfs_inactive_deactivate(mp);
 	cancel_delayed_work_sync(&mp->m_reclaim_work);
 	xfs_reclaim_inodes(mp, SYNC_WAIT);
 	xfs_health_unmount(mp);
@@ -1112,7 +1113,15 @@ xfs_unmountfs(
 	uint64_t		resblks;
 	int			error;
 
+	/*
+	 * Perform all on-disk metadata updates required to inactivate inodes.
+	 * Since this can involve finobt updates, do it now before we lose the
+	 * per-AG space reservations.
+	 */
+	xfs_inactive_force(mp);
+
 	xfs_icache_disable_reclaim(mp);
+
 	xfs_fs_unreserve_ag_blocks(mp);
 	xfs_qm_unmount_quotas(mp);
 	xfs_rtunmount_inodes(mp);
@@ -1161,6 +1170,13 @@ xfs_unmountfs(
 	xfs_health_unmount(mp);
 
 	xfs_qm_unmount(mp);
+
+	/*
+	 * Kick off inode inactivation again to push the metadata inodes past
+	 * INACTIVE into RECLAIM.  We also have to deactivate the inactivation
+	 * worker.
+	 */
+	xfs_inactive_deactivate(mp);
 
 	/*
 	 * Unreserve any blocks we have so that when we unmount we don't account
