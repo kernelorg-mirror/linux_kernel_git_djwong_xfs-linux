@@ -1490,13 +1490,41 @@ xfs_fs_unfreeze(
 /*
  * Before we get to stage 1 of a freeze, force all the inactivation work so
  * that there's less work to do if we crash during the freeze.
+ *
+ * Don't let userspace freeze while scrub has the filesystem frozen.  Note
+ * that freeze_super can free the xfs_mount, so we must be careful to recheck
+ * XFS_M before trying to access anything in the xfs_mount afterwards.
  */
 STATIC int
 xfs_fs_freeze_super(
 	struct super_block	*sb)
 {
+	int			error;
+
 	xfs_inactive_force(XFS_M(sb));
-	return freeze_super(sb);
+	mutex_lock(&XFS_M(sb)->m_scrub_freeze);
+	error = freeze_super(sb);
+	if (XFS_M(sb))
+		mutex_unlock(&XFS_M(sb)->m_scrub_freeze);
+	return error;
+}
+
+/*
+ * Don't let userspace thaw while scrub has the filesystem frozen.  Note that
+ * thaw_super can free the xfs_mount, so we must be careful to recheck XFS_M
+ * before trying to access anything in the xfs_mount afterwards.
+ */
+STATIC int
+xfs_fs_thaw_super(
+	struct super_block	*sb)
+{
+	int			error;
+
+	mutex_lock(&XFS_M(sb)->m_scrub_freeze);
+	error = thaw_super(sb);
+	if (XFS_M(sb))
+		mutex_unlock(&XFS_M(sb)->m_scrub_freeze);
+	return error;
 }
 
 STATIC int
@@ -1657,6 +1685,7 @@ xfs_mount_alloc(
 	INIT_RADIX_TREE(&mp->m_perag_tree, GFP_ATOMIC);
 	spin_lock_init(&mp->m_perag_lock);
 	mutex_init(&mp->m_growlock);
+	mutex_init(&mp->m_scrub_freeze);
 	atomic_set(&mp->m_active_trans, 0);
 	INIT_DELAYED_WORK(&mp->m_reclaim_work, xfs_reclaim_worker);
 	INIT_DELAYED_WORK(&mp->m_eofblocks_work, xfs_eofblocks_worker);
@@ -1843,6 +1872,7 @@ xfs_fs_fill_super(
  out_free_fsname:
 	sb->s_fs_info = NULL;
 	xfs_free_fsname(mp);
+	mutex_destroy(&mp->m_scrub_freeze);
 	kfree(mp);
  out:
 	return error;
@@ -1875,6 +1905,19 @@ xfs_fs_put_super(
 
 	sb->s_fs_info = NULL;
 	xfs_free_fsname(mp);
+	/*
+	 * fs freeze takes an active reference to the filesystem and fs thaw
+	 * drops it.  If a filesystem on a frozen (dm) block device is
+	 * unmounted before the block device is thawed, we can end up tearing
+	 * down the super from within thaw_super when the device is thawed.
+	 * xfs_fs_thaw_super grabbed the scrub repair mutex before calling
+	 * thaw_super, so we must avoid freeing a locked mutex.  At this point
+	 * we know we're the only user of the filesystem, so we can safely
+	 * unlock the scrub/repair mutex if it's locked.
+	 */
+	if (mutex_is_locked(&mp->m_scrub_freeze))
+		mutex_unlock(&mp->m_scrub_freeze);
+	mutex_destroy(&mp->m_scrub_freeze);
 	kfree(mp);
 }
 
@@ -1922,6 +1965,7 @@ static const struct super_operations xfs_super_operations = {
 	.nr_cached_objects	= xfs_fs_nr_cached_objects,
 	.free_cached_objects	= xfs_fs_free_cached_objects,
 	.freeze_super		= xfs_fs_freeze_super,
+	.thaw_super		= xfs_fs_thaw_super,
 };
 
 static struct file_system_type xfs_fs_type = {
