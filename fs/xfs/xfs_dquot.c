@@ -517,12 +517,25 @@ xfs_dquot_from_disk(
 static int
 xfs_qm_dqread_alloc(
 	struct xfs_mount	*mp,
+	struct xfs_trans	**tpp,
 	struct xfs_dquot	*dqp,
 	struct xfs_buf		**bpp)
 {
 	struct xfs_trans	*tp;
 	struct xfs_buf		*bp;
 	int			error;
+
+	/*
+	 * The caller passed in a transaction which we don't control, so
+	 * release the hold before passing back the buffer.
+	 */
+	if (tpp) {
+		error = xfs_dquot_disk_alloc(tpp, dqp, &bp);
+		if (error)
+			return error;
+		xfs_trans_bhold_release(*tpp, bp);
+		return 0;
+	}
 
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_qm_dqalloc,
 			XFS_QM_DQALLOC_SPACE_RES(mp), 0, 0, &tp);
@@ -559,6 +572,7 @@ err:
 static int
 xfs_qm_dqread(
 	struct xfs_mount	*mp,
+	struct xfs_trans	**tpp,
 	xfs_dqid_t		id,
 	uint			type,
 	bool			can_alloc,
@@ -574,7 +588,7 @@ xfs_qm_dqread(
 	/* Try to read the buffer, allocating if necessary. */
 	error = xfs_dquot_disk_read(mp, dqp, &bp);
 	if (error == -ENOENT && can_alloc)
-		error = xfs_qm_dqread_alloc(mp, dqp, &bp);
+		error = xfs_qm_dqread_alloc(mp, tpp, dqp, &bp);
 	if (error)
 		goto err;
 
@@ -758,9 +772,10 @@ xfs_qm_dqget_checks(
  * Given the file system, id, and type (UDQUOT/GDQUOT), return a a locked
  * dquot, doing an allocation (if requested) as needed.
  */
-int
-xfs_qm_dqget(
+static int
+__xfs_qm_dqget(
 	struct xfs_mount	*mp,
+	struct xfs_trans	**tpp,
 	xfs_dqid_t		id,
 	uint			type,
 	bool			can_alloc,
@@ -782,7 +797,7 @@ restart:
 		return 0;
 	}
 
-	error = xfs_qm_dqread(mp, id, type, can_alloc, &dqp);
+	error = xfs_qm_dqread(mp, NULL, id, type, can_alloc, &dqp);
 	if (error)
 		return error;
 
@@ -821,7 +836,39 @@ xfs_qm_dqget_uncached(
 	if (error)
 		return error;
 
-	return xfs_qm_dqread(mp, id, type, 0, dqpp);
+	return xfs_qm_dqread(mp, NULL, id, type, 0, dqpp);
+}
+
+/*
+ * Given the file system, id, and type (UDQUOT/GDQUOT), return a a locked
+ * dquot, doing an allocation (if requested) as needed.
+ */
+int
+xfs_qm_dqget(
+	struct xfs_mount	*mp,
+	xfs_dqid_t		id,
+	uint			type,
+	bool			can_alloc,
+	struct xfs_dquot	**O_dqpp)
+{
+	return __xfs_qm_dqget(mp, NULL, id, type, can_alloc, O_dqpp);
+}
+
+/*
+ * Given the file system, id, and type (UDQUOT/GDQUOT) and a hole in the quota
+ * data where the on-disk dquot is supposed to live, return a locked dquot
+ * having allocated blocks with the transaction.  This is a corner case
+ * required by online repair, which already has a transaction and has to pass
+ * that into dquot_setup.
+ */
+int
+xfs_qm_dqget_alloc(
+	struct xfs_trans	**tpp,
+	xfs_dqid_t		id,
+	uint			type,
+	struct xfs_dquot	**dqpp)
+{
+	return __xfs_qm_dqget((*tpp)->t_mountp, tpp, id, type, true, dqpp);
 }
 
 /* Return the quota id for a given inode and type. */
@@ -885,7 +932,7 @@ restart:
 	 * we re-acquire the lock.
 	 */
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
-	error = xfs_qm_dqread(mp, id, type, can_alloc, &dqp);
+	error = xfs_qm_dqread(mp, NULL, id, type, can_alloc, &dqp);
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
 	if (error)
 		return error;

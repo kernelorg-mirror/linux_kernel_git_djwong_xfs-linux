@@ -172,6 +172,9 @@ extern int		xfs_qm_dqget_next(struct xfs_mount *mp, xfs_dqid_t id,
 extern int		xfs_qm_dqget_uncached(struct xfs_mount *mp,
 					xfs_dqid_t id, uint type,
 					struct xfs_dquot **dqpp);
+extern int		xfs_qm_dqget_alloc(struct xfs_trans **tpp,
+					xfs_dqid_t id, uint type,
+					struct xfs_dquot **dqpp);
 extern void		xfs_qm_dqput(xfs_dquot_t *);
 
 extern void		xfs_dqlock2(struct xfs_dquot *, struct xfs_dquot *);
