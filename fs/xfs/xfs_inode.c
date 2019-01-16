@@ -637,6 +637,44 @@ xfs_ialloc_iget(
 }
 
 /*
+ * Roll the transaction after allocating an inode chunk and before allocating
+ * the actual inode, moving the quota charge information to the second
+ * transaction.
+ */
+int
+xfs_dir_ialloc_roll(
+	struct xfs_trans	**tpp)
+{
+	struct xfs_dquot_acct	*dqinfo = NULL;
+	unsigned int		tflags = 0;
+	int			error;
+
+	/*
+	 * We want the quota changes to be associated with the next
+	 * transaction, NOT this one. So, detach the dqinfo from this
+	 * and attach it to the next transaction.
+	 */
+	if ((*tpp)->t_dqinfo) {
+		dqinfo = (*tpp)->t_dqinfo;
+		(*tpp)->t_dqinfo = NULL;
+		tflags = (*tpp)->t_flags & XFS_TRANS_DQ_DIRTY;
+		(*tpp)->t_flags &= ~(XFS_TRANS_DQ_DIRTY);
+	}
+
+	error = xfs_trans_roll(tpp);
+
+	/*
+	 * Re-attach the quota info that we detached from prev trx.
+	 */
+	if (dqinfo) {
+		(*tpp)->t_dqinfo = dqinfo;
+		(*tpp)->t_flags |= tflags;
+	}
+
+	return error;
+}
+
+/*
  * Allocates a new inode from disk and return a pointer to the
  * incore copy. This routine will internally commit the current
  * transaction and allocate a new one if the Space Manager needed
@@ -655,8 +693,6 @@ xfs_dir_ialloc(
 	struct xfs_trans		*tp;
 	struct xfs_inode		*ip;
 	struct xfs_buf			*ialloc_context = NULL;
-	void				*dqinfo;
-	uint				tflags;
 	int				code;
 
 	tp = *tpp;
@@ -709,30 +745,7 @@ xfs_dir_ialloc(
 		 */
 		xfs_trans_bhold(tp, ialloc_context);
 
-		/*
-		 * We want the quota changes to be associated with the next
-		 * transaction, NOT this one. So, detach the dqinfo from this
-		 * and attach it to the next transaction.
-		 */
-		dqinfo = NULL;
-		tflags = 0;
-		if (tp->t_dqinfo) {
-			dqinfo = (void *)tp->t_dqinfo;
-			tp->t_dqinfo = NULL;
-			tflags = tp->t_flags & XFS_TRANS_DQ_DIRTY;
-			tp->t_flags &= ~(XFS_TRANS_DQ_DIRTY);
-		}
-
-		code = xfs_trans_roll(&tp);
-
-		/*
-		 * Re-attach the quota info that we detached from prev trx.
-		 */
-		if (dqinfo) {
-			tp->t_dqinfo = dqinfo;
-			tp->t_flags |= tflags;
-		}
-
+		code = xfs_dir_ialloc_roll(&tp);
 		if (code) {
 			xfs_buf_relse(ialloc_context);
 			*tpp = tp;
