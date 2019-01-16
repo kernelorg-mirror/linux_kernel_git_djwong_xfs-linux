@@ -149,6 +149,9 @@ xfs_free_perag(
 		spin_unlock(&mp->m_perag_lock);
 		ASSERT(pag);
 		ASSERT(atomic_read(&pag->pag_ref) == 0);
+		ASSERT(pag->pagi_unlinked_count == 0 ||
+		       XFS_FORCED_SHUTDOWN(mp));
+		mutex_destroy(&pag->pagi_unlinked_lock);
 		xfs_buf_hash_destroy(pag);
 		mutex_destroy(&pag->pag_ici_reclaim_lock);
 		call_rcu(&pag->rcu_head, __xfs_free_perag);
@@ -227,6 +230,7 @@ xfs_initialize_perag(
 		/* first new pag is fully initialized */
 		if (first_initialised == NULLAGNUMBER)
 			first_initialised = index;
+		mutex_init(&pag->pagi_unlinked_lock);
 	}
 
 	index = xfs_set_inode_alloc(mp, agcount);
@@ -249,6 +253,7 @@ out_unwind_new_pags:
 		if (!pag)
 			break;
 		xfs_buf_hash_destroy(pag);
+		mutex_destroy(&pag->pagi_unlinked_lock);
 		mutex_destroy(&pag->pag_ici_reclaim_lock);
 		kmem_free(pag);
 	}
