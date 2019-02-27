@@ -1425,7 +1425,7 @@ xfs_fs_remount(
 		 * inodes.  Since this can involve finobt updates, do it now
 		 * before we lose the per-AG space reservations.
 		 */
-		xfs_inactive_force(mp);
+		xfs_inactive_force_poll(mp);
 
 		/* Free the per-AG metadata reservation pool. */
 		error = xfs_fs_unreserve_ag_blocks(mp);
