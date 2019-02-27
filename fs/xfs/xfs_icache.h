@@ -130,4 +130,6 @@ int xfs_inactive_free_quota(struct xfs_inode *ip);
 void xfs_inactive_cancel_work(struct xfs_mount *mp);
 void xfs_inactive_schedule_work(struct xfs_mount *mp, unsigned long delay);
 
+void xfs_inactive_force_poll(struct xfs_mount *mp);
+
 #endif
