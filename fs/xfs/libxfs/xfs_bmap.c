@@ -4077,16 +4077,18 @@ xfs_bmapi_allocate(
 	bma->got.br_state = XFS_EXT_NORM;
 
 	/*
-	 * In the data fork, a wasdelay extent has been initialized, so
-	 * shouldn't be flagged as unwritten.
+	 * In the data fork, the pages backed by a delalloc extent have been
+	 * dirtied but not yet written to disk, so the allocation should be
+	 * marked unwritten.  Only after writeback completes successfully
+	 * should we convert those mappings to real, so that a crash during
+	 * writeback won't expose stale disk contents.
 	 *
 	 * For the cow fork, however, we convert delalloc reservations
 	 * (extents allocated for speculative preallocation) to
 	 * allocated unwritten extents, and only convert the unwritten
 	 * extents to real extents when we're about to write the data.
 	 */
-	if ((!bma->wasdel || (bma->flags & XFS_BMAPI_COWFORK)) &&
-	    (bma->flags & XFS_BMAPI_PREALLOC))
+	if (bma->flags & XFS_BMAPI_PREALLOC)
 		bma->got.br_state = XFS_EXT_UNWRITTEN;
 
 	if (bma->wasdel)
@@ -4496,8 +4498,9 @@ xfs_bmapi_convert_delalloc(
 	bma.length = max_t(xfs_filblks_t, bma.got.br_blockcount, MAXEXTLEN);
 	bma.total = XFS_EXTENTADD_SPACE_RES(ip->i_mount, XFS_DATA_FORK);
 	bma.minleft = xfs_bmapi_minleft(tp, ip, whichfork);
+	bma.flags = XFS_BMAPI_PREALLOC;
 	if (whichfork == XFS_COW_FORK)
-		bma.flags = XFS_BMAPI_COWFORK | XFS_BMAPI_PREALLOC;
+		bma.flags |= XFS_BMAPI_COWFORK;
 
 	if (!xfs_iext_peek_prev_extent(ifp, &bma.icur, &bma.prev))
 		bma.prev.br_startoff = NULLFILEOFF;
