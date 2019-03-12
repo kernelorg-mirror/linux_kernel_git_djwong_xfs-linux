@@ -630,7 +630,7 @@ xfs_reflink_end_cow_extent(
 	}
 
 	resblks = XFS_EXTENTADD_SPACE_RES(mp, XFS_DATA_FORK);
-	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, 0,
+	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_remap, resblks, 0,
 			XFS_TRANS_RESERVE | XFS_TRANS_NOFS, &tp);
 	if (error)
 		return error;

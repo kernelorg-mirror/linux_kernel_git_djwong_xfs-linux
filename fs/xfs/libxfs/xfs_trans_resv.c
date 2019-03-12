@@ -851,6 +851,13 @@ xfs_trans_resv_calc(
 		resp->tr_write.tr_logcount = XFS_WRITE_LOG_COUNT;
 	resp->tr_write.tr_logflags |= XFS_TRANS_PERM_LOG_RES;
 
+	resp->tr_remap.tr_logres = xfs_calc_write_reservation(mp);
+	if (xfs_sb_version_hasreflink(&mp->m_sb))
+		resp->tr_remap.tr_logcount = XFS_REMAP_LOG_COUNT_REFLINK;
+	else
+		resp->tr_remap.tr_logcount = 0;
+	resp->tr_remap.tr_logflags |= XFS_TRANS_PERM_LOG_RES;
+
 	resp->tr_itruncate.tr_logres = xfs_calc_itruncate_reservation(mp);
 	if (xfs_sb_version_hasreflink(&mp->m_sb))
 		resp->tr_itruncate.tr_logcount =

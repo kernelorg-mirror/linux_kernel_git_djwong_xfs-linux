@@ -20,6 +20,7 @@ struct xfs_trans_res {
 
 struct xfs_trans_resv {
 	struct xfs_trans_res	tr_write;	/* extent alloc trans */
+	struct xfs_trans_res	tr_remap;	/* extent remap trans */
 	struct xfs_trans_res	tr_itruncate;	/* truncate trans */
 	struct xfs_trans_res	tr_rename;	/* rename trans */
 	struct xfs_trans_res	tr_link;	/* link trans */
@@ -88,6 +89,7 @@ struct xfs_trans_resv {
 #define	XFS_RENAME_LOG_COUNT		2
 #define	XFS_WRITE_LOG_COUNT		2
 #define	XFS_WRITE_LOG_COUNT_REFLINK	8
+#define	XFS_REMAP_LOG_COUNT_REFLINK	10
 #define	XFS_ADDAFORK_LOG_COUNT		2
 #define	XFS_ATTRINVAL_LOG_COUNT		1
 #define	XFS_ATTRSET_LOG_COUNT		3
