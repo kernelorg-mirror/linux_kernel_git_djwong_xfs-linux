@@ -385,6 +385,9 @@ xfs_log_regrant(
 
 	if (tic->t_cnt > 0)
 		return 0;
+#ifdef DEBUG
+	tic->t_spillcnt++;
+#endif
 
 	trace_xfs_log_regrant(log, tic);
 
@@ -3124,6 +3127,9 @@ xlog_regrant_reserve_log_space(
 	/* just return if we still have some of the pre-reserved space */
 	if (ticket->t_cnt > 0)
 		return;
+#ifdef DEBUG
+	ticket->t_spillcnt++;
+#endif
 
 	xlog_grant_add_space(log, &log->l_reserve_head.grant,
 					ticket->t_unit_res);
@@ -3158,6 +3164,11 @@ xlog_ungrant_log_space(
 
 	if (ticket->t_cnt > 0)
 		ticket->t_cnt--;
+
+#ifdef DEBUG
+	if (ticket->t_spillcnt > 0)
+		trace_xfs_log_ungrant_spill(log, ticket);
+#endif
 
 	trace_xfs_log_ungrant_enter(log, ticket);
 	trace_xfs_log_ungrant_sub(log, ticket);

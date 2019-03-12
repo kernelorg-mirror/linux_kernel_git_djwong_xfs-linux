@@ -937,6 +937,7 @@ DECLARE_EVENT_CLASS(xfs_loggrant_class,
 		__field(dev_t, dev)
 		__field(char, ocnt)
 		__field(char, cnt)
+		__field(int, spillcnt)
 		__field(int, curr_res)
 		__field(int, unit_res)
 		__field(unsigned int, flags)
@@ -954,6 +955,11 @@ DECLARE_EVENT_CLASS(xfs_loggrant_class,
 		__entry->dev = log->l_mp->m_super->s_dev;
 		__entry->ocnt = tic->t_ocnt;
 		__entry->cnt = tic->t_cnt;
+#ifdef DEBUG
+		__entry->spillcnt = tic->t_spillcnt;
+#else
+		__entry->spillcnt = -1;
+#endif
 		__entry->curr_res = tic->t_curr_res;
 		__entry->unit_res = tic->t_unit_res;
 		__entry->flags = tic->t_flags;
@@ -969,7 +975,7 @@ DECLARE_EVENT_CLASS(xfs_loggrant_class,
 		__entry->curr_block = log->l_curr_block;
 		__entry->tail_lsn = atomic64_read(&log->l_tail_lsn);
 	),
-	TP_printk("dev %d:%d t_ocnt %u t_cnt %u t_curr_res %u "
+	TP_printk("dev %d:%d t_ocnt %u t_cnt %u spill %u t_curr_res %u "
 		  "t_unit_res %u t_flags %s reserveq %s "
 		  "writeq %s grant_reserve_cycle %d "
 		  "grant_reserve_bytes %d grant_write_cycle %d "
@@ -978,6 +984,7 @@ DECLARE_EVENT_CLASS(xfs_loggrant_class,
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ocnt,
 		  __entry->cnt,
+		  __entry->spillcnt,
 		  __entry->curr_res,
 		  __entry->unit_res,
 		  __print_flags(__entry->flags, "|", XLOG_TIC_FLAGS),
@@ -1014,6 +1021,7 @@ DEFINE_LOGGRANT_EVENT(xfs_log_regrant_reserve_sub);
 DEFINE_LOGGRANT_EVENT(xfs_log_ungrant_enter);
 DEFINE_LOGGRANT_EVENT(xfs_log_ungrant_exit);
 DEFINE_LOGGRANT_EVENT(xfs_log_ungrant_sub);
+DEFINE_LOGGRANT_EVENT(xfs_log_ungrant_spill);
 
 DECLARE_EVENT_CLASS(xfs_log_item_class,
 	TP_PROTO(struct xfs_log_item *lip),
