@@ -70,6 +70,9 @@ xfs_inode_alloc(
 	ip->i_flags = 0;
 	ip->i_delayed_blks = 0;
 	memset(&ip->i_d, 0, sizeof(ip->i_d));
+	INIT_WORK(&ip->i_iodone_work, xfs_end_io);
+	INIT_LIST_HEAD(&ip->i_iodone_list);
+	spin_lock_init(&ip->i_iodone_lock);
 
 	return ip;
 }
