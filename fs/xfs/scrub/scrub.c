@@ -40,6 +40,7 @@
 #include "scrub/trace.h"
 #include "scrub/btree.h"
 #include "scrub/repair.h"
+#include "scrub/health.h"
 
 /*
  * Online Scrub and Repair
@@ -468,6 +469,7 @@ xfs_scrub_metadata(
 {
 	struct xfs_scrub		sc;
 	struct xfs_mount		*mp = ip->i_mount;
+	unsigned int			heal_mask;
 	bool				try_harder = false;
 	bool				already_fixed = false;
 	int				error = 0;
@@ -488,6 +490,7 @@ xfs_scrub_metadata(
 	error = xchk_validate_inputs(mp, sm);
 	if (error)
 		goto out;
+	heal_mask = xchk_health_mask_for_scrub_type(sm->sm_type);
 
 	xchk_experimental_warning(mp);
 
@@ -499,6 +502,8 @@ retry_op:
 	sc.ops = &meta_scrub_ops[sm->sm_type];
 	sc.try_harder = try_harder;
 	sc.sa.agno = NULLAGNUMBER;
+	sc.heal_mask = heal_mask;
+	sc.sick_mask = xchk_health_mask_for_scrub_type(sm->sm_type);
 	error = sc.ops->setup(&sc, ip);
 	if (error)
 		goto out_teardown;
@@ -518,6 +523,8 @@ retry_op:
 		goto retry_op;
 	} else if (error)
 		goto out_teardown;
+
+	xchk_update_health(&sc, already_fixed);
 
 	if ((sc.sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) && !already_fixed) {
 		bool needs_fix;
@@ -551,6 +558,7 @@ retry_op:
 				xrep_failure(mp);
 				goto out;
 			}
+			heal_mask = sc.heal_mask;
 			goto retry_op;
 		}
 	}

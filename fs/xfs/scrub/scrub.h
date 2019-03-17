@@ -62,6 +62,17 @@ struct xfs_scrub {
 	struct xfs_inode		*ip;
 	void				*buf;
 	uint				ilock_flags;
+
+	/* Metadata to be marked sick if scrub finds errors. */
+	unsigned int			sick_mask;
+
+	/*
+	 * Metadata to be marked healthy if repair fixes errors.  Some repair
+	 * functions can fix multiple data structures at once, so we have to
+	 * treat sick and heal masks separately.
+	 */
+	unsigned int			heal_mask;
+
 	bool				try_harder;
 	bool				has_quotaofflock;
 
