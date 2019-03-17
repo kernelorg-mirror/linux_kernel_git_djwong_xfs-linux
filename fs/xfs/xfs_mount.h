@@ -60,6 +60,13 @@ struct xfs_error_cfg {
 typedef struct xfs_mount {
 	struct super_block	*m_super;
 	xfs_tid_t		m_tid;		/* next unused tid for fs */
+
+	/*
+	 * Bitset of unhealthy per-fs metadata.
+	 * Callers must hold m_sb_lock to access this field.
+	 */
+	unsigned int		m_sick;
+
 	struct xfs_ail		*m_ail;		/* fs active log item list */
 
 	struct xfs_sb		m_sb;		/* copy of fs superblock */
@@ -71,6 +78,11 @@ typedef struct xfs_mount {
 	struct xfs_buf		*m_sb_bp;	/* buffer for superblock */
 	char			*m_fsname;	/* filesystem name */
 	int			m_fsname_len;	/* strlen of fs name */
+	/*
+	 * Bitset of unhealthy rt volume metadata.
+	 * Callers must hold m_sb_lock to access this field.
+	 */
+	unsigned int		m_rt_sick;
 	char			*m_rtname;	/* realtime device name */
 	char			*m_logname;	/* external log device name */
 	int			m_bsize;	/* fs logical block size */
@@ -389,6 +401,17 @@ typedef struct xfs_perag {
 	 * or have some other means to control concurrency.
 	 */
 	struct rhashtable	pagi_unlinked_hash;
+
+	/* Spinlock to protect in-core per-ag state */
+	spinlock_t	pag_state_lock;
+
+	/*
+	 * Bitset of unhealthy AG metadata.
+	 *
+	 * Callers should hold pag_state_lock and the relevant AG header buffer
+	 * lock before accessing this field.
+	 */
+	unsigned int	pag_sick;
 } xfs_perag_t;
 
 static inline struct xfs_ag_resv *
