@@ -28,6 +28,7 @@
 #include "xfs_log.h"
 #include "xfs_ag_resv.h"
 #include "xfs_bmap.h"
+#include "xfs_health.h"
 
 extern kmem_zone_t	*xfs_bmap_free_item_zone;
 
@@ -2284,6 +2285,17 @@ xfs_alloc_fix_freelist(
 			goto out_no_agbp;
 		}
 	}
+
+	/*
+	 * Is this AG unavailable for user data allocations?  If so, free the
+	 * AGF buffer and return empty-handed to encourage the allocator to
+	 * try another AG.
+	 */
+	if (!(flags & XFS_ALLOC_FLAG_FREEING) &&
+	    (xfs_alloc_is_userdata(args->datatype) ||
+	     (args->oinfo.oi_flags & XFS_OWNER_INFO_BMBT_BLOCK)) &&
+	    !xfs_ag_is_healthy(pag))
+		goto out_agbp_relse;
 
 	/* reset a padding mismatched agfl before final free space check */
 	if (pag->pagf_agflreset)
