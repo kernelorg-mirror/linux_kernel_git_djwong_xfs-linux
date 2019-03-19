@@ -40,6 +40,7 @@
 #include "xfs_rmap_btree.h"
 #include "xfs_sb.h"
 #include "xfs_ag_resv.h"
+#include "xfs_health.h"
 
 /*
  * Copy on Write of Shared Blocks
@@ -1004,6 +1005,41 @@ xfs_reflink_ag_has_free_space(
 }
 
 /*
+ * Can we increase the sharing factor of an extent in this AG?  Returns 0 for
+ * yes, -ENOSPC for no, or a runtime error code.  We don't allow new sharing
+ * when the AG is corrupt.  If we are going to allow the sharing, the AGF
+ * buffer will be attached to the transaction.
+ */
+static int
+xfs_reflink_can_map_ag(
+	struct xfs_trans	*tp,
+	xfs_agnumber_t		agno)
+{
+	struct xfs_mount	*mp = tp->t_mountp;
+	struct xfs_perag	*pag = xfs_perag_get(mp, agno);
+	struct xfs_buf		*agbp;
+	int			error;
+
+	/* First we have to grab the AGF */
+	error = xfs_alloc_read_agf(mp, tp, agno, 0, &agbp);
+	if (error)
+		goto out_put;
+	error = -ENOSPC;
+
+	/* Is this AG unavailable for allocations? */
+	if (!pag->pagf_init || !xfs_ag_healthy(pag))
+		goto out_relse;
+
+	xfs_perag_put(pag);
+	return 0;
+out_relse:
+	xfs_trans_brelse(tp, agbp);
+out_put:
+	xfs_perag_put(pag);
+	return error;
+}
+
+/*
  * Unmap a range of blocks from a file, then map other blocks into the hole.
  * The range to unmap is (destoff : destoff + srcioff + irec->br_blockcount).
  * The extent irec is mapped into dest at irec->br_startoff.
@@ -1023,6 +1059,7 @@ xfs_reflink_remap_extent(
 	xfs_filblks_t		rlen;
 	xfs_filblks_t		unmap_len;
 	xfs_off_t		newlen;
+	xfs_agnumber_t		agno = NULLAGNUMBER;
 	int			error;
 
 	unmap_len = irec->br_startoff + irec->br_blockcount - destoff;
@@ -1030,8 +1067,8 @@ xfs_reflink_remap_extent(
 
 	/* No reflinking if we're low on space */
 	if (real_extent) {
-		error = xfs_reflink_ag_has_free_space(mp,
-				XFS_FSB_TO_AGNO(mp, irec->br_startblock));
+		agno = XFS_FSB_TO_AGNO(mp, irec->br_startblock);
+		error = xfs_reflink_ag_has_free_space(mp, agno);
 		if (error)
 			goto out;
 	}
@@ -1045,10 +1082,16 @@ xfs_reflink_remap_extent(
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
 	xfs_trans_ijoin(tp, ip, 0);
 
-	/* If we're not just clearing space, then do we have enough quota? */
+	/* If we're not just clearing space... */
 	if (real_extent) {
+		/* Do we have enough quota? */
 		error = xfs_trans_reserve_quota_nblks(tp, ip,
 				irec->br_blockcount, 0, XFS_QMOPT_RES_REGBLKS);
+		if (error)
+			goto out_cancel;
+
+		/* Are we allowed to make more mappings into this AG? */
+		error = xfs_reflink_can_map_ag(tp, agno);
 		if (error)
 			goto out_cancel;
 	}

@@ -30,6 +30,7 @@
 #include "xfs_trace.h"
 #include "xfs_log.h"
 #include "xfs_rmap.h"
+#include "xfs_health.h"
 
 
 /*
@@ -1776,6 +1777,13 @@ xfs_dialloc(
 		error = xfs_ialloc_read_agi(mp, tp, agno, &agbp);
 		if (error)
 			goto out_error;
+
+		/*
+		 * Is this AG unavailable for inode allocations?  If so, move
+		 * on to the next AG.
+		 */
+		if (!xfs_ag_healthy(pag))
+			goto nextag;
 
 		if (pag->pagi_freecount) {
 			xfs_perag_put(pag);
