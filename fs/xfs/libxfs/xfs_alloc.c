@@ -693,6 +693,8 @@ xfs_alloc_update_counters(
 		return -EFSCORRUPTED;
 
 	xfs_alloc_log_agf(tp, agbp, XFS_AGF_FREEBLKS);
+
+	xfs_health_update_agf(tp, pag, len);
 	return 0;
 }
 

@@ -63,6 +63,7 @@ struct xfs_fsop_geom;
 #define XFS_SICK_AG_RMAPBT	(1 << 8)  /* reverse mappings */
 #define XFS_SICK_AG_REFCNTBT	(1 << 9)  /* reference counts */
 #define XFS_SICK_AG_INODES	(1 << 10) /* inactivated bad inodes */
+#define XFS_SICK_AG_OFFLINE	(1 << 11) /* ag free space is hidden */
 
 /* Observable health issues for inode metadata. */
 #define XFS_SICK_INO_CORE	(1 << 0)  /* inode core */
@@ -108,7 +109,7 @@ struct xfs_fsop_geom;
 /* Secondary state related to (but not primary evidence of) health problems. */
 #define XFS_SICK_FS_SECONDARY	(0)
 #define XFS_SICK_RT_SECONDARY	(0)
-#define XFS_SICK_AG_SECONDARY	(0)
+#define XFS_SICK_AG_SECONDARY	(XFS_SICK_AG_OFFLINE)
 #define XFS_SICK_INO_SECONDARY	(XFS_SICK_INO_FORGET)
 
 /* Evidence of health problems elsewhere. */
@@ -224,5 +225,7 @@ void xfs_fsop_geom_health(struct xfs_mount *mp, struct xfs_fsop_geom *geo);
 void xfs_ag_geom_health(struct xfs_mount *mp, xfs_agnumber_t agno,
 		struct xfs_ag_geometry *ageo);
 void xfs_bulkstat_health(struct xfs_inode *ip, struct xfs_bstat *bs);
+void xfs_health_update_agf(struct xfs_trans *tp, struct xfs_perag *pag,
+		long len);
 
 #endif	/* __XFS_HEALTH_H__ */

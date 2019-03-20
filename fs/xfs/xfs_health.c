@@ -18,6 +18,53 @@
 #include "xfs_inode.h"
 #include "xfs_trace.h"
 #include "xfs_health.h"
+#include "xfs_trans.h"
+
+/*
+ * Try to this AG offline by hiding its free space from the fdblocks count.
+ * This prevents other parts of the filesystem from increasing their reliance
+ * on the broken AG.  If the AG is already offline, we don't have to do
+ * anything.
+ *
+ * Caller must hold the per-ag state lock.
+ */
+STATIC void
+xfs_health_try_offline_ag(
+	struct xfs_perag	*pag)
+{
+	int			error;
+
+	if (pag->pag_sick & XFS_SICK_AG_OFFLINE)
+		return;
+
+	error = xfs_mod_fdblocks(pag->pag_mount, -(int64_t)pag->pagf_freeblks,
+			true);
+	if (error)
+		return;
+
+	trace_xfs_ag_going_offline(pag->pag_mount, pag->pag_agno);
+	pag->pag_sick |= XFS_SICK_AG_OFFLINE;
+}
+
+/*
+ * Try to this AG back online by revealing its free space in the fdblocks
+ * count.  There must not be any evidence of primary corruption.
+ *
+ * Caller must hold the per-ag state lock.
+ */
+STATIC void
+xfs_health_try_online_ag(
+	struct xfs_perag	*pag)
+{
+	if (!(pag->pag_sick & XFS_SICK_AG_OFFLINE))
+		return;
+	if (pag->pag_sick & XFS_SICK_AG_PRIMARY)
+		return;
+
+	xfs_mod_fdblocks(pag->pag_mount, pag->pagf_freeblks, true);
+	trace_xfs_ag_going_online(pag->pag_mount, pag->pag_agno);
+	pag->pag_sick &= ~XFS_SICK_AG_OFFLINE;
+}
 
 /*
  * Warn about metadata corruption that we detected but haven't fixed, and
@@ -44,6 +91,15 @@ xfs_health_unmount(
 		if (sick) {
 			trace_xfs_ag_unfixed_corruption(mp, agno, sick);
 			warn = true;
+
+			/*
+			 * Bring the AG back online because our AG hiding only
+			 * exists in-core and we need fdblocks to be roughly
+			 * correct when we write it out.
+			 */
+			spin_lock(&pag->pag_state_lock);
+			xfs_health_try_online_ag(pag);
+			spin_unlock(&pag->pag_state_lock);
 		}
 		xfs_perag_put(pag);
 	}
@@ -193,6 +249,7 @@ xfs_ag_mark_sick(
 	trace_xfs_ag_mark_sick(pag->pag_mount, pag->pag_agno, mask);
 
 	spin_lock(&pag->pag_state_lock);
+	xfs_health_try_offline_ag(pag);
 	pag->pag_sick |= mask;
 	pag->pag_checked |= mask;
 	spin_unlock(&pag->pag_state_lock);
@@ -209,6 +266,7 @@ xfs_ag_mark_healthy(
 
 	spin_lock(&pag->pag_state_lock);
 	pag->pag_sick &= ~mask;
+	xfs_health_try_online_ag(pag);
 	if (!(pag->pag_sick & XFS_SICK_AG_PRIMARY))
 		pag->pag_sick &= ~XFS_SICK_AG_SECONDARY;
 	pag->pag_checked |= mask;
@@ -342,6 +400,7 @@ static const struct ioctl_sick_map ag_map[] = {
 	{ XFS_SICK_AG_RMAPBT,	XFS_AG_GEOM_SICK_RMAPBT },
 	{ XFS_SICK_AG_REFCNTBT,	XFS_AG_GEOM_SICK_REFCNTBT },
 	{ XFS_SICK_AG_INODES,	XFS_AG_GEOM_SICK_INODES },
+	{ XFS_SICK_AG_OFFLINE,	XFS_AG_GEOM_SICK_OFFLINE },
 	{ 0, 0 },
 };
 
@@ -406,4 +465,24 @@ xfs_bulkstat_health(
 		if (sick & m->sick_mask)
 			bs->bs_sick |= m->ioctl_mask;
 	}
+}
+
+/*
+ * If the AG is offline, transfer the AGF free space update so that we don't
+ * update the incore fdblocks count until the AG comes back online.  The caller
+ * must hold the AGF so that nobody else can update the AG's offline state
+ * until this transaction completes.
+ */
+void
+xfs_health_update_agf(
+	struct xfs_trans	*tp,
+	struct xfs_perag	*pag,
+	long			len)
+{
+	spin_lock(&pag->pag_state_lock);
+	if (pag->pag_sick & XFS_SICK_AG_OFFLINE) {
+		tp->t_fdblocks_delta -= len;
+		tp->t_res_fdblocks_delta += len;
+	}
+	spin_unlock(&pag->pag_state_lock);
 }
