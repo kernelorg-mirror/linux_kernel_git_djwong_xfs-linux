@@ -19,6 +19,65 @@
 #include "xfs_trace.h"
 #include "xfs_health.h"
 
+/*
+ * Warn about metadata corruption that we detected but haven't fixed, and
+ * make sure we're not sitting on anything that would get in the way of
+ * recovery.
+ */
+void
+xfs_health_unmount(
+	struct xfs_mount	*mp)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+	unsigned int		sick;
+	bool			warn = false;
+
+	if (XFS_FORCED_SHUTDOWN(mp))
+		return;
+
+	/* Measure AG corruption levels. */
+	for (agno = 0; agno < mp->m_sb.sb_agcount; agno++) {
+		pag = xfs_perag_get(mp, agno);
+		spin_lock(&pag->pag_state_lock);
+		if (pag->pag_sick) {
+			trace_xfs_ag_unfixed_corruption(mp, agno, sick);
+			warn = true;
+		}
+		spin_unlock(&pag->pag_state_lock);
+		xfs_perag_put(pag);
+	}
+
+	/* Measure realtime volume corruption levels. */
+	sick = xfs_rt_measure_sickness(mp);
+	if (sick) {
+		trace_xfs_rt_unfixed_corruption(mp, sick);
+		warn = true;
+	}
+
+	/* Measure fs corruption and keep the sample around for the warning. */
+	sick = xfs_fs_measure_sickness(mp);
+	if (sick) {
+		trace_xfs_fs_unfixed_corruption(mp, sick);
+		warn = true;
+	}
+
+	if (warn) {
+		xfs_warn(mp,
+"Uncorrected metadata errors detected; please run xfs_repair.");
+
+		/*
+		 * If we have unhealthy metadata, we want the admin to run
+		 * xfs_repair after unmounting.  They can't do that if the log
+		 * is written out without a clean unmount record (such as when
+		 * the summary counters are marked unhealthy to force
+		 * recalculation of the summary counters) so clear it.
+		 */
+		if (sick & XFS_HEALTH_FS_COUNTERS)
+			xfs_fs_mark_healthy(mp, XFS_HEALTH_FS_COUNTERS);
+	}
+}
+
 /* Mark unhealthy per-fs metadata. */
 void
 xfs_fs_mark_sick(
