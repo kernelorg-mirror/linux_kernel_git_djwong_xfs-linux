@@ -3499,6 +3499,8 @@ DEFINE_EVENT(xfs_ag_corrupt_class, name,	\
 DEFINE_AG_CORRUPT_EVENT(xfs_ag_mark_sick);
 DEFINE_AG_CORRUPT_EVENT(xfs_ag_mark_healthy);
 DEFINE_AG_CORRUPT_EVENT(xfs_ag_unfixed_corruption);
+DEFINE_AG_EVENT(xfs_ag_going_offline);
+DEFINE_AG_EVENT(xfs_ag_going_online);
 
 DECLARE_EVENT_CLASS(xfs_inode_corrupt_class,
 	TP_PROTO(struct xfs_inode *ip, unsigned int flags),
