@@ -693,6 +693,18 @@ xfs_alloc_update_counters(
 		return -EFSCORRUPTED;
 
 	xfs_alloc_log_agf(tp, agbp, XFS_AGF_FREEBLKS);
+
+	/*
+	 * If the AG is offline, transfer the AGF free space update so that
+	 * we don't update the incore fdblocks count until the AG comes back
+	 * online.
+	 */
+	spin_lock(&pag->pag_state_lock);
+	if (pag->pag_sick & XFS_HEALTH_AG_OFFLINE) {
+		tp->t_fdblocks_delta -= len;
+		tp->t_res_fdblocks_delta += len;
+	}
+	spin_unlock(&pag->pag_state_lock);
 	return 0;
 }
 

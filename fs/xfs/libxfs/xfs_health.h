@@ -64,6 +64,7 @@ struct xfs_fsop_geom;
 #define XFS_HEALTH_AG_REFCNTBT	(1 << 9)  /* reference counts */
 /* Unfixed inodes from this AG were inactivated. */
 #define XFS_HEALTH_AG_BAD_INOS	(1 << 10)
+#define XFS_HEALTH_AG_OFFLINE	(1 << 11) /* ag free space is hidden */
 
 /* Observable health issues for inode metadata. */
 #define XFS_HEALTH_INO_CORE	(1 << 0)  /* inode core */
@@ -109,7 +110,7 @@ struct xfs_fsop_geom;
 /* Secondary state related to (but not primary evidence of) health problems. */
 #define XFS_HEALTH_FS_SECONDARY	(0)
 #define XFS_HEALTH_RT_SECONDARY	(0)
-#define XFS_HEALTH_AG_SECONDARY	(0)
+#define XFS_HEALTH_AG_SECONDARY	(XFS_HEALTH_AG_OFFLINE)
 #define XFS_HEALTH_INO_SECONDARY (XFS_HEALTH_INO_FORGET)
 
 /* Evidence of health problems elsewhere. */

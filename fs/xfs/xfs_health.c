@@ -20,6 +20,52 @@
 #include "xfs_health.h"
 
 /*
+ * Try to this AG offline by hiding its free space from the fdblocks count.
+ * This prevents other parts of the filesystem from increasing their reliance
+ * on the broken AG.  If the AG is already offline, we don't have to do
+ * anything.
+ *
+ * Caller must hold the per-ag state lock.
+ */
+STATIC void
+xfs_health_try_offline_ag(
+	struct xfs_perag	*pag)
+{
+	int			error;
+
+	if (pag->pag_sick & XFS_HEALTH_AG_OFFLINE)
+		return;
+
+	error = xfs_mod_fdblocks(pag->pag_mount, -(int64_t)pag->pagf_freeblks,
+			true);
+	if (error)
+		return;
+
+	trace_xfs_ag_going_offline(pag->pag_mount, pag->pag_agno);
+	pag->pag_sick |= XFS_HEALTH_AG_OFFLINE;
+}
+
+/*
+ * Try to this AG back online by revealing its free space in the fdblocks
+ * count.  There must not be any evidence of primary corruption.
+ *
+ * Caller must hold the per-ag state lock.
+ */
+STATIC void
+xfs_health_try_online_ag(
+	struct xfs_perag	*pag)
+{
+	if (!(pag->pag_sick & XFS_HEALTH_AG_OFFLINE))
+		return;
+	if (pag->pag_sick & XFS_HEALTH_AG_PRIMARY)
+		return;
+
+	xfs_mod_fdblocks(pag->pag_mount, pag->pagf_freeblks, true);
+	trace_xfs_ag_going_online(pag->pag_mount, pag->pag_agno);
+	pag->pag_sick &= ~XFS_HEALTH_AG_OFFLINE;
+}
+
+/*
  * Warn about metadata corruption that we detected but haven't fixed, and
  * make sure we're not sitting on anything that would get in the way of
  * recovery.
@@ -40,6 +86,7 @@ xfs_health_unmount(
 	for (agno = 0; agno < mp->m_sb.sb_agcount; agno++) {
 		pag = xfs_perag_get(mp, agno);
 		spin_lock(&pag->pag_state_lock);
+		xfs_health_try_online_ag(pag);
 		if (pag->pag_sick) {
 			trace_xfs_ag_unfixed_corruption(mp, agno, sick);
 			warn = true;
@@ -174,6 +221,7 @@ xfs_ag_mark_sick(
 	trace_xfs_ag_mark_sick(pag->pag_mount, pag->pag_agno, mask);
 
 	spin_lock(&pag->pag_state_lock);
+	xfs_health_try_offline_ag(pag);
 	pag->pag_sick |= mask;
 	spin_unlock(&pag->pag_state_lock);
 }
@@ -189,6 +237,7 @@ xfs_ag_mark_healthy(
 
 	spin_lock(&pag->pag_state_lock);
 	pag->pag_sick &= ~mask;
+	xfs_health_try_online_ag(pag);
 	if (!(pag->pag_sick & XFS_HEALTH_AG_PRIMARY))
 		pag->pag_sick &= ~XFS_HEALTH_AG_SECONDARY;
 	spin_unlock(&pag->pag_state_lock);
@@ -316,6 +365,8 @@ xfs_ag_geom_health(
 		ageo->ag_health |= XFS_AG_GEOM_HEALTH_AG_REFCNTBT;
 	if (sick & XFS_HEALTH_AG_BAD_INOS)
 		ageo->ag_health |= XFS_AG_GEOM_HEALTH_AG_BAD_INOS;
+	if (sick & XFS_HEALTH_AG_OFFLINE)
+		ageo->ag_health |= XFS_AG_GEOM_HEALTH_AG_OFFLINE;
 	xfs_perag_put(pag);
 }
 
