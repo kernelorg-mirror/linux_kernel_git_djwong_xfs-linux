@@ -148,9 +148,19 @@ xchk_update_health(
 		xfs_perag_put(pag);
 		break;
 	case XHG_INO:
-		if (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
-			xfs_inode_mark_sick(sc->ip, sc->sick_mask_update);
-		else
+		if (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT) {
+			unsigned int	mask = sc->sick_mask_update;
+
+			/*
+			 * If we're coming in for repairs then we don't want
+			 * sickness flags to propagate to the incore health
+			 * status if the inode gets inactivated before we can
+			 * fix it.
+			 */
+			if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR)
+				mask |= XFS_SICK_INO_FORGET;
+			xfs_inode_mark_sick(sc->ip, mask);
+		} else
 			xfs_inode_mark_healthy(sc->ip, sc->sick_mask_update);
 		break;
 	case XHG_FS:

@@ -43,6 +43,7 @@
 #include "xfs_dir2_priv.h"
 #include "xfs_dquot_item.h"
 #include "xfs_dquot.h"
+#include "xfs_health.h"
 
 kmem_zone_t *xfs_inode_zone;
 
@@ -1965,6 +1966,33 @@ xfs_inode_needs_inactivation(
 }
 
 /*
+ * Save health status somewhere, if we're dumping an inode with uncorrected
+ * errors and online repair isn't running.
+ */
+static inline void
+xfs_inactive_health(
+	struct xfs_inode	*ip)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_perag	*pag;
+	unsigned int		sick;
+	unsigned int		checked;
+
+	xfs_inode_measure_sickness(ip, &sick, &checked);
+	if (!sick)
+		return;
+
+	trace_xfs_inode_unfixed_corruption(ip, sick);
+
+	if (sick & XFS_SICK_INO_FORGET)
+		return;
+
+	pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, ip->i_ino));
+	xfs_ag_mark_sick(pag, XFS_SICK_AG_INODES);
+	xfs_perag_put(pag);
+}
+
+/*
  * xfs_inactive
  *
  * This is called when the vnode reference count for the vnode
@@ -1995,6 +2023,8 @@ xfs_inactive(
 	/* If this is a read-only mount, don't do this (would generate I/O) */
 	if (mp->m_flags & XFS_MOUNT_RDONLY)
 		return;
+
+	xfs_inactive_health(ip);
 
 	/*
 	 * Re-attach dquots prior to freeing EOF blocks or CoW staging extents.
