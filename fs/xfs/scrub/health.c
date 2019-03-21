@@ -143,6 +143,13 @@ xchk_mark_sick(
 	case XFS_SCRUB_TYPE_XATTR:
 	case XFS_SCRUB_TYPE_SYMLINK:
 	case XFS_SCRUB_TYPE_PARENT:
+		/*
+		 * If we're coming in for repairs then we don't want sickness
+		 * flags to propagate to the fs health measure if the inode
+		 * gets inactivated before we can fix it.
+		 */
+		if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR)
+			mask |= XFS_HEALTH_INO_FORGET;
 		xfs_inode_mark_sick(sc->ip, mask);
 		break;
 	case XFS_SCRUB_TYPE_UQUOTA:

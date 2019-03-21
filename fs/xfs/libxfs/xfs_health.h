@@ -62,6 +62,8 @@ struct xfs_fsop_geom;
 #define XFS_HEALTH_AG_FINOBT	(1 << 7)  /* free inode index */
 #define XFS_HEALTH_AG_RMAPBT	(1 << 8)  /* reverse mappings */
 #define XFS_HEALTH_AG_REFCNTBT	(1 << 9)  /* reference counts */
+/* Unfixed inodes from this AG were inactivated. */
+#define XFS_HEALTH_AG_BAD_INOS	(1 << 10)
 
 /* Observable health issues for inode metadata. */
 #define XFS_HEALTH_INO_CORE	(1 << 0)  /* inode core */
@@ -72,6 +74,8 @@ struct xfs_fsop_geom;
 #define XFS_HEALTH_INO_XATTR	(1 << 5)  /* extended attributes */
 #define XFS_HEALTH_INO_SYMLINK	(1 << 6)  /* symbolic link remote target */
 #define XFS_HEALTH_INO_PARENT	(1 << 7)  /* parent pointers */
+/* Don't propagate sick status to ag health summary during inactivation */
+#define XFS_HEALTH_INO_FORGET	(1 << 31)
 
 /* Primary evidence of health problems in a given group. */
 #define XFS_HEALTH_FS_PRIMARY	(XFS_HEALTH_FS_COUNTERS | \
@@ -106,12 +110,12 @@ struct xfs_fsop_geom;
 #define XFS_HEALTH_FS_SECONDARY	(0)
 #define XFS_HEALTH_RT_SECONDARY	(0)
 #define XFS_HEALTH_AG_SECONDARY	(0)
-#define XFS_HEALTH_INO_SECONDARY (0)
+#define XFS_HEALTH_INO_SECONDARY (XFS_HEALTH_INO_FORGET)
 
 /* Evidence of health problems elsewhere. */
 #define XFS_HEALTH_FS_INDIRECT	(0)
 #define XFS_HEALTH_RT_INDIRECT	(0)
-#define XFS_HEALTH_AG_INDIRECT	(0)
+#define XFS_HEALTH_AG_INDIRECT	(XFS_HEALTH_AG_BAD_INOS)
 #define XFS_HEALTH_INO_INDIRECT	(0)
 
 /* All health masks. */

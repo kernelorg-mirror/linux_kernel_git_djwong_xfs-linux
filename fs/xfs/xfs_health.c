@@ -314,6 +314,8 @@ xfs_ag_geom_health(
 		ageo->ag_health |= XFS_AG_GEOM_HEALTH_AG_RMAPBT;
 	if (sick & XFS_HEALTH_AG_REFCNTBT)
 		ageo->ag_health |= XFS_AG_GEOM_HEALTH_AG_REFCNTBT;
+	if (sick & XFS_HEALTH_AG_BAD_INOS)
+		ageo->ag_health |= XFS_AG_GEOM_HEALTH_AG_BAD_INOS;
 	xfs_perag_put(pag);
 }
 

@@ -297,6 +297,7 @@ struct xfs_ag_geometry {
 #define XFS_AG_GEOM_HEALTH_AG_FINOBT	(1 << 7)  /* free inode index */
 #define XFS_AG_GEOM_HEALTH_AG_RMAPBT	(1 << 8)  /* reverse mappings */
 #define XFS_AG_GEOM_HEALTH_AG_REFCNTBT	(1 << 9)  /* reference counts */
+#define XFS_AG_GEOM_HEALTH_AG_BAD_INOS	(1 << 10) /* bad inodes were seen */
 
 /*
  * Structures for XFS_IOC_FSGROWFSDATA, XFS_IOC_FSGROWFSLOG & XFS_IOC_FSGROWFSRT
