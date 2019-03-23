@@ -30,6 +30,7 @@
 #include "xfs_refcount_btree.h"
 #include "xfs_da_format.h"
 #include "xfs_da_btree.h"
+#include "xfs_health.h"
 
 /*
  * Physical superblock buffer manipulations. Shared with libxfs in userspace.
@@ -907,7 +908,7 @@ xfs_initialize_perag_data(
 	/*
 	 * If the new summary counts are obviously incorrect, fail the
 	 * mount operation because that implies the AGFs are also corrupt.
-	 * Clear BAD_SUMMARY so that we don't unmount with a dirty log, which
+	 * Clear FS_COUNTERS so that we don't unmount with a dirty log, which
 	 * will prevent xfs_repair from fixing anything.
 	 */
 	if (fdblocks > sbp->sb_dblocks || ifree > ialloc) {
@@ -925,7 +926,7 @@ xfs_initialize_perag_data(
 
 	xfs_reinit_percpu_counters(mp);
 out:
-	mp->m_flags &= ~XFS_MOUNT_BAD_SUMMARY;
+	xfs_fs_mark_healthy(mp, XFS_HEALTH_FS_COUNTERS);
 	return error;
 }
 
