@@ -249,3 +249,30 @@ xfs_inode_measure_sickness(
 	spin_unlock(&ip->i_flags_lock);
 	return ret;
 }
+
+/* Fill out fs geometry health info. */
+void
+xfs_fsop_geom_health(
+	struct xfs_mount	*mp,
+	struct xfs_fsop_geom	*geo)
+{
+	unsigned int		sick;
+
+	geo->health = 0;
+
+	sick = xfs_fs_measure_sickness(mp);
+	if (sick & XFS_HEALTH_FS_COUNTERS)
+		geo->health |= XFS_FSOP_GEOM_HEALTH_FS_COUNTERS;
+	if (sick & XFS_HEALTH_FS_UQUOTA)
+		geo->health |= XFS_FSOP_GEOM_HEALTH_FS_UQUOTA;
+	if (sick & XFS_HEALTH_FS_GQUOTA)
+		geo->health |= XFS_FSOP_GEOM_HEALTH_FS_GQUOTA;
+	if (sick & XFS_HEALTH_FS_PQUOTA)
+		geo->health |= XFS_FSOP_GEOM_HEALTH_FS_PQUOTA;
+
+	sick = xfs_rt_measure_sickness(mp);
+	if (sick & XFS_HEALTH_RT_BITMAP)
+		geo->health |= XFS_FSOP_GEOM_HEALTH_RT_BITMAP;
+	if (sick & XFS_HEALTH_RT_SUMMARY)
+		geo->health |= XFS_FSOP_GEOM_HEALTH_RT_SUMMARY;
+}

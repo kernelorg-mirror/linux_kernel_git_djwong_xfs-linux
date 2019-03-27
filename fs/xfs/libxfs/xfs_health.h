@@ -39,6 +39,7 @@
 struct xfs_mount;
 struct xfs_perag;
 struct xfs_inode;
+struct xfs_fsop_geom;
 
 /* Observable health issues for metadata spanning the entire filesystem. */
 #define XFS_HEALTH_FS_COUNTERS	(1 << 0)  /* summary counters */
@@ -199,5 +200,7 @@ xfs_inode_healthy(struct xfs_inode *ip)
 {
 	return xfs_inode_measure_sickness(ip) == 0;
 }
+
+void xfs_fsop_geom_health(struct xfs_mount *mp, struct xfs_fsop_geom *geo);
 
 #endif	/* __XFS_HEALTH_H__ */

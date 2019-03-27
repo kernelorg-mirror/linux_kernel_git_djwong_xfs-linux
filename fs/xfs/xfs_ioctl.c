@@ -34,6 +34,7 @@
 #include "scrub/xfs_scrub.h"
 #include "xfs_sb.h"
 #include "xfs_ag.h"
+#include "xfs_health.h"
 
 #include <linux/capability.h>
 #include <linux/cred.h>
@@ -829,6 +830,8 @@ xfs_ioc_fsgeometry(
 	error = xfs_fs_geometry(&mp->m_sb, &fsgeo, 5);
 	if (error)
 		return error;
+
+	xfs_fsop_geom_health(mp, &fsgeo);
 
 	if (copy_to_user(arg, &fsgeo, sizeof(fsgeo)))
 		return -EFAULT;
