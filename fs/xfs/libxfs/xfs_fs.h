@@ -148,7 +148,34 @@ typedef struct xfs_fsop_geom_v1 {
 } xfs_fsop_geom_v1_t;
 
 /*
- * Output for XFS_IOC_FSGEOMETRY
+ * Output for XFS_IOC_FSGEOMETRY_V2
+ */
+typedef struct xfs_fsop_geom_v2 {
+	__u32		blocksize;	/* filesystem (data) block size */
+	__u32		rtextsize;	/* realtime extent size		*/
+	__u32		agblocks;	/* fsblocks in an AG		*/
+	__u32		agcount;	/* number of allocation groups	*/
+	__u32		logblocks;	/* fsblocks in the log		*/
+	__u32		sectsize;	/* (data) sector size, bytes	*/
+	__u32		inodesize;	/* inode size in bytes		*/
+	__u32		imaxpct;	/* max allowed inode space(%)	*/
+	__u64		datablocks;	/* fsblocks in data subvolume	*/
+	__u64		rtblocks;	/* fsblocks in realtime subvol	*/
+	__u64		rtextents;	/* rt extents in realtime subvol*/
+	__u64		logstart;	/* starting fsblock of the log	*/
+	unsigned char	uuid[16];	/* unique id of the filesystem	*/
+	__u32		sunit;		/* stripe unit, fsblocks	*/
+	__u32		swidth;		/* stripe width, fsblocks	*/
+	__s32		version;	/* structure version		*/
+	__u32		flags;		/* superblock version flags	*/
+	__u32		logsectsize;	/* log sector size, bytes	*/
+	__u32		rtsectsize;	/* realtime sector size, bytes	*/
+	__u32		dirblocksize;	/* directory block size, bytes	*/
+	__u32		logsunit;	/* log stripe unit, bytes */
+} xfs_fsop_geom_v2_t;
+
+/*
+ * Output for XFS_IOC_FSGEOMETRY (v5)
  */
 typedef struct xfs_fsop_geom {
 	__u32		blocksize;	/* filesystem (data) block size */
@@ -172,6 +199,7 @@ typedef struct xfs_fsop_geom {
 	__u32		rtsectsize;	/* realtime sector size, bytes	*/
 	__u32		dirblocksize;	/* directory block size, bytes	*/
 	__u32		logsunit;	/* log stripe unit, bytes */
+	__u64		reserved[18];	/* reserved space */
 } xfs_fsop_geom_t;
 
 /* Output for XFS_FS_COUNTS */
@@ -189,6 +217,7 @@ typedef struct xfs_fsop_resblks {
 } xfs_fsop_resblks_t;
 
 #define XFS_FSOP_GEOM_VERSION	0
+#define XFS_FSOP_GEOM_V5	5
 
 #define XFS_FSOP_GEOM_FLAGS_ATTR	0x0001	/* attributes in use	*/
 #define XFS_FSOP_GEOM_FLAGS_NLINK	0x0002	/* 32-bit nlink values	*/
@@ -620,6 +649,7 @@ struct xfs_scrub_metadata {
 #define XFS_IOC_FSSETDM_BY_HANDLE    _IOW ('X', 121, struct xfs_fsop_setdm_handlereq)
 #define XFS_IOC_ATTRLIST_BY_HANDLE   _IOW ('X', 122, struct xfs_fsop_attrlist_handlereq)
 #define XFS_IOC_ATTRMULTI_BY_HANDLE  _IOW ('X', 123, struct xfs_fsop_attrmulti_handlereq)
+#define XFS_IOC_FSGEOMETRY_V2	     _IOR ('X', 124, struct xfs_fsop_geom_v2)
 #define XFS_IOC_FSGEOMETRY	     _IOR ('X', 124, struct xfs_fsop_geom)
 #define XFS_IOC_GOINGDOWN	     _IOR ('X', 125, uint32_t)
 /*	XFS_IOC_GETFSUUID ---------- deprecated 140	 */

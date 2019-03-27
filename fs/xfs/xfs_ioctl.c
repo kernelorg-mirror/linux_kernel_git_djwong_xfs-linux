@@ -801,7 +801,7 @@ xfs_ioc_fsgeometry_v1(
 }
 
 STATIC int
-xfs_ioc_fsgeometry(
+xfs_ioc_fsgeometry_v2(
 	xfs_mount_t		*mp,
 	void			__user *arg)
 {
@@ -809,6 +809,23 @@ xfs_ioc_fsgeometry(
 	int			error;
 
 	error = xfs_fs_geometry(&mp->m_sb, &fsgeo, 4);
+	if (error)
+		return error;
+
+	if (copy_to_user(arg, &fsgeo, sizeof(struct xfs_fsop_geom_v2)))
+		return -EFAULT;
+	return 0;
+}
+
+STATIC int
+xfs_ioc_fsgeometry(
+	struct xfs_mount	*mp,
+	void			__user *arg)
+{
+	struct xfs_fsop_geom	fsgeo;
+	int			error;
+
+	error = xfs_fs_geometry(&mp->m_sb, &fsgeo, 5);
 	if (error)
 		return error;
 
@@ -1938,7 +1955,8 @@ xfs_file_ioctl(
 
 	case XFS_IOC_FSGEOMETRY_V1:
 		return xfs_ioc_fsgeometry_v1(mp, arg);
-
+	case XFS_IOC_FSGEOMETRY_V2:
+		return xfs_ioc_fsgeometry_v2(mp, arg);
 	case XFS_IOC_FSGEOMETRY:
 		return xfs_ioc_fsgeometry(mp, arg);
 
