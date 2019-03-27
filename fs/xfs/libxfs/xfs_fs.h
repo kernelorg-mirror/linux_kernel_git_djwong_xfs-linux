@@ -267,6 +267,19 @@ typedef struct xfs_fsop_resblks {
 			 (s)->sb_agblocks + XFS_MIN_AG_BLOCKS)
 
 /*
+ * Output for XFS_IOC_AG_GEOMETRY
+ */
+struct xfs_ag_geometry {
+	__u32		ag_number;	/* i/o: AG number */
+	__u32		ag_length;	/* o: length in blocks */
+	__u32		ag_freeblks;	/* o: free space */
+	__u32		ag_icount;	/* o: inodes allocated */
+	__u32		ag_ifree;	/* o: inodes free */
+	__u32		ag_reserved32;	/* o: zero */
+	__u64		ag_reserved[5];	/* o: zero */
+};
+
+/*
  * Structures for XFS_IOC_FSGROWFSDATA, XFS_IOC_FSGROWFSLOG & XFS_IOC_FSGROWFSRT
  */
 typedef struct xfs_growfs_data {
@@ -619,6 +632,7 @@ struct xfs_scrub_metadata {
 #define XFS_IOC_FREE_EOFBLOCKS	_IOR ('X', 58, struct xfs_fs_eofblocks)
 /*	XFS_IOC_GETFSMAP ------ hoisted 59         */
 #define XFS_IOC_SCRUB_METADATA	_IOWR('X', 60, struct xfs_scrub_metadata)
+#define XFS_IOC_AG_GEOMETRY	_IOWR('X', 61, struct xfs_ag_geometry)
 
 /*
  * ioctl commands that replace IRIX syssgi()'s
