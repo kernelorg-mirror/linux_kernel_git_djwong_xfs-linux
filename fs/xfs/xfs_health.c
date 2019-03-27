@@ -276,3 +276,43 @@ xfs_fsop_geom_health(
 	if (sick & XFS_HEALTH_RT_SUMMARY)
 		geo->health |= XFS_FSOP_GEOM_HEALTH_RT_SUMMARY;
 }
+
+/* Fill out ag geometry health info. */
+void
+xfs_ag_geom_health(
+	struct xfs_mount	*mp,
+	xfs_agnumber_t		agno,
+	struct xfs_ag_geometry	*ageo)
+{
+	struct xfs_perag	*pag;
+	unsigned int		sick;
+
+	if (agno >= mp->m_sb.sb_agcount)
+		return;
+
+	ageo->ag_health = 0;
+
+	pag = xfs_perag_get(mp, agno);
+	sick = xfs_ag_measure_sickness(pag);
+	if (sick & XFS_HEALTH_AG_SB)
+		ageo->ag_health |= XFS_AG_GEOM_HEALTH_AG_SB;
+	if (sick & XFS_HEALTH_AG_AGF)
+		ageo->ag_health |= XFS_AG_GEOM_HEALTH_AG_AGF;
+	if (sick & XFS_HEALTH_AG_AGFL)
+		ageo->ag_health |= XFS_AG_GEOM_HEALTH_AG_AGFL;
+	if (sick & XFS_HEALTH_AG_AGI)
+		ageo->ag_health |= XFS_AG_GEOM_HEALTH_AG_AGI;
+	if (sick & XFS_HEALTH_AG_BNOBT)
+		ageo->ag_health |= XFS_AG_GEOM_HEALTH_AG_BNOBT;
+	if (sick & XFS_HEALTH_AG_CNTBT)
+		ageo->ag_health |= XFS_AG_GEOM_HEALTH_AG_CNTBT;
+	if (sick & XFS_HEALTH_AG_INOBT)
+		ageo->ag_health |= XFS_AG_GEOM_HEALTH_AG_INOBT;
+	if (sick & XFS_HEALTH_AG_FINOBT)
+		ageo->ag_health |= XFS_AG_GEOM_HEALTH_AG_FINOBT;
+	if (sick & XFS_HEALTH_AG_RMAPBT)
+		ageo->ag_health |= XFS_AG_GEOM_HEALTH_AG_RMAPBT;
+	if (sick & XFS_HEALTH_AG_REFCNTBT)
+		ageo->ag_health |= XFS_AG_GEOM_HEALTH_AG_REFCNTBT;
+	xfs_perag_put(pag);
+}

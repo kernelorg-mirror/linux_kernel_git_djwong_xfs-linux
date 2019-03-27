@@ -284,9 +284,19 @@ struct xfs_ag_geometry {
 	__u32		ag_freeblks;	/* o: free space */
 	__u32		ag_icount;	/* o: inodes allocated */
 	__u32		ag_ifree;	/* o: inodes free */
-	__u32		ag_reserved32;	/* o: zero */
+	__u32		ag_health;	/* o: sick things in ag */
 	__u64		ag_reserved[5];	/* o: zero */
 };
+#define XFS_AG_GEOM_HEALTH_AG_SB	(1 << 0)  /* superblock */
+#define XFS_AG_GEOM_HEALTH_AG_AGF	(1 << 1)  /* AGF header */
+#define XFS_AG_GEOM_HEALTH_AG_AGFL	(1 << 2)  /* AGFL header */
+#define XFS_AG_GEOM_HEALTH_AG_AGI	(1 << 3)  /* AGI header */
+#define XFS_AG_GEOM_HEALTH_AG_BNOBT	(1 << 4)  /* free space by block */
+#define XFS_AG_GEOM_HEALTH_AG_CNTBT	(1 << 5)  /* free space by length */
+#define XFS_AG_GEOM_HEALTH_AG_INOBT	(1 << 6)  /* inode index */
+#define XFS_AG_GEOM_HEALTH_AG_FINOBT	(1 << 7)  /* free inode index */
+#define XFS_AG_GEOM_HEALTH_AG_RMAPBT	(1 << 8)  /* reverse mappings */
+#define XFS_AG_GEOM_HEALTH_AG_REFCNTBT	(1 << 9)  /* reference counts */
 
 /*
  * Structures for XFS_IOC_FSGROWFSDATA, XFS_IOC_FSGROWFSLOG & XFS_IOC_FSGROWFSRT

@@ -853,6 +853,8 @@ xfs_ioc_ag_geometry(
 	if (error)
 		return error;
 
+	xfs_ag_geom_health(mp, ageo.ag_number, &ageo);
+
 	if (copy_to_user(arg, &ageo, sizeof(ageo)))
 		return -EFAULT;
 	return 0;
