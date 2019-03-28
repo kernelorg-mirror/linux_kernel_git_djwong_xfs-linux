@@ -12,5 +12,6 @@ bool xchk_ag_btree_healthy_enough(struct xfs_scrub *sc, struct xfs_perag *pag,
 		xfs_btnum_t btnum);
 void xchk_ag_btree_mark_sick(struct xfs_scrub *sc,
 		struct xfs_btree_cur *cur);
+int xchk_health_record(struct xfs_scrub *sc);
 
 #endif /* __XFS_SCRUB_HEALTH_H__ */
