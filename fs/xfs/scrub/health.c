@@ -19,6 +19,7 @@
 #include "xfs_health.h"
 #include "scrub/scrub.h"
 #include "scrub/health.h"
+#include "scrub/common.h"
 
 static const unsigned int xchk_type_to_health_flag[XFS_SCRUB_TYPE_NR] = {
 	[XFS_SCRUB_TYPE_SB]		= XFS_HEALTH_AG_SB,
@@ -54,6 +55,60 @@ xchk_health_mask_for_scrub_type(
 	return xchk_type_to_health_flag[scrub_type];
 }
 
+/*
+ * Quick scan to double-check that there isn't any evidence of lingering
+ * primary health problems.  If we're still clear, then the health update will
+ * take care of clearing the indirect evidence.
+ */
+int
+xchk_health_record(
+	struct xfs_scrub	*sc)
+{
+	struct xfs_mount	*mp = sc->mp;
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+	unsigned int		sick;
+
+	sick = xfs_fs_measure_sickness(mp);
+	if (sick & XFS_HEALTH_FS_PRIMARY)
+		xchk_set_corrupt(sc);
+
+	sick = xfs_rt_measure_sickness(mp);
+	if (sick & XFS_HEALTH_RT_PRIMARY)
+		xchk_set_corrupt(sc);
+
+	for (agno = 0; agno < mp->m_sb.sb_agcount; agno++) {
+		pag = xfs_perag_get(mp, agno);
+		sick = xfs_ag_measure_sickness(pag);
+		if (sick & XFS_HEALTH_AG_PRIMARY)
+			xchk_set_corrupt(sc);
+		xfs_perag_put(pag);
+	}
+
+	return 0;
+}
+
+/*
+ * Scrub gave the filesystem a clean bill of health, so clear all the indirect
+ * markers of past problems (at least for the fs and ags) so that we can be
+ * healthy again.
+ */
+STATIC void
+xchk_mark_all_healthy(
+	struct xfs_mount	*mp)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+	int			error = 0;
+
+	xfs_fs_mark_healthy(mp, XFS_HEALTH_FS_INDIRECT);
+	xfs_rt_mark_healthy(mp, XFS_HEALTH_RT_INDIRECT);
+	for (agno = 0; error == 0 && agno < mp->m_sb.sb_agcount; agno++) {
+		pag = xfs_perag_get(mp, agno);
+		xfs_ag_mark_healthy(pag, XFS_HEALTH_AG_INDIRECT);
+		xfs_perag_put(pag);
+	}
+}
 /* Mark metadata unhealthy. */
 static void
 xchk_mark_sick(
@@ -148,6 +203,9 @@ xchk_mark_healthy(
 	case XFS_SCRUB_TYPE_RTBITMAP:
 	case XFS_SCRUB_TYPE_RTSUM:
 		xfs_rt_mark_healthy(sc->mp, mask);
+		break;
+	case XFS_SCRUB_TYPE_HEALTHY:
+		xchk_mark_all_healthy(sc->mp);
 		break;
 	default:
 		break;

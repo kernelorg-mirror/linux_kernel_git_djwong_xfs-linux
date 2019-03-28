@@ -208,6 +208,18 @@ xchk_ino_set_preen(
 	trace_xchk_ino_preen(sc, ino, __return_address);
 }
 
+/* Record non-specific corruption. */
+void
+xchk_set_corrupt(
+	struct xfs_scrub	*sc)
+{
+	sc->sm->sm_flags |= XFS_SCRUB_OFLAG_CORRUPT;
+	xfs_scrub_whine(sc->mp, "type %d ret_ip %pS",
+			sc->sm->sm_type,
+			__return_address);
+	trace_xchk_fs_error(sc, 0, __return_address);
+}
+
 /* Record a corrupt block. */
 void
 xchk_block_set_corrupt(
