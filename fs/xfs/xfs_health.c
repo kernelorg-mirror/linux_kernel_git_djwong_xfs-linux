@@ -316,3 +316,30 @@ xfs_ag_geom_health(
 		ageo->ag_health |= XFS_AG_GEOM_HEALTH_AG_REFCNTBT;
 	xfs_perag_put(pag);
 }
+
+/* Fill out bulkstat health info. */
+void
+xfs_bulkstat_health(
+	struct xfs_inode	*ip,
+	struct xfs_bstat	*bs)
+{
+	unsigned int		sick = xfs_inode_measure_sickness(ip);
+
+	bs->bs_health = 0;
+	if (sick & XFS_HEALTH_INO_CORE)
+		bs->bs_health |= XFS_BS_HEALTH_INODE;
+	if (sick & XFS_HEALTH_INO_BMBTD)
+		bs->bs_health |= XFS_BS_HEALTH_BMBTD;
+	if (sick & XFS_HEALTH_INO_BMBTA)
+		bs->bs_health |= XFS_BS_HEALTH_BMBTA;
+	if (sick & XFS_HEALTH_INO_BMBTC)
+		bs->bs_health |= XFS_BS_HEALTH_BMBTC;
+	if (sick & XFS_HEALTH_INO_DIR)
+		bs->bs_health |= XFS_BS_HEALTH_DIR;
+	if (sick & XFS_HEALTH_INO_XATTR)
+		bs->bs_health |= XFS_BS_HEALTH_XATTR;
+	if (sick & XFS_HEALTH_INO_SYMLINK)
+		bs->bs_health |= XFS_BS_HEALTH_SYMLINK;
+	if (sick & XFS_HEALTH_INO_PARENT)
+		bs->bs_health |= XFS_BS_HEALTH_PARENT;
+}

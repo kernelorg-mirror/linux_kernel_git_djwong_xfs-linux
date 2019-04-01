@@ -204,5 +204,6 @@ xfs_inode_healthy(struct xfs_inode *ip)
 void xfs_fsop_geom_health(struct xfs_mount *mp, struct xfs_fsop_geom *geo);
 void xfs_ag_geom_health(struct xfs_mount *mp, xfs_agnumber_t agno,
 		struct xfs_ag_geometry *ageo);
+void xfs_bulkstat_health(struct xfs_inode *ip, struct xfs_bstat *bs);
 
 #endif	/* __XFS_HEALTH_H__ */
