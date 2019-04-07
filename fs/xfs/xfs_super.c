@@ -1625,8 +1625,14 @@ xfs_init_percpu_counters(
 	if (error)
 		goto free_dinactive;
 
+	error = percpu_counter_init(&mp->m_delayed_blks, 0, GFP_KERNEL);
+	if (error)
+		goto free_rinactive;
+
 	return 0;
 
+free_rinactive:
+	percpu_counter_destroy(&mp->m_rinactive);
 free_dinactive:
 	percpu_counter_destroy(&mp->m_dinactive);
 free_iinactive:
@@ -1659,6 +1665,9 @@ xfs_destroy_percpu_counters(
 	percpu_counter_destroy(&mp->m_iinactive);
 	percpu_counter_destroy(&mp->m_dinactive);
 	percpu_counter_destroy(&mp->m_rinactive);
+	ASSERT(XFS_FORCED_SHUTDOWN(mp) ||
+	       percpu_counter_sum(&mp->m_delayed_blks) == 0);
+	percpu_counter_destroy(&mp->m_delayed_blks);
 }
 
 static struct xfs_mount *
