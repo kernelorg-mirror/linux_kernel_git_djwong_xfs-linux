@@ -84,6 +84,12 @@ typedef struct xfs_mount {
 	struct percpu_counter	m_iinactive;	/* inodes waiting for inactivation */
 	struct percpu_counter	m_dinactive;	/* data blocks waiting for inode inactivation */
 	struct percpu_counter	m_rinactive;	/* rt blocks waiting for inode inactivation */
+	/*
+	 * Count of data device blocks reserved for delayed allocations,
+	 * including indlen blocks.  Does not include allocated CoW staging
+	 * extents or anything related to the rt device.
+	 */
+	struct percpu_counter	m_delayed_blks;
 
 	struct xfs_buf		*m_sb_bp;	/* buffer for superblock */
 	char			*m_fsname;	/* filesystem name */
@@ -481,5 +487,14 @@ int	xfs_zero_extent(struct xfs_inode *ip, xfs_fsblock_t start_fsb,
 struct xfs_error_cfg * xfs_error_get_cfg(struct xfs_mount *mp,
 		int error_class, int error);
 void xfs_force_summary_recalc(struct xfs_mount *mp);
+
+/* Update the in-core delayed block counter. */
+static inline void
+xfs_mod_delayed(
+	struct xfs_mount	*mp,
+	int64_t			delta)
+{
+	percpu_counter_add(&mp->m_delayed_blks, delta);
+}
 
 #endif	/* __XFS_MOUNT_H__ */
