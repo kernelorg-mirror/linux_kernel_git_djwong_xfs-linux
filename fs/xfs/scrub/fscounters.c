@@ -53,6 +53,8 @@ xchk_setup_fscounters(
 	struct xfs_scrub	*sc,
 	struct xfs_inode	*ip)
 {
+	int			error;
+
 	sc->buf = kmem_zalloc(sizeof(struct xchk_fscounters), KM_SLEEP);
 	if (!sc->buf)
 		return -ENOMEM;
@@ -61,8 +63,19 @@ xchk_setup_fscounters(
 	 * Pause background reclaim while we're scrubbing to reduce the
 	 * likelihood of background perturbations to the counters throwing
 	 * off our calculations.
+	 *
+	 * If we're repairing, we need to prevent any other thread from
+	 * changing the global fs summary counters while we're repairing them.
+	 * This requires the fs to be frozen, which will disable background
+	 * reclaim and purge all inactive inodes.
 	 */
-	xchk_disable_reclaim(sc);
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		error = xchk_fs_freeze(sc);
+		if (error)
+			return error;
+	} else {
+		xchk_disable_reclaim(sc);
+	}
 
 	return xchk_trans_alloc(sc, 0);
 }
@@ -153,6 +166,7 @@ xchk_fscounters_calc(
  * Is the @counter within an acceptable range of @expected?
  *
  * Currently that means 1/16th (6%) or @nr_range of the @expected value.
+ * If we're repairing then we require an exact match.
  */
 static inline bool
 xchk_fscounter_within_range(
@@ -164,7 +178,10 @@ xchk_fscounter_within_range(
 	int64_t			value = percpu_counter_sum(counter);
 	uint64_t		range;
 
-	range = max_t(uint64_t, expected >> 4, nr_range);
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR)
+		range = 0;
+	else
+		range = max_t(uint64_t, expected >> 4, nr_range);
 	if (value < 0)
 		return false;
 	if (range < expected && value < expected - range)
