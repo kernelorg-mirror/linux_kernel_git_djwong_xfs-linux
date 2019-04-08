@@ -52,6 +52,10 @@
  * structures as quickly as it can.  We snapshot the percpu counters before and
  * after this operation and use the difference in counter values to guess at
  * our tolerance for mismatch between expected and actual counter values.
+ *
+ * NOTE: If the calling application has permitted us to repair the counters,
+ * we /must/ prevent all other filesystem activity by freezing it.  Since we've
+ * frozen the filesystem, we can require an exact match.
  */
 
 /*
@@ -154,8 +158,19 @@ xchk_setup_fscounters(
 	 * Pause background reclaim while we're scrubbing to reduce the
 	 * likelihood of background perturbations to the counters throwing
 	 * off our calculations.
+	 *
+	 * If we're repairing, we need to prevent any other thread from
+	 * changing the global fs summary counters while we're repairing them.
+	 * This requires the fs to be frozen, which will disable background
+	 * reclaim and purge all inactive inodes.
 	 */
-	xchk_stop_reaping(sc);
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		error = xchk_fs_freeze(sc);
+		if (error)
+			return error;
+	} else {
+		xchk_stop_reaping(sc);
+	}
 
 	return xchk_trans_alloc(sc, 0);
 }
@@ -265,6 +280,8 @@ retry:
  * Next, compute the variance from the expected value that we'll accept.
  * For now we'll use twice the change in the counter from start to finish
  * or the minimum variance, whichever is larger.
+ *
+ * If we're repairing then we require an exact match.
  */
 static inline bool
 xchk_fsc_within_range(
@@ -276,9 +293,13 @@ xchk_fsc_within_range(
 	int64_t			curr_value = percpu_counter_sum(counter);
 	int64_t			range;
 
-	range = abs(2 * (curr_value - old_value));
-	if (range < XCHK_FSC_MIN_VARIANCE)
-		range = XCHK_FSC_MIN_VARIANCE;
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		range = 0;
+	} else {
+		range = abs(2 * (curr_value - old_value));
+		if (range < XCHK_FSC_MIN_VARIANCE)
+			range = XCHK_FSC_MIN_VARIANCE;
+	}
 
 	trace_xchk_fscounters_within_range(sc->mp, expected, curr_value,
 			old_value, range);
