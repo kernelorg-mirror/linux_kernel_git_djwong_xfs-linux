@@ -195,6 +195,8 @@ xchk_teardown(
 			error = err2;
 		sc->flags &= ~XCHK_FS_FROZEN;
 	}
+	if (sc->flags & XCHK_RECLAIM_DISABLED)
+		xchk_enable_reclaim(sc);
 	if (sc->flags & XCHK_HAS_QUOTAOFFLOCK) {
 		mutex_unlock(&sc->mp->m_quotainfo->qi_quotaofflock);
 		sc->flags &= ~XCHK_HAS_QUOTAOFFLOCK;
