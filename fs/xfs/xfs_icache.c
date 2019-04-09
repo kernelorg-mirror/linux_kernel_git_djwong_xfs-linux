@@ -1809,7 +1809,7 @@ xfs_inactive_worker(
 }
 
 /* Cancel all queued inactivation work. */
-static void
+void
 xfs_inactive_cancel_work(
 	struct xfs_mount	*mp)
 {
@@ -1825,7 +1825,7 @@ xfs_inactive_cancel_work(
 }
 
 /* Reschedule background inactivation work. */
-static void
+void
 xfs_inactive_schedule_work(
 	struct xfs_mount	*mp,
 	unsigned long		delay)
