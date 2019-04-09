@@ -894,3 +894,21 @@ xchk_ilock_inverted(
 	}
 	return -EDEADLOCK;
 }
+
+/* Pause background reclamation and inactivation. */
+void
+xchk_disable_reclaim(
+	struct xfs_scrub	*sc)
+{
+	sc->flags |= XCHK_RECLAIM_DISABLED;
+	xfs_icache_disable_reclaim(sc->mp);
+}
+
+/* Unpause background reclamation and inactivation. */
+void
+xchk_enable_reclaim(
+	struct xfs_scrub	*sc)
+{
+	xfs_icache_enable_reclaim(sc->mp);
+	sc->flags &= ~XCHK_RECLAIM_DISABLED;
+}
