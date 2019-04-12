@@ -174,3 +174,79 @@ xchk_update_health(
 		break;
 	}
 }
+
+/* Is the given per-AG btree healthy enough for scanning? */
+bool
+xchk_ag_btree_healthy_enough(
+	struct xfs_scrub	*sc,
+	struct xfs_perag	*pag,
+	xfs_btnum_t		btnum)
+{
+	unsigned int		mask = 0;
+
+	/*
+	 * We always want the cursor if it's the same type as whatever we're
+	 * scrubbing, even if we already know the structure is corrupt.
+	 */
+	switch (sc->sm->sm_type) {
+	case XFS_SCRUB_TYPE_BNOBT:
+		if (btnum == XFS_BTNUM_BNO)
+			return true;
+		break;
+	case XFS_SCRUB_TYPE_CNTBT:
+		if (btnum == XFS_BTNUM_CNT)
+			return true;
+		break;
+	case XFS_SCRUB_TYPE_INOBT:
+		if (btnum == XFS_BTNUM_INO)
+			return true;
+		break;
+	case XFS_SCRUB_TYPE_FINOBT:
+		if (btnum == XFS_BTNUM_FINO)
+			return true;
+		break;
+	case XFS_SCRUB_TYPE_RMAPBT:
+		if (btnum == XFS_BTNUM_RMAP)
+			return true;
+		break;
+	case XFS_SCRUB_TYPE_REFCNTBT:
+		if (btnum == XFS_BTNUM_REFC)
+			return true;
+		break;
+	}
+
+	/*
+	 * Otherwise, we're only interested in the btree for cross-referencing.
+	 * If we know the btree is bad then don't bother, just set XFAIL.
+	 */
+	switch (btnum) {
+	case XFS_BTNUM_BNO:
+		mask = XFS_SICK_AG_BNOBT;
+		break;
+	case XFS_BTNUM_CNT:
+		mask = XFS_SICK_AG_CNTBT;
+		break;
+	case XFS_BTNUM_INO:
+		mask = XFS_SICK_AG_INOBT;
+		break;
+	case XFS_BTNUM_FINO:
+		mask = XFS_SICK_AG_FINOBT;
+		break;
+	case XFS_BTNUM_RMAP:
+		mask = XFS_SICK_AG_RMAPBT;
+		break;
+	case XFS_BTNUM_REFC:
+		mask = XFS_SICK_AG_REFCNTBT;
+		break;
+	default:
+		ASSERT(0);
+		return true;
+	}
+
+	if (xfs_ag_has_sickness(pag, mask)) {
+		sc->sm->sm_flags |= XFS_SCRUB_OFLAG_XFAIL;
+		return false;
+	}
+
+	return true;
+}
