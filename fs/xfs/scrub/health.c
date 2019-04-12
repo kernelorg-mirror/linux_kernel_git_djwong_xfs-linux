@@ -250,3 +250,38 @@ xchk_ag_btree_healthy_enough(
 
 	return true;
 }
+
+
+/* Mark the given btree unhealthy. */
+void
+xchk_ag_btree_mark_sick(
+	struct xfs_scrub	*sc,
+	struct xfs_btree_cur	*cur)
+{
+	unsigned int		mask = 0;
+
+	switch (cur->bc_btnum) {
+	case XFS_BTNUM_BNO:
+		mask = XFS_SICK_AG_BNOBT;
+		break;
+	case XFS_BTNUM_CNT:
+		mask = XFS_SICK_AG_CNTBT;
+		break;
+	case XFS_BTNUM_INO:
+		mask = XFS_SICK_AG_INOBT;
+		break;
+	case XFS_BTNUM_FINO:
+		mask = XFS_SICK_AG_FINOBT;
+		break;
+	case XFS_BTNUM_RMAP:
+		mask = XFS_SICK_AG_RMAPBT;
+		break;
+	case XFS_BTNUM_REFC:
+		mask = XFS_SICK_AG_REFCNTBT;
+		break;
+	default:
+		return;
+	}
+
+	xfs_ag_mark_sick(sc->sa.pag, mask);
+}

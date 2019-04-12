@@ -10,5 +10,7 @@ unsigned int xchk_health_mask_for_scrub_type(__u32 scrub_type);
 void xchk_update_health(struct xfs_scrub *sc);
 bool xchk_ag_btree_healthy_enough(struct xfs_scrub *sc, struct xfs_perag *pag,
 		xfs_btnum_t btnum);
+void xchk_ag_btree_mark_sick(struct xfs_scrub *sc,
+		struct xfs_btree_cur *cur);
 
 #endif /* __XFS_SCRUB_HEALTH_H__ */

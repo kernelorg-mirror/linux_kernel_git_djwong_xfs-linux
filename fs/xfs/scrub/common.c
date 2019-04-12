@@ -779,6 +779,8 @@ xchk_should_check_xref(
 		if (!*curpp)
 			return false;
 
+		xchk_ag_btree_mark_sick(sc, *curpp);
+
 		/* xref error, delete cursor and bail out. */
 		xfs_btree_del_cursor(*curpp, XFS_BTREE_ERROR);
 		*curpp = NULL;
