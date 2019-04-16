@@ -2324,6 +2324,8 @@ xfs_alloc_fix_freelist(
 		targs.oinfo = XFS_RMAP_OINFO_SKIP_UPDATE;
 	else
 		targs.oinfo = XFS_RMAP_OINFO_AG;
+	ASSERT((flags & XFS_ALLOC_FLAG_NOSHRINK) ||
+	       (tp->t_flags & XFS_TRANS_PERM_LOG_RES));
 	while (!(flags & XFS_ALLOC_FLAG_NOSHRINK) && pag->pagf_flcount > need) {
 		error = xfs_alloc_get_freelist(tp, agbp, &bno, 0);
 		if (error)
