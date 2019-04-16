@@ -180,6 +180,44 @@ static int check_fsflags(unsigned int flags)
 	return 0;
 }
 
+/* Do all the prep work to check immutable status and all that. */
+static int btrfs_ioctl_check_immutable(struct inode *inode,
+				       unsigned int fsflags,
+				       const unsigned int immutable_fsflag)
+{
+	struct btrfs_inode *binode = BTRFS_I(inode);
+	int ret;
+
+	/*
+	 * Wait for all pending directio and then flush all the dirty pages
+	 * for this file.  The flush marks all the pages readonly, so any
+	 * subsequent attempt to write to the file (particularly mmap pages)
+	 * will come through the filesystem and fail.
+	 */
+	if (S_ISREG(inode->i_mode) && !IS_IMMUTABLE(inode) &&
+	    (fsflags & immutable_fsflag)) {
+		inode_dio_wait(inode);
+		ret = filemap_write_and_wait(inode->i_mapping);
+		if (ret)
+			return ret;
+	}
+
+	/*
+	 * If immutable is set and we are not clearing it, we're not allowed to
+	 * change anything else in the inode.  Don't error out if we're only
+	 * trying to set immutable on an immutable file.
+	 */
+	if (!(binode->flags & BTRFS_INODE_IMMUTABLE) ||
+	    !(fsflags & immutable_fsflag))
+		return 0;
+
+	if ((binode->flags & ~BTRFS_INODE_IMMUTABLE) !=
+	    (fsflags & ~immutable_fsflag))
+		return -EPERM;
+
+	return 0;
+}
+
 static int btrfs_ioctl_setflags(struct file *file, void __user *arg)
 {
 	struct inode *inode = file_inode(file);
@@ -224,6 +262,10 @@ static int btrfs_ioctl_setflags(struct file *file, void __user *arg)
 			goto out_unlock;
 		}
 	}
+
+	ret = btrfs_ioctl_check_immutable(inode, fsflags, FS_IMMUTABLE_FL);
+	if (ret)
+		goto out_unlock;
 
 	if (fsflags & FS_SYNC_FL)
 		binode->flags |= BTRFS_INODE_SYNC;
@@ -432,6 +474,11 @@ static int btrfs_ioctl_fssetxattr(struct file *file, void __user *arg)
 		ret = -EPERM;
 		goto out_unlock;
 	}
+
+	ret = btrfs_ioctl_check_immutable(inode, fa.fsx_xflags,
+					  FS_XFLAG_IMMUTABLE);
+	if (ret)
+		goto out_unlock;
 
 	if (fa.fsx_xflags & FS_XFLAG_SYNC)
 		binode->flags |= BTRFS_INODE_SYNC;
