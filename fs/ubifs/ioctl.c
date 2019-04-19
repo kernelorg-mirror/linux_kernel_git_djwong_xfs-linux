@@ -124,6 +124,9 @@ static int setflags(struct inode *inode, int flags)
 	err = vfs_ioc_setflags_check(inode, oldflags, flags);
 	if (err)
 		goto out_unlock;
+	err = vfs_ioc_setflags_flush_data(inode, flags);
+	if (err)
+		goto out_unlock;
 
 	ui->flags = ioctl2ubifs(flags);
 	ubifs_set_inode_flags(inode);
