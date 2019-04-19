@@ -3534,4 +3534,6 @@ static inline struct sock *io_uring_get_socket(struct file *file)
 }
 #endif
 
+int vfs_ioc_setflags_check(struct inode *inode, int oldflags, int flags);
+
 #endif /* _LINUX_FS_H */
