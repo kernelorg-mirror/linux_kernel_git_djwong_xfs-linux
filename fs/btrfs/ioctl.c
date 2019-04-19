@@ -435,6 +435,9 @@ static int btrfs_ioctl_fssetxattr(struct file *file, void __user *arg)
 	ret = vfs_ioc_fssetxattr_check(inode, &old_fa, &fa);
 	if (ret)
 		goto out_unlock;
+	ret = vfs_ioc_fssetxattr_flush_data(inode, &fa);
+	if (ret)
+		goto out_unlock;
 
 	if (fa.fsx_xflags & FS_XFLAG_SYNC)
 		binode->flags |= BTRFS_INODE_SYNC;
