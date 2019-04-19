@@ -1671,6 +1671,9 @@ static int __f2fs_ioc_setflags(struct inode *inode, unsigned int flags)
 	err = vfs_ioc_setflags_check(inode, oldflags, flags);
 	if (err)
 		return err;
+	err = vfs_ioc_setflags_flush_data(inode, flags);
+	if (err)
+		return err;
 
 	flags = flags & F2FS_FL_USER_MODIFIABLE;
 	flags |= oldflags & ~F2FS_FL_USER_MODIFIABLE;
