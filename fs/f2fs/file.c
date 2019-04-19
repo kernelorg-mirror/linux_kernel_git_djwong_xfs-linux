@@ -2821,6 +2821,9 @@ static int f2fs_ioc_fssetxattr(struct file *filp, unsigned long arg)
 	err = vfs_ioc_fssetxattr_check(inode, &old_fa, &fa);
 	if (err)
 		goto out;
+	err = vfs_ioc_fssetxattr_flush_data(inode, &fa);
+	if (err)
+		goto out;
 	flags = (fi->i_flags & ~F2FS_FL_XFLAG_VISIBLE) |
 				(flags & F2FS_FL_XFLAG_VISIBLE);
 	err = __f2fs_ioc_setflags(inode, flags);
