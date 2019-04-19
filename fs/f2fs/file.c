@@ -2761,19 +2761,25 @@ static inline unsigned long f2fs_xflags_to_iflags(__u32 xflags)
 	return iflags;
 }
 
+static void __f2fs_ioc_fsgetxattr(struct f2fs_inode_info *fi,
+				  struct fsxattr *fa)
+{
+	memset(fa, 0, sizeof(struct fsxattr));
+	fa->fsx_xflags = f2fs_iflags_to_xflags(fi->i_flags &
+				F2FS_FL_USER_VISIBLE);
+
+	if (f2fs_sb_has_project_quota(F2FS_I_SB(inode)))
+		fa->fsx_projid = (__u32)from_kprojid(&init_user_ns,
+							fi->i_projid);
+}
+
 static int f2fs_ioc_fsgetxattr(struct file *filp, unsigned long arg)
 {
 	struct inode *inode = file_inode(filp);
 	struct f2fs_inode_info *fi = F2FS_I(inode);
 	struct fsxattr fa;
 
-	memset(&fa, 0, sizeof(struct fsxattr));
-	fa.fsx_xflags = f2fs_iflags_to_xflags(fi->i_flags &
-				F2FS_FL_USER_VISIBLE);
-
-	if (f2fs_sb_has_project_quota(F2FS_I_SB(inode)))
-		fa.fsx_projid = (__u32)from_kprojid(&init_user_ns,
-							fi->i_projid);
+	__f2fs_ioc_fsgetxattr(fi, &fa);
 
 	if (copy_to_user((struct fsxattr __user *)arg, &fa, sizeof(fa)))
 		return -EFAULT;
@@ -2808,7 +2814,7 @@ static int f2fs_ioc_fssetxattr(struct file *filp, unsigned long arg)
 {
 	struct inode *inode = file_inode(filp);
 	struct f2fs_inode_info *fi = F2FS_I(inode);
-	struct fsxattr fa;
+	struct fsxattr fa, old_fa;
 	unsigned int flags;
 	int err;
 
@@ -2832,6 +2838,11 @@ static int f2fs_ioc_fssetxattr(struct file *filp, unsigned long arg)
 
 	inode_lock(inode);
 	err = f2fs_ioctl_check_project(inode, &fa);
+	if (err)
+		goto out;
+
+	__f2fs_ioctl_fsgetxattr(fi, &old_fa);
+	err = vfs_ioc_fssetxattr_check(inode, &old_fa, &fa);
 	if (err)
 		goto out;
 	flags = (fi->i_flags & ~F2FS_FL_XFLAG_VISIBLE) |

@@ -2169,3 +2169,20 @@ int vfs_ioc_setflags_check(struct inode *inode, int oldflags, int flags)
 	return 0;
 }
 EXPORT_SYMBOL(vfs_ioc_setflags_check);
+
+/* Generic function to check FS_IOC_FSSETXATTR values. */
+int vfs_ioc_fssetxattr_check(struct inode *inode, const struct fsxattr *old_fa,
+			     struct fsxattr *fa)
+{
+	/*
+	 * Can't modify an immutable/append-only file unless we have
+	 * appropriate permission.
+	 */
+	if ((old_fa->fsx_xflags ^ fa->fsx_xflags) &
+			(FS_XFLAG_IMMUTABLE | FS_XFLAG_APPEND) &&
+	    !capable(CAP_LINUX_IMMUTABLE))
+		return -EPERM;
+
+	return 0;
+}
+EXPORT_SYMBOL(vfs_ioc_fssetxattr_check);
