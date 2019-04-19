@@ -291,6 +291,9 @@ static int ext4_ioctl_setflags(struct inode *inode,
 	err = vfs_ioc_setflags_check(inode, oldflags, flags);
 	if (err)
 		goto flags_out;
+	err = vfs_ioc_setflags_flush_data(inode, flags);
+	if (err)
+		goto flags_out;
 
 	/*
 	 * The JOURNAL_DATA flag can only be changed by
