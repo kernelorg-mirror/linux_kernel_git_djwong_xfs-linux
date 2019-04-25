@@ -11,5 +11,7 @@ typedef int (*xfs_iwalk_fn)(struct xfs_mount *mp, xfs_ino_t ino, void *data);
 #define XFS_IWALK_ABORT	(1)
 int xfs_iwalk(struct xfs_mount *mp, xfs_ino_t startino, xfs_iwalk_fn iwalk_fn,
 		void *data);
+int xfs_iwalk_threaded(struct xfs_mount *mp, xfs_ino_t startino,
+		xfs_iwalk_fn iwalk_fn, void *data);
 
 #endif /* __XFS_IWALK_H__ */
