@@ -721,16 +721,27 @@ out_unlock:
 	return error;
 }
 
+/* Return 0 on success or positive error */
+int
+xfs_bulkstat_one_fmt(
+	struct xfs_ibulk	*breq,
+	const struct xfs_bstat	*bstat)
+{
+	if (copy_to_user(breq->ubuffer, bstat, sizeof(*bstat)))
+		return -EFAULT;
+	return xfs_ibulk_advance(breq, sizeof(struct xfs_bstat));
+}
+
 STATIC int
 xfs_ioc_bulkstat(
 	xfs_mount_t		*mp,
 	unsigned int		cmd,
 	void			__user *arg)
 {
-	xfs_fsop_bulkreq_t	bulkreq;
-	int			count;	/* # of records returned */
-	xfs_ino_t		inlast;	/* last inode number */
-	int			done;
+	struct xfs_fsop_bulkreq	bulkreq;
+	struct xfs_ibulk	breq = {
+		.mp		= mp,
+	};
 	int			error;
 
 	/* done = 1 if there are more stats to get and if bulkstat */
@@ -745,35 +756,37 @@ xfs_ioc_bulkstat(
 	if (copy_from_user(&bulkreq, arg, sizeof(xfs_fsop_bulkreq_t)))
 		return -EFAULT;
 
-	if (copy_from_user(&inlast, bulkreq.lastip, sizeof(__s64)))
+	if (copy_from_user(&breq.lastino, bulkreq.lastip, sizeof(__s64)))
 		return -EFAULT;
 
-	if ((count = bulkreq.icount) <= 0)
+	if (bulkreq.icount <= 0)
 		return -EINVAL;
 
 	if (bulkreq.ubuffer == NULL)
 		return -EINVAL;
 
-	if (cmd == XFS_IOC_FSINUMBERS)
-		error = xfs_inumbers(mp, &inlast, &count,
+	breq.ubuffer = bulkreq.ubuffer;
+	breq.icount = bulkreq.icount;
+
+	if (cmd == XFS_IOC_FSINUMBERS) {
+		int	count = breq.icount;
+		error = xfs_inumbers(mp, &breq.lastino, &count,
 					bulkreq.ubuffer, xfs_inumbers_fmt);
-	else if (cmd == XFS_IOC_FSBULKSTAT_SINGLE)
-		error = xfs_bulkstat_one(mp, inlast, bulkreq.ubuffer,
-					sizeof(xfs_bstat_t), NULL, &done);
+		breq.ocount = count;
+	} else if (cmd == XFS_IOC_FSBULKSTAT_SINGLE)
+		error = xfs_bulkstat_one(&breq, xfs_bulkstat_one_fmt);
 	else	/* XFS_IOC_FSBULKSTAT */
-		error = xfs_bulkstat(mp, &inlast, &count, xfs_bulkstat_one,
-				     sizeof(xfs_bstat_t), bulkreq.ubuffer,
-				     &done);
+		error = xfs_bulkstat(&breq, xfs_bulkstat_one_fmt);
 
 	if (error)
 		return error;
 
 	if (bulkreq.lastip != NULL &&
-	    copy_to_user(bulkreq.lastip, &inlast, sizeof(xfs_ino_t)))
+	    copy_to_user(bulkreq.lastip, &breq.lastino, sizeof(xfs_ino_t)))
 		return -EFAULT;
 
 	if (bulkreq.ocount != NULL &&
-	    copy_to_user(bulkreq.ocount, &count, sizeof(count)))
+	    copy_to_user(bulkreq.ocount, &breq.ocount, sizeof(__s32)))
 		return -EFAULT;
 
 	return 0;
