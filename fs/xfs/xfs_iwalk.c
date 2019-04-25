@@ -21,6 +21,7 @@
 #include "xfs_health.h"
 #include "xfs_trans.h"
 #include "xfs_iwalk.h"
+#include "xfs_pwork.h"
 
 /*
  * Walking All the Inodes in the Filesystem
@@ -38,6 +39,9 @@
  */
 
 struct xfs_iwalk_ag {
+	/* parallel work control data; will be null if single threaded */
+	struct xfs_pwork		pwork;
+
 	struct xfs_mount		*mp;
 
 	/* Where do we start the traversal? */
@@ -198,6 +202,9 @@ xfs_iwalk_ag_recs(
 		trace_xfs_iwalk_ag_rec(iwag->mp, agno, irec->ir_startino,
 				irec->ir_free);
 		for (j = 0; j < XFS_INODES_PER_CHUNK; j++) {
+			if (xfs_pwork_want_abort(&iwag->pwork))
+				return 0;
+
 			/* Skip if this inode is free */
 			if (XFS_INOBT_MASK(j) & irec->ir_free)
 				continue;
@@ -293,7 +300,7 @@ xfs_iwalk_ag(
 	if (error)
 		goto out_cur;
 
-	while (has_rec) {
+	while (has_rec && !xfs_pwork_want_abort(&iwag->pwork)) {
 		struct xfs_inobt_rec_incore	*irec;
 
 		/* Fetch the inobt record. */
@@ -324,6 +331,8 @@ xfs_iwalk_ag(
 			error = xfs_iwalk_ag_recs(iwag);
 			if (error)
 				return error;
+			if (xfs_pwork_want_abort(&iwag->pwork))
+				return 0;
 
 			/* Recreate cursor where we left off. */
 			cur = xfs_iwalk_inobt_cur(mp, agno, &agi_bp);
@@ -367,6 +376,7 @@ xfs_iwalk(
 		.iwalk_fn	= iwalk_fn,
 		.data		= data,
 		.startino	= startino,
+		.pwork		= XFS_PWORK_SINGLE_THREADED,
 	};
 	xfs_agnumber_t		agno;
 	int			error;
@@ -389,4 +399,67 @@ xfs_iwalk(
 
 	xfs_iwalk_free(&iwag);
 	return error;
+}
+
+/* Run per-thread iwalk work. */
+static int
+xfs_iwalk_ag_work(
+	struct xfs_pwork	*pwork)
+{
+	struct xfs_iwalk_ag	*iwag;
+	int			error;
+
+	iwag = container_of(pwork, struct xfs_iwalk_ag, pwork);
+	error = xfs_iwalk_alloc(iwag);
+	if (error)
+		goto out;
+
+	error = xfs_iwalk_ag(iwag);
+	xfs_iwalk_free(iwag);
+out:
+	kmem_free(iwag);
+	return error;
+}
+
+/*
+ * Walk all the inodes in the filesystem using multiple threads to process each
+ * AG.
+ */
+int
+xfs_iwalk_threaded(
+	struct xfs_mount	*mp,
+	xfs_ino_t		startino,
+	xfs_iwalk_fn		iwalk_fn,
+	void			*data)
+{
+	struct xfs_pwork_ctl	pctl;
+	xfs_agnumber_t		agno;
+	unsigned int		nr_threads;
+	int			error;
+
+	if (startino && !xfs_verify_ino(mp, startino))
+		return -EINVAL;
+
+	nr_threads = xfs_pwork_guess_datadev_parallelism(mp);
+	error = xfs_pwork_init(&pctl, xfs_iwalk_ag_work, "xfs_iwalk",
+			nr_threads);
+	if (error)
+		return error;
+
+	for (agno = XFS_INO_TO_AGNO(mp, startino);
+	     agno < mp->m_sb.sb_agcount;
+	     agno++) {
+		struct xfs_iwalk_ag	*iwag;
+
+		iwag = kmem_alloc(sizeof(struct xfs_iwalk_ag), KM_SLEEP);
+		iwag->mp = mp;
+		iwag->iwalk_fn = iwalk_fn;
+		iwag->data = data;
+		iwag->startino = startino;
+		iwag->recs = NULL;
+		xfs_pwork_queue(&pctl, &iwag->pwork);
+		startino = XFS_AGINO_TO_INO(mp, agno + 1, 0);
+	}
+
+	return xfs_pwork_destroy(&pctl);
 }
