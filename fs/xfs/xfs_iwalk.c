@@ -75,8 +75,10 @@ xfs_iwalk_ichunk_ra(
 	     i < XFS_INODES_PER_CHUNK;
 	     i += igeo->ig_inodes_per_cluster,
 			agbno += igeo->ig_blocks_per_cluster) {
-		if (xfs_inobt_maskn(i, igeo->ig_inodes_per_cluster) &
-		    ~irec->ir_free) {
+		xfs_inofree_t	imask;
+
+		imask = xfs_inobt_maskn(i, igeo->ig_inodes_per_cluster);
+		if (imask & ~irec->ir_free) {
 			xfs_btree_reada_bufs(mp, agno, agbno,
 					igeo->ig_blocks_per_cluster,
 					&xfs_inode_buf_ops);
