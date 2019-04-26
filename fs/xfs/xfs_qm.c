@@ -1342,7 +1342,7 @@ xfs_qm_quotacheck_walk_and_flush(
 {
 	int			error, error2;
 
-	error = xfs_iwalk_threaded(mp, 0, xfs_qm_dqusage_adjust,
+	error = xfs_iwalk_threaded(mp, 0, xfs_qm_dqusage_adjust, !need_ilocks,
 			(void *)need_ilocks);
 	if (error)
 		return error;
