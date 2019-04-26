@@ -12,7 +12,7 @@ typedef int (*xfs_iwalk_fn)(struct xfs_mount *mp, xfs_ino_t ino, void *data);
 int xfs_iwalk(struct xfs_mount *mp, xfs_ino_t startino, xfs_iwalk_fn iwalk_fn,
 		void *data);
 int xfs_iwalk_threaded(struct xfs_mount *mp, xfs_ino_t startino,
-		xfs_iwalk_fn iwalk_fn, void *data);
+		xfs_iwalk_fn iwalk_fn, bool poll, void *data);
 
 /* Walk all inode btree records in the filesystem starting from @startino. */
 typedef int (*xfs_inobt_walk_fn)(struct xfs_mount *mp, xfs_agnumber_t agno,

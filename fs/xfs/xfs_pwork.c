@@ -11,6 +11,7 @@
 #include "xfs_trans_resv.h"
 #include "xfs_mount.h"
 #include "xfs_pwork.h"
+#include <linux/nmi.h>
 
 /*
  * Parallel Work Queue
@@ -38,6 +39,7 @@ xfs_pwork_work(
 	error = pctl->work_fn(pwork);
 	if (error && !pctl->error)
 		pctl->error = error;
+	atomic_dec(&pctl->works);
 }
 
 /*
@@ -58,6 +60,7 @@ xfs_pwork_init(
 		return -ENOMEM;
 	pwctl->work_fn = work_fn;
 	pwctl->error = 0;
+	atomic_set(&pwctl->works, 0);
 	return 0;
 }
 
@@ -69,6 +72,7 @@ xfs_pwork_queue(
 {
 	INIT_WORK(&pwork->work, xfs_pwork_work);
 	pwork->pctl = pctl;
+	atomic_inc(&pctl->works);
 	queue_work(pctl->wq, &pwork->work);
 }
 
@@ -79,6 +83,23 @@ xfs_pwork_destroy(
 {
 	destroy_workqueue(pctl->wq);
 	pctl->wq = NULL;
+	return pctl->error;
+}
+
+/*
+ * Wait for the work to finish and tear down the control structure.
+ * Continually poll completion status and touch the soft lockup watchdog.
+ * This is for things like mount that hold locks.
+ */
+int
+xfs_pwork_destroy_poll(
+	struct xfs_pwork_ctl	*pctl)
+{
+	while (atomic_read(&pctl->works) > 0) {
+		msleep(1);
+		touch_softlockup_watchdog();
+	}
+
 	return pctl->error;
 }
 

@@ -441,6 +441,7 @@ xfs_iwalk_threaded(
 	struct xfs_mount	*mp,
 	xfs_ino_t		startino,
 	xfs_iwalk_fn		iwalk_fn,
+	bool			polled,
 	void			*data)
 {
 	struct xfs_pwork_ctl	pctl;
@@ -472,6 +473,8 @@ xfs_iwalk_threaded(
 		startino = XFS_AGINO_TO_INO(mp, agno + 1, 0);
 	}
 
+	if (polled)
+		return xfs_pwork_destroy_poll(&pctl);
 	return xfs_pwork_destroy(&pctl);
 }
 
