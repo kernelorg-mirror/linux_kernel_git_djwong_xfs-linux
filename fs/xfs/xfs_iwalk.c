@@ -53,7 +53,10 @@ struct xfs_iwalk_ag {
 	unsigned int			nr_recs;
 
 	/* Inode walk function and data pointer. */
-	xfs_iwalk_fn			iwalk_fn;
+	union {
+		xfs_iwalk_fn		iwalk_fn;
+		xfs_inobt_walk_fn	inobt_walk_fn;
+	};
 	void				*data;
 };
 
@@ -93,16 +96,18 @@ xfs_iwalk_ichunk_ra(
 
 /*
  * Lookup the inode chunk that the given @agino lives in and then get the
- * record if we found the chunk.  Set the bits in @irec's free mask that
- * correspond to the inodes before @agino so that we skip them.  This is how we
- * restart an inode walk that was interrupted in the middle of an inode record.
+ * record if we found the chunk.  If @trim is set, set the bits in @irec's free
+ * mask that correspond to the inodes before @agino so that we skip them.
+ * This is how we restart an inode walk that was interrupted in the middle of
+ * an inode record.
  */
 STATIC int
 xfs_iwalk_grab_ichunk(
 	struct xfs_btree_cur		*cur,	/* btree cursor */
 	xfs_agino_t			agino,	/* starting inode of chunk */
 	int				*icount,/* return # of inodes grabbed */
-	struct xfs_inobt_rec_incore	*irec)	/* btree record */
+	struct xfs_inobt_rec_incore	*irec,	/* btree record */
+	bool				trim)
 {
 	int				idx;	/* index into inode chunk */
 	int				stat;
@@ -127,6 +132,12 @@ xfs_iwalk_grab_ichunk(
 	/* Check if the record contains the inode in request */
 	if (irec->ir_startino + XFS_INODES_PER_CHUNK <= agino) {
 		*icount = 0;
+		return 0;
+	}
+
+	/* Return the entire record if the caller wants the whole thing. */
+	if (!trim) {
+		*icount = irec->ir_count;
 		return 0;
 	}
 
@@ -287,7 +298,7 @@ xfs_iwalk_ag(
 		int			icount;
 
 		error = xfs_iwalk_grab_ichunk(cur, agino, &icount,
-				&iwag->recs[iwag->nr_recs]);
+				&iwag->recs[iwag->nr_recs], true);
 		if (error)
 			goto out_cur;
 		if (icount)
@@ -462,4 +473,164 @@ xfs_iwalk_threaded(
 	}
 
 	return xfs_pwork_destroy(&pctl);
+}
+
+/* For each inuse inode in each cached inobt record, call our function. */
+STATIC int
+xfs_inobt_walk_ag_recs(
+	struct xfs_iwalk_ag		*iwag)
+{
+	struct xfs_inobt_rec_incore	*irec;
+	unsigned int			i;
+	xfs_agnumber_t			agno;
+	int				error;
+
+	agno = XFS_INO_TO_AGNO(iwag->mp, iwag->startino);
+	for (i = 0, irec = iwag->recs; i < iwag->nr_recs; i++, irec++) {
+		trace_xfs_iwalk_ag_rec(iwag->mp, agno, irec->ir_startino,
+				irec->ir_free);
+		error = iwag->inobt_walk_fn(iwag->mp, agno, irec, iwag->data);
+		if (error)
+			return error;
+	}
+
+	iwag->nr_recs = 0;
+	return 0;
+}
+
+/*
+ * Walk all inode btree records in a single AG, from @iwag->startino to the end
+ * of the AG.
+ */
+STATIC int
+xfs_inobt_walk_ag(
+	struct xfs_iwalk_ag		*iwag)
+{
+	struct xfs_mount		*mp = iwag->mp;
+	struct xfs_buf			*agi_bp = NULL;
+	struct xfs_btree_cur		*cur;
+	xfs_agnumber_t			agno;
+	xfs_agino_t			agino;
+	int				has_rec;
+	int				error = 0;
+
+	agno = XFS_INO_TO_AGNO(mp, iwag->startino);
+	agino = XFS_INO_TO_AGINO(mp, iwag->startino);
+
+	cur = xfs_iwalk_inobt_cur(mp, agno, &agi_bp);
+	if (IS_ERR(cur))
+		return PTR_ERR(cur);
+
+	/*
+	 * If caller passed in a nonzero start inode number, load the record
+	 * from the inobt.  This is how we support starting an inobt walk in the
+	 * middle of an AG.
+	 *
+	 * If the caller passed in a start number of zero, move the cursor to
+	 * the first inobt record.
+	 */
+	if (agino != 0) {
+		int			icount;
+
+		error = xfs_iwalk_grab_ichunk(cur, agino, &icount,
+				&iwag->recs[iwag->nr_recs], false);
+		if (error)
+			goto out_cur;
+		if (icount)
+			iwag->nr_recs++;
+
+		error = xfs_btree_increment(cur, 0, &has_rec);
+	} else {
+		error = xfs_inobt_lookup(cur, 0, XFS_LOOKUP_GE, &has_rec);
+	}
+	if (error)
+		goto out_cur;
+
+	while (has_rec && !xfs_pwork_want_abort(&iwag->pwork)) {
+		struct xfs_inobt_rec_incore	*irec;
+
+		/* Fetch the inobt record. */
+		irec = &iwag->recs[iwag->nr_recs];
+		error = xfs_inobt_get_rec(cur, irec, &has_rec);
+		if (error)
+			goto out_cur;
+		if (!has_rec)
+			break;
+		iwag->nr_recs++;
+
+		/* If the record cache is full, walk the records. */
+		if (iwag->nr_recs == iwag->sz_recs) {
+			xfs_iwalk_del_inobt(&cur, &agi_bp, error);
+
+			error = xfs_inobt_walk_ag_recs(iwag);
+			if (error)
+				return error;
+			if (xfs_pwork_want_abort(&iwag->pwork))
+				return 0;
+
+			/* Recreate cursor where we left off. */
+			cur = xfs_iwalk_inobt_cur(mp, agno, &agi_bp);
+			if (IS_ERR(cur))
+				return PTR_ERR(cur);
+
+			error = xfs_inobt_lookup(cur, irec->ir_startino +
+					XFS_INODES_PER_CHUNK - 1,
+					XFS_LOOKUP_GE, &has_rec);
+		} else {
+			/* Move on to the next chunk. */
+			error = xfs_btree_increment(cur, 0, &has_rec);
+		}
+
+		if (error)
+			goto out_cur;
+		cond_resched();
+	}
+
+	/* Walk any records left behind in the cache. */
+	if (iwag->nr_recs) {
+		xfs_iwalk_del_inobt(&cur, &agi_bp, error);
+		return xfs_inobt_walk_ag_recs(iwag);
+	}
+
+out_cur:
+	xfs_iwalk_del_inobt(&cur, &agi_bp, error);
+	return error;
+}
+
+/* Walk all inode btree records in the filesystem starting from @startino. */
+int
+xfs_inobt_walk(
+	struct xfs_mount	*mp,
+	xfs_ino_t		startino,
+	xfs_inobt_walk_fn	inobt_walk_fn,
+	void			*data)
+{
+	struct xfs_iwalk_ag	iwag = {
+		.mp		= mp,
+		.inobt_walk_fn	= inobt_walk_fn,
+		.data		= data,
+		.startino	= startino,
+		.pwork		= XFS_PWORK_SINGLE_THREADED,
+	};
+	xfs_agnumber_t		agno;
+	int			error;
+
+	if (startino && !xfs_verify_ino(mp, startino))
+		return -EINVAL;
+
+	error = xfs_iwalk_alloc(&iwag);
+	if (error)
+		return error;
+
+	for (agno = XFS_INO_TO_AGNO(mp, startino);
+	     agno < mp->m_sb.sb_agcount;
+	     agno++) {
+		error = xfs_inobt_walk_ag(&iwag);
+		if (error)
+			break;
+		iwag.startino = XFS_AGINO_TO_INO(mp, agno + 1, 0);
+	}
+
+	xfs_iwalk_free(&iwag);
+	return error;
 }
