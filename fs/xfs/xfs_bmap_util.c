@@ -28,6 +28,7 @@
 #include "xfs_icache.h"
 #include "xfs_iomap.h"
 #include "xfs_reflink.h"
+#include "xfs_sb.h"
 
 /* Kernel only BMAP related definitions and functions */
 
@@ -836,6 +837,41 @@ out_unlock:
 	return error;
 }
 
+/*
+ * If we suspect that the target device isn't going to be able to satisfy the
+ * entire request, try forcing inode inactivation to free up space.  While it's
+ * perfectly fine to fill a preallocation request with a bunch of short
+ * extents, we'd prefer to do the inactivation work now to combat long term
+ * fragmentation in new file data.
+ */
+static void
+xfs_alloc_reclaim_inactive_space(
+	struct xfs_mount	*mp,
+	bool			is_rt,
+	xfs_filblks_t		allocatesize_fsb)
+{
+	struct xfs_perag	*pag;
+	struct xfs_sb		*sbp = &mp->m_sb;
+	xfs_extlen_t		free;
+	xfs_agnumber_t		agno;
+
+	if (is_rt) {
+		if (sbp->sb_frextents * sbp->sb_rextsize >= allocatesize_fsb)
+			return;
+	} else {
+		for (agno = 0; agno < mp->m_sb.sb_agcount; agno++) {
+			pag = xfs_perag_get(mp, agno);
+			free = pag->pagf_freeblks;
+			xfs_perag_put(pag);
+
+			if (free >= allocatesize_fsb)
+				return;
+		}
+	}
+
+	xfs_inactive_force(mp);
+}
+
 int
 xfs_alloc_file_space(
 	struct xfs_inode	*ip,
@@ -922,6 +958,8 @@ xfs_alloc_file_space(
 			resblks = qblocks = XFS_DIOSTRAT_SPACE_RES(mp, resblks);
 			quota_flag = XFS_QMOPT_RES_REGBLKS;
 		}
+
+		xfs_alloc_reclaim_inactive_space(mp, rt, allocatesize_fsb);
 
 		/*
 		 * Allocate and setup the transaction.
