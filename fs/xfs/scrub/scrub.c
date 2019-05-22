@@ -564,6 +564,11 @@ retry_op:
 		 * already tried to fix it, then attempt a repair.
 		 */
 		error = xrep_attempt(ip, &sc);
+		if (error != -EOPNOTSUPP && error != -ENOENT)
+			xchk_whine(mp, "REPAIRED? ino 0x%llx type %u agno %u inum %llu gen %u flags 0x%x error %d",
+					ip->i_ino, sm->sm_type, sm->sm_agno,
+					sm->sm_ino, sm->sm_gen, sm->sm_flags,
+					(sc.flags & XREP_ALREADY_FIXED) ? 0 : error);
 		if (error == -EAGAIN) {
 			/*
 			 * Either the repair function succeeded or it couldn't
