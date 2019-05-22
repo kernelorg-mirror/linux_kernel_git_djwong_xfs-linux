@@ -1050,7 +1050,7 @@ xfs_flush_unmap_range(
 {
 	struct xfs_mount	*mp = ip->i_mount;
 	struct inode		*inode = VFS_I(ip);
-	xfs_off_t		rounding, start, end;
+	xfs_off_t		rounding, start, end, flush_start;
 	int			error;
 
 	/* wait for the completion of any pending DIOs */
@@ -1060,7 +1060,20 @@ xfs_flush_unmap_range(
 	start = round_down(offset, rounding);
 	end = round_up(offset + len, rounding) - 1;
 
-	error = filemap_write_and_wait_range(inode->i_mapping, start, end);
+	/*
+	 * If we begin a data integrity writeback of a range that starts beyond
+	 * the on-disk EOF, it's possible that we'll convert an entire delalloc
+	 * extent to real to satisfy the writeback.  The on-disk EOF will be
+	 * updated to @offset + @len once writeback completes, having written
+	 * the entire real extent record into the data fork.  This is a vector
+	 * for exposure of stale disk contents, so we begin the flush at the
+	 * on-disk EOF or the requested range start, whichever is smaller.
+	 */
+	xfs_ilock(ip, XFS_ILOCK_SHARED);
+	flush_start = min(start, ip->i_d.di_size);
+	xfs_iunlock(ip, XFS_ILOCK_SHARED);
+	error = filemap_write_and_wait_range(inode->i_mapping, flush_start,
+			end);
 	if (error)
 		return error;
 	truncate_pagecache_range(inode, start, end);
