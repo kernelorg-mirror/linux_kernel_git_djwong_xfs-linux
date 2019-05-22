@@ -922,6 +922,83 @@ out_teardown:
 	return 0;
 }
 
+/*
+ * Check the incoming singleton request @hdr from userspace and initialize the
+ * internal @breq bulk request appropriately.  Returns 0 if the bulk request
+ * should proceed; or the usual negative error code.
+ */
+static int
+xfs_ireq_setup(
+	struct xfs_mount	*mp,
+	struct xfs_ireq		*hdr,
+	struct xfs_ibulk	*breq,
+	void __user		*ubuffer)
+{
+	if ((hdr->flags & ~XFS_IREQ_FLAGS_ALL) ||
+	    hdr->reserved32 ||
+	    memchr_inv(hdr->reserved, 0, sizeof(hdr->reserved)))
+		return -EINVAL;
+
+	if (XFS_INO_TO_AGNO(mp, hdr->ino) >= mp->m_sb.sb_agcount)
+		return -EINVAL;
+
+	breq->ubuffer = ubuffer;
+	breq->icount = 1;
+	breq->startino = hdr->ino;
+	return 0;
+}
+
+/*
+ * Update the userspace singleton request @hdr to reflect the end state of the
+ * internal bulk request @breq.  If @error is negative then we return just
+ * that; otherwise we copy the state so that userspace can discover what
+ * happened.
+ */
+static void
+xfs_ireq_teardown(
+	struct xfs_ireq		*hdr,
+	struct xfs_ibulk	*breq)
+{
+	hdr->ino = breq->startino;
+}
+
+/* Handle the v5 bulkstat_single ioctl. */
+STATIC int
+xfs_ioc_bulkstat_single(
+	struct xfs_mount	*mp,
+	unsigned int		cmd,
+	struct xfs_bulkstat_single_req __user *arg)
+{
+	struct xfs_ireq		hdr;
+	struct xfs_ibulk	breq = {
+		.mp		= mp,
+	};
+	int			error;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	if (XFS_FORCED_SHUTDOWN(mp))
+		return -EIO;
+
+	if (copy_from_user(&hdr, &arg->hdr, sizeof(hdr)))
+		return -EFAULT;
+
+	error = xfs_ireq_setup(mp, &hdr, &breq, &arg->bulkstat);
+	if (error)
+		return error;
+
+	error = xfs_bulkstat_one(&breq, xfs_bulkstat_fmt);
+	if (error)
+		return error;
+
+	xfs_ireq_teardown(&hdr, &breq);
+	if (copy_to_user(&arg->hdr, &hdr, sizeof(hdr)))
+		return -EFAULT;
+
+	return 0;
+}
+
 STATIC int
 xfs_ioc_fsgeometry(
 	struct xfs_mount	*mp,
@@ -2088,6 +2165,8 @@ xfs_file_ioctl(
 
 	case XFS_IOC_BULKSTAT:
 		return xfs_ioc_bulkstat(mp, cmd, arg);
+	case XFS_IOC_BULKSTAT_SINGLE:
+		return xfs_ioc_bulkstat_single(mp, cmd, arg);
 
 	case XFS_IOC_FSGEOMETRY_V1:
 		return xfs_ioc_fsgeometry(mp, arg, 3);
