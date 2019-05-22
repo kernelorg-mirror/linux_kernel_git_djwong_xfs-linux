@@ -617,6 +617,21 @@ out_unlock:
 }
 
 /*
+ * Create in-core inode for a newly allocated on-disk inode.  Get the in-core
+ * inode with the lock held exclusively because we're setting fields here and
+ * need to prevent others from looking at the inode until we're done.
+ */
+static int
+xfs_ialloc_iget(
+	struct xfs_trans	*tp,
+	xfs_ino_t		ino,
+	struct xfs_inode	**ipp)
+{
+	return xfs_iget(tp->t_mountp, tp, ino, XFS_IGET_CREATE, XFS_ILOCK_EXCL,
+			ipp);
+}
+
+/*
  * Initialize a newly allocated inode with the given arguments.  Heritable
  * inode properties will be copied from the parent if one is supplied and the
  * appropriate inode flags are set on the parent.
@@ -850,7 +865,7 @@ xfs_ialloc(
 	 * This is because we're setting fields here we need
 	 * to prevent others from looking at until we're done.
 	 */
-	error = xfs_iget(mp, tp, ino, XFS_IGET_CREATE, XFS_ILOCK_EXCL, &ip);
+	error = xfs_ialloc_iget(tp, ino, &ip);
 	if (error)
 		return error;
 	ASSERT(ip != NULL);
