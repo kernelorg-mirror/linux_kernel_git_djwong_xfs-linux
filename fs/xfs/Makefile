@@ -164,6 +164,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   array.o \
 				   bitmap.o \
 				   ialloc_repair.o \
+				   refcount_repair.o \
 				   repair.o \
 				   )
 endif
