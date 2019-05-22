@@ -227,6 +227,13 @@ typedef struct xfs_mount {
 	 * inactivating all the inodes.
 	 */
 	struct wait_queue_head	m_inactive_wait;
+
+	/*
+	 * Only allow one thread to initiate a repair freeze at a time.  We
+	 * also use this to block userspace from changing the freeze state
+	 * while a repair freeze is in progress.
+	 */
+	struct mutex		m_scrub_freeze;
 } xfs_mount_t;
 
 #define M_IGEO(mp)		(&(mp)->m_ino_geo)
