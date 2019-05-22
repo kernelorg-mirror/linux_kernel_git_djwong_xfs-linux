@@ -31,4 +31,22 @@ struct xfs_ialloc_args {
 	umode_t				mode;
 };
 
+/* The libxfs client must provide this group of helper functions. */
+void xfs_setup_inode(struct xfs_inode *ip);
+/*
+ * Flags for xfs_trans_ichgtime().
+ */
+#define	XFS_ICHGTIME_MOD	0x1	/* data fork modification timestamp */
+#define	XFS_ICHGTIME_CHG	0x2	/* inode field change timestamp */
+#define	XFS_ICHGTIME_CREATE	0x4	/* inode create timestamp */
+#define	XFS_ICHGTIME_ACCESS	0x8	/* last access timestamp */
+void xfs_trans_ichgtime(struct xfs_trans *tp, struct xfs_inode *ip, int flags);
+int xfs_ialloc_iget(struct xfs_trans *tp, xfs_ino_t ino,
+		    struct xfs_inode **ipp);
+
+int xfs_ialloc(struct xfs_trans *tp, const struct xfs_ialloc_args *args,
+	       struct xfs_buf **ialloc_context, struct xfs_inode **ipp);
+void xfs_inode_init(struct xfs_trans *tp, const struct xfs_ialloc_args *args,
+		    struct xfs_inode *ip);
+
 #endif /* __XFS_INODE_UTIL_H__ */
