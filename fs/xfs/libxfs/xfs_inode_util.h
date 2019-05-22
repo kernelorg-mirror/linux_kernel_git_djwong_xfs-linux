@@ -17,4 +17,18 @@ prid_t		xfs_get_projid(struct xfs_inode *ip);
 void		xfs_set_projid(struct xfs_inode *ip, prid_t projid);
 prid_t		xfs_get_initial_prid(struct xfs_inode *dp);
 
+/* Initial ids, link count, device number, and mode of a new inode. */
+struct xfs_ialloc_args {
+	struct xfs_inode		*pip;	/* parent inode or null */
+
+	uint32_t			uid;
+	uint32_t			gid;
+	prid_t				prid;
+
+	xfs_nlink_t			nlink;
+	dev_t				rdev;
+
+	umode_t				mode;
+};
+
 #endif /* __XFS_INODE_UTIL_H__ */
