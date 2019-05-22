@@ -6,20 +6,10 @@
 #ifndef __XFS_SCRUB_ARRAY_H__
 #define __XFS_SCRUB_ARRAY_H__
 
-struct xma_item;
-
-struct xma_cache {
-	uint64_t	nr;
-	struct xa_item	*item;
-};
-
-#define XMA_CACHE_SIZE	(8)
-
 struct xfbma {
-	struct list_head	list;
-	size_t			obj_size;
-	uint64_t		nr;
-	struct xma_cache	cache[XMA_CACHE_SIZE];
+	struct file	*filp;
+	size_t		obj_size;
+	uint64_t	nr;
 };
 
 struct xfbma *xfbma_init(size_t obj_size);
