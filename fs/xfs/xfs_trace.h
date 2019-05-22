@@ -3681,6 +3681,11 @@ DEFINE_IMETA_SB_EVENT(xfs_imeta_sb_create);
 DEFINE_IMETA_SB_EVENT(xfs_imeta_sb_unlink);
 DEFINE_IMETA_SB_EVENT(xfs_imeta_sb_zap);
 DEFINE_AG_ERROR_EVENT(xfs_imeta_end_update);
+DEFINE_NAMESPACE_EVENT(xfs_imeta_dir_lookup_component);
+DEFINE_NAMESPACE_EVENT(xfs_imeta_dir_try_create);
+DEFINE_NAMESPACE_EVENT(xfs_imeta_dir_created);
+DEFINE_NAMESPACE_EVENT(xfs_imeta_dir_unlinked);
+DEFINE_NAMESPACE_EVENT(xfs_imeta_dir_zap);
 
 #endif /* _TRACE_XFS_H */
 
