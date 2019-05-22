@@ -1280,9 +1280,7 @@ xfs_release(
 				return error;
 		}
 
-		/* delalloc blocks after truncation means it really is dirty */
-		if (ip->i_delayed_blks)
-			xfs_iflags_set(ip, XFS_IDIRTY_RELEASE);
+		xfs_iflags_set(ip, XFS_IDIRTY_RELEASE);
 	}
 	return 0;
 }
