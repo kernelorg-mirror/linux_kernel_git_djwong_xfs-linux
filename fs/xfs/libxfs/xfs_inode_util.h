@@ -6,6 +6,8 @@
 #ifndef	__XFS_INODE_UTIL_H__
 #define	__XFS_INODE_UTIL_H__
 
+struct xfs_icluster;
+
 uint16_t	xfs_flags2diflags(struct xfs_inode *ip, unsigned int xflags);
 uint64_t	xfs_flags2diflags2(struct xfs_inode *ip, unsigned int xflags);
 uint32_t	xfs_dic2xflags(uint16_t di_flags, uint64_t di_flags2,
@@ -54,6 +56,8 @@ int xfs_iunlink(struct xfs_trans *tp, struct xfs_inode *ip);
 int xfs_iunlink_remove(struct xfs_trans *tp, struct xfs_inode *ip);
 int xfs_droplink(struct xfs_trans *tp, struct xfs_inode *ip);
 void xfs_bumplink(struct xfs_trans *tp, struct xfs_inode *ip);
+int xfs_dir_ifree(struct xfs_trans *tp, struct xfs_inode *ip,
+		  struct xfs_icluster *xic);
 
 /* The libxfs client must provide these iunlink helper functions. */
 int xfs_iunlink_init(struct xfs_perag *pag);
