@@ -179,4 +179,7 @@ xfs_get_defquota(struct xfs_dquot *dqp, struct xfs_quotainfo *qi)
 	return defq;
 }
 
+int xfs_qm_quotacheck_walk_and_flush(struct xfs_mount *mp, bool need_ilocks,
+		struct list_head *buffer_list);
+
 #endif /* __XFS_QM_H__ */
