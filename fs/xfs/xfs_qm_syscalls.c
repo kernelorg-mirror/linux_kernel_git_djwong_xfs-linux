@@ -48,6 +48,12 @@ xfs_qm_scall_quotaoff(
 	xfs_qoff_logitem_t	*qoffstart;
 
 	/*
+	 * Clean up the inactive list before we turn quota off, to reduce the
+	 * amount of quotaoff work we have to do with the mutex held.
+	 */
+	xfs_inactive_force(mp);
+
+	/*
 	 * No file system can have quotas enabled on disk but not in core.
 	 * Note that quota utilities (like quotaoff) _expect_
 	 * errno == -EEXIST here.
