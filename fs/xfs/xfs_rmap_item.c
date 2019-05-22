@@ -322,7 +322,7 @@ xfs_trans_log_finish_rmap_update(
 	int				error;
 
 	error = xfs_rmap_finish_one(tp, type, owner, whichfork, startoff,
-			startblock, blockcount, state, pcur);
+			startblock, blockcount, state, rt, pcur);
 
 	/*
 	 * Mark the transaction dirty, even on error. This ensures the
@@ -492,7 +492,7 @@ const struct xfs_defer_op_type xfs_rmap_update_defer_type = {
  */
 int
 xfs_rui_recover(
-	struct xfs_mount		*mp,
+	struct xfs_trans		*parent_tp,
 	struct xfs_rui_log_item		*ruip)
 {
 	int				i;
@@ -506,6 +506,7 @@ xfs_rui_recover(
 	xfs_exntst_t			state;
 	struct xfs_trans		*tp;
 	struct xfs_btree_cur		*rcur = NULL;
+	struct xfs_mount		*mp = parent_tp->t_mountp;
 	bool				rt;
 
 	ASSERT(!test_bit(XFS_RUI_RECOVERED, &ruip->rui_flags));
@@ -553,6 +554,12 @@ xfs_rui_recover(
 			mp->m_rmap_maxlevels, 0, XFS_TRANS_RESERVE, &tp);
 	if (error)
 		return error;
+	/*
+	 * Recovery stashes all deferred ops during intent processing and
+	 * finishes them on completion. Transfer current dfops state to this
+	 * transaction and transfer the result back before we return.
+	 */
+	xfs_defer_move(tp, parent_tp);
 	rudp = xfs_trans_get_rud(tp, ruip);
 
 	for (i = 0; i < ruip->rui_format.rui_nextents; i++) {
@@ -602,10 +609,12 @@ xfs_rui_recover(
 
 	xfs_rmap_finish_one_cleanup(tp, rcur, error);
 	set_bit(XFS_RUI_RECOVERED, &ruip->rui_flags);
+	xfs_defer_move(parent_tp, tp);
 	error = xfs_trans_commit(tp);
 	return error;
 
 abort_error:
+	xfs_defer_move(parent_tp, tp);
 	xfs_rmap_finish_one_cleanup(tp, rcur, error);
 	xfs_trans_cancel(tp);
 	return error;
