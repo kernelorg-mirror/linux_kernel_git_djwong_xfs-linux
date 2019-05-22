@@ -52,6 +52,8 @@ void xfs_inode_init(struct xfs_trans *tp, const struct xfs_ialloc_args *args,
 
 int xfs_iunlink(struct xfs_trans *tp, struct xfs_inode *ip);
 int xfs_iunlink_remove(struct xfs_trans *tp, struct xfs_inode *ip);
+int xfs_droplink(struct xfs_trans *tp, struct xfs_inode *ip);
+void xfs_bumplink(struct xfs_trans *tp, struct xfs_inode *ip);
 
 /* The libxfs client must provide these iunlink helper functions. */
 int xfs_iunlink_init(struct xfs_perag *pag);
