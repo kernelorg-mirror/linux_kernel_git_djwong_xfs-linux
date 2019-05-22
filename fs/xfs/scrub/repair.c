@@ -26,6 +26,7 @@
 #include "xfs_quota.h"
 #include "xfs_attr.h"
 #include "xfs_reflink.h"
+#include "xfs_health.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
