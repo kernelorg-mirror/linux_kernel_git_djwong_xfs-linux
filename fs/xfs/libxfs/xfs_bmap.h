@@ -283,4 +283,7 @@ int	xfs_bunmapi_range(struct xfs_trans **tpp, struct xfs_inode *ip,
 		int whichfork, xfs_fileoff_t startoff, xfs_filblks_t unmap_len,
 		int bunmapi_flags);
 
+xfs_extlen_t	xfs_get_extsz_hint(struct xfs_inode *ip);
+xfs_extlen_t	xfs_get_cowextsz_hint(struct xfs_inode *ip);
+
 #endif	/* __XFS_BMAP_H__ */
