@@ -71,6 +71,25 @@ xfs_finobt_set_root(
 			   XFS_AGI_FREE_ROOT | XFS_AGI_FREE_LEVEL);
 }
 
+static inline void
+xfs_finobt_change_blocks(
+	struct xfs_btree_cur	*cur,
+	int			howmuch)
+{
+	if (!xfs_sb_version_hasfinobtblocks(&cur->bc_mp->m_sb))
+		return;
+
+	if (cur->bc_flags & XFS_BTREE_STAGING) {
+		xbtree_afakeroot_adjust_blocks(cur, howmuch);
+	} else {
+		struct xfs_buf	*agbp = cur->bc_private.a.agbp;
+		struct xfs_agi	*agi = XFS_BUF_TO_AGI(agbp);
+
+		be32_add_cpu(&agi->agi_fino_blocks, howmuch);
+		xfs_ialloc_log_agi(cur->bc_tp, agbp, XFS_AGI_FINO_BLOCKS);
+	}
+}
+
 STATIC int
 __xfs_inobt_alloc_block(
 	struct xfs_btree_cur	*cur,
@@ -126,10 +145,18 @@ xfs_finobt_alloc_block(
 	union xfs_btree_ptr	*new,
 	int			*stat)
 {
+	int			error;
+
 	if (cur->bc_mp->m_finobt_nores)
-		return xfs_inobt_alloc_block(cur, start, new, stat);
-	return __xfs_inobt_alloc_block(cur, start, new, stat,
-			XFS_AG_RESV_METADATA);
+		error = xfs_inobt_alloc_block(cur, start, new, stat);
+	else
+		error = __xfs_inobt_alloc_block(cur, start, new, stat,
+				XFS_AG_RESV_METADATA);
+	if (error)
+		return error;
+
+	xfs_finobt_change_blocks(cur, 1);
+	return 0;
 }
 
 STATIC int
@@ -156,6 +183,7 @@ xfs_finobt_free_block(
 	struct xfs_btree_cur	*cur,
 	struct xfs_buf		*bp)
 {
+	xfs_finobt_change_blocks(cur, -1);
 	if (cur->bc_mp->m_finobt_nores)
 		return xfs_inobt_free_block(cur, bp);
 	return __xfs_inobt_free_block(cur, bp, XFS_AG_RESV_METADATA);
@@ -507,10 +535,16 @@ xfs_finobt_commit_staged_btree(
 	struct xfs_buf		*agbp)
 {
 	struct xfs_agi		*agi = XFS_BUF_TO_AGI(agbp);
+	int			fields;
 
+	fields = XFS_AGI_FREE_ROOT | XFS_AGI_FREE_LEVEL;
+	if (xfs_sb_version_hasfinobtblocks(&tp->t_mountp->m_sb)) {
+		agi->agi_fino_blocks = cpu_to_be32(afake->af_blocks);
+		fields |= XFS_AGI_FINO_BLOCKS;
+	}
 	agi->agi_free_root = cpu_to_be32(afake->af_root);
 	agi->agi_free_level = cpu_to_be32(afake->af_levels);
-	xfs_ialloc_log_agi(tp, agbp, XFS_AGI_FREE_ROOT | XFS_AGI_FREE_LEVEL);
+	xfs_ialloc_log_agi(tp, agbp, fields);
 }
 
 /*
@@ -677,6 +711,20 @@ xfs_inobt_count_blocks(
 	struct xfs_buf		*agbp = NULL;
 	struct xfs_btree_cur	*cur = NULL;
 	int			error;
+
+	if (btnum == XFS_BTNUM_FINO &&
+	    xfs_sb_version_hasfinobtblocks(&mp->m_sb)) {
+		struct xfs_agi	*agi;
+
+		error = xfs_ialloc_read_agi(mp, tp, agno, &agbp);
+		if (error)
+			return error;
+
+		agi = XFS_BUF_TO_AGI(agbp);
+		*tree_blocks = be32_to_cpu(agi->agi_fino_blocks);
+		xfs_trans_brelse(tp, agbp);
+		return 0;
+	}
 
 	error = xfs_inobt_cur(mp, tp, agno, btnum, &cur, &agbp);
 	if (error)

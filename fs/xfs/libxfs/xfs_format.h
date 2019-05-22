@@ -569,6 +569,19 @@ static inline bool xfs_sb_version_hasmetadir(struct xfs_sb *sbp)
 }
 
 /*
+ * Free inode btree block counter.  We record the number of finobt blocks in
+ * the AGI header so that we can skip the finobt walk at mount time when
+ * setting up per-AG reservations.  Since this is an optimization of an
+ * existing feature, we only enable it when metadir is turned on to avoid
+ * paying the cost of a new incompat feature.
+ */
+static inline bool xfs_sb_version_hasfinobtblocks(struct xfs_sb *sbp)
+{
+	return xfs_sb_version_hasfinobt(sbp) &&
+	       xfs_sb_version_hasmetadir(sbp);
+}
+
+/*
  * end of superblock version macros
  */
 
@@ -766,7 +779,7 @@ typedef struct xfs_agi {
 	 */
 	uuid_t		agi_uuid;	/* uuid of filesystem */
 	__be32		agi_crc;	/* crc of agi sector */
-	__be32		agi_pad32;
+	__be32		agi_fino_blocks; /* finobt blocks used */
 	__be64		agi_lsn;	/* last write sequence */
 
 	__be32		agi_free_root; /* root of the free inode btree */
@@ -790,9 +803,10 @@ typedef struct xfs_agi {
 #define	XFS_AGI_UNLINKED	(1 << 10)
 #define	XFS_AGI_NUM_BITS_R1	11	/* end of the 1st agi logging region */
 #define	XFS_AGI_ALL_BITS_R1	((1 << XFS_AGI_NUM_BITS_R1) - 1)
-#define	XFS_AGI_FREE_ROOT	(1 << 11)
-#define	XFS_AGI_FREE_LEVEL	(1 << 12)
-#define	XFS_AGI_NUM_BITS_R2	13
+#define	XFS_AGI_FINO_BLOCKS	(1 << 11)
+#define	XFS_AGI_FREE_ROOT	(1 << 12)
+#define	XFS_AGI_FREE_LEVEL	(1 << 13)
+#define	XFS_AGI_NUM_BITS_R2	14
 
 /* disk block (xfs_daddr_t) in the AG */
 #define XFS_AGI_DADDR(mp)	((xfs_daddr_t)(2 << (mp)->m_sectbb_log))
