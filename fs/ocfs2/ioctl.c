@@ -109,6 +109,9 @@ static int ocfs2_set_inode_attr(struct inode *inode, unsigned flags,
 	status = vfs_ioc_setflags_check(inode, oldflags, flags);
 	if (status)
 		goto bail_unlock;
+	status = vfs_ioc_setflags_flush_data(inode, flags);
+	if (status)
+		goto bail_unlock;
 
 	handle = ocfs2_start_trans(osb, OCFS2_INODE_UPDATE_CREDITS);
 	if (IS_ERR(handle)) {

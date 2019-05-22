@@ -79,6 +79,9 @@ long reiserfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 						     flags);
 			if (err)
 				goto setflags_out;
+			err = vfs_ioc_setflags_flush_data(inode, flags);
+			if (err)
+				goto setflags_out;
 			if ((flags & REISERFS_NOTAIL_FL) &&
 			    S_ISREG(inode->i_mode)) {
 				int result;
