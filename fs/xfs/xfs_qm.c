@@ -823,11 +823,24 @@ xfs_qm_qino_alloc(
 	struct xfs_imeta_end		ic;
 	struct xfs_trans		*tp;
 	const struct xfs_imeta_path	*path = xfs_qflags_to_imeta(flags);
+	uint				old_qflags;
 	int				error;
 	bool				need_alloc = true;
 
 	*ip = NULL;
 	error = xfs_qm_qino_switch(mp, ip, flags, &need_alloc);
+	if (error)
+		return error;
+
+	/*
+	 * Ensure the quota directory exists, being careful to disable quotas
+	 * while we do this.  We'll have to quotacheck anyway, so the loss
+	 * of one inode shouldn't affect the quota count.
+	 */
+	old_qflags = mp->m_qflags & XFS_ALL_QUOTA_ACCT;
+	mp->m_qflags &= ~XFS_ALL_QUOTA_ACCT;
+	error = xfs_imeta_ensure_dirpath(mp, xfs_qflags_to_imeta(flags));
+	mp->m_qflags |= old_qflags;
 	if (error)
 		return error;
 
