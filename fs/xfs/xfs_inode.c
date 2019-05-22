@@ -643,32 +643,16 @@ xfs_ialloc_iget(
  */
 int
 xfs_dir_ialloc(
-	xfs_trans_t	**tpp,		/* input: current transaction;
-					   output: may be a new transaction. */
-	xfs_inode_t	*dp,		/* directory within whose allocate
-					   the inode. */
-	umode_t		mode,
-	xfs_nlink_t	nlink,
-	dev_t		rdev,
-	prid_t		prid,		/* project id */
-	xfs_inode_t	**ipp)		/* pointer to inode; it will be
-					   locked. */
+	struct xfs_trans		**tpp,
+	const struct xfs_ialloc_args	*args,
+	struct xfs_inode		**ipp)
 {
-	struct xfs_ialloc_args	args = {
-		.pip	= dp,
-		.uid	= xfs_kuid_to_uid(current_fsuid()),
-		.gid	= xfs_kgid_to_gid(current_fsgid()),
-		.prid	= prid,
-		.nlink	= nlink,
-		.rdev	= rdev,
-		.mode	= mode,
-	};
-	xfs_trans_t	*tp;
-	xfs_inode_t	*ip;
-	xfs_buf_t	*ialloc_context = NULL;
-	int		code;
-	void		*dqinfo;
-	uint		tflags;
+	struct xfs_trans		*tp;
+	struct xfs_inode		*ip;
+	struct xfs_buf			*ialloc_context = NULL;
+	void				*dqinfo;
+	uint				tflags;
+	int				code;
 
 	tp = *tpp;
 	ASSERT(tp->t_flags & XFS_TRANS_PERM_LOG_RES);
@@ -688,7 +672,7 @@ xfs_dir_ialloc(
 	 * transaction commit so that no other process can steal
 	 * the inode(s) that we've just allocated.
 	 */
-	code = xfs_ialloc(tp, &args, &ialloc_context, &ip);
+	code = xfs_ialloc(tp, args, &ialloc_context, &ip);
 
 	/*
 	 * Return an error if we were unable to allocate a new inode.
@@ -757,7 +741,7 @@ xfs_dir_ialloc(
 		 * other allocations in this allocation group,
 		 * this call should always succeed.
 		 */
-		code = xfs_ialloc(tp, &args, &ialloc_context, &ip);
+		code = xfs_ialloc(tp, args, &ialloc_context, &ip);
 
 		/*
 		 * If we get an error at this point, return to the caller
@@ -816,38 +800,34 @@ xfs_bumplink(
 
 int
 xfs_create(
-	xfs_inode_t		*dp,
-	struct xfs_name		*name,
-	umode_t			mode,
-	dev_t			rdev,
-	xfs_inode_t		**ipp)
+	struct xfs_inode		*dp,
+	struct xfs_name			*name,
+	const struct xfs_ialloc_args	*args,
+	struct xfs_inode		**ipp)
 {
-	int			is_dir = S_ISDIR(mode);
-	struct xfs_mount	*mp = dp->i_mount;
-	struct xfs_inode	*ip = NULL;
-	struct xfs_trans	*tp = NULL;
-	int			error;
-	bool                    unlock_dp_on_error = false;
-	prid_t			prid;
-	struct xfs_dquot	*udqp = NULL;
-	struct xfs_dquot	*gdqp = NULL;
-	struct xfs_dquot	*pdqp = NULL;
-	struct xfs_trans_res	*tres;
-	bool			cleared_space = false;
-	uint			resblks;
+	struct xfs_mount		*mp = dp->i_mount;
+	struct xfs_inode		*ip = NULL;
+	struct xfs_trans		*tp = NULL;
+	struct xfs_dquot		*udqp = NULL;
+	struct xfs_dquot		*gdqp = NULL;
+	struct xfs_dquot		*pdqp = NULL;
+	struct xfs_trans_res		*tres;
+	uint				resblks;
+	bool				unlock_dp_on_error = false;
+	bool				is_dir = S_ISDIR(args->mode);
+	bool				cleared_space = false;
+	int				error;
 
+	ASSERT(args->pip == dp);
 	trace_xfs_create(dp, name);
 
 	if (XFS_FORCED_SHUTDOWN(mp))
 		return -EIO;
 
-	prid = xfs_get_initial_prid(dp);
-
 	/*
 	 * Make sure that we have allocated dquot(s) on disk.
 	 */
-	error = xfs_qm_vop_dqalloc(dp, xfs_kuid_to_uid(current_fsuid()),
-					xfs_kgid_to_gid(current_fsgid()), prid,
+	error = xfs_qm_vop_dqalloc(dp, args->uid, args->gid, args->prid,
 					XFS_QMOPT_QUOTALL | XFS_QMOPT_INHERIT,
 					&udqp, &gdqp, &pdqp);
 	if (error)
@@ -915,7 +895,7 @@ retry:
 	 * entry pointing to them, but a directory also the "." entry
 	 * pointing to itself.
 	 */
-	error = xfs_dir_ialloc(&tp, dp, mode, is_dir ? 2 : 1, rdev, prid, &ip);
+	error = xfs_dir_ialloc(&tp, args, &ip);
 	if (error)
 		goto out_trans_cancel;
 
@@ -997,31 +977,30 @@ retry:
 
 int
 xfs_create_tmpfile(
-	struct xfs_inode	*dp,
-	umode_t			mode,
-	struct xfs_inode	**ipp)
+	struct xfs_inode		*dp,
+	const struct xfs_ialloc_args	*args,
+	struct xfs_inode		**ipp)
 {
-	struct xfs_mount	*mp = dp->i_mount;
-	struct xfs_inode	*ip = NULL;
-	struct xfs_trans	*tp = NULL;
-	int			error;
-	prid_t                  prid;
-	struct xfs_dquot	*udqp = NULL;
-	struct xfs_dquot	*gdqp = NULL;
-	struct xfs_dquot	*pdqp = NULL;
-	struct xfs_trans_res	*tres;
-	uint			resblks;
+	struct xfs_mount		*mp = dp->i_mount;
+	struct xfs_inode		*ip = NULL;
+	struct xfs_trans		*tp = NULL;
+	struct xfs_dquot		*udqp = NULL;
+	struct xfs_dquot		*gdqp = NULL;
+	struct xfs_dquot		*pdqp = NULL;
+	struct xfs_trans_res		*tres;
+	uint				resblks;
+	int				error;
+
+	ASSERT(args->nlink == 0);
+	ASSERT(args->pip == dp);
 
 	if (XFS_FORCED_SHUTDOWN(mp))
 		return -EIO;
 
-	prid = xfs_get_initial_prid(dp);
-
 	/*
 	 * Make sure that we have allocated dquot(s) on disk.
 	 */
-	error = xfs_qm_vop_dqalloc(dp, xfs_kuid_to_uid(current_fsuid()),
-				xfs_kgid_to_gid(current_fsgid()), prid,
+	error = xfs_qm_vop_dqalloc(dp, args->uid, args->gid, args->prid,
 				XFS_QMOPT_QUOTALL | XFS_QMOPT_INHERIT,
 				&udqp, &gdqp, &pdqp);
 	if (error)
@@ -1039,7 +1018,7 @@ xfs_create_tmpfile(
 	if (error)
 		goto out_trans_cancel;
 
-	error = xfs_dir_ialloc(&tp, dp, mode, 0, 0, prid, &ip);
+	error = xfs_dir_ialloc(&tp, args, &ip);
 	if (error)
 		goto out_trans_cancel;
 
@@ -3067,10 +3046,18 @@ xfs_rename_alloc_whiteout(
 	struct xfs_inode	*dp,
 	struct xfs_inode	**wip)
 {
+	struct xfs_ialloc_args	args = {
+		.pip	= dp,
+		.uid	= xfs_kuid_to_uid(current_fsuid()),
+		.gid	= xfs_kgid_to_gid(current_fsgid()),
+		.prid	= xfs_get_initial_prid(dp),
+		.nlink	= 0,
+		.mode	= S_IFCHR | WHITEOUT_MODE,
+	};
 	struct xfs_inode	*tmpfile;
 	int			error;
 
-	error = xfs_create_tmpfile(dp, S_IFCHR | WHITEOUT_MODE, &tmpfile);
+	error = xfs_create_tmpfile(dp, &args, &tmpfile);
 	if (error)
 		return error;
 
