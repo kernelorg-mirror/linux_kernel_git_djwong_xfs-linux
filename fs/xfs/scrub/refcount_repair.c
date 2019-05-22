@@ -111,6 +111,11 @@ struct xrep_refc {
 	xfs_extlen_t		btblocks;  /* # of refcountbt blocks */
 };
 
+struct xrep_refc_build {
+	struct xfs_scrub	*sc;
+	struct xbtree_afakeroot	refc_root;
+};
+
 /* Grab the next (abbreviated) rmap record from the rmapbt. */
 STATIC int
 xrep_refc_next_rrm(
@@ -414,18 +419,18 @@ out:
 	return error;
 }
 
-/* Initialize new refcountbt root and implant it into the AGF. */
+/*
+ * Initialize new refcountbt root block and set up a fake root so we can build
+ * a new btree and only swap it if we're successful.
+ */
 STATIC int
-xrep_refc_reset_btree(
-	struct xfs_scrub	*sc,
-	int			*log_flags)
+xrep_refc_stage_btree(
+	struct xrep_refc_build	*xrb)
 {
+	struct xfs_scrub	*sc = xrb->sc;
 	struct xfs_buf		*bp;
-	struct xfs_agf		*agf;
 	xfs_fsblock_t		btfsb;
 	int			error;
-
-	agf = XFS_BUF_TO_AGF(sc->sa.agf_bp);
 
 	/* Initialize a new refcountbt root. */
 	error = xrep_alloc_ag_block(sc, &XFS_RMAP_OINFO_REFC, &btfsb,
@@ -436,12 +441,8 @@ xrep_refc_reset_btree(
 			&xfs_refcountbt_buf_ops);
 	if (error)
 		return error;
-	agf->agf_refcount_root = cpu_to_be32(XFS_FSB_TO_AGBNO(sc->mp, btfsb));
-	agf->agf_refcount_level = cpu_to_be32(1);
-	agf->agf_refcount_blocks = cpu_to_be32(1);
-	*log_flags |= XFS_AGF_REFCOUNT_BLOCKS | XFS_AGF_REFCOUNT_ROOT |
-		      XFS_AGF_REFCOUNT_LEVEL;
-
+	xbtree_afakeroot_init(sc->mp, &xrb->refc_root,
+			XFS_FSB_TO_AGBNO(sc->mp, btfsb));
 	return 0;
 }
 
@@ -451,20 +452,21 @@ xrep_refc_insert_rec(
 	const void			*item,
 	void				*priv)
 {
+	struct xrep_refc_build		*xrb = priv;
 	const struct xrep_refc_extent	*rre = item;
 	struct xfs_refcount_irec	refc = {
 		.rc_startblock	= rre->startblock,
 		.rc_blockcount	= rre->blockcount,
 		.rc_refcount	= rre->refcount,
 	};
-	struct xfs_scrub		*sc = priv;
+	struct xfs_scrub		*sc = xrb->sc;
 	struct xfs_mount		*mp = sc->mp;
 	struct xfs_btree_cur		*cur;
 	int				have_gt;
 	int				error;
 
 	/* Insert into the refcountbt. */
-	cur = xfs_refcountbt_init_cursor(mp, sc->tp, sc->sa.agf_bp,
+	cur = xfs_refcountbt_stage_cursor(mp, sc->tp, &xrb->refc_root,
 			sc->sa.agno);
 	error = xfs_refcount_lookup_eq(cur, rre->startblock, &have_gt);
 	if (error)
@@ -481,13 +483,19 @@ out:
 	return error;
 }
 
-/* Build new refcount btree and dispose of the old one. */
+/*
+ * Use the collected refcount information to stage a new refcount btree.  If
+ * this is successful we'll return with the new btree root information logged
+ * to the repair transaction but not yet committed.
+ */
 STATIC int
-xrep_refc_rebuild_tree(
+xrep_refc_build_new_tree(
 	struct xfs_scrub	*sc,
-	struct xfbma		*refcount_records,
-	struct xfs_bitmap	*old_refcountbt_blocks)
+	struct xfbma		*refcount_records)
 {
+	struct xrep_refc_build	xrb = {
+		.sc		= sc,
+	};
 	int			error;
 
 	/*
@@ -498,14 +506,68 @@ xrep_refc_rebuild_tree(
 	if (error)
 		return error;
 
+	/*
+	 * Create a new btree for staging all the refcount records we collected
+	 * earlier.  This btree will not be rooted in the AGF until we've
+	 * succesfully reloaded the tree.
+	 */
+	error = xrep_refc_stage_btree(&xrb);
+	if (error)
+		return error;
+
+	/* Add all records. */
+	error = xfbma_iter_del(refcount_records, xrep_refc_insert_rec, &xrb);
+	if (error)
+		return error;
+
+	/* Clean transaction ahead of installing the new btree root. */
+	error = xrep_roll_ag_trans(sc);
+	if (error)
+		return error;
+
+	/*
+	 * Re-read the AGF so that the buffer type is set properly.  Since we
+	 * built a new tree without dirtying the AGF, the buffer item may have
+	 * fallen off the buffer.  This ought to succeed since the AGF is held
+	 * across transaction rolls.
+	 */
+	error = xfs_read_agf(sc->mp, sc->tp, sc->sa.agno, 0, &sc->sa.agf_bp);
+	if (error)
+		return error;
+
+	/* Install new btree root. */
+	xfs_refcountbt_commit_staged_btree(sc->tp, &xrb.refc_root,
+			sc->sa.agf_bp);
+	return 0;
+}
+
+/*
+ * Now that we've logged the roots of the new btrees, invalidate all of the
+ * old blocks and free them.
+ */
+STATIC int
+xrep_refc_remove_old_tree(
+	struct xfs_scrub	*sc,
+	struct xfs_bitmap	*old_refcountbt_blocks)
+{
+	int			error;
+
+	/* Invalidate all the inobt/finobt blocks in btlist. */
+	error = xrep_invalidate_blocks(sc, old_refcountbt_blocks);
+	if (error)
+		return error;
+	error = xrep_roll_ag_trans(sc);
+	if (error)
+		return error;
+
 	/* Free the old refcountbt blocks if they're not in use. */
 	error = xrep_reap_extents(sc, old_refcountbt_blocks,
 			&XFS_RMAP_OINFO_REFC, XFS_AG_RESV_METADATA);
 	if (error)
 		return error;
 
-	/* Add all records. */
-	return xfbma_iter_del(refcount_records, xrep_refc_insert_rec, sc);
+	sc->flags |= XREP_RESET_PERAG_RESV;
+	return 0;
 }
 
 /* Rebuild the refcount btree. */
@@ -516,7 +578,6 @@ xrep_refcountbt(
 	struct xfs_bitmap	old_refcountbt_blocks;
 	struct xfbma		*refcount_records;
 	struct xfs_mount	*mp = sc->mp;
-	int			log_flags = 0;
 	int			error;
 
 	/* We require the rmapbt to rebuild anything. */
@@ -537,29 +598,16 @@ xrep_refcountbt(
 	if (error)
 		goto out;
 
-	/*
-	 * Blow out the old refcount btrees.  This is the point at which
-	 * we are no longer able to bail out gracefully.
-	 */
-	error = xrep_refc_reset_btree(sc, &log_flags);
-	if (error)
-		goto out;
-	xfs_alloc_log_agf(sc->tp, sc->sa.agf_bp, log_flags);
-
-	/* Invalidate all the inobt/finobt blocks in btlist. */
-	error = xrep_invalidate_blocks(sc, &old_refcountbt_blocks);
-	if (error)
-		goto out;
-	error = xrep_roll_ag_trans(sc);
+	/* Rebuild the refcount information. */
+	error = xrep_refc_build_new_tree(sc, refcount_records);
 	if (error)
 		goto out;
 
-	/* Now rebuild the refcount information. */
-	error = xrep_refc_rebuild_tree(sc, refcount_records,
-			&old_refcountbt_blocks);
+	/* Kill the old tree. */
+	error = xrep_refc_remove_old_tree(sc, &old_refcountbt_blocks);
 	if (error)
 		goto out;
-	sc->flags |= XREP_RESET_PERAG_RESV;
+
 out:
 	xfs_bitmap_destroy(&old_refcountbt_blocks);
 	xfbma_destroy(refcount_records);

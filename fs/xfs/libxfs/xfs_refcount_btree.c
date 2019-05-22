@@ -20,10 +20,16 @@
 #include "xfs_bit.h"
 #include "xfs_rmap.h"
 
+static inline bool is_staging(struct xfs_btree_cur *cur);
+
 static struct xfs_btree_cur *
 xfs_refcountbt_dup_cursor(
 	struct xfs_btree_cur	*cur)
 {
+	if (is_staging(cur))
+		return xfs_refcountbt_stage_cursor(cur->bc_mp, cur->bc_tp,
+				cur->bc_private.a.afake,
+				cur->bc_private.a.agno);
 	return xfs_refcountbt_init_cursor(cur->bc_mp, cur->bc_tp,
 			cur->bc_private.a.agbp, cur->bc_private.a.agno);
 }
@@ -57,8 +63,6 @@ xfs_refcountbt_alloc_block(
 	union xfs_btree_ptr	*new,
 	int			*stat)
 {
-	struct xfs_buf		*agbp = cur->bc_private.a.agbp;
-	struct xfs_agf		*agf = XFS_BUF_TO_AGF(agbp);
 	struct xfs_alloc_arg	args;		/* block allocation args */
 	int			error;		/* error return value */
 
@@ -85,8 +89,16 @@ xfs_refcountbt_alloc_block(
 	ASSERT(args.len == 1);
 
 	new->s = cpu_to_be32(args.agbno);
-	be32_add_cpu(&agf->agf_refcount_blocks, 1);
-	xfs_alloc_log_agf(cur->bc_tp, agbp, XFS_AGF_REFCOUNT_BLOCKS);
+
+	if (is_staging(cur)) {
+		xbtree_afakeroot_adjust_blocks(cur, 1);
+	} else {
+		struct xfs_buf	*agbp = cur->bc_private.a.agbp;
+		struct xfs_agf	*agf = XFS_BUF_TO_AGF(agbp);
+
+		be32_add_cpu(&agf->agf_refcount_blocks, 1);
+		xfs_alloc_log_agf(cur->bc_tp, agbp, XFS_AGF_REFCOUNT_BLOCKS);
+	}
 
 	*stat = 1;
 	return 0;
@@ -101,15 +113,22 @@ xfs_refcountbt_free_block(
 	struct xfs_buf		*bp)
 {
 	struct xfs_mount	*mp = cur->bc_mp;
-	struct xfs_buf		*agbp = cur->bc_private.a.agbp;
-	struct xfs_agf		*agf = XFS_BUF_TO_AGF(agbp);
 	xfs_fsblock_t		fsbno = XFS_DADDR_TO_FSB(mp, XFS_BUF_ADDR(bp));
 	int			error;
 
 	trace_xfs_refcountbt_free_block(cur->bc_mp, cur->bc_private.a.agno,
 			XFS_FSB_TO_AGBNO(cur->bc_mp, fsbno), 1);
-	be32_add_cpu(&agf->agf_refcount_blocks, -1);
-	xfs_alloc_log_agf(cur->bc_tp, agbp, XFS_AGF_REFCOUNT_BLOCKS);
+
+	if (is_staging(cur)) {
+		xbtree_afakeroot_adjust_blocks(cur, -1);
+	} else {
+		struct xfs_buf	*agbp = cur->bc_private.a.agbp;
+		struct xfs_agf	*agf = XFS_BUF_TO_AGF(agbp);
+
+		be32_add_cpu(&agf->agf_refcount_blocks, -1);
+		xfs_alloc_log_agf(cur->bc_tp, agbp, XFS_AGF_REFCOUNT_BLOCKS);
+	}
+
 	error = xfs_free_extent(cur->bc_tp, fsbno, 1, &XFS_RMAP_OINFO_REFC,
 			XFS_AG_RESV_METADATA);
 	if (error)
@@ -310,9 +329,41 @@ static const struct xfs_btree_ops xfs_refcountbt_ops = {
 	.recs_inorder		= xfs_refcountbt_recs_inorder,
 };
 
+static inline bool is_staging(struct xfs_btree_cur *cur)
+{
+	return cur->bc_flags & XFS_BTREE_STAGING;
+}
+
 /*
- * Allocate a new refcount btree cursor.
+ * Initialize a new refcount btree cursor.
  */
+static struct xfs_btree_cur *
+xfs_refcountbt_init_common(
+	struct xfs_mount	*mp,
+	struct xfs_trans	*tp,
+	xfs_agnumber_t		agno)
+{
+	struct xfs_btree_cur	*cur;
+
+	ASSERT(agno != NULLAGNUMBER);
+	ASSERT(agno < mp->m_sb.sb_agcount);
+
+	cur = kmem_zone_zalloc(xfs_btree_cur_zone, KM_NOFS);
+	cur->bc_tp = tp;
+	cur->bc_mp = mp;
+	cur->bc_btnum = XFS_BTNUM_REFC;
+	cur->bc_blocklog = mp->m_sb.sb_blocklog;
+	cur->bc_statoff = XFS_STATS_CALC_INDEX(xs_refcbt_2);
+
+	cur->bc_private.a.agno = agno;
+	cur->bc_flags |= XFS_BTREE_CRC_BLOCKS;
+
+	cur->bc_private.a.priv.refc.nr_ops = 0;
+	cur->bc_private.a.priv.refc.shape_changes = 0;
+	return cur;
+}
+
+/* Create a btree cursor. */
 struct xfs_btree_cur *
 xfs_refcountbt_init_cursor(
 	struct xfs_mount	*mp,
@@ -323,27 +374,49 @@ xfs_refcountbt_init_cursor(
 	struct xfs_agf		*agf = XFS_BUF_TO_AGF(agbp);
 	struct xfs_btree_cur	*cur;
 
-	ASSERT(agno != NULLAGNUMBER);
-	ASSERT(agno < mp->m_sb.sb_agcount);
-	cur = kmem_zone_zalloc(xfs_btree_cur_zone, KM_NOFS);
-
-	cur->bc_tp = tp;
-	cur->bc_mp = mp;
-	cur->bc_btnum = XFS_BTNUM_REFC;
-	cur->bc_blocklog = mp->m_sb.sb_blocklog;
-	cur->bc_ops = &xfs_refcountbt_ops;
-	cur->bc_statoff = XFS_STATS_CALC_INDEX(xs_refcbt_2);
-
+	cur = xfs_refcountbt_init_common(mp, tp, agno);
 	cur->bc_nlevels = be32_to_cpu(agf->agf_refcount_level);
-
 	cur->bc_private.a.agbp = agbp;
-	cur->bc_private.a.agno = agno;
-	cur->bc_flags |= XFS_BTREE_CRC_BLOCKS;
-
-	cur->bc_private.a.priv.refc.nr_ops = 0;
-	cur->bc_private.a.priv.refc.shape_changes = 0;
-
+	cur->bc_ops = &xfs_refcountbt_ops;
 	return cur;
+}
+
+/* Create a btree cursor with a fake root for staging. */
+struct xfs_btree_cur *
+xfs_refcountbt_stage_cursor(
+	struct xfs_mount	*mp,
+	struct xfs_trans	*tp,
+	struct xbtree_afakeroot	*afake,
+	xfs_agnumber_t		agno)
+{
+	struct xfs_btree_cur	*cur;
+	struct xfs_btree_ops	*ops;
+
+	cur = xfs_refcountbt_init_common(mp, tp, agno);
+	xfs_btree_stage_afakeroot(cur, afake, &xfs_refcountbt_ops, &ops);
+	ops->set_root = xbtree_afakeroot_set_root;
+	ops->init_ptr_from_cur = xbtree_afakeroot_init_ptr_from_cur;
+	return cur;
+}
+
+/*
+ * Swap in the new btree root.  Once we pass this point the newly rebuilt btree
+ * is in place and we have to kill off all the old btree blocks.
+ */
+void
+xfs_refcountbt_commit_staged_btree(
+	struct xfs_trans	*tp,
+	struct xbtree_afakeroot	*afake,
+	struct xfs_buf		*agbp)
+{
+	struct xfs_agf		*agf = XFS_BUF_TO_AGF(agbp);
+
+	agf->agf_refcount_root = cpu_to_be32(afake->af_root);
+	agf->agf_refcount_level = cpu_to_be32(afake->af_levels);
+	agf->agf_refcount_blocks = cpu_to_be32(afake->af_blocks);
+	xfs_alloc_log_agf(tp, agbp, XFS_AGF_REFCOUNT_BLOCKS |
+				    XFS_AGF_REFCOUNT_ROOT |
+				    XFS_AGF_REFCOUNT_LEVEL);
 }
 
 /*
