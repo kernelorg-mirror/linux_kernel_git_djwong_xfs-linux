@@ -27,7 +27,7 @@
 #include "xfs_dquot_item.h"
 #include "xfs_dquot.h"
 #include "xfs_reflink.h"
-
+#include "xfs_icache.h"
 
 #define XFS_WRITEIO_ALIGN(mp,off)	(((off) >> mp->m_writeio_log) \
 						<< mp->m_writeio_log)
@@ -186,6 +186,7 @@ xfs_iomap_write_direct(
 	int		lockmode;
 	int		bmapi_flags = XFS_BMAPI_PREALLOC;
 	uint		tflags = 0;
+	bool		flush_inactive = true;
 
 	rt = XFS_IS_REALTIME_INODE(ip);
 	extsz = xfs_get_extsz_hint(ip);
@@ -258,8 +259,14 @@ xfs_iomap_write_direct(
 			resblks = XFS_DIOSTRAT_SPACE_RES(mp, 0) << 1;
 		}
 	}
+start_over:
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, resrtextents,
 			tflags, &tp);
+	if (error == -ENOSPC && flush_inactive) {
+		flush_inactive = false;
+		xfs_inactive_force(mp);
+		goto start_over;
+	}
 	if (error)
 		return error;
 
@@ -459,6 +466,7 @@ xfs_iomap_prealloc_size(
 				       alloc_blocks);
 
 	freesp = percpu_counter_read_positive(&mp->m_fdblocks);
+	freesp += percpu_counter_read_positive(&mp->m_dinactive);
 	if (freesp < mp->m_low_space[XFS_LOWSP_5_PCNT]) {
 		shift = 2;
 		if (freesp < mp->m_low_space[XFS_LOWSP_4_PCNT])
