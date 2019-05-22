@@ -45,6 +45,10 @@ typedef struct xfs_dquot {
 	xfs_qcnt_t	 q_res_bcount;	/* total regular nblks used+reserved */
 	xfs_qcnt_t	 q_res_icount;	/* total inos allocd+reserved */
 	xfs_qcnt_t	 q_res_rtbcount;/* total realtime blks used+reserved */
+	uint64_t	 q_ina_total;	/* inactive inodes attached here */
+	xfs_qcnt_t	 q_ina_bcount;	/* inactive regular nblks used+reserved */
+	xfs_qcnt_t	 q_ina_icount;	/* inactive inos allocd+reserved */
+	xfs_qcnt_t	 q_ina_rtbcount;/* inactive realtime blks used+reserved */
 	xfs_qcnt_t	 q_prealloc_lo_wmark;/* prealloc throttle wmark */
 	xfs_qcnt_t	 q_prealloc_hi_wmark;/* prealloc disabled wmark */
 	int64_t		 q_low_space[XFS_QLOWSP_MAX];
