@@ -883,7 +883,8 @@ xchk_agi(
 			xchk_block_set_corrupt(sc, sc->sa.agi_bp);
 	}
 
-	if (agi->agi_pad32 != cpu_to_be32(0))
+	if (!xfs_sb_version_hasfinobtblocks(&mp->m_sb) &&
+	    agi->agi_fino_blocks != cpu_to_be32(0))
 		xchk_block_set_corrupt(sc, sc->sa.agi_bp);
 
 	/* Do the incore counters match? */
