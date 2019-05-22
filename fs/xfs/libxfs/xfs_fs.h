@@ -468,6 +468,16 @@ struct xfs_bulk_ireq {
 
 #define XFS_BULK_IREQ_FLAGS_ALL	(0)
 
+/* Header for a single inode request. */
+struct xfs_ireq {
+	uint64_t	ino;		/* I/O: start with this inode	*/
+	uint32_t	flags;		/* I/O: operation flags		*/
+	uint32_t	reserved32;	/* must be zero			*/
+	uint64_t	reserved[2];	/* must be zero			*/
+};
+
+#define XFS_IREQ_FLAGS_ALL	(0)
+
 /*
  * ioctl structures for v5 bulkstat and inumbers requests
  */
@@ -477,6 +487,11 @@ struct xfs_bulkstat_req {
 };
 #define XFS_BULKSTAT_REQ_SIZE(nr)	(sizeof(struct xfs_bulkstat_req) + \
 					 (nr) * sizeof(struct xfs_bulkstat))
+
+struct xfs_bulkstat_single_req {
+	struct xfs_ireq		hdr;
+	struct xfs_bulkstat	bulkstat;
+};
 
 /*
  * Error injection.
@@ -780,6 +795,7 @@ struct xfs_scrub_metadata {
 #define XFS_IOC_GOINGDOWN	     _IOR ('X', 125, uint32_t)
 #define XFS_IOC_FSGEOMETRY	     _IOR ('X', 126, struct xfs_fsop_geom)
 #define XFS_IOC_BULKSTAT	     _IOR ('X', 127, struct xfs_bulkstat_req)
+#define XFS_IOC_BULKSTAT_SINGLE	     _IOR ('X', 128, struct xfs_bulkstat_single_req)
 /*	XFS_IOC_GETFSUUID ---------- deprecated 140	 */
 
 
