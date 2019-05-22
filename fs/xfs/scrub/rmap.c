@@ -24,6 +24,7 @@
 #include "scrub/common.h"
 #include "scrub/btree.h"
 #include "scrub/trace.h"
+#include "scrub/repair.h"
 
 /*
  * Set us up to scrub reverse mapping btrees.
@@ -33,7 +34,10 @@ xchk_setup_ag_rmapbt(
 	struct xfs_scrub	*sc,
 	struct xfs_inode	*ip)
 {
-	return xchk_setup_ag_btree(sc, ip, false);
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR)
+		return xrep_rmapbt_setup(sc, ip);
+	else
+		return xchk_setup_ag_btree(sc, ip, false);
 }
 
 /* Reverse-mapping scrubber. */
