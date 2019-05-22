@@ -14,6 +14,7 @@
 #include "xfs_ioctl.h"
 #include "xfs_alloc.h"
 #include "xfs_rtalloc.h"
+#include "xfs_iwalk.h"
 #include "xfs_itable.h"
 #include "xfs_error.h"
 #include "xfs_attr.h"
@@ -846,10 +847,26 @@ xfs_bulk_ireq_setup(
 	struct xfs_ibulk	*breq,
 	void __user		*ubuffer)
 {
-	if (hdr->icount == 0 ||
-	    (hdr->flags & ~XFS_BULK_IREQ_FLAGS_ALL) ||
-	    hdr->reserved32 ||
+	if (hdr->icount == 0 || (hdr->flags & ~XFS_BULK_IREQ_FLAGS_ALL) ||
 	    memchr_inv(hdr->reserved, 0, sizeof(hdr->reserved)))
+		return -EINVAL;
+
+	/*
+	 * The IREQ_AGNO flag means that we only want results from a given AG.
+	 * If @hdr->ino is zero, we start iterating in that AG.  If @hdr->ino is
+	 * beyond the specified AG then we return no results.
+	 */
+	if (hdr->flags & XFS_BULK_IREQ_AGNO) {
+		if (hdr->agno >= mp->m_sb.sb_agcount)
+			return -EINVAL;
+
+		if (hdr->ino == 0)
+			hdr->ino = XFS_AGINO_TO_INO(mp, hdr->agno, 0);
+		else if (XFS_INO_TO_AGNO(mp, hdr->ino) < hdr->agno)
+			return -EINVAL;
+		else if (XFS_INO_TO_AGNO(mp, hdr->ino) > hdr->agno)
+			goto no_results;
+	} else if (hdr->agno)
 		return -EINVAL;
 
 	if (XFS_INO_TO_AGNO(mp, hdr->ino) >= mp->m_sb.sb_agcount)
@@ -858,6 +875,8 @@ xfs_bulk_ireq_setup(
 	breq->ubuffer = ubuffer;
 	breq->icount = hdr->icount;
 	breq->startino = hdr->ino;
+	if (hdr->flags & XFS_BULK_IREQ_AGNO)
+		breq->flags |= XFS_IBULK_SAME_AG;
 	return 0;
 no_results:
 	hdr->ocount = 0;

@@ -241,8 +241,8 @@ xfs_bulkstat(
 	if (xfs_bulkstat_already_done(breq->mp, breq->startino))
 		return 0;
 
-	error = xfs_iwalk(breq->mp, NULL, breq->startino, xfs_bulkstat_iwalk,
-			breq->icount, &bc);
+	error = xfs_iwalk(breq->mp, NULL, breq->startino, breq->flags,
+			xfs_bulkstat_iwalk, breq->icount, &bc);
 
 	/*
 	 * We found some inodes, so clear the error status and return them.
@@ -362,7 +362,7 @@ xfs_inumbers(
 	if (xfs_bulkstat_already_done(breq->mp, breq->startino))
 		return 0;
 
-	error = xfs_inobt_walk(breq->mp, NULL, breq->startino,
+	error = xfs_inobt_walk(breq->mp, NULL, breq->startino, breq->flags,
 			xfs_inumbers_walk, breq->icount, &ic);
 
 	/*
