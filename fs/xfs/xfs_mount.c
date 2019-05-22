@@ -1036,7 +1036,7 @@ xfs_unmountfs(
 	 * Since this can involve finobt updates, do it now before we lose the
 	 * per-AG space reservations.
 	 */
-	xfs_inactive_force(mp);
+	xfs_inactive_force_poll(mp);
 
 	xfs_stop_block_reaping(mp);
 	xfs_fs_unreserve_ag_blocks(mp);
