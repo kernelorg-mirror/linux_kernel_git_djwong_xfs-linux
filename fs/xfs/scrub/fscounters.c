@@ -40,6 +40,10 @@
  * structures as quickly as it can.  We snapshot the percpu counters before and
  * after this operation and use the difference in counter values to guess at
  * our tolerance for mismatch between expected and actual counter values.
+ *
+ * NOTE: If the calling application has permitted us to repair the counters,
+ * we /must/ prevent all other filesystem activity by freezing it.  Since we've
+ * frozen the filesystem, we can require an exact match.
  */
 
 /*
@@ -141,8 +145,19 @@ xchk_setup_fscounters(
 	 * Pause background reclaim while we're scrubbing to reduce the
 	 * likelihood of background perturbations to the counters throwing off
 	 * our calculations.
+	 *
+	 * If we're repairing, we need to prevent any other thread from
+	 * changing the global fs summary counters while we're repairing them.
+	 * This requires the fs to be frozen, which will disable background
+	 * reclaim and purge all inactive inodes.
 	 */
-	xchk_stop_reaping(sc);
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		error = xchk_fs_freeze(sc);
+		if (error)
+			return error;
+	} else {
+		xchk_stop_reaping(sc);
+	}
 
 	return xchk_trans_alloc(sc, 0);
 }
@@ -251,6 +266,8 @@ retry:
  * Otherwise, we /might/ have a problem.  If the change in the summations is
  * more than we want to tolerate, the filesystem is probably busy and we should
  * just send back INCOMPLETE and see if userspace will try again.
+ *
+ * If we're repairing then we require an exact match.
  */
 static inline bool
 xchk_fscount_within_range(
@@ -272,6 +289,10 @@ xchk_fscount_within_range(
 	/* Exact matches are always ok. */
 	if (curr_value == expected)
 		return true;
+
+	/* We require exact matches when repair is running. */
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR)
+		return false;
 
 	min_value = min(old_value, curr_value);
 	max_value = max(old_value, curr_value);
