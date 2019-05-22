@@ -171,6 +171,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   refcount_repair.o \
 				   repair.o \
 				   symlink_repair.o \
+				   xfile.o \
 				   )
 xfs-$(CONFIG_XFS_QUOTA)		+= scrub/quota_repair.o
 endif

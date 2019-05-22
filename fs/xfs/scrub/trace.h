@@ -906,6 +906,29 @@ TRACE_EVENT(xrep_ibt_insert,
 		  __entry->freemask)
 )
 
+TRACE_EVENT(xfbma_sort_stats,
+	TP_PROTO(uint64_t nr, unsigned int max_stack_depth,
+		 unsigned int max_stack_used, int error),
+	TP_ARGS(nr, max_stack_depth, max_stack_used, error),
+	TP_STRUCT__entry(
+		__field(uint64_t, nr)
+		__field(unsigned int, max_stack_depth)
+		__field(unsigned int, max_stack_used)
+		__field(int, error)
+	),
+	TP_fast_assign(
+		__entry->nr = nr;
+		__entry->max_stack_depth = max_stack_depth;
+		__entry->max_stack_used = max_stack_used;
+		__entry->error = error;
+	),
+	TP_printk("nr %llu max_depth %u max_used %u error %d",
+		  __entry->nr,
+		  __entry->max_stack_depth,
+		  __entry->max_stack_used,
+		  __entry->error)
+);
+
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
 
 #endif /* _TRACE_XFS_SCRUB_TRACE_H */
