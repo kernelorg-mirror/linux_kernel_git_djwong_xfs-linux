@@ -732,7 +732,8 @@ xchk_get_inode(
 				error, __return_address);
 		return error;
 	}
-	if (VFS_I(ip)->i_generation != sc->sm->sm_gen) {
+	if (VFS_I(ip)->i_generation != sc->sm->sm_gen ||
+	    xfs_is_metadata_inode(ip)) {
 		xfs_irele(ip);
 		return -ENOENT;
 	}
