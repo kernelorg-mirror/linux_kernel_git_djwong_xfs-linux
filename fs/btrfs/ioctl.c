@@ -216,6 +216,9 @@ static int btrfs_ioctl_setflags(struct file *file, void __user *arg)
 	ret = vfs_ioc_setflags_check(inode, old_fsflags, fsflags);
 	if (ret)
 		goto out_unlock;
+	ret = vfs_ioc_setflags_flush_data(inode, fsflags);
+	if (ret)
+		goto out_unlock;
 
 	if (fsflags & FS_SYNC_FL)
 		binode_flags |= BTRFS_INODE_SYNC;

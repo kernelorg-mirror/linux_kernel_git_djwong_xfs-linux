@@ -151,6 +151,9 @@ static int nilfs_ioctl_setflags(struct inode *inode, struct file *filp,
 	ret = vfs_ioc_setflags_check(inode, oldflags, flags);
 	if (ret)
 		goto out;
+	ret = vfs_ioc_setflags_flush_data(inode, flags);
+	if (ret)
+		goto out;
 
 	ret = nilfs_transaction_begin(inode->i_sb, &ti, 0);
 	if (ret)
