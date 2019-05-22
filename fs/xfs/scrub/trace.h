@@ -782,7 +782,7 @@ TRACE_EVENT(xrep_ibt_found,
 		  __entry->freemask)
 )
 
-TRACE_EVENT(xrep_refcount_extent_fn,
+TRACE_EVENT(xrep_refc_found,
 	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno,
 		 xfs_agblock_t startblock, xfs_extlen_t blockcount,
 		 xfs_nlink_t refcount),
