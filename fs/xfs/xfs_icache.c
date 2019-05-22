@@ -1981,12 +1981,12 @@ xfs_start_block_reaping(
 /* Queue a new inode inactivation pass if there are reclaimable inodes. */
 static void
 xfs_inactive_work_queue(
-	struct xfs_mount        *mp)
+	struct xfs_perag	*pag)
 {
 	rcu_read_lock();
-	if (radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_RECLAIM_TAG))
-		queue_delayed_work(mp->m_inactive_workqueue,
-				&mp->m_inactive_work,
+	if (pag->pag_ici_inactive)
+		queue_delayed_work(pag->pag_mount->m_inactive_workqueue,
+				&pag->pag_inactive_work,
 				msecs_to_jiffies(xfs_syncd_centisecs / 6 * 10));
 	rcu_read_unlock();
 }
@@ -2012,7 +2012,7 @@ xfs_perag_set_inactive_tag(
 	 * take a while, so we allow the deferral of an already-scheduled
 	 * inactivation on the grounds that we prefer batching.
 	 */
-	xfs_inactive_work_queue(mp);
+	xfs_inactive_work_queue(pag);
 
 	trace_xfs_perag_set_reclaim(mp, pag->pag_agno, -1, _RET_IP_);
 }
@@ -2121,6 +2121,28 @@ xfs_inactive_inode(
 }
 
 /*
+ * Inactivate the inodes in an AG. Even if the filesystem is corrupted, we
+ * still need to clear the INACTIVE iflag so that we can move on to reclaiming
+ * the inode.
+ */
+static int
+xfs_inactive_inodes_pag(
+	struct xfs_perag	*pag)
+{
+	DEFINE_INACTIVE_CTX(inctx, NULL);
+	int			error;
+
+	error = xfs_ici_walk_ag(pag, 0, xfs_inactive_grab, xfs_inactive_inode,
+			NULL, &inctx, XFS_ICI_RECLAIM_TAG);
+
+	/* If we inactivated any inodes at all, we need to kick reclaim. */
+	if (inctx.kick_reclaim)
+		xfs_reclaim_work_queue(pag->pag_mount);
+
+	return error;
+}
+
+/*
  * Walk the AGs and reclaim the inodes in them. Even if the filesystem is
  * corrupted, we still need to clear the INACTIVE iflag so that we can move
  * on to reclaiming the inode.
@@ -2148,8 +2170,9 @@ void
 xfs_inactive_worker(
 	struct work_struct	*work)
 {
-	struct xfs_mount	*mp = container_of(to_delayed_work(work),
-					struct xfs_mount, m_inactive_work);
+	struct xfs_perag	*pag = container_of(to_delayed_work(work),
+					struct xfs_perag, pag_inactive_work);
+	struct xfs_mount	*mp = pag->pag_mount;
 	int			error;
 
 	/*
@@ -2164,12 +2187,33 @@ xfs_inactive_worker(
 	if (!sb_start_write_trylock(mp->m_super))
 		return;
 
-	error = xfs_inactive_inodes(mp, NULL);
+	error = xfs_inactive_inodes_pag(pag);
 	if (error && error != -EAGAIN)
 		xfs_err(mp, "inode inactivation failed, error %d", error);
 
 	sb_end_write(mp->m_super);
-	xfs_inactive_work_queue(mp);
+	xfs_inactive_work_queue(pag);
+}
+
+/* Wait for all background inactivation work to finish. */
+static void
+xfs_inactive_flush(
+	struct xfs_mount	*mp)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno = 0;
+
+	while ((pag = xfs_perag_get_tag(mp, agno, XFS_ICI_RECLAIM_TAG))) {
+		bool		flush;
+
+		agno = pag->pag_agno + 1;
+		spin_lock(&pag->pag_ici_lock);
+		flush = pag->pag_ici_inactive > 0;
+		spin_unlock(&pag->pag_ici_lock);
+		if (flush)
+			flush_delayed_work(&pag->pag_inactive_work);
+		xfs_perag_put(pag);
+	}
 }
 
 /* Flush all inode inactivation work that might be queued. */
@@ -2177,8 +2221,8 @@ void
 xfs_inactive_force(
 	struct xfs_mount	*mp)
 {
-	queue_delayed_work(mp->m_inactive_workqueue, &mp->m_inactive_work, 0);
-	flush_delayed_work(&mp->m_inactive_work);
+	xfs_inactive_schedule_work(mp, 0);
+	xfs_inactive_flush(mp);
 }
 
 /*
@@ -2190,7 +2234,42 @@ void
 xfs_inactive_shutdown(
 	struct xfs_mount	*mp)
 {
-	cancel_delayed_work_sync(&mp->m_inactive_work);
-	flush_workqueue(mp->m_inactive_workqueue);
+	xfs_inactive_cancel_work(mp);
 	xfs_inactive_inodes(mp, NULL);
+}
+
+/* Cancel all queued inactivation work. */
+void
+xfs_inactive_cancel_work(
+	struct xfs_mount	*mp)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno = 0;
+
+	while ((pag = xfs_perag_get_tag(mp, agno, XFS_ICI_RECLAIM_TAG))) {
+		agno = pag->pag_agno + 1;
+		cancel_delayed_work_sync(&pag->pag_inactive_work);
+		xfs_perag_put(pag);
+	}
+	flush_workqueue(mp->m_inactive_workqueue);
+}
+
+/* Reschedule background inactivation work. */
+void
+xfs_inactive_schedule_work(
+	struct xfs_mount	*mp,
+	unsigned long		delay)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno = 0;
+
+	while ((pag = xfs_perag_get_tag(mp, agno, XFS_ICI_RECLAIM_TAG))) {
+		agno = pag->pag_agno + 1;
+		spin_lock(&pag->pag_ici_lock);
+		if (pag->pag_ici_inactive)
+			queue_delayed_work(mp->m_inactive_workqueue,
+					&pag->pag_inactive_work, delay);
+		spin_unlock(&pag->pag_ici_lock);
+		xfs_perag_put(pag);
+	}
 }
