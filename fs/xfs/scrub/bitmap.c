@@ -33,6 +33,7 @@ xfs_bitmap_set(
 	bmr->start = start;
 	bmr->len = len;
 	list_add_tail(&bmr->list, &bitmap->list);
+	bitmap->weight += len;
 
 	return 0;
 }
@@ -57,6 +58,7 @@ xfs_bitmap_init(
 	struct xfs_bitmap	*bitmap)
 {
 	INIT_LIST_HEAD(&bitmap->list);
+	bitmap->weight = 0;
 }
 
 /* Compare two btree extents. */
@@ -159,6 +161,7 @@ xfs_bitmap_disunion(
 			state |= LEFT_ALIGNED;
 		if (sub_start + sub_len == br->start + br->len)
 			state |= RIGHT_ALIGNED;
+		bitmap->weight -= sub_len;
 		switch (state) {
 		case LEFT_ALIGNED:
 			/* Coincides with only the left. */
@@ -295,4 +298,12 @@ xfs_bitmap_set_btblocks(
 	struct xfs_btree_cur	*cur)
 {
 	return xfs_btree_visit_blocks(cur, xfs_bitmap_collect_btblock, bitmap);
+}
+
+/* Compute the weight of this bitmap. */
+uint64_t
+xfs_bitmap_hweight(
+	struct xfs_bitmap	*bitmap)
+{
+	return bitmap->weight;
 }
