@@ -29,6 +29,7 @@
 #include <linux/kthread.h>
 #include <linux/freezer.h>
 #include <linux/iversion.h>
+#include <linux/nmi.h>
 
 STATIC bool
 xfs_inode_match_id(
@@ -1893,6 +1894,41 @@ xfs_inactive_force(
 {
 	xfs_inactive_schedule_work(mp, 0);
 	xfs_inactive_flush(mp);
+}
+
+/* Decide if there are inodes still needing inactivation. */
+static inline bool
+xfs_has_inactive(
+	struct xfs_mount	*mp)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno = 0;
+	bool			ret = false;
+
+	for (agno = 0; agno < mp->m_sb.sb_agcount && !ret; agno++) {
+		pag = xfs_perag_get(mp, agno);
+		if (xfs_pag_has_inactive(pag))
+			ret = true;
+		xfs_perag_put(pag);
+	}
+
+	return ret;
+}
+
+/*
+ * Flush all pending inactivation work and poll until finished.  This function
+ * is for callers that must flush with vfs locks held, such as unmount,
+ * remount, and iunlinks processing during mount.
+ */
+void
+xfs_inactive_force_poll(
+	struct xfs_mount	*mp)
+{
+	xfs_inactive_schedule_work(mp, 0);
+	while (xfs_has_inactive(mp)) {
+		touch_softlockup_watchdog();
+		schedule_timeout_uninterruptible(1);
+	}
 }
 
 /*
