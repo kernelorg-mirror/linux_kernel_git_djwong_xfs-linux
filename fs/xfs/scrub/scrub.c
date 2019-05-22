@@ -165,6 +165,7 @@ xchk_teardown(
 		if (sc->ilock_flags)
 			xfs_iunlock(sc->ip, sc->ilock_flags);
 		if (sc->ip != ip_in &&
+		    !xfs_is_metadata_inode(sc->ip) &&
 		    !xfs_internal_inum(sc->mp, sc->ip->i_ino))
 			xfs_irele(sc->ip);
 		sc->ip = NULL;
