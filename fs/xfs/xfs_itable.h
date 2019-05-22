@@ -37,6 +37,7 @@ xfs_ibulk_advance(
 
 	breq->ubuffer = b + bytes;
 	breq->ocount++;
+xfs_err(breq->mp, "%s: icount=%u ocount=%u", __func__, breq->icount, breq->ocount);
 	return breq->ocount == breq->icount ? XFS_IBULK_BUFFER_FULL : 0;
 }
 

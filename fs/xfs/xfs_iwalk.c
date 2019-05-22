@@ -202,6 +202,7 @@ xfs_iwalk_ag_recs(
 
 	agno = XFS_INO_TO_AGNO(mp, iwag->startino);
 	for (i = 0, irec = iwag->recs; i < iwag->nr_recs; i++, irec++) {
+xfs_err(mp, "%s: agno=%u startino=%u alloccount=%u", __func__, agno, irec->ir_startino, 64 - irec->ir_freecount);
 		trace_xfs_iwalk_ag_rec(mp, agno, irec->ir_startino,
 				irec->ir_free);
 		for (j = 0; j < XFS_INODES_PER_CHUNK; j++) {
@@ -296,7 +297,7 @@ xfs_iwalk_ag_start(
 	struct xfs_trans	*tp = iwag->tp;
 	int			icount;
 	int			error;
-
+xfs_err(mp, "%s ag=%u agino=%u nr_recs=%u sz_recs=%u", __func__, agno, agino, iwag->nr_recs, iwag->sz_recs);
 	/* Set up a fresh cursor and empty the inobt cache. */
 	iwag->nr_recs = 0;
 	error = xfs_iwalk_inobt_cur(mp, tp, agno, curpp, agi_bpp);
@@ -317,6 +318,7 @@ xfs_iwalk_ag_start(
 			&iwag->recs[iwag->nr_recs], trim);
 	if (error)
 		return error;
+xfs_err(mp, "%s ag=%u nr_recs=%u sz_recs=%u icount=%d", __func__, agno, iwag->nr_recs, iwag->sz_recs, icount);
 	if (icount)
 		iwag->nr_recs++;
 
@@ -369,7 +371,9 @@ xfs_iwalk_ag_increment(
 	if (error)
 		return error;
 
-	return xfs_inobt_lookup(*curpp, restart, XFS_LOOKUP_GE, has_more);
+	error = xfs_inobt_lookup(*curpp, restart, XFS_LOOKUP_GE, has_more);
+xfs_err(mp, "%s: restart=%u has=%d err=%d", __func__, restart, *has_more, error);
+	return error;
 }
 
 /* Walk all inodes in a single AG, from @iwag->startino to the end of the AG. */
@@ -502,9 +506,10 @@ xfs_iwalk(
 	error = xfs_iwalk_allocbuf(&iwag);
 	if (error)
 		return error;
-
+xfs_err(mp, "%s: start ag %u", __func__, agno);
 	for (; agno < mp->m_sb.sb_agcount; agno++) {
 		error = xfs_iwalk_ag(&iwag);
+xfs_err(mp, "%s: end ag %u err %d", __func__, agno, error);
 		if (error)
 			break;
 		iwag.startino = XFS_AGINO_TO_INO(mp, agno + 1, 0);
@@ -601,6 +606,7 @@ xfs_inobt_walk_ag_recs(
 
 	agno = XFS_INO_TO_AGNO(mp, iwag->startino);
 	for (i = 0, irec = iwag->recs; i < iwag->nr_recs; i++, irec++) {
+xfs_err(mp, "%s: agno=%u startino=%u alloccount=%u", __func__, agno, irec->ir_startino, 64 - irec->ir_freecount);
 		trace_xfs_iwalk_ag_rec(mp, agno, irec->ir_startino,
 				irec->ir_free);
 		error = iwag->inobt_walk_fn(mp, tp, agno, irec, iwag->data);
@@ -631,15 +637,18 @@ xfs_inobt_walk_ag(
 	/* Set up our cursor at the right place in the inode btree. */
 	agno = XFS_INO_TO_AGNO(mp, iwag->startino);
 	agino = XFS_INO_TO_AGINO(mp, iwag->startino);
+xfs_err(mp, "%s: ***** agno=%u agino=%u", __func__, agno, agino);
 	error = xfs_iwalk_ag_start(iwag, agno, agino, &cur, &agi_bp, &has_more,
 			false);
 	if (error)
 		goto out_cur;
+xfs_err(cur->bc_mp, "%s.1 ag=%u nr_recs=%u sz_recs=%u has=%d", __func__, agno, iwag->nr_recs, iwag->sz_recs, has_more);
 
 	while (has_more && !xfs_pwork_want_abort(&iwag->pwork)) {
 		struct xfs_inobt_rec_incore	*irec;
 
 		/* Fetch the inobt record. */
+xfs_err(cur->bc_mp, "%s.2 ag=%u nr_recs=%u sz_recs=%u has=%d", __func__, agno, iwag->nr_recs, iwag->sz_recs, has_more);
 		irec = &iwag->recs[iwag->nr_recs];
 		error = xfs_inobt_get_rec(cur, irec, &has_more);
 		if (error)
@@ -704,8 +713,10 @@ xfs_inobt_walk(
 	if (error)
 		return error;
 
+xfs_err(mp, "%s: start ag %u", __func__, agno);
 	for (; agno < mp->m_sb.sb_agcount; agno++) {
 		error = xfs_inobt_walk_ag(&iwag);
+xfs_err(mp, "%s: end ag %u err %d", __func__, agno, error);
 		if (error)
 			break;
 		iwag.startino = XFS_AGINO_TO_INO(mp, agno + 1, 0);
