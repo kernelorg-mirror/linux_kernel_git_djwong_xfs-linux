@@ -457,7 +457,7 @@ xrep_xattr_reset_attr_local(
 }
 
 /* Free all the attribute fork blocks and delete the fork. */
-STATIC int
+int
 xrep_xattr_reset_fork(
 	struct xfs_scrub	*sc,
 	uint64_t		nr_attrs)
