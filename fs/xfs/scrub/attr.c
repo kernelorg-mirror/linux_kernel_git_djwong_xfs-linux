@@ -38,9 +38,15 @@ xchk_setup_xattr_buf(
 	 * We need enough space to read an xattr value from the file or enough
 	 * space to hold three copies of the xattr free space bitmap.  We don't
 	 * need the buffer space for both purposes at the same time.
+	 *
+	 * If we're doing a repair, we need enough space to hold the largest
+	 * xattr value and the largest xattr name.
 	 */
 	sz = 3 * sizeof(long) * BITS_TO_LONGS(sc->mp->m_attr_geo->blksize);
-	sz = max_t(size_t, sz, value_size);
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR)
+		sz = max_t(size_t, sz, value_size + XATTR_NAME_MAX + 1);
+	else
+		sz = max_t(size_t, sz, value_size);
 
 	/*
 	 * If there's already a buffer, figure out if we need to reallocate it
@@ -184,7 +190,7 @@ fail_xref:
  * Within a char, the lowest bit of the char represents the byte with
  * the smallest address
  */
-STATIC bool
+bool
 xchk_xattr_set_map(
 	struct xfs_scrub	*sc,
 	unsigned long		*map,
