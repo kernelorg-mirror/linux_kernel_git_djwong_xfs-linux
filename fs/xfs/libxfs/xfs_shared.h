@@ -136,4 +136,10 @@ void xfs_symlink_local_to_remote(struct xfs_trans *tp, struct xfs_buf *bp,
 				 struct xfs_inode *ip, struct xfs_ifork *ifp);
 xfs_failaddr_t xfs_symlink_shortform_verify(struct xfs_inode *ip);
 
+/* Keep iterating the data structure. */
+#define XFS_ITER_CONTINUE	(0)
+
+/* Stop iterating the data structure. */
+#define XFS_ITER_ABORT		(1)
+
 #endif /* __XFS_SHARED_H__ */
