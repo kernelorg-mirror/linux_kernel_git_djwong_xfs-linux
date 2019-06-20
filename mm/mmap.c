@@ -1488,6 +1488,8 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 					return -EACCES;
 				if (IS_IMMUTABLE(file->f_mapping->host))
 					return -EPERM;
+				if (IS_SWAPFILE(file->f_mapping->host))
+					return -ETXTBSY;
 			}
 
 			/*

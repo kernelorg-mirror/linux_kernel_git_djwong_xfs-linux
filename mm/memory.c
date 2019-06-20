@@ -2236,7 +2236,8 @@ static vm_fault_t do_page_mkwrite(struct vm_fault *vmf)
 	vmf->flags = FAULT_FLAG_WRITE|FAULT_FLAG_MKWRITE;
 
 	if (vmf->vma->vm_file &&
-	    IS_IMMUTABLE(vmf->vma->vm_file->f_mapping->host))
+	    (IS_IMMUTABLE(vmf->vma->vm_file->f_mapping->host) ||
+	     IS_SWAPFILE(vmf->vma->vm_file->f_mapping->host)))
 		return VM_FAULT_SIGBUS;
 
 	ret = vmf->vma->vm_ops->page_mkwrite(vmf);
