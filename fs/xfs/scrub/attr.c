@@ -64,7 +64,12 @@ xchk_setup_xattr_buf(
 		sc->buf = NULL;
 	}
 
-	ab = kmem_zalloc_large(sizeof(*ab) + sz, flags);
+	/*
+	 * Allocate the big buffer.  We skip zeroing it because that added 7%
+	 * to the scrub runtime and all the users were careful never to read
+	 * uninitialized contents.
+	 */
+	ab = kmem_alloc_large(sizeof(*ab) + sz, flags);
 	if (!ab)
 		return -ENOMEM;
 
