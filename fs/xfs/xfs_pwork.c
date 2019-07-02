@@ -127,10 +127,45 @@ xfs_pwork_guess_datadev_parallelism(
 	struct xfs_mount	*mp)
 {
 	struct xfs_buftarg	*btp = mp->m_ddev_targp;
+	unsigned int		threads;
+	unsigned int		max_threads;
+	int			iomin;
+	int			ioopt;
 
 	/*
-	 * For now we'll go with the most conservative setting possible,
-	 * which is two threads for an SSD and 1 thread everywhere else.
+	 * For metadata activities we probably can't scale further than the
+	 * number of AGs and the number of online CPUs; and we must abide the
+	 * workqueue maximum thread count.
 	 */
-	return blk_queue_nonrot(btp->bt_bdev->bd_queue) ? 2 : 1;
+	max_threads = min(mp->m_sb.sb_agcount,
+			min_t(unsigned int, num_online_cpus(), WQ_MAX_ACTIVE));
+
+	if (blk_queue_nonrot(btp->bt_bdev->bd_queue)) {
+		threads = max_threads;
+		goto out;
+	}
+
+	/*
+	 * For filesystems on rotational storage with configured stripe width
+	 * and stripe units, we assume that there's a multidisk setup (e.g.
+	 * RAID) and that we can parallelise according to the setup's geometry.
+	 * First we try the values in the superblock and then we resort to
+	 * probing the block layer.
+	 */
+	if (mp->m_sb.sb_width && mp->m_sb.sb_unit) {
+		threads = mp->m_sb.sb_width / mp->m_sb.sb_unit;
+		goto out;
+	}
+
+	iomin = bdev_io_min(btp->bt_bdev);
+	ioopt = bdev_io_opt(btp->bt_bdev);
+	if (iomin > 0 && ioopt > 0) {
+		threads = ioopt / iomin;
+		goto out;
+	}
+
+	/* Unexciting rotating disks get one thread. */
+	threads = 1;
+out:
+	return clamp(threads, 1U, max_threads);
 }
