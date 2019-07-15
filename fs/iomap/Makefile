@@ -14,4 +14,5 @@ iomap-y				+= \
 					fiemap.o \
 					seek.o
 
+iomap-$(CONFIG_MIGRATION)	+= migrate.o
 iomap-$(CONFIG_SWAP)		+= swapfile.o
