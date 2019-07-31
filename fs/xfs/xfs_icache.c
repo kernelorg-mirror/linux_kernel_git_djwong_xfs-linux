@@ -789,13 +789,15 @@ out_unlock_noent:
  */
 STATIC int
 xfs_ici_walk_ag(
-	struct xfs_mount	*mp,
 	struct xfs_perag	*pag,
+	int			iter_flags,
+	bool			(*grab)(struct xfs_inode *ip, int iter_flags),
 	xfs_ici_walk_fn		execute,
+	void			(*rele)(struct xfs_inode *),
 	void			*args,
-	int			tag,
-	int			iter_flags)
+	int			tag)
 {
+	struct xfs_mount	*mp = pag->pag_mount;
 	uint32_t		first_index;
 	int			last_error = 0;
 	int			skipped;
@@ -836,7 +838,7 @@ restart:
 		for (i = 0; i < nr_found; i++) {
 			struct xfs_inode *ip = batch[i];
 
-			if (done || !xfs_inode_ag_walk_grab(ip, iter_flags))
+			if (done || !grab(ip, iter_flags))
 				batch[i] = NULL;
 
 			/*
@@ -868,7 +870,8 @@ restart:
 			    xfs_iflags_test(batch[i], XFS_INEW))
 				xfs_inew_wait(batch[i]);
 			error = execute(batch[i], pag, args);
-			xfs_irele(batch[i]);
+			if (rele)
+				rele(batch[i]);
 			if (error == -EAGAIN) {
 				skipped++;
 				continue;
@@ -905,14 +908,16 @@ xfs_ici_walk_get_perag(
 }
 
 /*
- * Call the @execute function on all incore inodes matching the radix tree
- * @tag.
+ * Call the @grab, @execute, and @rele functions on all incore inodes matching
+ * the radix tree @tag.
  */
 STATIC int
-xfs_ici_walk(
+xfs_ici_walk_fns(
 	struct xfs_mount	*mp,
 	int			iter_flags,
+	bool			(*grab)(struct xfs_inode *ip, int iter_flags),
 	xfs_ici_walk_fn		execute,
+	void			(*rele)(struct xfs_inode *ip),
 	void			*args,
 	int			tag)
 {
@@ -924,8 +929,8 @@ xfs_ici_walk(
 	ag = 0;
 	while ((pag = xfs_ici_walk_get_perag(mp, ag, tag))) {
 		ag = pag->pag_agno + 1;
-		error = xfs_ici_walk_ag(mp, pag, execute, args, tag,
-				iter_flags);
+		error = xfs_ici_walk_ag(pag, iter_flags, grab, execute, rele,
+				args, tag);
 		xfs_perag_put(pag);
 		if (error) {
 			last_error = error;
@@ -934,6 +939,22 @@ xfs_ici_walk(
 		}
 	}
 	return last_error;
+}
+
+/*
+ * Call the @execute function on all incore inodes matching a given radix tree
+ * @tag.
+ */
+STATIC int
+xfs_ici_walk(
+	struct xfs_mount	*mp,
+	int			iter_flags,
+	xfs_ici_walk_fn		execute,
+	void			*args,
+	int			tag)
+{
+	return xfs_ici_walk_fns(mp, iter_flags, xfs_inode_ag_walk_grab,
+			execute, xfs_irele, args, tag);
 }
 
 /*
