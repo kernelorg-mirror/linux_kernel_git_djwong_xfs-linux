@@ -1418,6 +1418,33 @@ xfs_inode_match_id_union(
 	return 0;
 }
 
+/*
+ * Is this inode @ip eligible for eof/cow block reclamation, given some
+ * filtering parameters @eofb?  The inode is eligible if @eofb is null or
+ * if the predicate functions match.
+ */
+static bool
+xfs_inode_matches_eofb(
+	struct xfs_inode	*ip,
+	struct xfs_eofblocks	*eofb)
+{
+	int			match;
+
+	if (!eofb)
+		return true;
+
+	if (eofb->eof_flags & XFS_EOF_FLAGS_UNION)
+		match = xfs_inode_match_id_union(ip, eofb);
+	else
+		match = xfs_inode_match_id(ip, eofb);
+	if (match)
+		return true;
+
+	/* skip the inode if the file size is too small */
+	return !(eofb->eof_flags & XFS_EOF_FLAGS_MINFILESIZE &&
+		 XFS_ISIZE(ip) < eofb->eof_min_file_size);
+}
+
 STATIC int
 xfs_inode_free_eofblocks(
 	struct xfs_inode	*ip,
@@ -1425,7 +1452,6 @@ xfs_inode_free_eofblocks(
 {
 	struct xfs_eofblocks	*eofb = args;
 	bool			wait;
-	int			match;
 	int			ret = 0;
 
 	wait = (eofb && (eofb->eof_flags & XFS_EOF_FLAGS_SYNC));
@@ -1444,19 +1470,8 @@ xfs_inode_free_eofblocks(
 	if (!wait && mapping_tagged(VFS_I(ip)->i_mapping, PAGECACHE_TAG_DIRTY))
 		return 0;
 
-	if (eofb) {
-		if (eofb->eof_flags & XFS_EOF_FLAGS_UNION)
-			match = xfs_inode_match_id_union(ip, eofb);
-		else
-			match = xfs_inode_match_id(ip, eofb);
-		if (!match)
-			return 0;
-
-		/* skip the inode if the file size is too small */
-		if (eofb->eof_flags & XFS_EOF_FLAGS_MINFILESIZE &&
-		    XFS_ISIZE(ip) < eofb->eof_min_file_size)
-			return 0;
-	}
+	if (!xfs_inode_matches_eofb(ip, eofb))
+		return 0;
 
 	/*
 	 * If the caller is waiting, return -EAGAIN to keep the background
@@ -1698,25 +1713,13 @@ xfs_inode_free_cowblocks(
 	void			*args)
 {
 	struct xfs_eofblocks	*eofb = args;
-	int			match;
 	int			ret = 0;
 
 	if (!xfs_prep_free_cowblocks(ip))
 		return 0;
 
-	if (eofb) {
-		if (eofb->eof_flags & XFS_EOF_FLAGS_UNION)
-			match = xfs_inode_match_id_union(ip, eofb);
-		else
-			match = xfs_inode_match_id(ip, eofb);
-		if (!match)
-			return 0;
-
-		/* skip the inode if the file size is too small */
-		if (eofb->eof_flags & XFS_EOF_FLAGS_MINFILESIZE &&
-		    XFS_ISIZE(ip) < eofb->eof_min_file_size)
-			return 0;
-	}
+	if (!xfs_inode_matches_eofb(ip, eofb))
+		return 0;
 
 	/* Free the CoW blocks */
 	xfs_ilock(ip, XFS_IOLOCK_EXCL);
