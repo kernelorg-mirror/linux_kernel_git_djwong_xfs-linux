@@ -38,9 +38,9 @@ struct xfs_eofblocks {
 #define XFS_IGET_INCORE		0x8	/* don't read from disk or reinit */
 
 /*
- * flags for AG inode iterator
+ * flags for incore inode iterator
  */
-#define XFS_AGITER_INEW_WAIT	0x1	/* wait on new inodes */
+#define XFS_ICI_WALK_INEW_WAIT	0x1	/* wait on new inodes */
 
 int xfs_iget(struct xfs_mount *mp, struct xfs_trans *tp, xfs_ino_t ino,
 	     uint flags, uint lock_flags, xfs_inode_t **ipp);
@@ -71,9 +71,8 @@ int xfs_inode_free_quota_cowblocks(struct xfs_inode *ip);
 void xfs_cowblocks_worker(struct work_struct *);
 void xfs_queue_cowblocks(struct xfs_mount *);
 
-int xfs_inode_ag_iterator(struct xfs_mount *mp, int iter_flags,
-	int (*execute)(struct xfs_inode *ip, void *args),
-	void *args, int tag);
+typedef int (*xfs_ici_walk_fn)(struct xfs_inode *ip, void *args);
+int xfs_ici_walk_all(struct xfs_mount *mp, xfs_ici_walk_fn execute, void *args);
 
 int xfs_icache_inode_is_allocated(struct xfs_mount *mp, struct xfs_trans *tp,
 				  xfs_ino_t ino, bool *inuse);
