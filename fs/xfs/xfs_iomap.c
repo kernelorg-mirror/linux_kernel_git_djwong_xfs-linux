@@ -262,6 +262,18 @@ xfs_iomap_write_direct(
 retry:
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, resrtextents,
 			tflags, &tp);
+	/*
+	 * We weren't able to reserve enough space for the direct write.  Flush
+	 * any disk space that was being held in the hopes of speeding up the
+	 * filesystem.  Historically, we expected callers to have preallocated
+	 * all the space before a direct write, but this is not an absolute
+	 * requirement.  We still hold the IOLOCK so we cannot do a sync scan.
+	 */
+	if (error == -ENOSPC && !cleared_space) {
+		cleared_space = true;
+		xfs_inode_free_blocks(ip->i_mount, false);
+		goto retry;
+	}
 	if (error)
 		return error;
 
