@@ -1171,10 +1171,17 @@ xfs_create(
 	 */
 retry:
 	error = xfs_trans_alloc(mp, tres, resblks, 0, 0, &tp);
-	if (error == -ENOSPC) {
+	/*
+	 * We weren't able to reserve enough space to add the inode.  Flush
+	 * any disk space that was being held in the hopes of speeding up the
+	 * filesystem.
+	 */
+	if (error == -ENOSPC && !cleared_space) {
+		cleared_space = true;
 		/* flush outstanding delalloc blocks and retry */
 		xfs_flush_inodes(mp);
-		error = xfs_trans_alloc(mp, tres, resblks, 0, 0, &tp);
+		xfs_inode_free_blocks(mp, true);
+		goto retry;
 	}
 	if (error)
 		goto out_release_inode;
