@@ -1524,6 +1524,15 @@ xfs_icache_free_eofblocks(
 			XFS_ICI_EOFBLOCKS_TAG);
 }
 
+static inline void
+xfs_inode_free_scan(
+	struct xfs_mount	*mp,
+	struct xfs_eofblocks	*eofb)
+{
+	xfs_icache_free_eofblocks(mp, eofb);
+	xfs_icache_free_cowblocks(mp, eofb);
+}
+
 /*
  * Run cow/eofblocks scans on the quotas applicable to the inode. For inodes
  * with multiple quotas, we don't know exactly which quota caused an allocation
@@ -1579,9 +1588,26 @@ xfs_inode_free_quota_blocks(
 
 	trace_xfs_inode_free_quota_blocks(ip->i_mount, &eofb, _RET_IP_);
 
-	xfs_icache_free_eofblocks(ip->i_mount, &eofb);
-	xfs_icache_free_cowblocks(ip->i_mount, &eofb);
+	xfs_inode_free_scan(ip->i_mount, &eofb);
 	return true;
+}
+
+/*
+ * Try to free space in the filesystem by purging eofblocks and cowblocks.
+ */
+void
+xfs_inode_free_blocks(
+	struct xfs_mount	*mp,
+	bool			sync)
+{
+	struct xfs_eofblocks	eofb = {0};
+
+	if (sync)
+		eofb.eof_flags |= XFS_EOF_FLAGS_SYNC;
+
+	trace_xfs_inode_free_blocks(mp, &eofb, _RET_IP_);
+
+	xfs_inode_free_scan(mp, &eofb);
 }
 
 static inline unsigned long
