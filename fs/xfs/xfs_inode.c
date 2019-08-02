@@ -1135,6 +1135,7 @@ xfs_create(
 	struct xfs_dquot	*gdqp = NULL;
 	struct xfs_dquot	*pdqp = NULL;
 	struct xfs_trans_res	*tres;
+	bool			cleared_space = false;
 	uint			resblks;
 
 	trace_xfs_create(dp, name);
@@ -1168,6 +1169,7 @@ xfs_create(
 	 * the case we'll drop the one we have and get a more
 	 * appropriate transaction later.
 	 */
+retry:
 	error = xfs_trans_alloc(mp, tres, resblks, 0, 0, &tp);
 	if (error == -ENOSPC) {
 		/* flush outstanding delalloc blocks and retry */
@@ -1185,6 +1187,21 @@ xfs_create(
 	 */
 	error = xfs_trans_reserve_quota(tp, mp, udqp, gdqp,
 						pdqp, resblks, 1, 0);
+	/*
+	 * We weren't able to reserve enough quota to handle adding the inode.
+	 * Flush any disk space that was being held in the hopes of speeding up
+	 * the filesystem.
+	 */
+	if ((error == -EDQUOT || error == -ENOSPC) && !cleared_space) {
+		xfs_trans_cancel(tp);
+		if (unlock_dp_on_error)
+			xfs_iunlock(dp, XFS_ILOCK_EXCL);
+		unlock_dp_on_error = false;
+		cleared_space = xfs_inode_free_quota_blocks(dp, true);
+		if (cleared_space)
+			goto retry;
+		goto out_release_inode;
+	}
 	if (error)
 		goto out_trans_cancel;
 
