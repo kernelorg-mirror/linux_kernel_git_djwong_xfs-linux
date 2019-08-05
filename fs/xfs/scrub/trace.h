@@ -749,6 +749,39 @@ TRACE_EVENT(xrep_abt_found,
 		  __entry->blockcount)
 )
 
+TRACE_EVENT(xrep_ibt_found,
+	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno,
+		 xfs_agino_t startino, uint16_t holemask, uint8_t count,
+		 uint8_t freecount, uint64_t freemask),
+	TP_ARGS(mp, agno, startino, holemask, count, freecount, freemask),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_agnumber_t, agno)
+		__field(xfs_agino_t, startino)
+		__field(uint16_t, holemask)
+		__field(uint8_t, count)
+		__field(uint8_t, freecount)
+		__field(uint64_t, freemask)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->agno = agno;
+		__entry->startino = startino;
+		__entry->holemask = holemask;
+		__entry->count = count;
+		__entry->freecount = freecount;
+		__entry->freemask = freemask;
+	),
+	TP_printk("dev %d:%d agno %d startino %u holemask 0x%x count %u freecount %u freemask 0x%llx",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->agno,
+		  __entry->startino,
+		  __entry->holemask,
+		  __entry->count,
+		  __entry->freecount,
+		  __entry->freemask)
+)
+
 TRACE_EVENT(xrep_refcount_extent_fn,
 	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno,
 		 struct xfs_refcount_irec *irec),
@@ -891,39 +924,6 @@ TRACE_EVENT(xrep_reset_counters,
 	),
 	TP_printk("dev %d:%d",
 		  MAJOR(__entry->dev), MINOR(__entry->dev))
-)
-
-TRACE_EVENT(xrep_ibt_insert,
-	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno,
-		 xfs_agino_t startino, uint16_t holemask, uint8_t count,
-		 uint8_t freecount, uint64_t freemask),
-	TP_ARGS(mp, agno, startino, holemask, count, freecount, freemask),
-	TP_STRUCT__entry(
-		__field(dev_t, dev)
-		__field(xfs_agnumber_t, agno)
-		__field(xfs_agino_t, startino)
-		__field(uint16_t, holemask)
-		__field(uint8_t, count)
-		__field(uint8_t, freecount)
-		__field(uint64_t, freemask)
-	),
-	TP_fast_assign(
-		__entry->dev = mp->m_super->s_dev;
-		__entry->agno = agno;
-		__entry->startino = startino;
-		__entry->holemask = holemask;
-		__entry->count = count;
-		__entry->freecount = freecount;
-		__entry->freemask = freemask;
-	),
-	TP_printk("dev %d:%d agno %d startino %u holemask 0x%x count %u freecount %u freemask 0x%llx",
-		  MAJOR(__entry->dev), MINOR(__entry->dev),
-		  __entry->agno,
-		  __entry->startino,
-		  __entry->holemask,
-		  __entry->count,
-		  __entry->freecount,
-		  __entry->freemask)
 )
 
 DECLARE_EVENT_CLASS(xrep_newbt_extent_class,
