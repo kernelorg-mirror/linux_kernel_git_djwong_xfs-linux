@@ -384,6 +384,8 @@ xfs_btree_del_cursor(
 	/*
 	 * Free the cursor.
 	 */
+	if (unlikely(cur->bc_flags & XFS_BTREE_STAGING))
+		kmem_free(cur->bc_ops);
 	kmem_zone_free(xfs_btree_cur_zone, cur);
 }
 
@@ -4933,4 +4935,116 @@ xfs_btree_has_more_records(
 		return block->bb_u.l.bb_rightsib != cpu_to_be64(NULLFSBLOCK);
 	else
 		return block->bb_u.s.bb_rightsib != cpu_to_be32(NULLAGBLOCK);
+}
+
+/* We don't allow staging cursors to be duplicated. */
+struct xfs_btree_cur *
+xbtree_fakeroot_dup_cursor(
+	struct xfs_btree_cur	*cur)
+{
+	ASSERT(0);
+	return NULL;
+}
+
+/* Refuse to allow block allocation or frees. */
+int
+xbtree_fakeroot_alloc_block(
+	struct xfs_btree_cur	*cur,
+	union xfs_btree_ptr	*start_bno,
+	union xfs_btree_ptr	*new_bno,
+	int			*stat)
+{
+	ASSERT(0);
+	return -EFSCORRUPTED;
+}
+
+int
+xbtree_fakeroot_free_block(
+	struct xfs_btree_cur	*cur,
+	struct xfs_buf		*bp)
+{
+	ASSERT(0);
+	return -EFSCORRUPTED;
+}
+
+/* Initialize a pointer to the root block from the fakeroot. */
+void
+xbtree_fakeroot_init_ptr_from_cur(
+	struct xfs_btree_cur	*cur,
+	union xfs_btree_ptr	*ptr)
+{
+	struct xbtree_afakeroot	*afake;
+
+	ASSERT(cur->bc_flags & XFS_BTREE_STAGING);
+
+	if (cur->bc_flags & XFS_BTREE_LONG_PTRS) {
+		ptr->l = cpu_to_be64(0);
+	} else {
+		afake = cur->bc_private.a.afake;
+		ptr->s = cpu_to_be32(afake->af_root);
+	}
+}
+
+/* Set the root block when our tree has a fakeroot. */
+void
+xbtree_afakeroot_set_root(
+	struct xfs_btree_cur	*cur,
+	union xfs_btree_ptr	*ptr,
+	int			inc)
+{
+	struct xbtree_afakeroot	*afake = cur->bc_private.a.afake;
+
+	ASSERT(cur->bc_flags & XFS_BTREE_STAGING);
+	afake->af_root = be32_to_cpu(ptr->s);
+	afake->af_levels += inc;
+}
+
+/*
+ * Initialize a AG-rooted btree cursor with the given AG @fakeroot, and prepare
+ * @ops for overriding by duplicating them into @new_ops.  The caller can
+ * replace pointers in @new_ops as necessary once this call completes.  Note
+ * that staging cursors can only be used for bulk loading.
+ */
+void
+xfs_btree_stage_afakeroot(
+	struct xfs_btree_cur		*cur,
+	struct xbtree_afakeroot		*afake,
+	const struct xfs_btree_ops	*ops,
+	struct xfs_btree_ops		**new_ops)
+{
+	ASSERT(!(cur->bc_flags & XFS_BTREE_STAGING));
+	ASSERT(!(cur->bc_flags & XFS_BTREE_ROOT_IN_INODE));
+
+	*new_ops = kmem_alloc(sizeof(struct xfs_btree_ops), KM_NOFS);
+	memcpy(*new_ops, ops, sizeof(struct xfs_btree_ops));
+	(*new_ops)->alloc_block = xbtree_fakeroot_alloc_block;
+	(*new_ops)->free_block = xbtree_fakeroot_free_block;
+	(*new_ops)->init_ptr_from_cur = xbtree_fakeroot_init_ptr_from_cur;
+	(*new_ops)->set_root = xbtree_afakeroot_set_root;
+	(*new_ops)->dup_cursor = xbtree_fakeroot_dup_cursor;
+
+	cur->bc_private.a.afake = afake;
+	cur->bc_nlevels = afake->af_levels;
+	cur->bc_ops = *new_ops;
+	cur->bc_flags |= XFS_BTREE_STAGING;
+}
+
+/*
+ * Transform an AG-rooted staging btree cursor back into a regular btree
+ * cursor.  Caller is responsible for logging changes before this.
+ */
+void
+xfs_btree_commit_afakeroot(
+	struct xfs_btree_cur		*cur,
+	struct xfs_buf			*agbp,
+	const struct xfs_btree_ops	*ops)
+{
+	ASSERT(cur->bc_flags & XFS_BTREE_STAGING);
+
+	trace_xfs_btree_commit_afakeroot(cur);
+
+	kmem_free(cur->bc_ops);
+	cur->bc_private.a.agbp = agbp;
+	cur->bc_ops = ops;
+	cur->bc_flags &= ~XFS_BTREE_STAGING;
 }
