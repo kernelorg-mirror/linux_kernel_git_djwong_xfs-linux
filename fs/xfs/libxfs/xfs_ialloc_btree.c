@@ -33,6 +33,10 @@ STATIC struct xfs_btree_cur *
 xfs_inobt_dup_cursor(
 	struct xfs_btree_cur	*cur)
 {
+	if (cur->bc_flags & XFS_BTREE_STAGING)
+		return xfs_inobt_stage_cursor(cur->bc_mp, cur->bc_tp,
+				cur->bc_private.a.afake,
+				cur->bc_private.a.agno, cur->bc_btnum);
 	return xfs_inobt_init_cursor(cur->bc_mp, cur->bc_tp,
 			cur->bc_private.a.agbp, cur->bc_private.a.agno,
 			cur->bc_btnum);
@@ -400,43 +404,113 @@ static const struct xfs_btree_ops xfs_finobt_ops = {
 };
 
 /*
- * Allocate a new inode btree cursor.
+ * Initialize a new inode btree cursor.
  */
-struct xfs_btree_cur *				/* new inode btree cursor */
-xfs_inobt_init_cursor(
+static struct xfs_btree_cur *
+xfs_inobt_init_common(
 	struct xfs_mount	*mp,		/* file system mount point */
 	struct xfs_trans	*tp,		/* transaction pointer */
-	struct xfs_buf		*agbp,		/* buffer for agi structure */
 	xfs_agnumber_t		agno,		/* allocation group number */
 	xfs_btnum_t		btnum)		/* ialloc or free ino btree */
 {
-	struct xfs_agi		*agi = XFS_BUF_TO_AGI(agbp);
 	struct xfs_btree_cur	*cur;
 
 	cur = kmem_zone_zalloc(xfs_btree_cur_zone, KM_NOFS);
-
 	cur->bc_tp = tp;
 	cur->bc_mp = mp;
 	cur->bc_btnum = btnum;
-	if (btnum == XFS_BTNUM_INO) {
-		cur->bc_nlevels = be32_to_cpu(agi->agi_level);
-		cur->bc_ops = &xfs_inobt_ops;
+	if (btnum == XFS_BTNUM_INO)
 		cur->bc_statoff = XFS_STATS_CALC_INDEX(xs_ibt_2);
-	} else {
-		cur->bc_nlevels = be32_to_cpu(agi->agi_free_level);
-		cur->bc_ops = &xfs_finobt_ops;
+	else
 		cur->bc_statoff = XFS_STATS_CALC_INDEX(xs_fibt_2);
-	}
 
 	cur->bc_blocklog = mp->m_sb.sb_blocklog;
 
 	if (xfs_sb_version_hascrc(&mp->m_sb))
 		cur->bc_flags |= XFS_BTREE_CRC_BLOCKS;
 
-	cur->bc_private.a.agbp = agbp;
 	cur->bc_private.a.agno = agno;
-
 	return cur;
+}
+
+/* Create an inode btree cursor. */
+struct xfs_btree_cur *
+xfs_inobt_init_cursor(
+	struct xfs_mount	*mp,
+	struct xfs_trans	*tp,
+	struct xfs_buf		*agbp,
+	xfs_agnumber_t		agno,
+	xfs_btnum_t		btnum)
+{
+	struct xfs_btree_cur	*cur;
+	struct xfs_agi		*agi = XFS_BUF_TO_AGI(agbp);
+
+	cur = xfs_inobt_init_common(mp, tp, agno, btnum);
+	if (btnum == XFS_BTNUM_INO) {
+		cur->bc_nlevels = be32_to_cpu(agi->agi_level);
+		cur->bc_ops = &xfs_inobt_ops;
+	} else {
+		cur->bc_nlevels = be32_to_cpu(agi->agi_free_level);
+		cur->bc_ops = &xfs_finobt_ops;
+	}
+	cur->bc_private.a.agbp = agbp;
+	return cur;
+}
+
+/* Create an inode btree cursor with a fake root for staging. */
+struct xfs_btree_cur *
+xfs_inobt_stage_cursor(
+	struct xfs_mount	*mp,
+	struct xfs_trans	*tp,
+	struct xbtree_afakeroot	*afake,
+	xfs_agnumber_t		agno,
+	xfs_btnum_t		btnum)
+{
+	struct xfs_btree_cur	*cur;
+	struct xfs_btree_ops	*ops;
+
+	cur = xfs_inobt_init_common(mp, tp, agno, btnum);
+	if (btnum == XFS_BTNUM_INO)
+		xfs_btree_stage_afakeroot(cur, afake, &xfs_inobt_ops, &ops);
+	else
+		xfs_btree_stage_afakeroot(cur, afake, &xfs_finobt_ops, &ops);
+	ops->set_root = xbtree_afakeroot_set_root;
+	ops->init_ptr_from_cur = xbtree_afakeroot_init_ptr_from_cur;
+	return cur;
+}
+
+/*
+ * Install a new inobt btree root.  Caller is responsible for invalidating
+ * and freeing the old btree blocks.
+ */
+void
+xfs_inobt_commit_staged_btree(
+	struct xfs_trans	*tp,
+	struct xbtree_afakeroot	*afake,
+	struct xfs_buf		*agbp)
+{
+	struct xfs_agi		*agi = XFS_BUF_TO_AGI(agbp);
+
+	agi->agi_root = cpu_to_be32(afake->af_root);
+	agi->agi_level = cpu_to_be32(afake->af_levels);
+	xfs_ialloc_log_agi(tp, agbp, XFS_AGI_ROOT | XFS_AGI_LEVEL);
+}
+
+/*
+ * Install a new finobt btree root.  Caller is responsible for invalidating
+ * and freeing the old btree blocks.
+ */
+void
+xfs_finobt_commit_staged_btree(
+	struct xfs_trans	*tp,
+	struct xbtree_afakeroot	*afake,
+	struct xfs_buf		*agbp)
+{
+	struct xfs_agi		*agi = XFS_BUF_TO_AGI(agbp);
+
+	agi->agi_free_root = cpu_to_be32(afake->af_root);
+	agi->agi_free_level = cpu_to_be32(afake->af_levels);
+	xfs_ialloc_log_agi(tp, agbp, XFS_AGI_FREE_ROOT | XFS_AGI_FREE_LEVEL);
 }
 
 /*
