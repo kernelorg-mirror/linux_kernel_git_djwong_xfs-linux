@@ -185,6 +185,16 @@ union xfs_btree_cur_private {
 	} refc;
 };
 
+/* Private information for a AG-rooted btree. */
+struct xfs_btree_priv_ag {			/* needed for BNO, CNT, INO */
+	union {
+		struct xfs_buf		*agbp;	/* agf/agi buffer pointer */
+		struct xbtree_afakeroot	*afake;	/* fake ag header root */
+	};
+	xfs_agnumber_t			agno;	/* ag number */
+	union xfs_btree_cur_private	priv;
+};
+
 /*
  * Btree cursor structure.
  * This collects all information needed by the btree code in one place.
@@ -206,11 +216,7 @@ typedef struct xfs_btree_cur
 	xfs_btnum_t	bc_btnum;	/* identifies which btree type */
 	int		bc_statoff;	/* offset of btre stats array */
 	union {
-		struct {			/* needed for BNO, CNT, INO */
-			struct xfs_buf	*agbp;	/* agf/agi buffer pointer */
-			xfs_agnumber_t	agno;	/* ag number */
-			union xfs_btree_cur_private	priv;
-		} a;
+		struct xfs_btree_priv_ag a;
 		struct {			/* needed for BMAP */
 			struct xfs_inode *ip;	/* pointer to our inode */
 			int		allocated;	/* count of alloced */
@@ -229,6 +235,12 @@ typedef struct xfs_btree_cur
 #define XFS_BTREE_LASTREC_UPDATE	(1<<2)	/* track last rec externally */
 #define XFS_BTREE_CRC_BLOCKS		(1<<3)	/* uses extended btree blocks */
 #define XFS_BTREE_OVERLAPPING		(1<<4)	/* overlapping intervals */
+/*
+ * The root of this btree is a fakeroot structure so that we can stage a btree
+ * rebuild without leaving it accessible via primary metadata.  The ops struct
+ * is dynamically allocated and must be freed when the cursor is deleted.
+ */
+#define XFS_BTREE_STAGING		(1<<5)
 
 
 #define	XFS_BTREE_NOERROR	0
@@ -509,5 +521,36 @@ union xfs_btree_key *xfs_btree_high_key_from_key(struct xfs_btree_cur *cur,
 int xfs_btree_has_record(struct xfs_btree_cur *cur, union xfs_btree_irec *low,
 		union xfs_btree_irec *high, bool *exists);
 bool xfs_btree_has_more_records(struct xfs_btree_cur *cur);
+
+/* Fake root for an AG-rooted btree. */
+struct xbtree_afakeroot {
+	/* AG block number of the new btree root. */
+	xfs_agblock_t		af_root;
+
+	/* Height of the new btree. */
+	unsigned int		af_levels;
+
+	/* Number of blocks used by the btree. */
+	unsigned int		af_blocks;
+};
+
+/* Fake root overrides for staged btree cursors. */
+int xbtree_fakeroot_alloc_block(struct xfs_btree_cur *cur,
+		union xfs_btree_ptr *start_bno, union xfs_btree_ptr *new_bno,
+		int *stat);
+int xbtree_fakeroot_free_block(struct xfs_btree_cur *cur, struct xfs_buf *bp);
+void xbtree_fakeroot_init_ptr_from_cur(struct xfs_btree_cur *cur,
+		union xfs_btree_ptr *ptr);
+void xbtree_afakeroot_set_root(struct xfs_btree_cur *cur,
+		union xfs_btree_ptr *ptr, int inc);
+
+/* Cursor interactions with with fake roots for AG-rooted btrees. */
+void xfs_btree_stage_afakeroot(struct xfs_btree_cur *cur,
+		struct xbtree_afakeroot *afake,
+		const struct xfs_btree_ops *ops,
+		struct xfs_btree_ops **new_ops);
+void xfs_btree_commit_afakeroot(struct xfs_btree_cur *cur,
+		struct xfs_buf *agbp,
+		const struct xfs_btree_ops *ops);
 
 #endif	/* __XFS_BTREE_H__ */
