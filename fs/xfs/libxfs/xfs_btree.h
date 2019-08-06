@@ -565,4 +565,31 @@ void xfs_btree_commit_afakeroot(struct xfs_btree_cur *cur,
 		struct xfs_buf *agbp,
 		const struct xfs_btree_ops *ops);
 
+/* Bulk loading of staged btrees. */
+struct xfs_btree_bload {
+	/* Number of records the caller wants to store. */
+	uint64_t	nr_records;
+
+	/* Number of btree blocks needed to store those records. */
+	uint64_t	nr_blocks;
+
+	/* Number of free records/keys to leave in each block. */
+	unsigned int	leaf_slack;
+	unsigned int	node_slack;
+
+	/* Computed btree height. */
+	unsigned int	btree_height;
+};
+
+typedef int (*xfs_btree_bload_get_fn)(struct xfs_btree_cur *cur, void *priv);
+typedef int (*xfs_btree_bload_alloc_fn)(struct xfs_btree_cur *cur,
+		union xfs_btree_ptr *ptr, void *priv);
+
+int xfs_btree_bload_init(struct xfs_btree_cur *cur,
+		struct xfs_btree_bload *bbl, uint64_t nr_records,
+		unsigned int leaf_slack, unsigned int node_slack);
+int xfs_btree_bload(struct xfs_btree_cur *cur, struct xfs_btree_bload *bbl,
+		xfs_btree_bload_get_fn get_data,
+		xfs_btree_bload_alloc_fn alloc_block, void *priv);
+
 #endif	/* __XFS_BTREE_H__ */
