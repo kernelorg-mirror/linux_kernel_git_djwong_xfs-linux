@@ -405,18 +405,21 @@ xfs_refcountbt_stage_cursor(
  */
 void
 xfs_refcountbt_commit_staged_btree(
-	struct xfs_trans	*tp,
-	struct xbtree_afakeroot	*afake,
+	struct xfs_btree_cur	*cur,
 	struct xfs_buf		*agbp)
 {
 	struct xfs_agf		*agf = XFS_BUF_TO_AGF(agbp);
+	struct xbtree_afakeroot	*afake = cur->bc_private.a.afake;
+
+	ASSERT(cur->bc_flags & XFS_BTREE_STAGING);
 
 	agf->agf_refcount_root = cpu_to_be32(afake->af_root);
 	agf->agf_refcount_level = cpu_to_be32(afake->af_levels);
 	agf->agf_refcount_blocks = cpu_to_be32(afake->af_blocks);
-	xfs_alloc_log_agf(tp, agbp, XFS_AGF_REFCOUNT_BLOCKS |
-				    XFS_AGF_REFCOUNT_ROOT |
-				    XFS_AGF_REFCOUNT_LEVEL);
+	xfs_alloc_log_agf(cur->bc_tp, agbp, XFS_AGF_REFCOUNT_BLOCKS |
+					    XFS_AGF_REFCOUNT_ROOT |
+					    XFS_AGF_REFCOUNT_LEVEL);
+	xfs_btree_commit_afakeroot(cur, agbp, &xfs_refcountbt_ops);
 }
 
 /*

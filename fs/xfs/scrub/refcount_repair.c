@@ -107,6 +107,9 @@ struct xrep_refc {
 	/* refcount extents */
 	struct xfbma		*refcount_records;
 
+	/* new refcountbt information */
+	struct xrep_newbt	new_btree_info;
+
 	/* old refcountbt blocks */
 	struct xfs_bitmap	old_refcountbt_blocks;
 
@@ -115,8 +118,8 @@ struct xrep_refc {
 	/* # of refcountbt blocks */
 	xfs_extlen_t		btblocks;
 
-	/* Fake root for new btree. */
-	struct xbtree_afakeroot	refc_root;
+	/* Iterator */
+	uint64_t		iter;
 };
 
 /* Grab the next (abbreviated) rmap record from the rmapbt. */
@@ -389,76 +392,53 @@ out_cur:
 }
 #undef RRM_NEXT
 
-/*
- * Initialize new refcountbt root block and set up a fake root so we can build
- * a new btree and only swap it if we're successful.
- */
+/* Retrieve refcountbt data for bulk load. */
 STATIC int
-xrep_refc_stage_btree(
+xrep_refc_get_data(
+	struct xfs_btree_cur		*cur,
+	void				*priv)
+{
+	struct xfs_refcount_irec	*refc = &cur->bc_rec.rc;
+	struct xrep_refc		*rr = priv;
+	int				error;
+
+	do {
+		error = xfbma_get(rr->refcount_records, rr->iter++, refc);
+	} while (error == 0 && xfbma_is_null(rr->refcount_records, refc));
+
+	return error;
+}
+
+/* Feed one of the new btree blocks to the bulk loader. */
+STATIC int
+xrep_refc_bload_alloc(
+	struct xfs_btree_cur	*cur,
+	union xfs_btree_ptr	*ptr,
+	void			*priv)
+{
+	struct xrep_refc        *rr = priv;
+
+	return xrep_newbt_alloc_block(cur, &rr->new_btree_info, ptr);
+}
+
+/* Update the AGF counters. */
+STATIC int
+xrep_refc_reset_counters(
 	struct xrep_refc	*rr)
 {
 	struct xfs_scrub	*sc = rr->sc;
-	struct xfs_mount	*mp = sc->mp;
+	struct xfs_perag	*pag = sc->sa.pag;
 	struct xfs_buf		*bp;
-	xfs_fsblock_t		btfsb;
-	xfs_extlen_t		blocks;
-	int			error;
 
-	/* Do we actually have enough space to do this? */
-	blocks = xfs_refcountbt_calc_size(mp,
-			xfbma_length(rr->refcount_records));
-	if (!xrep_ag_has_space(sc->sa.pag, blocks, XFS_AG_RESV_METADATA))
-		return -ENOSPC;
+	/*
+	 * Mark the pagf information stale and use the accessor function to
+	 * forcibly reload it from the values we just logged.  We still own the
+	 * AGF bp so we can safely ignore bp.
+	 */
+	ASSERT(pag->pagf_init);
+	pag->pagf_init = 0;
 
-	/* Initialize a new refcountbt root. */
-	error = xrep_alloc_ag_block(sc, &XFS_RMAP_OINFO_REFC, &btfsb,
-			XFS_AG_RESV_METADATA);
-	if (error)
-		return error;
-	error = xrep_init_btblock(sc, btfsb, &bp, XFS_BTNUM_REFC,
-			&xfs_refcountbt_buf_ops);
-	if (error)
-		return error;
-	xbtree_afakeroot_init(sc->mp, &rr->refc_root,
-			XFS_FSB_TO_AGBNO(sc->mp, btfsb));
-	return 0;
-}
-
-/* Insert a single record into the refcount btree. */
-STATIC int
-xrep_refc_insert_rec(
-	const void			*item,
-	void				*priv)
-{
-	struct xrep_refc		*rr = priv;
-	const struct xrep_refc_extent	*rre = item;
-	struct xfs_refcount_irec	refc = {
-		.rc_startblock	= rre->startblock,
-		.rc_blockcount	= rre->blockcount,
-		.rc_refcount	= rre->refcount,
-	};
-	struct xfs_scrub		*sc = rr->sc;
-	struct xfs_mount		*mp = sc->mp;
-	struct xfs_btree_cur		*cur;
-	int				have_gt;
-	int				error;
-
-	/* Insert into the refcountbt. */
-	cur = xfs_refcountbt_stage_cursor(mp, sc->tp, &rr->refc_root,
-			sc->sa.agno);
-	error = xfs_refcount_lookup_eq(cur, rre->startblock, &have_gt);
-	if (error)
-		goto out;
-	XFS_WANT_CORRUPTED_GOTO(mp, have_gt == 0, out);
-	error = xfs_refcount_insert(cur, &refc, &have_gt);
-	if (error)
-		goto out;
-	XFS_WANT_CORRUPTED_GOTO(mp, have_gt == 1, out);
-	xfs_btree_del_cursor(cur, error);
-	return xrep_roll_ag_trans(sc);
-out:
-	xfs_btree_del_cursor(cur, error);
-	return error;
+	return xfs_alloc_read_agf(sc->mp, sc->tp, sc->sa.agno, 0, &bp);
 }
 
 /*
@@ -470,50 +450,91 @@ STATIC int
 xrep_refc_build_new_tree(
 	struct xrep_refc	*rr)
 {
+	struct xfs_btree_bload	refc_bload;
 	struct xfs_scrub	*sc = rr->sc;
+	struct xfs_btree_cur	*refc_cur;
 	int			error;
 
 	/*
-	 * Sort the refcount extents by startblock to avoid btree splits when
-	 * we rebuild the refcount btree.
+	 * Sort the refcount extents by startblock or else the btree records
+	 * will be in the wrong order.
 	 */
 	error = xfbma_sort(rr->refcount_records, xrep_refc_extent_cmp);
 	if (error)
 		return error;
 
 	/*
-	 * Create a new btree for staging all the refcount records we collected
-	 * earlier.  This btree will not be rooted in the AGF until we've
-	 * succesfully reloaded the tree.
+	 * Prepare to construct the new btree by reserving disk space for the
+	 * new btree and setting up all the accounting information we'll need
+	 * to root the new btree while it's under construction and before we
+	 * attach it to the AG header.
 	 */
-	error = xrep_refc_stage_btree(rr);
-	if (error)
-		return error;
+	xrep_newbt_init(&rr->new_btree_info, sc, &XFS_RMAP_OINFO_REFC,
+			XFS_AGB_TO_FSB(sc->mp, sc->sa.agno,
+				       xfs_refc_block(sc->mp)),
+			XFS_AG_RESV_METADATA);
 
-	/* Add all records. */
-	error = xfbma_iter_del(rr->refcount_records, xrep_refc_insert_rec, rr);
+	/* Compute how many blocks we'll need. */
+	refc_cur = xfs_refcountbt_stage_cursor(sc->mp, sc->tp,
+			&rr->new_btree_info.afake, sc->sa.agno);
+	error = xfs_btree_bload_init(refc_cur, &refc_bload,
+			xfbma_length(rr->refcount_records), 0, 0);
 	if (error)
-		return error;
-
-	/* Clean transaction ahead of installing the new btree root. */
-	error = xrep_roll_ag_trans(sc);
-	if (error)
-		return error;
+		goto err_cur;
+	xfs_btree_del_cursor(refc_cur, error);
 
 	/*
-	 * Re-read the AGF so that the buffer type is set properly.  Since we
-	 * built a new tree without dirtying the AGF, the buffer item may have
-	 * fallen off the buffer.  This ought to succeed since the AGF is held
-	 * across transaction rolls.
+	 * Reserve the space we'll need for the new btree.  Drop the cursor
+	 * while we do this because that can roll the transaction and cursors
+	 * can't handle that.
+	 */
+	error = xrep_newbt_reserve_space(&rr->new_btree_info,
+			refc_bload.nr_blocks);
+	if (error)
+		goto err_newbt;
+
+	/* Add all observed refcount records. */
+	rr->iter = 0;
+	refc_cur = xfs_refcountbt_stage_cursor(sc->mp, sc->tp,
+			&rr->new_btree_info.afake, sc->sa.agno);
+	error = xfs_btree_bload(refc_cur, &refc_bload, xrep_refc_get_data,
+			xrep_refc_bload_alloc, rr);
+	if (error)
+		goto err_cur;
+
+	/*
+	 * Install the new btree in the AG header.  After this point the old
+	 * btree is no longer accessible and the new tree is live.
+	 *
+	 * Note: We re-read the AGF here to ensure the buffer type is set
+	 * properly.  Since we built a new tree without attaching to the AGF
+	 * buffer, the buffer item may have fallen off the buffer.  This ought
+	 * to succeed since the AGF is held across transaction rolls.
 	 */
 	error = xfs_read_agf(sc->mp, sc->tp, sc->sa.agno, 0, &sc->sa.agf_bp);
 	if (error)
+		goto err_cur;
+
+	/* Commit our new btree. */
+	xfs_refcountbt_commit_staged_btree(refc_cur, sc->sa.agf_bp);
+	xfs_btree_del_cursor(refc_cur, 0);
+
+	/* Reset the AGF counters now that we've changed the btree shape. */
+	error = xrep_refc_reset_counters(rr);
+	if (error)
+		goto err_newbt;
+
+	/* Dispose of any unused blocks and the accounting infomation. */
+	error = xrep_newbt_unreserve_space(&rr->new_btree_info);
+	if (error)
 		return error;
 
-	/* Install new btree root. */
-	xfs_refcountbt_commit_staged_btree(sc->tp, &rr->refc_root,
-			sc->sa.agf_bp);
-	return 0;
+	return xrep_roll_ag_trans(sc);
+err_cur:
+	xfs_btree_del_cursor(refc_cur, error);
+err_newbt:
+	xrep_newbt_unreserve_space(&rr->new_btree_info);
+	return error;
 }
 
 /*

@@ -62,7 +62,7 @@ extern int xfs_refcountbt_calc_reserves(struct xfs_mount *mp,
 		struct xfs_trans *tp, xfs_agnumber_t agno, xfs_extlen_t *ask,
 		xfs_extlen_t *used);
 
-void xfs_refcountbt_commit_staged_btree(struct xfs_trans *tp,
-		struct xbtree_afakeroot *afake, struct xfs_buf *agbp);
+void xfs_refcountbt_commit_staged_btree(struct xfs_btree_cur *cur,
+		struct xfs_buf *agbp);
 
 #endif	/* __XFS_REFCOUNT_BTREE_H__ */
