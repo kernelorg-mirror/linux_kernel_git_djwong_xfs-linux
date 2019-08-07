@@ -104,15 +104,18 @@ struct xrep_refc_extent {
 } __packed;
 
 struct xrep_refc {
-	struct xfbma		*rmap_bag; /* rmaps we're tracking */
-	struct xfbma		*refcount_records;	/* refcount extents */
-	struct xfs_bitmap	*btlist;   /* old refcountbt blocks */
-	struct xfs_scrub	*sc;
-	xfs_extlen_t		btblocks;  /* # of refcountbt blocks */
-};
+	/* refcount extents */
+	struct xfbma		*refcount_records;
 
-struct xrep_refc_build {
+	/* old refcountbt blocks */
+	struct xfs_bitmap	old_refcountbt_blocks;
+
 	struct xfs_scrub	*sc;
+
+	/* # of refcountbt blocks */
+	xfs_extlen_t		btblocks;
+
+	/* Fake root for new btree. */
 	struct xbtree_afakeroot	refc_root;
 };
 
@@ -170,8 +173,8 @@ xrep_refc_next_rrm(
 			fsbno = XFS_AGB_TO_FSB(cur->bc_mp,
 					cur->bc_private.a.agno,
 					rmap.rm_startblock);
-			error = xfs_bitmap_set(rr->btlist, fsbno,
-					rmap.rm_blockcount);
+			error = xfs_bitmap_set(&rr->old_refcountbt_blocks,
+					fsbno, rmap.rm_blockcount);
 			if (error)
 				goto out_error;
 		}
@@ -249,11 +252,12 @@ xrep_refc_next_edge(
 
 /* Iterate all the rmap records to generate reference count data. */
 STATIC int
-xrep_refc_generate_refcounts(
-	struct xfs_scrub	*sc,
+xrep_refc_find_refcounts(
 	struct xrep_refc	*rr)
 {
 	struct xrep_refc_rmap	rrm;
+	struct xfs_scrub	*sc = rr->sc;
+	struct xfbma		*rmap_bag;
 	struct xfs_btree_cur	*cur;
 	xfs_agblock_t		sbno;
 	xfs_agblock_t		cbno;
@@ -269,8 +273,15 @@ xrep_refc_generate_refcounts(
 			sc->sa.agno);
 	error = xfs_rmap_lookup_le(cur, 0, 0, 0, 0, 0, &have_gt);
 	if (error)
-		goto out;
+		goto out_cur;
 	ASSERT(have_gt == 0);
+
+	/* Set up some storage */
+	rmap_bag = xfbma_init(sizeof(struct xrep_refc_rmap));
+	if (IS_ERR(rmap_bag)) {
+		error = PTR_ERR(rmap_bag);
+		goto out_cur;
+	}
 
 	/* Process reverse mappings into refcount data. */
 	while (xfs_btree_has_more_records(cur)) {
@@ -282,7 +293,7 @@ xrep_refc_generate_refcounts(
 			break;
 		sbno = cbno = rrm.startblock;
 		while (have && rrm.startblock == sbno) {
-			error = xfbma_insert_anywhere(rr->rmap_bag, &rrm);
+			error = xfbma_insert_anywhere(rmap_bag, &rrm);
 			if (error)
 				goto out;
 			stack_sz++;
@@ -296,7 +307,7 @@ xrep_refc_generate_refcounts(
 		XFS_WANT_CORRUPTED_GOTO(sc->mp, have_gt, out);
 
 		/* Set nbno to the bno of the next refcount change */
-		nbno = xrep_refc_next_edge(rr->rmap_bag, &rrm, have);
+		nbno = xrep_refc_next_edge(rmap_bag, &rrm, have);
 		if (nbno == NULLAGBLOCK) {
 			error = -EFSCORRUPTED;
 			goto out;
@@ -310,10 +321,10 @@ xrep_refc_generate_refcounts(
 			uint64_t	i;
 
 			/* Pop all rmaps that end at nbno */
-			foreach_xfbma_item(rr->rmap_bag, i, rrm) {
+			foreach_xfbma_item(rmap_bag, i, rrm) {
 				if (RRM_NEXT(rrm) != nbno)
 					continue;
-				error = xfbma_nullify(rr->rmap_bag, i);
+				error = xfbma_nullify(rmap_bag, i);
 				if (error)
 					goto out;
 				stack_sz--;
@@ -324,7 +335,7 @@ xrep_refc_generate_refcounts(
 			if (error)
 				goto out;
 			while (have && rrm.startblock == nbno) {
-				error = xfbma_insert_anywhere(rr->rmap_bag,
+				error = xfbma_insert_anywhere(rmap_bag,
 						&rrm);
 				if (error)
 					goto out;
@@ -359,7 +370,7 @@ xrep_refc_generate_refcounts(
 			sbno = nbno;
 
 			/* Set nbno to the bno of the next refcount change */
-			nbno = xrep_refc_next_edge(rr->rmap_bag, &rrm, have);
+			nbno = xrep_refc_next_edge(rmap_bag, &rrm, have);
 			if (nbno == NULLAGBLOCK) {
 				error = -EFSCORRUPTED;
 				goto out;
@@ -371,53 +382,12 @@ xrep_refc_generate_refcounts(
 
 	ASSERT(stack_sz == 0);
 out:
+	xfbma_destroy(rmap_bag);
+out_cur:
 	xfs_btree_del_cursor(cur, error);
 	return error;
 }
 #undef RRM_NEXT
-
-/*
- * Generate all the reference counts for this AG and a list of the old
- * refcount btree blocks.  Figure out if we have enough free space to
- * reconstruct the inode btrees.  The caller must clean up the lists if
- * anything goes wrong.
- */
-STATIC int
-xrep_refc_find_refcounts(
-	struct xfs_scrub	*sc,
-	struct xfbma		*refcount_records,
-	struct xfs_bitmap	*old_refcountbt_blocks)
-{
-	struct xrep_refc	rr = {
-		.sc			= sc,
-		.refcount_records	= refcount_records,
-		.btlist			= old_refcountbt_blocks,
-	};
-	struct xfs_mount	*mp = sc->mp;
-	xfs_extlen_t		blocks;
-	int			error;
-
-	/* Set up some storage */
-	rr.rmap_bag = xfbma_init(sizeof(struct xrep_refc_rmap));
-	if (IS_ERR(rr.rmap_bag))
-		return PTR_ERR(rr.rmap_bag);
-
-	/* Generate all the refcount records. */
-	error = xrep_refc_generate_refcounts(sc, &rr);
-	if (error)
-		goto out;
-
-	/* Do we actually have enough space to do this? */
-	blocks = xfs_refcountbt_calc_size(mp, xfbma_length(refcount_records));
-	if (!xrep_ag_has_space(sc->sa.pag, blocks, XFS_AG_RESV_METADATA)) {
-		error = -ENOSPC;
-		goto out;
-	}
-
-out:
-	xfbma_destroy(rr.rmap_bag);
-	return error;
-}
 
 /*
  * Initialize new refcountbt root block and set up a fake root so we can build
@@ -425,12 +395,20 @@ out:
  */
 STATIC int
 xrep_refc_stage_btree(
-	struct xrep_refc_build	*xrb)
+	struct xrep_refc	*rr)
 {
-	struct xfs_scrub	*sc = xrb->sc;
+	struct xfs_scrub	*sc = rr->sc;
+	struct xfs_mount	*mp = sc->mp;
 	struct xfs_buf		*bp;
 	xfs_fsblock_t		btfsb;
+	xfs_extlen_t		blocks;
 	int			error;
+
+	/* Do we actually have enough space to do this? */
+	blocks = xfs_refcountbt_calc_size(mp,
+			xfbma_length(rr->refcount_records));
+	if (!xrep_ag_has_space(sc->sa.pag, blocks, XFS_AG_RESV_METADATA))
+		return -ENOSPC;
 
 	/* Initialize a new refcountbt root. */
 	error = xrep_alloc_ag_block(sc, &XFS_RMAP_OINFO_REFC, &btfsb,
@@ -441,7 +419,7 @@ xrep_refc_stage_btree(
 			&xfs_refcountbt_buf_ops);
 	if (error)
 		return error;
-	xbtree_afakeroot_init(sc->mp, &xrb->refc_root,
+	xbtree_afakeroot_init(sc->mp, &rr->refc_root,
 			XFS_FSB_TO_AGBNO(sc->mp, btfsb));
 	return 0;
 }
@@ -452,21 +430,21 @@ xrep_refc_insert_rec(
 	const void			*item,
 	void				*priv)
 {
-	struct xrep_refc_build		*xrb = priv;
+	struct xrep_refc		*rr = priv;
 	const struct xrep_refc_extent	*rre = item;
 	struct xfs_refcount_irec	refc = {
 		.rc_startblock	= rre->startblock,
 		.rc_blockcount	= rre->blockcount,
 		.rc_refcount	= rre->refcount,
 	};
-	struct xfs_scrub		*sc = xrb->sc;
+	struct xfs_scrub		*sc = rr->sc;
 	struct xfs_mount		*mp = sc->mp;
 	struct xfs_btree_cur		*cur;
 	int				have_gt;
 	int				error;
 
 	/* Insert into the refcountbt. */
-	cur = xfs_refcountbt_stage_cursor(mp, sc->tp, &xrb->refc_root,
+	cur = xfs_refcountbt_stage_cursor(mp, sc->tp, &rr->refc_root,
 			sc->sa.agno);
 	error = xfs_refcount_lookup_eq(cur, rre->startblock, &have_gt);
 	if (error)
@@ -490,19 +468,16 @@ out:
  */
 STATIC int
 xrep_refc_build_new_tree(
-	struct xfs_scrub	*sc,
-	struct xfbma		*refcount_records)
+	struct xrep_refc	*rr)
 {
-	struct xrep_refc_build	xrb = {
-		.sc		= sc,
-	};
+	struct xfs_scrub	*sc = rr->sc;
 	int			error;
 
 	/*
 	 * Sort the refcount extents by startblock to avoid btree splits when
 	 * we rebuild the refcount btree.
 	 */
-	error = xfbma_sort(refcount_records, xrep_refc_extent_cmp);
+	error = xfbma_sort(rr->refcount_records, xrep_refc_extent_cmp);
 	if (error)
 		return error;
 
@@ -511,12 +486,12 @@ xrep_refc_build_new_tree(
 	 * earlier.  This btree will not be rooted in the AGF until we've
 	 * succesfully reloaded the tree.
 	 */
-	error = xrep_refc_stage_btree(&xrb);
+	error = xrep_refc_stage_btree(rr);
 	if (error)
 		return error;
 
 	/* Add all records. */
-	error = xfbma_iter_del(refcount_records, xrep_refc_insert_rec, &xrb);
+	error = xfbma_iter_del(rr->refcount_records, xrep_refc_insert_rec, rr);
 	if (error)
 		return error;
 
@@ -536,7 +511,7 @@ xrep_refc_build_new_tree(
 		return error;
 
 	/* Install new btree root. */
-	xfs_refcountbt_commit_staged_btree(sc->tp, &xrb.refc_root,
+	xfs_refcountbt_commit_staged_btree(sc->tp, &rr->refc_root,
 			sc->sa.agf_bp);
 	return 0;
 }
@@ -547,13 +522,13 @@ xrep_refc_build_new_tree(
  */
 STATIC int
 xrep_refc_remove_old_tree(
-	struct xfs_scrub	*sc,
-	struct xfs_bitmap	*old_refcountbt_blocks)
+	struct xrep_refc	*rr)
 {
+	struct xfs_scrub	*sc = rr->sc;
 	int			error;
 
-	/* Invalidate all the inobt/finobt blocks in btlist. */
-	error = xrep_invalidate_blocks(sc, old_refcountbt_blocks);
+	/* Invalidate all the inobt/finobt blocks in old_refcountbt_blocks. */
+	error = xrep_invalidate_blocks(sc, &rr->old_refcountbt_blocks);
 	if (error)
 		return error;
 	error = xrep_roll_ag_trans(sc);
@@ -561,7 +536,7 @@ xrep_refc_remove_old_tree(
 		return error;
 
 	/* Free the old refcountbt blocks if they're not in use. */
-	error = xrep_reap_extents(sc, old_refcountbt_blocks,
+	error = xrep_reap_extents(sc, &rr->old_refcountbt_blocks,
 			&XFS_RMAP_OINFO_REFC, XFS_AG_RESV_METADATA);
 	if (error)
 		return error;
@@ -575,8 +550,7 @@ int
 xrep_refcountbt(
 	struct xfs_scrub	*sc)
 {
-	struct xfs_bitmap	old_refcountbt_blocks;
-	struct xfbma		*refcount_records;
+	struct xrep_refc	*rr;
 	struct xfs_mount	*mp = sc->mp;
 	int			error;
 
@@ -584,32 +558,40 @@ xrep_refcountbt(
 	if (!xfs_sb_version_hasrmapbt(&mp->m_sb))
 		return -EOPNOTSUPP;
 
+	rr = kmem_zalloc(sizeof(struct xrep_refc), KM_NOFS | KM_MAYFAIL);
+	if (!rr)
+		return -ENOMEM;
+	rr->sc = sc;
+
 	xchk_perag_get(sc->mp, &sc->sa);
 
 	/* Set up some storage */
-	refcount_records = xfbma_init(sizeof(struct xrep_refc_extent));
-	if (IS_ERR(refcount_records))
-		return PTR_ERR(refcount_records);
+	rr->refcount_records = xfbma_init(sizeof(struct xrep_refc_extent));
+	if (IS_ERR(rr->refcount_records)) {
+		error = PTR_ERR(rr->refcount_records);
+		goto out_rr;
+	}
 
 	/* Collect all reference counts. */
-	xfs_bitmap_init(&old_refcountbt_blocks);
-	error = xrep_refc_find_refcounts(sc, refcount_records,
-			&old_refcountbt_blocks);
+	xfs_bitmap_init(&rr->old_refcountbt_blocks);
+	error = xrep_refc_find_refcounts(rr);
 	if (error)
-		goto out;
+		goto out_bitmap;
 
 	/* Rebuild the refcount information. */
-	error = xrep_refc_build_new_tree(sc, refcount_records);
+	error = xrep_refc_build_new_tree(rr);
 	if (error)
-		goto out;
+		goto out_bitmap;
 
 	/* Kill the old tree. */
-	error = xrep_refc_remove_old_tree(sc, &old_refcountbt_blocks);
+	error = xrep_refc_remove_old_tree(rr);
 	if (error)
-		goto out;
+		goto out_bitmap;
 
-out:
-	xfs_bitmap_destroy(&old_refcountbt_blocks);
-	xfbma_destroy(refcount_records);
+out_bitmap:
+	xfs_bitmap_destroy(&rr->old_refcountbt_blocks);
+	xfbma_destroy(rr->refcount_records);
+out_rr:
+	kmem_free(rr);
 	return error;
 }
