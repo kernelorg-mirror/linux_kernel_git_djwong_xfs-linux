@@ -513,38 +513,33 @@ xfs_inobt_stage_cursor(
  */
 void
 xfs_inobt_commit_staged_btree(
-	struct xfs_trans	*tp,
-	struct xbtree_afakeroot	*afake,
+	struct xfs_btree_cur	*cur,
 	struct xfs_buf		*agbp)
 {
 	struct xfs_agi		*agi = XFS_BUF_TO_AGI(agbp);
+	struct xbtree_afakeroot	*afake = cur->bc_private.a.afake;
 
-	agi->agi_root = cpu_to_be32(afake->af_root);
-	agi->agi_level = cpu_to_be32(afake->af_levels);
-	xfs_ialloc_log_agi(tp, agbp, XFS_AGI_ROOT | XFS_AGI_LEVEL);
-}
+	ASSERT(cur->bc_flags & XFS_BTREE_STAGING);
 
-/*
- * Install a new finobt btree root.  Caller is responsible for invalidating
- * and freeing the old btree blocks.
- */
-void
-xfs_finobt_commit_staged_btree(
-	struct xfs_trans	*tp,
-	struct xbtree_afakeroot	*afake,
-	struct xfs_buf		*agbp)
-{
-	struct xfs_agi		*agi = XFS_BUF_TO_AGI(agbp);
-	int			fields;
+	if (cur->bc_btnum == XFS_BTNUM_INO) {
+		agi->agi_root = cpu_to_be32(afake->af_root);
+		agi->agi_level = cpu_to_be32(afake->af_levels);
+		xfs_ialloc_log_agi(cur->bc_tp, agbp, XFS_AGI_ROOT |
+						     XFS_AGI_LEVEL);
+		xfs_btree_commit_afakeroot(cur, agbp, &xfs_inobt_ops);
+	} else {
+		int			fields;
 
-	fields = XFS_AGI_FREE_ROOT | XFS_AGI_FREE_LEVEL;
-	if (xfs_sb_version_hasfinobtblocks(&tp->t_mountp->m_sb)) {
-		agi->agi_fino_blocks = cpu_to_be32(afake->af_blocks);
-		fields |= XFS_AGI_FINO_BLOCKS;
+		fields = XFS_AGI_FREE_ROOT | XFS_AGI_FREE_LEVEL;
+		if (xfs_sb_version_hasfinobtblocks(&cur->bc_mp->m_sb)) {
+			agi->agi_fino_blocks = cpu_to_be32(afake->af_blocks);
+			fields |= XFS_AGI_FINO_BLOCKS;
+		}
+		agi->agi_free_root = cpu_to_be32(afake->af_root);
+		agi->agi_free_level = cpu_to_be32(afake->af_levels);
+		xfs_ialloc_log_agi(cur->bc_tp, agbp, fields);
+		xfs_btree_commit_afakeroot(cur, agbp, &xfs_finobt_ops);
 	}
-	agi->agi_free_root = cpu_to_be32(afake->af_root);
-	agi->agi_free_level = cpu_to_be32(afake->af_levels);
-	xfs_ialloc_log_agi(tp, agbp, fields);
 }
 
 /*

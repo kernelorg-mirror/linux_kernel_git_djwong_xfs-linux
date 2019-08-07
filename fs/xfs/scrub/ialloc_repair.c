@@ -91,9 +91,11 @@ struct xrep_ibt {
 	/* Record under construction. */
 	struct xfs_inobt_rec_incore	rie;
 
-	/* Fake roots for new btrees. */
-	struct xbtree_afakeroot	ino_root;
-	struct xbtree_afakeroot	fino_root;
+	/* new inobt information */
+	struct xrep_newbt	new_inobt_info;
+
+	/* new finobt information */
+	struct xrep_newbt	new_finobt_info;
 
 	/* Old inode btree blocks we found in the rmap. */
 	struct xfs_bitmap	old_iallocbt_blocks;
@@ -109,11 +111,11 @@ struct xrep_ibt {
 	/* Number of inodes in use. */
 	unsigned int		iused;
 
-	/* Number of inobt records needed. */
-	unsigned int		inobt_recs;
-
 	/* Number of finobt records needed. */
 	unsigned int		finobt_recs;
+
+	/* get_data()'s position in the inode record array. */
+	uint64_t		iter;
 };
 
 /*
@@ -167,6 +169,28 @@ xrep_ibt_check_ifree(
 	return 0;
 }
 
+/* Stash the accumulated inobt record for rebuilding. */
+STATIC int
+xrep_ibt_stash_record(
+	struct xrep_ibt		*ri)
+{
+	int			error;
+
+	ri->rie.ir_freecount = xfs_inobt_rec_freecount(&ri->rie);
+	if (ri->rie.ir_freecount > 0)
+		ri->finobt_recs++;
+
+	trace_xrep_ibt_insert(ri->sc->mp, ri->sc->sa.agno, ri->rie.ir_startino,
+			ri->rie.ir_holemask, ri->rie.ir_count,
+			ri->rie.ir_freecount, ri->rie.ir_free);
+
+	error = xfbma_append(ri->inode_records, &ri->rie);
+	if (error)
+		return error;
+	ri->rie.ir_startino = NULLAGINO;
+	return 0;
+}
+
 /*
  * Given an extent of inodes and an inode cluster buffer, calculate the
  * location of the corresponding inobt record (creating it if necessary),
@@ -205,13 +229,9 @@ xrep_ibt_cluster_record(
 	 */
 	if (ri->rie.ir_startino != NULLAGINO &&
 	    ri->rie.ir_startino + XFS_INODES_PER_CHUNK <= ir_startino) {
-		if (xfs_inobt_rec_freecount(&ri->rie) > 0)
-			ri->finobt_recs++;
-		ri->inobt_recs++;
-		error = xfbma_append(ri->inode_records, &ri->rie);
+		error = xrep_ibt_stash_record(ri);
 		if (error)
 			return error;
-		ri->rie.ir_startino = NULLAGINO;
 	}
 
 	if (ri->rie.ir_startino == NULLAGINO) {
@@ -403,6 +423,8 @@ xrep_ibt_find_inodes(
 	struct xfs_btree_cur	*cur;
 	int			error;
 
+	ri->rie.ir_startino = NULLAGINO;
+
 	/* Collect all reverse mappings for inode blocks. */
 	cur = xfs_rmapbt_init_cursor(mp, sc->tp, sc->sa.agf_bp, sc->sa.agno);
 	error = xfs_rmap_query_all(cur, xrep_ibt_walk_rmap, ri);
@@ -412,10 +434,7 @@ xrep_ibt_find_inodes(
 
 	/* If we have a record ready to go, add it to the array. */
 	if (ri->rie.ir_startino != NULLAGINO) {
-		if (xfs_inobt_rec_freecount(&ri->rie) > 0)
-			ri->finobt_recs++;
-		ri->inobt_recs++;
-		error = xfbma_append(ri->inode_records, &ri->rie);
+		error = xrep_ibt_stash_record(ri);
 		if (error)
 			return error;
 	}
@@ -431,6 +450,7 @@ xrep_ibt_reset_counters(
 	struct xfs_scrub	*sc = ri->sc;
 	struct xfs_agi		*agi;
 	struct xfs_perag	*pag = sc->sa.pag;
+	struct xfs_buf		*bp;
 	unsigned int		freecount;
 
 	agi = XFS_BUF_TO_AGI(sc->sa.agi_bp);
@@ -440,159 +460,69 @@ xrep_ibt_reset_counters(
 	xfs_force_summary_recalc(sc->mp);
 
 	/*
-	 * Reset the per-AG info, both incore and ondisk.  Mark the incore
-	 * state stale in case we fail out of here.
+	 * Mark the pagi information stale and use the accessor function to
+	 * forcibly reload it from the values we just logged.  We still own
+	 * the AGI bp so we can throw away bp.
 	 */
 	ASSERT(pag->pagi_init);
 	pag->pagi_init = 0;
-	pag->pagi_count = ri->icount;
-	pag->pagi_freecount = freecount;
 
 	agi->agi_count = cpu_to_be32(ri->icount);
 	agi->agi_freecount = cpu_to_be32(freecount);
 	xfs_ialloc_log_agi(sc->tp, sc->sa.agi_bp,
 			   XFS_AGI_COUNT | XFS_AGI_FREECOUNT);
 
-	return 0;
+	return xfs_ialloc_read_agi(sc->mp, sc->tp, sc->sa.agno, &bp);
 }
 
-/* Initialize a new inode btree roots and implant it into the AGI. */
-STATIC int
-xrep_ibt_stage_btree(
+/* Do we even want this record? */
+static inline bool
+xrep_ibt_rec_wanted(
 	struct xrep_ibt			*ri,
-	xfs_btnum_t			btnum,
-	enum xfs_ag_resv_type		resv)
+	struct xfs_btree_cur		*cur,
+	struct xfs_inobt_rec_incore	*irec)
 {
-	struct xfs_scrub		*sc = ri->sc;
-	struct xfs_buf			*bp;
-	const struct xfs_buf_ops	*ops;
-	struct xbtree_afakeroot		*afake;
-	xfs_fsblock_t			fsbno;
-	int				error;
+	/* Ignore null records. */
+	if (xfbma_is_null(ri->inode_records, irec))
+		return false;
 
-	switch (btnum) {
-	case XFS_BTNUM_INO:
-		ops = &xfs_inobt_buf_ops;
-		afake = &ri->ino_root;
-		break;
-	case XFS_BTNUM_FINO:
-		ops = &xfs_finobt_buf_ops;
-		afake = &ri->fino_root;
-		break;
-	default:
-		ASSERT(0);
-		return -EFSCORRUPTED;
-	}
+	/* finobt only wants inode records with at least 1 free inode. */
+	if (cur->bc_btnum == XFS_BTNUM_FINO &&
+	    xfs_inobt_rec_freecount(irec) == 0)
+		return false;
 
-	/* Initialize new btree root. */
-	error = xrep_alloc_ag_block(sc, &XFS_RMAP_OINFO_INOBT, &fsbno, resv);
-	if (error)
-		return error;
-	error = xrep_init_btblock(sc, fsbno, &bp, btnum, ops);
-	if (error)
-		return error;
-
-	xbtree_afakeroot_init(sc->mp, afake, XFS_FSB_TO_AGBNO(sc->mp, fsbno));
-	return 0;
+	return true;
 }
 
-/*
- * Initialize new inode btrees root blocks and set up fake roots so we can
- * build new btrees and only plug them into the AGI if we're successful.
- */
+/* Retrieve inobt data for bulk load. */
 STATIC int
-xrep_ibt_stage_btrees(
-	struct xrep_ibt		*ri)
-{
-	struct xfs_scrub	*sc = ri->sc;
-	enum xfs_ag_resv_type	resv;
-	xfs_extlen_t		nr_blocks;
-	int			error;
-
-	/* Do we have enough space to rebuild all inode trees? */
-	nr_blocks = xfs_iallocbt_calc_size(sc->mp, ri->inobt_recs);
-	if (xfs_sb_version_hasfinobt(&sc->mp->m_sb))
-		nr_blocks += xfs_iallocbt_calc_size(sc->mp, ri->finobt_recs);
-	if (!xrep_ag_has_space(sc->sa.pag, nr_blocks, XFS_AG_RESV_NONE))
-		return -ENOSPC;
-
-	resv = XFS_AG_RESV_NONE;
-	error = xrep_ibt_stage_btree(ri, XFS_BTNUM_INO, resv);
-	if (error || !xfs_sb_version_hasfinobt(&sc->mp->m_sb))
-		return error;
-
-	/*
-	 * If we made a per-AG reservation for the finobt then we must account
-	 * the new block correctly.
-	 */
-	if (!sc->mp->m_finobt_nores)
-		resv = XFS_AG_RESV_METADATA;
-	return xrep_ibt_stage_btree(ri, XFS_BTNUM_FINO, resv);
-}
-
-/* Insert an inode chunk record into a given btree. */
-static int
-xrep_ibt_insert_btrec(
-	struct xfs_btree_cur			*cur,
-	const struct xfs_inobt_rec_incore	*rie,
-	unsigned int				freecount)
-{
-	int					stat;
-	int					error;
-
-	error = xfs_inobt_lookup(cur, rie->ir_startino, XFS_LOOKUP_EQ, &stat);
-	if (error)
-		return error;
-	XFS_WANT_CORRUPTED_RETURN(cur->bc_mp, stat == 0);
-	error = xfs_inobt_insert_rec(cur, rie->ir_holemask, rie->ir_count,
-			freecount, rie->ir_free, &stat);
-	if (error)
-		return error;
-	XFS_WANT_CORRUPTED_RETURN(cur->bc_mp, stat == 1);
-	return error;
-}
-
-/* Insert an inode chunk record into both inode btrees. */
-static int
-xrep_ibt_insert_rec(
-	const void			*item,
+xrep_ibt_get_data(
+	struct xfs_btree_cur		*cur,
 	void				*priv)
 {
-	const struct xfs_inobt_rec_incore	*rie = item;
+	struct xfs_inobt_rec_incore	*irec = &cur->bc_rec.i;
 	struct xrep_ibt			*ri = priv;
-	struct xfs_scrub		*sc = ri->sc;
-	struct xfs_btree_cur		*cur;
-	unsigned int			freecount;
 	int				error;
 
-	freecount = xfs_inobt_rec_freecount(rie);
+	do {
+		error = xfbma_get(ri->inode_records, ri->iter++, irec);
+	} while (error == 0 && !xrep_ibt_rec_wanted(ri, cur, irec));
 
-	trace_xrep_ibt_insert(sc->mp, sc->sa.agno, rie->ir_startino,
-			rie->ir_holemask, rie->ir_count, freecount,
-			rie->ir_free);
-
-	/* Insert into the inobt. */
-	cur = xfs_inobt_stage_cursor(sc->mp, sc->tp, &ri->ino_root,
-			sc->sa.agno, XFS_BTNUM_INO);
-	error = xrep_ibt_insert_btrec(cur, rie, freecount);
-	if (error)
-		goto out_cur;
-	xfs_btree_del_cursor(cur, error);
-
-	/* Insert into the finobt if chunk has free inodes. */
-	if (xfs_sb_version_hasfinobt(&sc->mp->m_sb) && freecount != 0) {
-		cur = xfs_inobt_stage_cursor(sc->mp, sc->tp, &ri->fino_root,
-				sc->sa.agno, XFS_BTNUM_FINO);
-		error = xrep_ibt_insert_btrec(cur, rie, freecount);
-		if (error)
-			goto out_cur;
-		xfs_btree_del_cursor(cur, error);
-	}
-
-	return xrep_roll_ag_trans(sc);
-out_cur:
-	xfs_btree_del_cursor(cur, error);
 	return error;
+}
+
+/* Feed one of the new inobt blocks to the bulk loader. */
+STATIC int
+xrep_ibt_bload_alloc(
+	struct xfs_btree_cur	*cur,
+	union xfs_btree_ptr	*ptr,
+	void			*priv)
+{
+	struct xrep_ibt		*ri = priv;
+
+	if (cur->bc_btnum == XFS_BTNUM_INO)
+		return xrep_newbt_alloc_block(cur, &ri->new_inobt_info, ptr);
+	return xrep_newbt_alloc_block(cur, &ri->new_finobt_info, ptr);
 }
 
 /* Build new inode btrees and dispose of the old one. */
@@ -600,35 +530,97 @@ STATIC int
 xrep_ibt_build_new_trees(
 	struct xrep_ibt		*ri)
 {
+	struct xfs_btree_bload	ino_bload;
+	struct xfs_btree_bload	fino_bload;
 	struct xfs_scrub	*sc = ri->sc;
+	struct xfs_btree_cur	*ino_cur;
+	struct xfs_btree_cur	*fino_cur = NULL;
+	bool			need_finobt;
 	int			error;
 
+	need_finobt = xfs_sb_version_hasfinobt(&sc->mp->m_sb);
+
 	/*
-	 * Sort the inode extents by startino to avoid btree splits when we
-	 * rebuild the inode btrees.
+	 * Sort the inode extents by startino or else the btree records will
+	 * be in the wrong order.
 	 */
 	error = xfbma_sort(ri->inode_records, xfs_inobt_rec_incore_cmp);
 	if (error)
 		return error;
 
 	/*
-	 * Create a new btree for staging all the refcount records we collected
-	 * earlier.  This btree will not be rooted in the AGF until we've
+	 * Create new btrees for staging all the inobt records we collected
+	 * earlier.  These btrees will not be rooted in the AGI until we've
 	 * succesfully reloaded the tree.
 	 */
-	error = xrep_ibt_stage_btrees(ri);
-	if (error)
-		return error;
 
-	/* Add all records. */
-	error = xfbma_iter_del(ri->inode_records, xrep_ibt_insert_rec, ri);
+	/* Set up inobt staging cursor. */
+	xrep_newbt_init(&ri->new_inobt_info, sc, &XFS_RMAP_OINFO_INOBT,
+			XFS_AGB_TO_FSB(sc->mp, sc->sa.agno,
+				       XFS_IBT_BLOCK(sc->mp)),
+			XFS_AG_RESV_NONE);
+	ino_cur = xfs_inobt_stage_cursor(sc->mp, sc->tp,
+			&ri->new_inobt_info.afake, sc->sa.agno, XFS_BTNUM_INO);
+	error = xfs_btree_bload_init(ino_cur, &ino_bload,
+			xfbma_length(ri->inode_records), 0, 0);
+	xfs_btree_del_cursor(ino_cur, error);
 	if (error)
-		return error;
+		goto err_inobt;
 
-	/* Clean transaction ahead of installing the new btree roots. */
-	error = xrep_roll_ag_trans(sc);
+	/* Set up finobt staging cursor. */
+	if (need_finobt) {
+		enum xfs_ag_resv_type	resv = XFS_AG_RESV_METADATA;
+
+		if (sc->mp->m_finobt_nores)
+			resv = XFS_AG_RESV_NONE;
+
+		xrep_newbt_init(&ri->new_finobt_info, sc, &XFS_RMAP_OINFO_INOBT,
+				XFS_AGB_TO_FSB(sc->mp, sc->sa.agno,
+					       XFS_FIBT_BLOCK(sc->mp)),
+				resv);
+		fino_cur = xfs_inobt_stage_cursor(sc->mp, sc->tp,
+				&ri->new_finobt_info.afake, sc->sa.agno,
+				XFS_BTNUM_FINO);
+		error = xfs_btree_bload_init(fino_cur, &fino_bload,
+				ri->finobt_recs, 0, 0);
+		xfs_btree_del_cursor(fino_cur, error);
+		if (error)
+			goto err_finobt;
+	}
+
+	/* Reserve all the space we need to build the new btrees. */
+	error = xrep_newbt_reserve_space(&ri->new_inobt_info,
+			ino_bload.nr_blocks);
 	if (error)
-		return error;
+		goto err_finobt;
+
+	if (need_finobt) {
+		error = xrep_newbt_reserve_space(&ri->new_finobt_info,
+				fino_bload.nr_blocks);
+		if (error)
+			goto err_finobt;
+	}
+
+	/* Add all inobt records. */
+	ri->iter = 0;
+	ino_cur = xfs_inobt_stage_cursor(sc->mp, sc->tp,
+			&ri->new_inobt_info.afake, sc->sa.agno, XFS_BTNUM_INO);
+	error = xfs_btree_bload(ino_cur, &ino_bload, xrep_ibt_get_data,
+			xrep_ibt_bload_alloc, ri);
+	if (error)
+		goto err_inocur;
+
+	/* Add all finobt records. */
+	if (need_finobt) {
+		ri->iter = 0;
+		fino_cur = xfs_inobt_stage_cursor(sc->mp, sc->tp,
+				&ri->new_finobt_info.afake, sc->sa.agno,
+				XFS_BTNUM_FINO);
+		error = xfs_btree_bload(fino_cur, &fino_bload,
+				xrep_ibt_get_data, xrep_ibt_bload_alloc, ri);
+		if (error)
+			goto err_finocur;
+	}
 
 	/*
 	 * Re-read the AGI so that the buffer type is set properly.  Since we
@@ -638,16 +630,45 @@ xrep_ibt_build_new_trees(
 	 */
 	error = xfs_read_agi(sc->mp, sc->tp, sc->sa.agno, &sc->sa.agi_bp);
 	if (error)
-		return error;
+		goto err_finocur;
 
 	/* Install new btree roots. */
-	xfs_inobt_commit_staged_btree(sc->tp, &ri->ino_root, sc->sa.agi_bp);
-	if (xfs_sb_version_hasfinobt(&sc->mp->m_sb))
-		xfs_finobt_commit_staged_btree(sc->tp, &ri->fino_root,
-				sc->sa.agi_bp);
+	xfs_inobt_commit_staged_btree(ino_cur, sc->sa.agi_bp);
+	xfs_btree_del_cursor(ino_cur, 0);
+
+	if (fino_cur) {
+		xfs_inobt_commit_staged_btree(fino_cur, sc->sa.agi_bp);
+		xfs_btree_del_cursor(fino_cur, 0);
+	}
 
 	/* Reset the AGI counters now that we've changed the inode roots. */
-	return xrep_ibt_reset_counters(ri);
+	error = xrep_ibt_reset_counters(ri);
+	if (error)
+		goto err_finobt;
+
+	/* Free unused blocks and bitmap. */
+	if (fino_cur) {
+		error = xrep_newbt_unreserve_space(&ri->new_finobt_info);
+		if (error)
+			goto err_inobt;
+	}
+	error = xrep_newbt_unreserve_space(&ri->new_inobt_info);
+	if (error)
+		return error;
+
+	return xrep_roll_ag_trans(sc);
+
+err_finocur:
+	if (need_finobt)
+		xfs_btree_del_cursor(fino_cur, error);
+err_inocur:
+	xfs_btree_del_cursor(ino_cur, error);
+err_finobt:
+	if (need_finobt)
+		xrep_newbt_unreserve_space(&ri->new_finobt_info);
+err_inobt:
+	xrep_newbt_unreserve_space(&ri->new_inobt_info);
+	return error;
 }
 
 /*
