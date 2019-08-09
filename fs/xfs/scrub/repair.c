@@ -378,6 +378,19 @@ xrep_newbt_init(
 	INIT_LIST_HEAD(&xnr->reservations);
 }
 
+/*
+ * Initialize accounting resources for staging a new btree.  Callers are
+ * expected to add their own reservations (and clean them up) manually.
+ */
+void
+xrep_newbt_init_bare(
+	struct xrep_newbt		*xnr,
+	struct xfs_scrub		*sc)
+{
+	xrep_newbt_init(xnr, sc, &XFS_RMAP_OINFO_ANY_OWNER, NULLFSBLOCK,
+			XFS_AG_RESV_NONE);
+}
+
 /* Add a space reservation manually. */
 int
 xrep_newbt_add_reservation(
@@ -510,7 +523,7 @@ xrep_newbt_alloc_block(
 	 */
 	if (xnr->last_resv == NULL) {
 		list_for_each_entry(resv, &xnr->reservations, list) {
-			if (resv->used < xnr->last_resv->len) {
+			if (resv->used < resv->len) {
 				xnr->last_resv = resv;
 				break;
 			}

@@ -124,9 +124,13 @@ struct xrep_newbt {
 	enum xfs_ag_resv_type	resv;
 };
 
+#define for_each_xrep_newbt_reservation(xnr, resv, n)	\
+	list_for_each_entry_safe((resv), (n), &(xnr)->reservations, list)
+
 void xrep_newbt_init(struct xrep_newbt *xba, struct xfs_scrub *sc,
 		const struct xfs_owner_info *oinfo, xfs_fsblock_t alloc_hint,
 		enum xfs_ag_resv_type resv);
+void xrep_newbt_init_bare(struct xrep_newbt *xba, struct xfs_scrub *sc);
 int xrep_newbt_add_reservation(struct xrep_newbt *xba, xfs_fsblock_t fsbno,
 		xfs_extlen_t len);
 int xrep_newbt_reserve_space(struct xrep_newbt *xba, uint64_t nr_blocks);

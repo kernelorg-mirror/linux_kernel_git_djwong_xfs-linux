@@ -23,6 +23,7 @@
 #include "xfs_refcount.h"
 #include "xfs_extent_busy.h"
 #include "xfs_health.h"
+#include "xfs_bmap.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
@@ -72,10 +73,25 @@ struct xrep_abt {
 	/* All OWN_AG blocks. */
 	struct xfs_bitmap	old_allocbt_blocks;
 
+	/*
+	 * New bnobt information.  All btree block reservations are added to
+	 * the reservation list in new_bnobt_info.
+	 */
+	struct xrep_newbt	new_bnobt_info;
+
+	/* new cntbt information */
+	struct xrep_newbt	new_cntbt_info;
+
 	/* Free space extents. */
 	struct xfbma		*free_records;
 
 	struct xfs_scrub	*sc;
+
+	/* Number of non-null records in @free_records. */
+	uint64_t		nr_real_records;
+
+	/* get_data()'s position in the free space record array. */
+	uint64_t		iter;
 
 	/*
 	 * Next block we anticipate seeing in the rmap records.  If the next
@@ -85,6 +101,9 @@ struct xrep_abt {
 
 	/* Number of free blocks in this AG. */
 	xfs_agblock_t		nr_blocks;
+
+	/* Longest free extent we found in the AG. */
+	xfs_agblock_t		longest;
 };
 
 /* Record extents that aren't in use from gaps in the rmap records. */
@@ -151,9 +170,12 @@ xrep_abt_walk_agfl(
 	return xfs_bitmap_set(&ra->not_allocbt_blocks, fsb, 1);
 }
 
-/* Compare two free space extents. */
+/*
+ * Compare two free space extents by block number.  We want to sort by block
+ * number.
+ */
 static int
-xrep_abt_extent_cmp(
+xrep_bnobt_extent_cmp(
 	const void			*a,
 	const void			*b)
 {
@@ -168,93 +190,30 @@ xrep_abt_extent_cmp(
 }
 
 /*
- * Add a free space record back into the bnobt/cntbt.  It is assumed that the
- * space is already accounted for in fdblocks, so we use a special per-AG
- * reservation code to skip the fdblocks update.
+ * Compare two free space extents by length and then block number.  We want
+ * to sort first in order of decreasing length and then in increasing block
+ * number.
  */
-STATIC int
-xrep_abt_free_extent(
-	const void			*item,
-	void				*priv)
-{
-	struct xrep_abt			*ra = priv;
-	struct xfs_scrub		*sc = ra->sc;
-	const struct xrep_abt_extent	*rae = item;
-	xfs_fsblock_t			fsbno;
-	int				error;
-
-	fsbno = XFS_AGB_TO_FSB(sc->mp, sc->sa.agno, rae->bno);
-
-	error = xfs_free_extent(sc->tp, fsbno, rae->len,
-			&XFS_RMAP_OINFO_SKIP_UPDATE, XFS_AG_RESV_IGNORE);
-	if (error)
-		return error;
-	return xrep_roll_ag_trans(sc);
-}
-
-/* Find the longest free extent in the list. */
 static int
-xrep_abt_get_longest(
-	struct xrep_abt		*ra,
-	struct xrep_abt_extent	*longest)
+xrep_cntbt_extent_cmp(
+	const void			*a,
+	const void			*b)
 {
-	struct xrep_abt_extent	rae;
-	uint64_t		victim = -1ULL;
-	uint64_t		i;
+	const struct xrep_abt_extent	*ap = a;
+	const struct xrep_abt_extent	*bp = b;
 
-	longest->len = 0;
-	foreach_xfbma_item(ra->free_records, i, rae) {
-		if (rae.len > longest->len) {
-			memcpy(longest, &rae, sizeof(*longest));
-			victim = i;
-		}
-	}
-
-	if (longest->len == 0)
-		return 0;
-	return xfbma_nullify(ra->free_records, victim);
+	if (ap->len > bp->len)
+		return 1;
+	else if (ap->len < bp->len)
+		return -1;
+	return xrep_bnobt_extent_cmp(a, b);
 }
 
 /*
- * Allocate a block from the (cached) first extent in the AG.  In theory
- * this should never fail, since we already checked that there was enough
- * space to handle the new btrees.
- */
-STATIC xfs_agblock_t
-xrep_abt_alloc_block(
-	struct xrep_abt		*ra)
-{
-	struct xrep_abt_extent	ext = { 0 };
-	uint64_t		i;
-	xfs_agblock_t		agbno;
-	int			error;
-
-	/* Pull the first free space extent off the list, and... */
-	foreach_xfbma_item(ra->free_records, i, ext) {
-		break;
-	}
-	if (ext.len == 0)
-		return NULLAGBLOCK;
-
-	/* ...take its first block. */
-	agbno = ext.bno;
-	ext.bno++;
-	ext.len--;
-	if (ext.len)
-		error = xfbma_set(ra->free_records, i, &ext);
-	else
-		error = xfbma_nullify(ra->free_records, i);
-	if (error)
-		return NULLAGBLOCK;
-	return agbno;
-}
-
-/*
- * Iterate all reverse mappings to find (1) the free extents, (2) the OWN_AG
- * extents, (3) the rmapbt blocks, and (4) the AGFL blocks.  The free space is
- * (1) + (2) - (3) - (4).  Figure out if we have enough free space to
- * reconstruct the free space btrees.  Caller must clean up the input lists
- * if something goes wrong.
+ * Iterate all reverse mappings to find (1) the gaps between rmap records (all
+ * unowned space), (2) the OWN_AG extents (which encompass the free space
+ * btrees, the rmapbt, and the agfl), (3) the rmapbt blocks, and (4) the AGFL
+ * blocks.  The free space is (1) + (2) - (3) - (4).
  */
 STATIC int
 xrep_abt_find_freespace(
@@ -264,7 +223,6 @@ xrep_abt_find_freespace(
 	struct xfs_btree_cur	*cur;
 	struct xfs_mount	*mp = sc->mp;
 	xfs_agblock_t		agend;
-	xfs_agblock_t		nr_blocks;
 	int			error;
 
 	xfs_bitmap_init(&ra->not_allocbt_blocks);
@@ -274,7 +232,7 @@ xrep_abt_find_freespace(
 	 * mappings, all the OWN_AG blocks, and all the rmapbt extents.
 	 */
 	cur = xfs_rmapbt_init_cursor(mp, sc->tp, sc->sa.agf_bp, sc->sa.agno);
-	error = xfs_rmap_query_all(cur, xrep_abt_walk_rmap, &ra);
+	error = xfs_rmap_query_all(cur, xrep_abt_walk_rmap, ra);
 	xfs_btree_del_cursor(cur, error);
 	if (error)
 		goto err;
@@ -294,166 +252,368 @@ xrep_abt_find_freespace(
 
 	/* Collect all the AGFL blocks. */
 	error = xfs_agfl_walk(mp, XFS_BUF_TO_AGF(sc->sa.agf_bp),
-			sc->sa.agfl_bp, xrep_abt_walk_agfl, &ra);
+			sc->sa.agfl_bp, xrep_abt_walk_agfl, ra);
 	if (error)
 		goto err;
-
-	/*
-	 * Do we have enough space to rebuild both freespace btrees?  We won't
-	 * touch the AG if we've exceeded the per-AG reservation or if we don't
-	 * have enough free space to store the free space information.
-	 */
-	nr_blocks = 2 * xfs_allocbt_calc_size(mp,
-			xfbma_length(ra->free_records));
-	if (!xrep_ag_has_space(sc->sa.pag, 0, XFS_AG_RESV_NONE) ||
-	    ra->nr_blocks < nr_blocks) {
-		error = -ENOSPC;
-		goto err;
-	}
 
 	/* Compute the old bnobt/cntbt blocks. */
 	error = xfs_bitmap_disunion(&ra->old_allocbt_blocks,
 			&ra->not_allocbt_blocks);
+	if (error)
+		goto err;
+
+	ra->nr_real_records = xfbma_length(ra->free_records);
 err:
 	xfs_bitmap_destroy(&ra->not_allocbt_blocks);
 	return error;
 }
 
 /*
- * Reset the global free block counter and the per-AG counters to make it look
- * like this AG has no free space.
+ * We're going to use the observed free space records to reserve blocks for the
+ * new free space btrees, so we play an iterative game where we try to converge
+ * on the number of blocks we need:
+ *
+ * 1. Estimate how many blocks we'll need to store the records.
+ * 2. If the first free record has more blocks than we need, we're done.
+ *    We will have to re-sort the records prior to building the cntbt.
+ * 3. If that record has exactly the number of blocks we need, null out the
+ *    record.  We're done.
+ * 4. Otherwise, we still need more blocks.  Null out the record, subtract its
+ *    length from the number of blocks we need, and go back to step 1.
+ *
+ * Fortunately, we don't have to do any transaction work to play this game, so
+ * we don't have to tear down the staging cursors.
  */
 STATIC int
-xrep_abt_reset_counters(
-	struct xfs_scrub	*sc,
-	int			*log_flags)
-{
-	struct xfs_perag	*pag = sc->sa.pag;
-	struct xfs_agf		*agf;
-	xfs_agblock_t		new_btblks;
-	xfs_agblock_t		to_free;
-
-	/*
-	 * Since we're abandoning the old bnobt/cntbt, we have to decrease
-	 * fdblocks by the # of blocks in those trees.  btreeblks counts the
-	 * non-root blocks of the free space and rmap btrees.  Do this before
-	 * resetting the AGF counters.
-	 */
-	agf = XFS_BUF_TO_AGF(sc->sa.agf_bp);
-
-	/* rmap_blocks accounts root block, btreeblks doesn't */
-	new_btblks = be32_to_cpu(agf->agf_rmap_blocks) - 1;
-
-	/* btreeblks doesn't account bno/cnt root blocks */
-	to_free = pag->pagf_btreeblks + 2;
-
-	/* and don't account for the blocks we aren't freeing */
-	to_free -= new_btblks;
-
-	/*
-	 * Reset the per-AG info, both incore and ondisk.  Mark the incore
-	 * state stale in case we fail out of here.
-	 */
-	ASSERT(pag->pagf_init);
-	pag->pagf_init = 0;
-	pag->pagf_btreeblks = new_btblks;
-	pag->pagf_freeblks = 0;
-	pag->pagf_longest = 0;
-
-	agf->agf_btreeblks = cpu_to_be32(new_btblks);
-	agf->agf_freeblks = 0;
-	agf->agf_longest = 0;
-	*log_flags |= XFS_AGF_BTREEBLKS | XFS_AGF_LONGEST | XFS_AGF_FREEBLKS;
-
-	return 0;
-}
-
-/* Initialize a new free space btree root and implant into AGF. */
-STATIC int
-xrep_abt_reset_btree(
+xrep_abt_reserve_space(
 	struct xrep_abt		*ra,
-	xfs_btnum_t		btnum)
+	struct xfs_btree_cur	*bno_cur,
+	struct xfs_btree_bload	*bno_bload,
+	struct xfs_btree_cur	*cnt_cur,
+	struct xfs_btree_bload	*cnt_bload,
+	bool			*need_resort)
 {
 	struct xfs_scrub	*sc = ra->sc;
-	struct xfs_buf		*bp;
-	struct xfs_perag	*pag = sc->sa.pag;
-	struct xfs_mount	*mp = sc->mp;
-	struct xfs_agf		*agf = XFS_BUF_TO_AGF(sc->sa.agf_bp);
-	const struct xfs_buf_ops *ops;
-	xfs_agblock_t		agbno;
-	int			error;
+	uint64_t		record_nr = xfbma_length(ra->free_records) - 1;
+	unsigned int		allocated = 0;
+	int			error = 0;
 
-	/* Allocate new root block. */
-	agbno = xrep_abt_alloc_block(ra);
-	if (agbno == NULLAGBLOCK)
-		return -ENOSPC;
+	*need_resort = false;
+	do {
+		struct xrep_abt_extent	rae;
+		uint64_t		required;
+		unsigned int		desired;
+		unsigned int		found;
 
-	switch (btnum) {
-	case XFS_BTNUM_BNOi:
-		ops = &xfs_bnobt_buf_ops;
-		break;
-	case XFS_BTNUM_CNTi:
-		ops = &xfs_cntbt_buf_ops;
-		break;
-	default:
-		ASSERT(0);
-		return -EFSCORRUPTED;
-	}
+		/* Compute how many blocks we'll need. */
+		error = xfs_btree_bload_init(cnt_cur, cnt_bload,
+				ra->nr_real_records, 0, 0);
+		if (error)
+			break;
 
-	/* Initialize new tree root. */
-	error = xrep_init_btblock(sc, XFS_AGB_TO_FSB(mp, sc->sa.agno, agbno),
-			&bp, btnum, ops);
-	if (error)
-		return error;
+		error = xfs_btree_bload_init(bno_cur, bno_bload,
+				ra->nr_real_records, 0, 0);
+		if (error)
+			break;
 
-	/* Implant into AGF. */
-	agf->agf_roots[btnum] = cpu_to_be32(agbno);
-	agf->agf_levels[btnum] = cpu_to_be32(1);
+		/* How many btree blocks do we need to store all records? */
+		required = cnt_bload->nr_blocks + bno_bload->nr_blocks;
+		ASSERT(required < INT_MAX);
 
-	/* Add rmap records for the btree roots */
-	error = xfs_rmap_alloc(sc->tp, sc->sa.agf_bp, sc->sa.agno, agbno, 1,
-			&XFS_RMAP_OINFO_AG);
-	if (error)
-		return error;
+		/* If we've reserved enough blocks, we're done. */
+		if (allocated >= required)
+			break;
 
-	/* Reset the incore state. */
-	pag->pagf_levels[btnum] = 1;
+		desired = required - allocated;
 
-	return 0;
-}
+		/* We need space but there's none left; bye! */
+		if (ra->nr_real_records == 0) {
+			error = -ENOSPC;
+			break;
+		}
 
-/* Initialize new bnobt/cntbt roots and implant them into the AGF. */
-STATIC int
-xrep_abt_reset_btrees(
-	struct xrep_abt		*ra,
-	int			*log_flags)
-{
-	int			error;
+		/* Grab the first record from the list. */
+		error = xfbma_get(ra->free_records, record_nr, &rae);
+		if (error)
+			break;
 
-	error = xrep_abt_reset_btree(ra, XFS_BTNUM_BNOi);
-	if (error)
-		return error;
-	error = xrep_abt_reset_btree(ra, XFS_BTNUM_CNTi);
-	if (error)
-		return error;
+		ASSERT(rae.len <= UINT_MAX);
+		found = min_t(unsigned int, rae.len, desired);
 
-	*log_flags |= XFS_AGF_ROOTS | XFS_AGF_LEVELS;
-	return 0;
+		error = xrep_newbt_add_reservation(&ra->new_bnobt_info,
+				XFS_AGB_TO_FSB(sc->mp, sc->sa.agno, rae.bno),
+				found);
+		if (error)
+			break;
+		allocated += found;
+		ra->nr_blocks -= found;
+
+		if (rae.len > desired) {
+			/*
+			 * Record has more space than we need.  The number of
+			 * free records doesn't change, so shrink the free
+			 * record and exit the loop.
+			 */
+			rae.bno += desired;
+			rae.len -= desired;
+			error = xfbma_set(ra->free_records, record_nr, &rae);
+			if (error)
+				break;
+			*need_resort = true;
+			break;
+		} else {
+			/*
+			 * We're going to use up the entire record, so nullify
+			 * it and move on to the next one.  This changes the
+			 * number of free records, so we must go around the
+			 * loop once more to re-run _bload_init.
+			 */
+			error = xfbma_nullify(ra->free_records, record_nr);
+			if (error)
+				break;
+			ra->nr_real_records--;
+			record_nr--;
+		}
+	} while (1);
+
+	return error;
 }
 
 /*
- * Make our new freespace btree roots permanent so that we can start freeing
- * unused space back into the AG.
+ * Deal with all the space we reserved.  Blocks that were allocated for the
+ * free space btrees need to have a (deferred) rmap added for the OWN_AG
+ * allocation, and blocks that didn't get used can be freed via the usual
+ * (deferred) means.
  */
 STATIC int
-xrep_abt_commit_new(
+xrep_abt_dispose_reservations(
+	struct xrep_abt		*ra)
+{
+	struct xrep_newbt_resv	*resv, *n;
+	struct xfs_scrub	*sc = ra->sc;
+	int			error = 0;
+
+	for_each_xrep_newbt_reservation(&ra->new_bnobt_info, resv, n) {
+		/* Add a deferred rmap for each extent we used. */
+		if (resv->used > 0) {
+			error = xfs_rmap_alloc_extent(sc->tp, resv->fsbno,
+					resv->used, XFS_RMAP_OWN_AG, false);
+			if (error)
+				break;
+		}
+
+		/*
+		 * Add a deferred free for each block we didn't use and now
+		 * have to add to the free space since the new btrees are
+		 * online.
+		 */
+		if (resv->used < resv->len)
+			__xfs_bmap_add_free(sc->tp, resv->fsbno + resv->used,
+					resv->len - resv->used, NULL, true);
+	}
+
+	for_each_xrep_newbt_reservation(&ra->new_bnobt_info, resv, n) {
+		list_del(&resv->list);
+		kmem_free(resv);
+	}
+
+	return error;
+}
+
+/* Retrieve free space data for bulk load. */
+STATIC int
+xrep_abt_get_data(
+	struct xfs_btree_cur		*cur,
+	void				*priv)
+{
+	struct xfs_alloc_rec_incore	*arec = &cur->bc_rec.a;
+	struct xrep_abt			*ra = priv;
+	int				error;
+
+	do {
+		error = xfbma_get(ra->free_records, ra->iter++, arec);
+	} while (error == 0 && xfbma_is_null(ra->free_records, arec));
+
+	ra->longest = max(ra->longest, arec->ar_blockcount);
+	return error;
+}
+
+/* Feed one of the new btree blocks to the bulk loader. */
+STATIC int
+xrep_abt_bload_alloc(
+	struct xfs_btree_cur	*cur,
+	union xfs_btree_ptr	*ptr,
+	void			*priv)
+{
+	struct xrep_abt		*ra = priv;
+
+	return xrep_newbt_alloc_block(cur, &ra->new_bnobt_info, ptr);
+}
+
+/*
+ * Reset the AGF counters to reflect the free space btrees that we just
+ * rebuilt, then reinitialize the per-AG data.
+ */
+STATIC int
+xrep_abt_reset_counters(
 	struct xrep_abt		*ra,
-	int			log_flags)
+	unsigned int		freesp_btreeblks)
+{
+	struct xfs_scrub	*sc = ra->sc;
+	struct xfs_perag	*pag = sc->sa.pag;
+	struct xfs_agf		*agf;
+	struct xfs_buf		*bp;
+
+	agf = XFS_BUF_TO_AGF(sc->sa.agf_bp);
+
+	/*
+	 * Mark the pagf information stale and use the accessor function to
+	 * forcibly reload it from the values we just logged.  We still own the
+	 * AGF buffer so we can safely ignore bp.
+	 */
+	ASSERT(pag->pagf_init);
+	pag->pagf_init = 0;
+
+	agf->agf_btreeblks = cpu_to_be32(freesp_btreeblks +
+				(be32_to_cpu(agf->agf_rmap_blocks) - 1));
+	agf->agf_freeblks = cpu_to_be32(ra->nr_blocks);
+	agf->agf_longest = cpu_to_be32(ra->longest);
+	xfs_alloc_log_agf(sc->tp, sc->sa.agf_bp, XFS_AGF_BTREEBLKS |
+						 XFS_AGF_LONGEST |
+						 XFS_AGF_FREEBLKS);
+
+	return xfs_alloc_read_agf(sc->mp, sc->tp, sc->sa.agno, 0, &bp);
+}
+
+/*
+ * Use the collected free space information to stage new free space btrees.
+ * If this is successful we'll return with the new btree root
+ * information logged to the repair transaction but not yet committed.
+ */
+STATIC int
+xrep_abt_build_new_trees(
+	struct xrep_abt		*ra)
+{
+	struct xfs_btree_bload	bno_bload;
+	struct xfs_btree_bload	cnt_bload;
+	struct xfs_scrub	*sc = ra->sc;
+	struct xfs_btree_cur	*bno_cur;
+	struct xfs_btree_cur	*cnt_cur;
+	bool			need_resort;
+	int			error;
+
+	/*
+	 * Sort the free extents by length so that we can set up the free space
+	 * btrees in as few extents as possible.  This reduces the amount of
+	 * deferred rmap / free work we have to do at the end.
+	 */
+	error = xfbma_sort(ra->free_records, xrep_cntbt_extent_cmp);
+	if (error)
+		return error;
+
+	/*
+	 * Prepare to construct the new btree by reserving disk space for the
+	 * new btree and setting up all the accounting information we'll need
+	 * to root the new btree while it's under construction and before we
+	 * attach it to the AG header.
+	 */
+	xrep_newbt_init_bare(&ra->new_bnobt_info, sc);
+	xrep_newbt_init_bare(&ra->new_cntbt_info, sc);
+
+	/* Allocate cursors for the staged btrees. */
+	bno_cur = xfs_allocbt_stage_cursor(sc->mp, sc->tp,
+			&ra->new_bnobt_info.afake, sc->sa.agno, XFS_BTNUM_BNO);
+	cnt_cur = xfs_allocbt_stage_cursor(sc->mp, sc->tp,
+			&ra->new_cntbt_info.afake, sc->sa.agno, XFS_BTNUM_CNT);
+
+	/* Reserve the space we'll need for the new btrees. */
+	error = xrep_abt_reserve_space(ra, bno_cur, &bno_bload, cnt_cur,
+			&cnt_bload, &need_resort);
+	if (error)
+		goto out_cur;
+
+	/*
+	 * If we need to re-sort the free extents by length, do so so that we
+	 * can put the records into the cntbt in the correct order.
+	 */
+	if (need_resort) {
+		error = xfbma_sort(ra->free_records, xrep_cntbt_extent_cmp);
+		if (error)
+			goto out_cur;
+	}
+
+	/* Load the free space by length tree. */
+	ra->iter = 0;
+	ra->longest = 0;
+	error = xfs_btree_bload(cnt_cur, &cnt_bload, xrep_abt_get_data,
+			xrep_abt_bload_alloc, ra);
+	if (error)
+		goto out_cur;
+
+	/* Re-sort the free extents by block number so so that we can put the
+	 * records into the bnobt in the correct order.
+	 */
+	error = xfbma_sort(ra->free_records, xrep_bnobt_extent_cmp);
+	if (error)
+		goto out_cur;
+
+	/* Load the free space by block number tree. */
+	ra->iter = 0;
+	error = xfs_btree_bload(bno_cur, &bno_bload, xrep_abt_get_data,
+			xrep_abt_bload_alloc, ra);
+	if (error)
+		goto out_cur;
+
+	/*
+	 * Install the new btrees in the AG header.  After this point the old
+	 * btree is no longer accessible and the new tree is live.
+	 *
+	 * Note: We re-read the AGF here to ensure the buffer type is set
+	 * properly.  Since we built a new tree without attaching to the AGF
+	 * buffer, the buffer item may have fallen off the buffer.  This ought
+	 * to succeed since the AGF is held across transaction rolls.
+	 */
+	error = xfs_read_agf(sc->mp, sc->tp, sc->sa.agno, 0, &sc->sa.agf_bp);
+	if (error)
+		goto out_cur;
+
+	/* Commit our new btrees. */
+	xfs_allocbt_commit_staged_btree(bno_cur, sc->sa.agf_bp);
+	xfs_btree_del_cursor(bno_cur, 0);
+	xfs_allocbt_commit_staged_btree(cnt_cur, sc->sa.agf_bp);
+	xfs_btree_del_cursor(cnt_cur, 0);
+
+	/* Reset the AGF counters now that we've changed the btree shape. */
+	error = xrep_abt_reset_counters(ra, (bno_bload.nr_blocks - 1) +
+					    (cnt_bload.nr_blocks - 1));
+	if (error)
+		goto out_newbt;
+
+	/* Dispose of any unused blocks and the accounting infomation. */
+	error = xrep_abt_dispose_reservations(ra);
+	if (error)
+		return error;
+
+	return xrep_roll_ag_trans(sc);
+
+out_cur:
+	xfs_btree_del_cursor(cnt_cur, error);
+	xfs_btree_del_cursor(bno_cur, error);
+out_newbt:
+	xrep_abt_dispose_reservations(ra);
+	return error;
+}
+
+/*
+ * Now that we've logged the roots of the new btrees, invalidate all of the
+ * old blocks and free them.
+ */
+STATIC int
+xrep_abt_remove_old_trees(
+	struct xrep_abt		*ra)
 {
 	struct xfs_scrub	*sc = ra->sc;
 	int			error;
-
-	xfs_alloc_log_agf(sc->tp, sc->sa.agf_bp, log_flags);
 
 	/* Invalidate the old freespace btree blocks and commit. */
 	error = xrep_invalidate_blocks(sc, &ra->old_allocbt_blocks);
@@ -463,40 +623,14 @@ xrep_abt_commit_new(
 	if (error)
 		return error;
 
-	/* Now that we've succeeded, mark the incore state valid again. */
-	sc->sa.pag->pagf_init = 1;
-	return 0;
-}
-
-/* Build new free space btrees and dispose of the old one. */
-STATIC int
-xrep_abt_rebuild_trees(
-	struct xrep_abt		*ra)
-{
-	struct xrep_abt_extent	rae;
-	struct xfs_scrub	*sc = ra->sc;
-	int			error;
-
-	/*
-	 * Insert the longest free extent in case it's necessary to
-	 * refresh the AGFL with multiple blocks.  If there is no longest
-	 * extent, we had exactly the free space we needed; we're done.
-	 */
-	error = xrep_abt_get_longest(ra, &rae);
-	if (!error && rae.len > 0) {
-		error = xrep_abt_free_extent(&rae, ra);
-		if (error)
-			return error;
-	}
-
 	/* Free all the OWN_AG blocks that are not in the rmapbt/agfl. */
 	error = xrep_reap_extents(sc, &ra->old_allocbt_blocks,
 			&XFS_RMAP_OINFO_AG, XFS_AG_RESV_IGNORE);
 	if (error)
 		return error;
 
-	/* Insert records into the new btrees. */
-	return xfbma_iter_del(ra->free_records, xrep_abt_free_extent, ra);
+	sc->flags |= XREP_RESET_PERAG_RESV;
+	return 0;
 }
 
 /* Repair the freespace btrees for some AG. */
@@ -506,7 +640,6 @@ xrep_allocbt(
 {
 	struct xrep_abt		*ra;
 	struct xfs_mount	*mp = sc->mp;
-	int			log_flags = 0;
 	int			error;
 
 	/* We require the rmapbt to rebuild anything. */
@@ -543,36 +676,14 @@ xrep_allocbt(
 	if (error)
 		goto out_bitmap;
 
-	/* Make sure we got some free space. */
-	if (xfbma_length(ra->free_records) == 0) {
-		error = -ENOSPC;
-		goto out_bitmap;
-	}
-
-	/*
-	 * Sort the free extents by block number to avoid bnobt splits when we
-	 * rebuild the free space btrees.
-	 */
-	error = xfbma_sort(ra->free_records, xrep_abt_extent_cmp);
+	/* Rebuild the free space information. */
+	error = xrep_abt_build_new_trees(ra);
 	if (error)
 		goto out_bitmap;
 
-	/*
-	 * Blow out the old free space btrees.  This is the point at which
-	 * we are no longer able to bail out gracefully.
-	 */
-	error = xrep_abt_reset_counters(sc, &log_flags);
-	if (error)
-		goto out_bitmap;
-	error = xrep_abt_reset_btrees(ra, &log_flags);
-	if (error)
-		goto out_bitmap;
-	error = xrep_abt_commit_new(ra, log_flags);
-	if (error)
-		goto out_bitmap;
+	/* Kill the old trees. */
+	error = xrep_abt_remove_old_trees(ra);
 
-	/* Now rebuild the freespace information. */
-	error = xrep_abt_rebuild_trees(ra);
 out_bitmap:
 	xfs_bitmap_destroy(&ra->old_allocbt_blocks);
 	xfbma_destroy(ra->free_records);
