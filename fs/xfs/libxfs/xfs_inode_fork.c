@@ -496,14 +496,11 @@ xfs_idata_realloc(
 	ifp->if_bytes = new_size;
 }
 
+/* Free all memory and reset a fork back to its initial state. */
 void
-xfs_idestroy_fork(
-	xfs_inode_t	*ip,
-	int		whichfork)
+xfs_ifork_reset(
+	struct xfs_ifork	*ifp)
 {
-	struct xfs_ifork	*ifp;
-
-	ifp = XFS_IFORK_PTR(ip, whichfork);
 	if (ifp->if_broot != NULL) {
 		kmem_free(ifp->if_broot);
 		ifp->if_broot = NULL;
@@ -515,7 +512,7 @@ xfs_idestroy_fork(
 	 * not local then we may or may not have an extents list,
 	 * so check and free it up if we do.
 	 */
-	if (XFS_IFORK_FORMAT(ip, whichfork) == XFS_DINODE_FMT_LOCAL) {
+	if (ifp->if_flags & XFS_IFINLINE) {
 		if (ifp->if_u1.if_data != NULL) {
 			kmem_free(ifp->if_u1.if_data);
 			ifp->if_u1.if_data = NULL;
@@ -523,6 +520,18 @@ xfs_idestroy_fork(
 	} else if ((ifp->if_flags & XFS_IFEXTENTS) && ifp->if_height) {
 		xfs_iext_destroy(ifp);
 	}
+	ifp->if_flags = 0;
+}
+
+void
+xfs_idestroy_fork(
+	struct xfs_inode	*ip,
+	int			whichfork)
+{
+	struct xfs_ifork	*ifp;
+
+	ifp = XFS_IFORK_PTR(ip, whichfork);
+	xfs_ifork_reset(ifp);
 
 	if (whichfork == XFS_ATTR_FORK) {
 		kmem_zone_free(xfs_ifork_zone, ip->i_afp);
