@@ -646,6 +646,17 @@ xfs_btree_ptr_addr(
 		((char *)block + xfs_btree_ptr_offset(cur, n, level));
 }
 
+struct xfs_ifork *
+xfs_btree_ifork_ptr(
+	struct xfs_btree_cur	*cur)
+{
+	ASSERT(cur->bc_flags & XFS_BTREE_ROOT_IN_INODE);
+
+	if (cur->bc_flags & XFS_BTREE_STAGING)
+		return cur->bc_private.b.ifake->if_fork;
+	return XFS_IFORK_PTR(cur->bc_private.b.ip, cur->bc_private.b.whichfork);
+}
+
 /*
  * Get the root block which is stored in the inode.
  *
@@ -656,9 +667,8 @@ STATIC struct xfs_btree_block *
 xfs_btree_get_iroot(
 	struct xfs_btree_cur	*cur)
 {
-	struct xfs_ifork	*ifp;
+	struct xfs_ifork	*ifp = xfs_btree_ifork_ptr(cur);
 
-	ifp = XFS_IFORK_PTR(cur->bc_private.b.ip, cur->bc_private.b.whichfork);
 	return (struct xfs_btree_block *)ifp->if_broot;
 }
 
@@ -5045,6 +5055,55 @@ xfs_btree_commit_afakeroot(
 
 	kmem_free(cur->bc_ops);
 	cur->bc_private.a.agbp = agbp;
+	cur->bc_ops = ops;
+	cur->bc_flags &= ~XFS_BTREE_STAGING;
+}
+/*
+ * Initialize an inode-rooted btree cursor with the given fake root @ifake, and
+ * prepare @ops for overriding by duplicating them into @new_ops.  The caller
+ * can replace pointers in @new_ops as necessary once this call completes.
+ * Note that staging cursors can only be used for bulk loading.
+ */
+void
+xfs_btree_stage_ifakeroot(
+	struct xfs_btree_cur		*cur,
+	struct xbtree_ifakeroot		*ifake,
+	const struct xfs_btree_ops	*ops,
+	struct xfs_btree_ops		**new_ops)
+{
+	ASSERT(!(cur->bc_flags & XFS_BTREE_STAGING));
+	ASSERT(cur->bc_flags & XFS_BTREE_ROOT_IN_INODE);
+
+	*new_ops = kmem_alloc(sizeof(struct xfs_btree_ops), KM_NOFS);
+	memcpy(*new_ops, ops, sizeof(struct xfs_btree_ops));
+	(*new_ops)->alloc_block = xbtree_fakeroot_alloc_block;
+	(*new_ops)->free_block = xbtree_fakeroot_free_block;
+	(*new_ops)->init_ptr_from_cur = xbtree_fakeroot_init_ptr_from_cur;
+	(*new_ops)->dup_cursor = xbtree_fakeroot_dup_cursor;
+
+	cur->bc_private.b.ifake = ifake;
+	cur->bc_nlevels = ifake->if_levels;
+	cur->bc_ops = *new_ops;
+	cur->bc_flags |= XFS_BTREE_STAGING;
+}
+
+/*
+ * Transform an inode-rooted staging btree cursor back into a regular btree
+ * cursor.  Caller is responsible for logging changes before this.
+ */
+void
+xfs_btree_commit_ifakeroot(
+	struct xfs_btree_cur		*cur,
+	int				whichfork,
+	const struct xfs_btree_ops	*ops)
+{
+	ASSERT(cur->bc_flags & XFS_BTREE_STAGING);
+
+	trace_xfs_btree_commit_ifakeroot(cur);
+
+	kmem_free(cur->bc_ops);
+	cur->bc_private.b.ifake = NULL;
+	cur->bc_private.b.whichfork = whichfork;
 	cur->bc_ops = ops;
 	cur->bc_flags &= ~XFS_BTREE_STAGING;
 }
