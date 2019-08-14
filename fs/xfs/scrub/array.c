@@ -66,6 +66,7 @@ xfbma_init(
 	array->filp = filp;
 	array->obj_size = obj_size;
 	array->nr = 0;
+	array->io_flags = 0;
 	return array;
 out_filp:
 	fput(filp);
@@ -105,7 +106,8 @@ xfbma_get(
 		return -ENODATA;
 	}
 
-	return xfile_io(array->filp, XFILE_IO_READ, &pos, ptr, array->obj_size);
+	return xfile_io(array->filp, array->io_flags | XFILE_IO_READ, &pos,
+			ptr, array->obj_size);
 }
 
 /* Put an element in the array. */
@@ -122,8 +124,8 @@ xfbma_set(
 		return -ENODATA;
 	}
 
-	return xfile_io(array->filp, XFILE_IO_WRITE, &pos, ptr,
-			array->obj_size);
+	return xfile_io(array->filp, array->io_flags | XFILE_IO_WRITE, &pos,
+			ptr, array->obj_size);
 }
 
 /* Is this array element NULL? */
@@ -172,8 +174,8 @@ xfbma_nullify(
 	}
 
 	memset(temp, 0, array->obj_size);
-	return xfile_io(array->filp, XFILE_IO_WRITE, &pos, temp,
-			array->obj_size);
+	return xfile_io(array->filp, array->io_flags | XFILE_IO_WRITE, &pos,
+			temp, array->obj_size);
 }
 
 /* Append an element to the array. */
@@ -190,8 +192,8 @@ xfbma_append(
 		return -ENODATA;
 	}
 
-	error = xfile_io(array->filp, XFILE_IO_WRITE, &pos, ptr,
-			array->obj_size);
+	error = xfile_io(array->filp, array->io_flags | XFILE_IO_WRITE, &pos,
+			ptr, array->obj_size);
 	if (error)
 		return error;
 	array->nr++;
@@ -219,8 +221,8 @@ xfbma_iter_del(
 	for (pos = 0, i = 0; pos < max_bytes; i++) {
 		pgoff_t	pagenr;
 
-		error = xfile_io(array->filp, XFILE_IO_READ, &pos, temp,
-				array->obj_size);
+		error = xfile_io(array->filp, array->io_flags | XFILE_IO_READ,
+				&pos, temp, array->obj_size);
 		if (error)
 			break;
 		if (xfbma_is_null(array, temp))
