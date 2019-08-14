@@ -384,6 +384,7 @@ xchk_bmapbt_rec(
 	struct xfs_inode	*ip = bs->cur->bc_private.b.ip;
 	struct xfs_buf		*bp = NULL;
 	struct xfs_btree_block	*block;
+	struct xfs_ifork	*ifp = XFS_IFORK_PTR(ip, info->whichfork);
 	uint64_t		owner;
 	int			i;
 
@@ -402,8 +403,30 @@ xchk_bmapbt_rec(
 		}
 	}
 
-	/* Set up the in-core record and scrub it. */
+	/*
+	 * If the incore bmap cache is already loaded, check that it contains
+	 * an extent that matches this one exactly.  We validate those cached
+	 * bmaps later, so we don't need to check here.
+	 *
+	 * If the cache is /not/ loaded, we need to validate the bmbt records
+	 * now.
+	 */
 	xfs_bmbt_disk_get_all(&rec->bmbt, &irec);
+        if (ifp->if_flags & XFS_IFEXTENTS) {
+		struct xfs_bmbt_irec	iext_irec;
+		struct xfs_iext_cursor	icur;
+
+		if (!xfs_iext_lookup_extent(ip, ifp, irec.br_startoff, &icur,
+					&iext_irec) ||
+		    irec.br_startoff != iext_irec.br_startoff ||
+		    irec.br_startblock != iext_irec.br_startblock ||
+		    irec.br_blockcount != iext_irec.br_blockcount ||
+		    irec.br_state != iext_irec.br_state)
+			xchk_fblock_set_corrupt(bs->sc, info->whichfork,
+					irec.br_startoff);
+		return 0;
+	}
+
 	return xchk_bmap_extent(ip, bs->cur, info, &irec);
 }
 
@@ -671,11 +694,22 @@ xchk_bmap(
 	if (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
 		goto out;
 
-	/* Now try to scrub the in-memory extent list. */
+	/*
+	 * If the incore bmap cache isn't loaded, then this inode has a bmap
+	 * btree and we already walked it to check all of the mappings.  Load
+	 * the cache now and skip ahead to rmap checking (which requires the
+	 * bmap cache to be loaded).  We don't need to check twice.
+	 *
+	 * If the cache /is/ loaded, then we haven't checked any mappings, so
+	 * iterate the incore cache and check the mappings now, because the
+	 * bmbt iteration code skipped the checks, assuming that we'd do them
+	 * here.
+	 */
         if (!(ifp->if_flags & XFS_IFEXTENTS)) {
 		error = xfs_iread_extents(sc->tp, ip, whichfork);
 		if (!xchk_fblock_process_error(sc, whichfork, 0, &error))
 			goto out;
+		goto out_check_rmap;
 	}
 
 	/* Find the offset of the last extent in the mapping. */
@@ -689,7 +723,7 @@ xchk_bmap(
 	for_each_xfs_iext(ifp, &icur, &irec) {
 		if (xchk_should_terminate(sc, &error) ||
 		    (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT))
-			break;
+			goto out;
 		if (isnullstartblock(irec.br_startblock))
 			continue;
 		if (irec.br_startoff >= endoff) {
