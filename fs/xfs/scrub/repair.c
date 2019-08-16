@@ -604,15 +604,14 @@ xrep_reap_extents(
 	const struct xfs_owner_info	*oinfo,
 	enum xfs_ag_resv_type		type)
 {
-	struct xbitmap_range		*bmr;
-	struct xbitmap_range		*n;
+	struct interval_tree_node	*itn, *n;
 	xfs_fsblock_t			fsbno;
 	unsigned int			deferred = 0;
 	int				error = 0;
 
 	ASSERT(xfs_sb_version_hasrmapbt(&sc->mp->m_sb));
 
-	for_each_xbitmap_block(fsbno, bmr, n, bitmap) {
+	for_each_xbitmap_block(fsbno, itn, n, bitmap) {
 		ASSERT(sc->ip != NULL ||
 		       XFS_FSB_TO_AGNO(sc->mp, fsbno) == sc->sa.agno);
 		trace_xrep_dispose_btree_extent(sc->mp,

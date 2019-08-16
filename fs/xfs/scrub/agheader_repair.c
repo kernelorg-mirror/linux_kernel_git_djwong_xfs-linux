@@ -482,8 +482,7 @@ xrep_agfl_collect_blocks(
 	struct xrep_agfl	ra;
 	struct xfs_mount	*mp = sc->mp;
 	struct xfs_btree_cur	*cur;
-	struct xbitmap_range	*br;
-	struct xbitmap_range	*n;
+	struct interval_tree_node *itn, *n;
 	int			error;
 
 	ra.sc = sc;
@@ -518,18 +517,16 @@ xrep_agfl_collect_blocks(
 	 * Drop the freesp meta blocks that are in use by btrees.
 	 * The remaining blocks /should/ be AGFL blocks.
 	 */
-	error = xbitmap_disunion(agfl_extents, &ra.agmetablocks);
+	xbitmap_disunion(agfl_extents, &ra.agmetablocks);
 	xbitmap_destroy(&ra.agmetablocks);
-	if (error)
-		return error;
 
 	/*
 	 * Calculate the new AGFL size.  If we found more blocks than fit in
 	 * the AGFL we'll free them later.
 	 */
 	*flcount = 0;
-	for_each_xbitmap_extent(br, n, agfl_extents) {
-		*flcount += br->len;
+	for_each_xbitmap_extent(itn, n, agfl_extents) {
+		*flcount += itn->last - itn->start + 1;
 		if (*flcount > xfs_agfl_size(mp))
 			break;
 	}
@@ -578,10 +575,8 @@ xrep_agfl_init_header(
 {
 	struct xfs_mount	*mp = sc->mp;
 	__be32			*agfl_bno;
-	struct xbitmap_range	*br;
-	struct xbitmap_range	*n;
+	struct interval_tree_node *itn, *n;
 	struct xfs_agfl		*agfl;
-	xfs_agblock_t		agbno;
 	unsigned int		fl_off;
 
 	ASSERT(flcount <= xfs_agfl_size(mp));
@@ -603,28 +598,20 @@ xrep_agfl_init_header(
 	 */
 	fl_off = 0;
 	agfl_bno = XFS_BUF_TO_AGFL_BNO(mp, agfl_bp);
-	for_each_xbitmap_extent(br, n, agfl_extents) {
-		agbno = XFS_FSB_TO_AGBNO(mp, br->start);
+	for_each_xbitmap_extent(itn, n, agfl_extents) {
+		xfs_fsblock_t		start = itn->start;
 
-		trace_xrep_agfl_insert(mp, sc->sa.agno, agbno, br->len);
+		while (start <= itn->last && fl_off < flcount)
+			agfl_bno[fl_off++] = cpu_to_be32(XFS_FSB_TO_AGBNO(mp,
+						start++));
 
-		while (br->len > 0 && fl_off < flcount) {
-			agfl_bno[fl_off] = cpu_to_be32(agbno);
-			fl_off++;
-			agbno++;
+		trace_xrep_agfl_insert(mp, sc->sa.agno,
+				XFS_FSB_TO_AGBNO(mp, itn->start),
+				start - itn->start + 1);
 
-			/*
-			 * We've now used br->start by putting it in the AGFL,
-			 * so bump br so that we don't reap the block later.
-			 */
-			br->start++;
-			br->len--;
-		}
-
-		if (br->len)
+		xbitmap_clear(agfl_extents, itn->start, start - 1);
+		if (fl_off == flcount)
 			break;
-		list_del(&br->list);
-		kmem_free(br);
 	}
 
 	/* Write new AGFL to disk. */
