@@ -2788,7 +2788,7 @@ xfs_ialloc_setup_geometry(
 			inodes);
 
 	/* Set the maximum inode count for this filesystem. */
-	if (sbp->sb_imax_pct) {
+	if (sbp->sb_imax_pct && igeo->ialloc_blks) {
 		/*
 		 * Make sure the maximum inode count is a multiple
 		 * of the units we allocate inodes in.
