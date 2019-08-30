@@ -28,10 +28,10 @@ int xrep_init_btblock(struct xfs_scrub *sc, xfs_fsblock_t fsb,
 		struct xfs_buf **bpp, xfs_btnum_t btnum,
 		const struct xfs_buf_ops *ops);
 
-struct xfs_bitmap;
+struct xbitmap;
 
 int xrep_fix_freelist(struct xfs_scrub *sc, bool can_shrink);
-int xrep_reap_extents(struct xfs_scrub *sc, struct xfs_bitmap *exlist,
+int xrep_reap_extents(struct xfs_scrub *sc, struct xbitmap *exlist,
 		const struct xfs_owner_info *oinfo, enum xfs_ag_resv_type type);
 
 struct xrep_find_ag_btree {
