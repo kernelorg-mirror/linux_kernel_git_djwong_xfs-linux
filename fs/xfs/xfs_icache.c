@@ -1532,7 +1532,8 @@ xfs_icache_free_eofblocks(
  */
 bool
 xfs_inode_free_quota_blocks(
-	struct xfs_inode	*ip)
+	struct xfs_inode	*ip,
+	bool			sync)
 {
 	struct xfs_eofblocks	eofb = {0};
 	struct xfs_dquot	*dq;
@@ -1542,7 +1543,9 @@ xfs_inode_free_quota_blocks(
 	 * Run a sync scan to increase effectiveness and use the union filter to
 	 * cover all applicable quotas in a single scan.
 	 */
-	eofb.eof_flags = XFS_EOF_FLAGS_UNION | XFS_EOF_FLAGS_SYNC;
+	eofb.eof_flags = XFS_EOF_FLAGS_UNION;
+	if (sync)
+		eofb.eof_flags |= XFS_EOF_FLAGS_SYNC;
 
 	if (XFS_IS_UQUOTA_ENFORCED(ip->i_mount)) {
 		dq = xfs_inode_dquot(ip, XFS_DQ_USER);
@@ -1573,6 +1576,8 @@ xfs_inode_free_quota_blocks(
 
 	if (!do_work)
 		return false;
+
+	trace_xfs_inode_free_quota_blocks(ip->i_mount, &eofb, _RET_IP_);
 
 	xfs_icache_free_eofblocks(ip->i_mount, &eofb);
 	xfs_icache_free_cowblocks(ip->i_mount, &eofb);
