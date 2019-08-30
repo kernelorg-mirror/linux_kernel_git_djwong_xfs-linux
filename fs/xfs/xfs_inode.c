@@ -1798,6 +1798,60 @@ xfs_inactive_ifree(
 }
 
 /*
+ * Play some accounting tricks with deferred inactivation of unlinked inodes so
+ * that it looks like the inode got freed immediately.  The superblock
+ * maintains counts of the number of inodes, data blocks, and rt blocks that
+ * would be freed if we were to force inode inactivation.  These counts are
+ * added to the statfs free counters outside of the regular fdblocks/ifree
+ * counters.  If userspace actually demands those "free" resources we'll force
+ * an inactivation scan to free things for real.
+ *
+ * Note that we can safely skip the block accounting trickery for complicated
+ * situations (inode with blocks on both devices, inode block counts that seem
+ * wrong) since the worst that happens is that statfs resource usage decreases
+ * more slowly.
+ *
+ * Positive @direction means we're setting up the accounting trick and
+ * negative undoes it.
+ */
+static inline void
+xfs_inode_iadjust(
+	struct xfs_inode	*ip,
+	int			direction)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	xfs_filblks_t		iblocks;
+	int64_t			inodes = 0;
+	int64_t			dblocks = 0;
+	int64_t			rblocks = 0;
+
+	ASSERT(direction != 0);
+
+	if (VFS_I(ip)->i_nlink == 0) {
+		inodes = 1;
+
+		iblocks = max_t(int64_t, 0, ip->i_d.di_nblocks +
+					    ip->i_delayed_blks);
+		if (!XFS_IS_REALTIME_INODE(ip))
+			dblocks = iblocks;
+		else if (!XFS_IFORK_Q(ip) ||
+			 XFS_IFORK_FORMAT(ip, XFS_ATTR_FORK) ==
+					XFS_DINODE_FMT_LOCAL)
+			rblocks = iblocks;
+	}
+
+	if (direction < 0) {
+		inodes = -inodes;
+		dblocks = -dblocks;
+		rblocks = -rblocks;
+	}
+
+	percpu_counter_add(&mp->m_iinactive, inodes);
+	percpu_counter_add(&mp->m_dinactive, dblocks);
+	percpu_counter_add(&mp->m_rinactive, rblocks);
+}
+
+/*
  * Returns true if we need to update the on-disk metadata before we can free
  * the memory used by this inode.  Updates include freeing post-eof
  * preallocations; freeing COW staging extents; and marking the inode free in

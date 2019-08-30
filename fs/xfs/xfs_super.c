@@ -1102,6 +1102,8 @@ xfs_fs_statfs(
 	uint64_t		icount;
 	uint64_t		ifree;
 	uint64_t		fdblocks;
+	uint64_t		iinactive;
+	uint64_t		binactive;
 	xfs_extlen_t		lsize;
 	int64_t			ffree;
 
@@ -1115,6 +1117,7 @@ xfs_fs_statfs(
 	icount = percpu_counter_sum(&mp->m_icount);
 	ifree = percpu_counter_sum(&mp->m_ifree);
 	fdblocks = percpu_counter_sum(&mp->m_fdblocks);
+	iinactive = percpu_counter_sum(&mp->m_iinactive);
 
 	spin_lock(&mp->m_sb_lock);
 	statp->f_bsize = sbp->sb_blocksize;
@@ -1138,7 +1141,7 @@ xfs_fs_statfs(
 					sbp->sb_icount);
 
 	/* make sure statp->f_ffree does not underflow */
-	ffree = statp->f_files - (icount - ifree);
+	ffree = statp->f_files - (icount - ifree) + iinactive;
 	statp->f_ffree = max_t(int64_t, ffree, 0);
 
 
@@ -1152,7 +1155,12 @@ xfs_fs_statfs(
 		statp->f_blocks = sbp->sb_rblocks;
 		statp->f_bavail = statp->f_bfree =
 			sbp->sb_frextents * sbp->sb_rextsize;
+		binactive = percpu_counter_sum(&mp->m_rinactive);
+	} else {
+		binactive = percpu_counter_sum(&mp->m_dinactive);
 	}
+	statp->f_bavail += binactive;
+	statp->f_bfree += binactive;
 
 	return 0;
 }
@@ -1526,8 +1534,26 @@ xfs_init_percpu_counters(
 	if (error)
 		goto free_fdblocks;
 
+	error = percpu_counter_init(&mp->m_iinactive, 0, GFP_KERNEL);
+	if (error)
+		goto free_delalloc;
+
+	error = percpu_counter_init(&mp->m_dinactive, 0, GFP_KERNEL);
+	if (error)
+		goto free_iinactive;
+
+	error = percpu_counter_init(&mp->m_rinactive, 0, GFP_KERNEL);
+	if (error)
+		goto free_dinactive;
+
 	return 0;
 
+free_dinactive:
+	percpu_counter_destroy(&mp->m_dinactive);
+free_iinactive:
+	percpu_counter_destroy(&mp->m_iinactive);
+free_delalloc:
+	percpu_counter_destroy(&mp->m_delalloc_blks);
 free_fdblocks:
 	percpu_counter_destroy(&mp->m_fdblocks);
 free_ifree:
@@ -1556,6 +1582,9 @@ xfs_destroy_percpu_counters(
 	ASSERT(XFS_FORCED_SHUTDOWN(mp) ||
 	       percpu_counter_sum(&mp->m_delalloc_blks) == 0);
 	percpu_counter_destroy(&mp->m_delalloc_blks);
+	percpu_counter_destroy(&mp->m_iinactive);
+	percpu_counter_destroy(&mp->m_dinactive);
+	percpu_counter_destroy(&mp->m_rinactive);
 }
 
 static struct xfs_mount *
