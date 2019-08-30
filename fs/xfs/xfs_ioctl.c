@@ -2434,6 +2434,8 @@ xfs_file_ioctl(
 		if (error)
 			return error;
 
+		trace_xfs_ioc_free_eofblocks(mp, &keofb, _RET_IP_);
+
 		return xfs_icache_free_eofblocks(mp, &keofb);
 	}
 
