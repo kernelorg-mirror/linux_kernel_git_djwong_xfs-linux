@@ -490,6 +490,7 @@ xfs_iomap_prealloc_size(
 				       alloc_blocks);
 
 	freesp = percpu_counter_read_positive(&mp->m_fdblocks);
+	freesp += percpu_counter_read_positive(&mp->m_dinactive);
 	if (freesp < mp->m_low_space[XFS_LOWSP_5_PCNT]) {
 		shift = 2;
 		if (freesp < mp->m_low_space[XFS_LOWSP_4_PCNT])
