@@ -92,6 +92,7 @@ struct xfs_ifork *xfs_iext_state_to_fork(struct xfs_inode *ip, int state);
 int		xfs_iformat_fork(struct xfs_inode *, struct xfs_dinode *);
 void		xfs_iflush_fork(struct xfs_inode *, struct xfs_dinode *,
 				struct xfs_inode_log_item *, int);
+void		xfs_ifork_reset(struct xfs_ifork *ifp);
 void		xfs_idestroy_fork(struct xfs_inode *, int);
 void		xfs_idata_realloc(struct xfs_inode *, int, int);
 void		xfs_iroot_realloc(struct xfs_inode *, int, int);
@@ -101,6 +102,9 @@ int		xfs_iextents_copy(struct xfs_inode *, struct xfs_bmbt_rec *,
 void		xfs_init_local_fork(struct xfs_inode *, int, const void *, int);
 
 xfs_extnum_t	xfs_iext_count(struct xfs_ifork *ifp);
+void		xfs_iext_insert_raw(struct xfs_ifork *ifp,
+			struct xfs_iext_cursor *cur,
+			struct xfs_bmbt_irec *irec);
 void		xfs_iext_insert(struct xfs_inode *, struct xfs_iext_cursor *cur,
 			struct xfs_bmbt_irec *, int);
 void		xfs_iext_remove(struct xfs_inode *, struct xfs_iext_cursor *,
