@@ -72,7 +72,8 @@ int xfs_icache_free_cowblocks(struct xfs_mount *, struct xfs_eofblocks *);
 void xfs_cowblocks_worker(struct work_struct *);
 void xfs_queue_cowblocks(struct xfs_mount *);
 
-typedef int (*xfs_ici_walk_fn)(struct xfs_inode *ip, void *args);
+typedef int (*xfs_ici_walk_fn)(struct xfs_inode *ip, struct xfs_perag *pag,
+		void *args);
 int xfs_ici_walk_all(struct xfs_mount *mp, xfs_ici_walk_fn execute, void *args);
 
 int xfs_icache_inode_is_allocated(struct xfs_mount *mp, struct xfs_trans *tp,
