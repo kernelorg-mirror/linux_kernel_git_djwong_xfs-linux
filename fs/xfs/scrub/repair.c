@@ -25,6 +25,8 @@
 #include "xfs_ag_resv.h"
 #include "xfs_quota.h"
 #include "xfs_bmap.h"
+#include "xfs_defer.h"
+#include "xfs_extfree_item.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -412,7 +414,8 @@ int
 xrep_newbt_add_reservation(
 	struct xrep_newbt		*xnr,
 	xfs_fsblock_t			fsbno,
-	xfs_extlen_t			len)
+	xfs_extlen_t			len,
+	void				*priv)
 {
 	struct xrep_newbt_resv	*resv;
 
@@ -424,6 +427,7 @@ xrep_newbt_add_reservation(
 	resv->fsbno = fsbno;
 	resv->len = len;
 	resv->used = 0;
+	resv->priv = priv;
 	list_add_tail(&resv->list, &xnr->reservations);
 	return 0;
 }
@@ -434,6 +438,7 @@ xrep_newbt_reserve_space(
 	struct xrep_newbt	*xnr,
 	uint64_t		nr_blocks)
 {
+	const struct xfs_defer_op_type *efi_type = &xfs_extent_free_defer_type;
 	struct xfs_scrub	*sc = xnr->sc;
 	xfs_alloctype_t		type;
 	xfs_fsblock_t		alloc_hint = xnr->alloc_hint;
@@ -442,6 +447,7 @@ xrep_newbt_reserve_space(
 	type = sc->ip ? XFS_ALLOCTYPE_START_BNO : XFS_ALLOCTYPE_NEAR_BNO;
 
 	while (nr_blocks > 0 && !error) {
+		struct xfs_extent_free_item	efi_item;
 		struct xfs_alloc_arg	args = {
 			.tp		= sc->tp,
 			.mp		= sc->mp,
@@ -453,6 +459,7 @@ xrep_newbt_reserve_space(
 			.prod		= nr_blocks,
 			.resv		= xnr->resv,
 		};
+		void			*efi;
 
 		error = xfs_alloc_vextent(&args);
 		if (error)
@@ -465,7 +472,20 @@ xrep_newbt_reserve_space(
 				XFS_FSB_TO_AGBNO(sc->mp, args.fsbno),
 				args.len, xnr->oinfo.oi_owner);
 
-		error = xrep_newbt_add_reservation(xnr, args.fsbno, args.len);
+		/*
+		 * Log a deferred free item for each extent we allocate so that
+		 * we can get all of the space back if we crash before we can
+		 * commit the new btree.
+		 */
+		efi_item.xefi_startblock = args.fsbno;
+		efi_item.xefi_blockcount = args.len;
+		efi_item.xefi_oinfo = xnr->oinfo;
+		efi_item.xefi_skip_discard = true;
+		efi = efi_type->create_intent(sc->tp, 1);
+		efi_type->log_item(sc->tp, efi, &efi_item.xefi_list);
+
+		error = xrep_newbt_add_reservation(xnr, args.fsbno, args.len,
+				efi);
 		if (error)
 			break;
 
@@ -487,6 +507,7 @@ xrep_newbt_destroy(
 	struct xrep_newbt	*xnr,
 	int			error)
 {
+	const struct xfs_defer_op_type *efi_type = &xfs_extent_free_defer_type;
 	struct xfs_scrub	*sc = xnr->sc;
 	struct xrep_newbt_resv	*resv, *n;
 
@@ -494,6 +515,17 @@ xrep_newbt_destroy(
 		goto junkit;
 
 	list_for_each_entry_safe(resv, n, &xnr->reservations, list) {
+		struct xfs_efd_log_item *efd;
+
+		/*
+		 * Log a deferred free done for each extent we allocated now
+		 * that we've linked the block into the filesystem.  We cheat
+		 * since we know that log recovery has never looked at the
+		 * extents attached to an EFD.
+		 */
+		efd = efi_type->create_done(sc->tp, resv->priv, 0);
+		set_bit(XFS_LI_DIRTY, &efd->efd_item.li_flags);
+
 		/* Free every block we didn't use. */
 		resv->fsbno += resv->used;
 		resv->len -= resv->used;
@@ -515,6 +547,7 @@ xrep_newbt_destroy(
 
 junkit:
 	list_for_each_entry_safe(resv, n, &xnr->reservations, list) {
+		efi_type->abort_intent(resv->priv);
 		list_del(&resv->list);
 		kmem_free(resv);
 	}
