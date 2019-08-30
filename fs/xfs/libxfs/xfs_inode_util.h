@@ -11,4 +11,10 @@ uint64_t	xfs_flags2diflags2(struct xfs_inode *ip, unsigned int xflags);
 uint32_t	xfs_dic2xflags(uint16_t di_flags, uint64_t di_flags2,
 			       bool has_attr);
 
+#define XFS_PROJID_DEFAULT		0
+
+prid_t		xfs_get_projid(struct xfs_inode *ip);
+void		xfs_set_projid(struct xfs_inode *ip, prid_t projid);
+prid_t		xfs_get_initial_prid(struct xfs_inode *dp);
+
 #endif /* __XFS_INODE_UTIL_H__ */
