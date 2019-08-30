@@ -20,6 +20,7 @@
 #include "xfs_symlink.h"
 #include "xfs_dir2.h"
 #include "xfs_iomap.h"
+#include "xfs_bmap.h"
 
 #include <linux/xattr.h>
 #include <linux/posix_acl.h>
