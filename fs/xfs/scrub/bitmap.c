@@ -13,30 +13,97 @@
 #include "scrub/bitmap.h"
 
 /* Iterate each interval of a bitmap.  Do not change the bitmap. */
-#define for_each_xbitmap_extent(bex, bitmap) \
-	list_for_each_entry((bex), &(bitmap)->list, list)
+#define for_each_xbitmap_extent(itn, bitmap) \
+	for ((itn) = rb_entry_safe(rb_first(&(bitmap)->root.rb_root), \
+				   struct interval_tree_node, rb); \
+	     (itn) != NULL; \
+	     (itn) = rb_entry_safe(rb_next(&(itn)->rb), \
+				   struct interval_tree_node, rb))
 
-/*
- * Set a range of this bitmap.  Caller must ensure the range is not set.
- *
- * This is the logical equivalent of bitmap |= mask(start, len).
- */
+/* Clear a range of this bitmap. */
+void
+xbitmap_clear(
+	struct xbitmap			*bitmap,
+	uint64_t			start,
+	uint64_t			len)
+{
+	struct interval_tree_node	*itn;
+	uint64_t			last = start + len - 1;
+
+	while ((itn = interval_tree_iter_first(&bitmap->root, start, last))) {
+		if (itn->start < start) {
+			/* overlaps with the left side of the clearing range */
+			interval_tree_remove(itn, &bitmap->root);
+			itn->last = start - 1;
+			interval_tree_insert(itn, &bitmap->root);
+		} else if (itn->last > last) {
+			/* overlaps with the right side of the clearing range */
+			interval_tree_remove(itn, &bitmap->root);
+			itn->start = last + 1;
+			interval_tree_insert(itn, &bitmap->root);
+			break;
+		} else {
+			/* in the middle of the clearing range */
+			interval_tree_remove(itn, &bitmap->root);
+			kmem_free(itn);
+		}
+	}
+}
+
+/* Set a range of this bitmap. */
 int
 xbitmap_set(
-	struct xbitmap		*bitmap,
-	uint64_t		start,
-	uint64_t		len)
+	struct xbitmap			*bitmap,
+	uint64_t			start,
+	uint64_t			len)
 {
-	struct xbitmap_range	*bmr;
+	struct interval_tree_node	*left;
+	struct interval_tree_node	*right;
+	uint64_t			last = start + len - 1;
 
-	bmr = kmem_alloc(sizeof(struct xbitmap_range), KM_MAYFAIL);
-	if (!bmr)
-		return -ENOMEM;
+	/* Is this whole range already set? */
+	left = interval_tree_iter_first(&bitmap->root, start, last);
+	if (left && left->start <= start && left->last >= last)
+		return 0;
 
-	INIT_LIST_HEAD(&bmr->list);
-	bmr->start = start;
-	bmr->len = len;
-	list_add_tail(&bmr->list, &bitmap->list);
+	/* Clear out everything in the range we want to set. */
+	xbitmap_clear(bitmap, start, len);
+
+	/* Do we have a left-adjacent extent? */
+	left = interval_tree_iter_first(&bitmap->root, start - 1, start - 1);
+	ASSERT(!left || left->last + 1 == start);
+
+	/* Do we have a right-adjacent extent? */
+	right = interval_tree_iter_first(&bitmap->root, last + 1, last + 1);
+	ASSERT(!right || right->start == last + 1);
+
+	if (left && right) {
+		/* combine left and right adjacent extent */
+		interval_tree_remove(left, &bitmap->root);
+		interval_tree_remove(right, &bitmap->root);
+		left->last = right->last;
+		interval_tree_insert(left, &bitmap->root);
+		kmem_free(right);
+	} else if (left) {
+		/* combine with left extent */
+		interval_tree_remove(left, &bitmap->root);
+		left->last = last;
+		interval_tree_insert(left, &bitmap->root);
+	} else if (right) {
+		/* combine with right extent */
+		interval_tree_remove(right, &bitmap->root);
+		right->start = start;
+		interval_tree_insert(right, &bitmap->root);
+	} else {
+		/* add an extent */
+		left = kmem_alloc(sizeof(struct interval_tree_node),
+				KM_MAYFAIL);
+		if (!left)
+			return -ENOMEM;
+		left->start = start;
+		left->last = last;
+		interval_tree_insert(left, &bitmap->root);
+	}
 
 	return 0;
 }
@@ -44,13 +111,13 @@ xbitmap_set(
 /* Free everything related to this bitmap. */
 void
 xbitmap_destroy(
-	struct xbitmap		*bitmap)
+	struct xbitmap			*bitmap)
 {
-	struct xbitmap_range	*bmr;
+	struct interval_tree_node	*itn;
 
-	for_each_xbitmap_extent(bmr, bitmap) {
-		list_del(&bmr->list);
-		kmem_free(bmr);
+	while ((itn = interval_tree_iter_first(&bitmap->root, 0, -1ULL))) {
+		interval_tree_remove(itn, &bitmap->root);
+		kfree(itn);
 	}
 }
 
@@ -59,27 +126,7 @@ void
 xbitmap_init(
 	struct xbitmap		*bitmap)
 {
-	INIT_LIST_HEAD(&bitmap->list);
-}
-
-/* Compare two btree extents. */
-static int
-xbitmap_range_cmp(
-	void			*priv,
-	struct list_head	*a,
-	struct list_head	*b)
-{
-	struct xbitmap_range	*ap;
-	struct xbitmap_range	*bp;
-
-	ap = container_of(a, struct xbitmap_range, list);
-	bp = container_of(b, struct xbitmap_range, list);
-
-	if (ap->start > bp->start)
-		return 1;
-	if (ap->start < bp->start)
-		return -1;
-	return 0;
+	bitmap->root = RB_ROOT_CACHED;
 }
 
 /*
@@ -96,118 +143,19 @@ xbitmap_range_cmp(
  *
  * This is the logical equivalent of bitmap &= ~sub.
  */
-#define LEFT_ALIGNED	(1 << 0)
-#define RIGHT_ALIGNED	(1 << 1)
-int
+void
 xbitmap_disunion(
-	struct xbitmap		*bitmap,
-	struct xbitmap		*sub)
+	struct xbitmap			*bitmap,
+	struct xbitmap			*sub)
 {
-	struct list_head	*lp;
-	struct xbitmap_range	*br;
-	struct xbitmap_range	*new_br;
-	struct xbitmap_range	*sub_br;
-	uint64_t		sub_start;
-	uint64_t		sub_len;
-	int			state;
-	int			error = 0;
+	struct interval_tree_node	*itn;
 
-	if (list_empty(&bitmap->list) || list_empty(&sub->list))
-		return 0;
-	ASSERT(!list_empty(&sub->list));
+	if (xbitmap_empty(bitmap) || xbitmap_empty(sub))
+		return;
 
-	list_sort(NULL, &bitmap->list, xbitmap_range_cmp);
-	list_sort(NULL, &sub->list, xbitmap_range_cmp);
-
-	/*
-	 * Now that we've sorted both lists, we iterate bitmap once, rolling
-	 * forward through sub and/or bitmap as necessary until we find an
-	 * overlap or reach the end of either list.  We do not reset lp to the
-	 * head of bitmap nor do we reset sub_br to the head of sub.  The
-	 * list traversal is similar to merge sort, but we're deleting
-	 * instead.  In this manner we avoid O(n^2) operations.
-	 */
-	sub_br = list_first_entry(&sub->list, struct xbitmap_range,
-			list);
-	lp = bitmap->list.next;
-	while (lp != &bitmap->list) {
-		br = list_entry(lp, struct xbitmap_range, list);
-
-		/*
-		 * Advance sub_br and/or br until we find a pair that
-		 * intersect or we run out of extents.
-		 */
-		while (sub_br->start + sub_br->len <= br->start) {
-			if (list_is_last(&sub_br->list, &sub->list))
-				goto out;
-			sub_br = list_next_entry(sub_br, list);
-		}
-		if (sub_br->start >= br->start + br->len) {
-			lp = lp->next;
-			continue;
-		}
-
-		/* trim sub_br to fit the extent we have */
-		sub_start = sub_br->start;
-		sub_len = sub_br->len;
-		if (sub_br->start < br->start) {
-			sub_len -= br->start - sub_br->start;
-			sub_start = br->start;
-		}
-		if (sub_len > br->len)
-			sub_len = br->len;
-
-		state = 0;
-		if (sub_start == br->start)
-			state |= LEFT_ALIGNED;
-		if (sub_start + sub_len == br->start + br->len)
-			state |= RIGHT_ALIGNED;
-		switch (state) {
-		case LEFT_ALIGNED:
-			/* Coincides with only the left. */
-			br->start += sub_len;
-			br->len -= sub_len;
-			break;
-		case RIGHT_ALIGNED:
-			/* Coincides with only the right. */
-			br->len -= sub_len;
-			lp = lp->next;
-			break;
-		case LEFT_ALIGNED | RIGHT_ALIGNED:
-			/* Total overlap, just delete ex. */
-			lp = lp->next;
-			list_del(&br->list);
-			kmem_free(br);
-			break;
-		case 0:
-			/*
-			 * Deleting from the middle: add the new right extent
-			 * and then shrink the left extent.
-			 */
-			new_br = kmem_alloc(sizeof(struct xbitmap_range),
-					KM_MAYFAIL);
-			if (!new_br) {
-				error = -ENOMEM;
-				goto out;
-			}
-			INIT_LIST_HEAD(&new_br->list);
-			new_br->start = sub_start + sub_len;
-			new_br->len = br->start + br->len - new_br->start;
-			list_add(&new_br->list, &br->list);
-			br->len = sub_start - br->start;
-			lp = lp->next;
-			break;
-		default:
-			ASSERT(0);
-			break;
-		}
-	}
-
-out:
-	return error;
+	for_each_xbitmap_extent(itn, sub)
+		xbitmap_clear(bitmap, itn->start, itn->last - itn->start + 1);
 }
-#undef LEFT_ALIGNED
-#undef RIGHT_ALIGNED
 
 /*
  * Record all btree blocks seen while iterating all records of a btree.
@@ -304,13 +252,13 @@ xbitmap_set_btblocks(
 /* How many bits are set in this bitmap? */
 uint64_t
 xbitmap_hweight(
-	struct xbitmap		*bitmap)
+	struct xbitmap			*bitmap)
 {
-	struct xbitmap_range	*bmr;
-	uint64_t		ret = 0;
+	struct interval_tree_node	*itn;
+	uint64_t			ret = 0;
 
-	for_each_xbitmap_extent(bmr, bitmap)
-		ret += bmr->len;
+	for_each_xbitmap_extent(itn, bitmap)
+		ret += itn->last - itn->start + 1;
 
 	return ret;
 }
@@ -318,15 +266,15 @@ xbitmap_hweight(
 /* Call a function for every run of set bits in this bitmap. */
 int
 xbitmap_walk(
-	struct xbitmap		*bitmap,
-	xbitmap_walk_fn	fn,
-	void			*priv)
+	struct xbitmap			*bitmap,
+	xbitmap_walk_fn		fn,
+	void				*priv)
 {
-	struct xbitmap_range	*bex;
-	int			error;
+	struct interval_tree_node	*itn;
+	int				error;
 
-	for_each_xbitmap_extent(bex, bitmap) {
-		error = fn(bex->start, bex->len, priv);
+	for_each_xbitmap_extent(itn, bitmap) {
+		error = fn(itn->start, itn->last - itn->start + 1, priv);
 		if (error)
 			break;
 	}
@@ -369,4 +317,12 @@ xbitmap_walk_bits(
 	struct xbitmap_walk_bits	wb = {.fn = fn, .priv = priv};
 
 	return xbitmap_walk(bitmap, xbitmap_walk_bits_in_run, &wb);
+}
+
+/* Does this bitmap have no bits set at all? */
+bool
+xbitmap_empty(
+	struct xbitmap		*bitmap)
+{
+	return bitmap->root.rb_root.rb_node == NULL;
 }
