@@ -152,12 +152,12 @@ void xchk_xref_is_not_inode_chunk(struct xfs_scrub *sc, xfs_agblock_t agbno,
 		xfs_extlen_t len);
 void xchk_xref_is_inode_chunk(struct xfs_scrub *sc, xfs_agblock_t agbno,
 		xfs_extlen_t len);
-void xchk_xref_is_owned_by(struct xfs_scrub *sc, xfs_agblock_t agbno,
-		xfs_extlen_t len, const struct xfs_owner_info *oinfo);
-void xchk_xref_is_not_owned_by(struct xfs_scrub *sc, xfs_agblock_t agbno,
-		xfs_extlen_t len, const struct xfs_owner_info *oinfo);
-void xchk_xref_has_no_owner(struct xfs_scrub *sc, xfs_agblock_t agbno,
-		xfs_extlen_t len);
+void xchk_xref_is_owned_by(struct xfs_scrub *sc, xfs_fsblock_t bno,
+		xfs_filblks_t len, const struct xfs_owner_info *oinfo);
+void xchk_xref_is_not_owned_by(struct xfs_scrub *sc, xfs_fsblock_t bno,
+		xfs_filblks_t len, const struct xfs_owner_info *oinfo);
+void xchk_xref_has_no_owner(struct xfs_scrub *sc, xfs_fsblock_t bno,
+		xfs_filblks_t len);
 void xchk_xref_is_cow_staging(struct xfs_scrub *sc, xfs_agblock_t bno,
 		xfs_extlen_t len);
 void xchk_xref_is_not_shared(struct xfs_scrub *sc, xfs_agblock_t bno,
