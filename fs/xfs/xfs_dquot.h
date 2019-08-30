@@ -47,6 +47,16 @@ struct xfs_dquot {
 	xfs_qcnt_t		q_res_icount;
 	/* total realtime blks used+reserved */
 	xfs_qcnt_t		q_res_rtbcount;
+
+	/* inactive inodes attached to this dquot */
+	uint64_t		q_ina_total;
+	/* inactive regular nblks used+reserved */
+	xfs_qcnt_t		q_ina_bcount;
+	/* inactive inos allocd+reserved */
+	xfs_qcnt_t		q_ina_icount;
+	/* inactive realtime blks used+reserved */
+	xfs_qcnt_t		q_ina_rtbcount;
+
 	xfs_qcnt_t		q_prealloc_lo_wmark;
 	xfs_qcnt_t		q_prealloc_hi_wmark;
 	int64_t			q_low_space[XFS_QLOWSP_MAX];
