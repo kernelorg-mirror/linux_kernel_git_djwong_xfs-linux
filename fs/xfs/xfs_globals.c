@@ -43,4 +43,10 @@ struct xfs_globals xfs_globals = {
 #ifdef DEBUG
 	.pwork_threads		=	-1,	/* automatic thread detection */
 #endif
+
+	/* Bulk load new btree leaf blocks to 75% full. */
+	.bload_leaf_slack	=	-1,
+
+	/* Bulk load new btree node blocks to 75% full. */
+	.bload_node_slack	=	-1,
 };
