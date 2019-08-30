@@ -29,6 +29,7 @@ xchk_setup_inode_bmap(
 	struct xfs_scrub	*sc,
 	struct xfs_inode	*ip)
 {
+	bool			is_repair = false;
 	int			error;
 
 	error = xchk_get_inode(sc, ip);
@@ -38,6 +39,10 @@ xchk_setup_inode_bmap(
 	sc->ilock_flags = XFS_IOLOCK_EXCL | XFS_MMAPLOCK_EXCL;
 	xfs_ilock(sc->ip, sc->ilock_flags);
 
+#ifdef CONFIG_XFS_REPAIR
+	is_repair = (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR);
+#endif
+
 	/*
 	 * We don't want any ephemeral data fork updates sitting around
 	 * while we inspect block mappings, so wait for directio to finish
@@ -45,10 +50,27 @@ xchk_setup_inode_bmap(
 	 */
 	if (S_ISREG(VFS_I(sc->ip)->i_mode) &&
 	    sc->sm->sm_type == XFS_SCRUB_TYPE_BMBTD) {
+		/* Break all our leases, we're going to mess with things. */
+		if (is_repair) {
+			error = xfs_break_layouts(VFS_I(sc->ip),
+					&sc->ilock_flags, BREAK_UNMAP);
+			if (error)
+				goto out;
+		}
+
 		inode_dio_wait(VFS_I(sc->ip));
 		error = filemap_write_and_wait(VFS_I(sc->ip)->i_mapping);
 		if (error)
 			goto out;
+
+		/* Drop the page cache if we're repairing block mappings. */
+		if (is_repair) {
+			error = invalidate_inode_pages2(
+					VFS_I(sc->ip)->i_mapping);
+			if (error)
+				goto out;
+		}
+
 	}
 
 	/* Got the inode, lock it and we're ready to go. */
