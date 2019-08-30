@@ -1653,12 +1653,6 @@ xfs_fc_fill_super(
 		}
 	}
 
-	if (xfs_sb_version_hasrmapbt(&mp->m_sb) && mp->m_sb.sb_rblocks) {
-		xfs_alert(mp,
-	"reverse mapping btree not compatible with realtime device!");
-		error = -EINVAL;
-		goto out_filestream_unmount;
-	}
 
 	if (xfs_sb_version_hasinobtcounts(&mp->m_sb))
 		xfs_warn(mp,
