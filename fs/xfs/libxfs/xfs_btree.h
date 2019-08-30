@@ -582,4 +582,47 @@ void xfs_btree_stage_ifakeroot(struct xfs_btree_cur *cur,
 void xfs_btree_commit_ifakeroot(struct xfs_btree_cur *cur, int whichfork,
 		const struct xfs_btree_ops *ops);
 
+typedef int (*xfs_btree_bload_get_fn)(struct xfs_btree_cur *cur, void *priv);
+typedef int (*xfs_btree_bload_alloc_block_fn)(struct xfs_btree_cur *cur,
+		union xfs_btree_ptr *ptr, void *priv);
+typedef size_t (*xfs_btree_bload_iroot_size_fn)(struct xfs_btree_cur *cur,
+		unsigned int nr_this_level, void *priv);
+
+/* Bulk loading of staged btrees. */
+struct xfs_btree_bload {
+	/* Function to store a record in the cursor. */
+	xfs_btree_bload_get_fn		get_data;
+
+	/* Function to allocate a block for the btree. */
+	xfs_btree_bload_alloc_block_fn	alloc_block;
+
+	/* Function to compute the size of the in-core btree root block. */
+	xfs_btree_bload_iroot_size_fn	iroot_size;
+
+	/* Number of records the caller wants to store. */
+	uint64_t			nr_records;
+
+	/* Number of btree blocks needed to store those records. */
+	uint64_t			nr_blocks;
+
+	/*
+	 * Number of free records to leave in each leaf block.  If this (or
+	 * any of the slack values) are negative, this will be computed to
+	 * be halfway between maxrecs and minrecs.  This typically leaves the
+	 * block 75% full.
+	 */
+	int				leaf_slack;
+
+	/* Number of free keyptrs to leave in each node block. */
+	int				node_slack;
+
+	/* Computed btree height. */
+	unsigned int			btree_height;
+};
+
+int xfs_btree_bload_compute_geometry(struct xfs_btree_cur *cur,
+		struct xfs_btree_bload *bbl, uint64_t nr_records);
+int xfs_btree_bload(struct xfs_btree_cur *cur, struct xfs_btree_bload *bbl,
+		void *priv);
+
 #endif	/* __XFS_BTREE_H__ */
