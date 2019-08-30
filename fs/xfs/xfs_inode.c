@@ -661,8 +661,8 @@ xfs_ialloc(
 	struct inode			*inode;
 	xfs_ino_t			ino;
 	uint				flags;
+	int				times;
 	int				error;
-	struct timespec64		tv;
 
 	/*
 	 * Call the space management code to pick
@@ -739,11 +739,7 @@ xfs_ialloc(
 	ip->i_d.di_nextents = 0;
 	ASSERT(ip->i_d.di_nblocks == 0);
 
-	tv = current_time(inode);
-	inode->i_mtime = tv;
-	inode->i_atime = tv;
-	inode->i_ctime = tv;
-
+	times = XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG | XFS_ICHGTIME_ACCESS;
 	ip->i_d.di_extsize = 0;
 	ip->i_d.di_dmevmask = 0;
 	ip->i_d.di_dmstate = 0;
@@ -755,9 +751,10 @@ xfs_ialloc(
 		if (xfs_sb_version_hasbigtime(&ip->i_mount->m_sb))
 			ip->i_d.di_flags2 |= XFS_DIFLAG2_BIGTIME;
 		ip->i_d.di_cowextsize = 0;
-		ip->i_d.di_crtime = tv;
+		times |= XFS_ICHGTIME_CREATE;
 	}
 
+	xfs_trans_ichgtime(tp, ip, times);
 
 	flags = XFS_ILOG_CORE;
 	switch (args->mode & S_IFMT) {
