@@ -2897,6 +2897,13 @@ xfs_irele(
 	iput(VFS_I(ip));
 }
 
+void
+xfs_imeta_irele(
+	struct xfs_inode	*ip)
+{
+	xfs_irele(ip);
+}
+
 /*
  * Decide if this inode have post-EOF blocks.  The caller is responsible
  * for knowing / caring about the PREALLOC/APPEND flags.
