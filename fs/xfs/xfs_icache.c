@@ -778,7 +778,9 @@ xfs_imeta_iget(
 	if (error)
 		return error;
 
-	if (ftype == XFS_DIR3_FT_UNKNOWN ||
+	if ((xfs_sb_version_hasmetadir(&mp->m_sb) &&
+	     !xfs_is_metadata_inode(ip)) ||
+	    ftype == XFS_DIR3_FT_UNKNOWN ||
 	    xfs_mode_to_ftype(VFS_I(ip)->i_mode) != ftype) {
 		xfs_irele(ip);
 		return -EFSCORRUPTED;
