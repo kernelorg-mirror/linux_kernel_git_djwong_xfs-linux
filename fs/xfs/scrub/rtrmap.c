@@ -56,6 +56,16 @@ xchk_setup_rtrmapbt(
 
 /* Realtime reverse mapping. */
 
+/* Cross-reference with other metadata. */
+STATIC void
+xchk_rtrmapbt_xref(
+	struct xfs_scrub	*sc,
+	struct xfs_rmap_irec	*irec)
+{
+	xchk_xref_is_used_rt_space(sc, irec->rm_startblock,
+			irec->rm_blockcount);
+}
+
 /* Scrub a realtime rmapbt record. */
 STATIC int
 xchk_rtrmapbt_helper(
@@ -86,6 +96,10 @@ xchk_rtrmapbt_helper(
 	if (is_bmbt || non_inode || is_attr)
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 
+	if (bs->sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
+		goto out;
+
+	xchk_rtrmapbt_xref(bs->sc, &irec);
 out:
 	return error;
 }
