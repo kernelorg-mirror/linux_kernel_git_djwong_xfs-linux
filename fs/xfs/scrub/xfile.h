@@ -13,6 +13,7 @@ void xfile_destroy(struct file *filp);
 #define XFILE_IO_READ		(0)
 #define XFILE_IO_WRITE		(1)
 #define XFILE_IO_MASK		(1 << 0)
+#define XFILE_IO_ASYNC		(1 << 1)
 int xfile_io(struct file *filp, unsigned int cmd_flags, loff_t *pos,
 		void *ptr, size_t count);
 

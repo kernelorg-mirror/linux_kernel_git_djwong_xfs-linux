@@ -10,6 +10,7 @@ struct xfbma {
 	struct file	*filp;
 	size_t		obj_size;
 	uint64_t	nr;
+	unsigned int	io_flags;
 };
 
 struct xfbma *xfbma_init(size_t obj_size);
