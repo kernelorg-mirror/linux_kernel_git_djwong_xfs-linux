@@ -185,23 +185,36 @@ xfs_rmap_get_rec(
 	int			*stat)
 {
 	struct xfs_mount	*mp = cur->bc_mp;
-	xfs_agnumber_t		agno = cur->bc_private.a.agno;
+	xfs_agnumber_t		agno;
 	union xfs_btree_rec	*rec;
 	int			error;
-
-	if (cur->bc_btnum != XFS_BTNUM_RMAP)
-		goto out_bad_rec;
 
 	error = xfs_btree_get_rec(cur, &rec, stat);
 	if (error || !*stat)
 		return error;
+
+	if (cur->bc_btnum == XFS_BTNUM_RTRMAP)
+		agno = -1;
+	else
+		agno = cur->bc_private.a.agno;
 
 	if (xfs_rmap_btrec_to_irec(rec, irec))
 		goto out_bad_rec;
 
 	if (irec->rm_blockcount == 0)
 		goto out_bad_rec;
-	if (irec->rm_startblock <= XFS_AGFL_BLOCK(mp)) {
+	if (cur->bc_btnum == XFS_BTNUM_RTRMAP) {
+		if (!xfs_verify_rtbno(mp, irec->rm_startblock))
+			goto out_bad_rec;
+		if (irec->rm_startblock >
+				irec->rm_startblock + irec->rm_blockcount)
+			goto out_bad_rec;
+		if (!xfs_verify_rtbno(mp,
+				irec->rm_startblock + irec->rm_blockcount - 1))
+			goto out_bad_rec;
+		if (XFS_RMAP_NON_INODE_OWNER(irec->rm_owner))
+			goto out_bad_rec;
+	} else if (irec->rm_startblock <= XFS_AGFL_BLOCK(mp)) {
 		if (irec->rm_owner != XFS_RMAP_OWN_FS)
 			goto out_bad_rec;
 		if (irec->rm_blockcount != XFS_AGFL_BLOCK(mp) + 1)
