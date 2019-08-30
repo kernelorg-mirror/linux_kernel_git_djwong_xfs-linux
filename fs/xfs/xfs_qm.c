@@ -1130,11 +1130,12 @@ xfs_qm_dqusage_adjust(
 	struct xfs_mount	*mp,
 	struct xfs_trans	*tp,
 	xfs_ino_t		ino,
-	void			*data)
+	void			*need_ilocks)
 {
 	struct xfs_inode	*ip;
 	xfs_qcnt_t		nblks;
 	xfs_filblks_t		rtblks = 0;	/* total rt blks */
+	uint			ilock_flags = 0;
 	int			error;
 
 	ASSERT(XFS_IS_QUOTA_RUNNING(mp));
@@ -1146,15 +1147,18 @@ xfs_qm_dqusage_adjust(
 	if (xfs_is_quota_inode(&mp->m_sb, ino))
 		return 0;
 
-	/*
-	 * We don't _need_ to take the ilock EXCL here because quotacheck runs
-	 * at mount time and therefore nobody will be racing chown/chproj.
-	 */
+	/* Grab inode and lock it if needed. */
 	error = xfs_iget(mp, tp, ino, XFS_IGET_DONTCACHE, 0, &ip);
 	if (error == -EINVAL || error == -ENOENT)
 		return 0;
 	if (error)
 		return error;
+
+	if (need_ilocks) {
+		ilock_flags = XFS_IOLOCK_SHARED | XFS_MMAPLOCK_SHARED;
+		xfs_ilock(ip, ilock_flags);
+		ilock_flags |= xfs_ilock_data_map_shared(ip);
+	}
 
 	ASSERT(ip->i_delayed_blks == 0);
 
@@ -1206,6 +1210,8 @@ xfs_qm_dqusage_adjust(
 	}
 
 error0:
+	if (ilock_flags)
+		xfs_iunlock(ip, ilock_flags);
 	xfs_irele(ip);
 	return error;
 }
@@ -1263,16 +1269,60 @@ out_unlock:
 }
 
 /*
+ * Walk the inodes and adjust quota usage.  Caller must have previously
+ * zeroed all dquots.
+ */
+int
+xfs_qm_quotacheck_walk_and_flush(
+	struct xfs_mount	*mp,
+	bool			need_ilocks,
+	struct list_head	*buffer_list)
+{
+	int			error, error2;
+
+	error = xfs_iwalk_threaded(mp, 0, 0, xfs_qm_dqusage_adjust, 0,
+			!need_ilocks, NULL);
+	if (error)
+		return error;
+
+	/*
+	 * We've made all the changes that we need to make incore.  Flush them
+	 * down to disk buffers if everything was updated successfully.
+	 */
+	if (XFS_IS_UQUOTA_ON(mp)) {
+		error = xfs_qm_dquot_walk(mp, XFS_DQ_USER, xfs_qm_flush_one,
+					  buffer_list);
+	}
+	if (XFS_IS_GQUOTA_ON(mp)) {
+		error2 = xfs_qm_dquot_walk(mp, XFS_DQ_GROUP, xfs_qm_flush_one,
+					   buffer_list);
+		if (!error)
+			error = error2;
+	}
+	if (XFS_IS_PQUOTA_ON(mp)) {
+		error2 = xfs_qm_dquot_walk(mp, XFS_DQ_PROJ, xfs_qm_flush_one,
+					   buffer_list);
+		if (!error)
+			error = error2;
+	}
+
+	error2 = xfs_buf_delwri_submit(buffer_list);
+	if (!error)
+		error = error2;
+	return error;
+}
+
+/*
  * Walk thru all the filesystem inodes and construct a consistent view
  * of the disk quota world. If the quotacheck fails, disable quotas.
  */
 STATIC int
 xfs_qm_quotacheck(
-	xfs_mount_t	*mp)
+	struct xfs_mount	*mp)
 {
-	int			error, error2;
-	uint			flags;
+	int			error;
 	LIST_HEAD		(buffer_list);
+	uint			flags;
 	struct xfs_inode	*uip = mp->m_quotainfo->qi_uquotaip;
 	struct xfs_inode	*gip = mp->m_quotainfo->qi_gquotaip;
 	struct xfs_inode	*pip = mp->m_quotainfo->qi_pquotaip;
@@ -1313,35 +1363,9 @@ xfs_qm_quotacheck(
 		flags |= XFS_PQUOTA_CHKD;
 	}
 
-	error = xfs_iwalk_threaded(mp, 0, 0, xfs_qm_dqusage_adjust, 0, true,
-			NULL);
+	error = xfs_qm_quotacheck_walk_and_flush(mp, false, &buffer_list);
 	if (error)
 		goto error_return;
-
-	/*
-	 * We've made all the changes that we need to make incore.  Flush them
-	 * down to disk buffers if everything was updated successfully.
-	 */
-	if (XFS_IS_UQUOTA_ON(mp)) {
-		error = xfs_qm_dquot_walk(mp, XFS_DQ_USER, xfs_qm_flush_one,
-					  &buffer_list);
-	}
-	if (XFS_IS_GQUOTA_ON(mp)) {
-		error2 = xfs_qm_dquot_walk(mp, XFS_DQ_GROUP, xfs_qm_flush_one,
-					   &buffer_list);
-		if (!error)
-			error = error2;
-	}
-	if (XFS_IS_PQUOTA_ON(mp)) {
-		error2 = xfs_qm_dquot_walk(mp, XFS_DQ_PROJ, xfs_qm_flush_one,
-					   &buffer_list);
-		if (!error)
-			error = error2;
-	}
-
-	error2 = xfs_buf_delwri_submit(&buffer_list);
-	if (!error)
-		error = error2;
 
 	/*
 	 * We can get this error if we couldn't do a dquot allocation inside
