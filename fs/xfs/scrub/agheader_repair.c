@@ -816,6 +816,7 @@ xrep_agi_calc_from_btrees(
 	struct xfs_btree_cur	*cur;
 	struct xfs_agi		*agi = XFS_BUF_TO_AGI(agi_bp);
 	struct xfs_mount	*mp = sc->mp;
+	xfs_agblock_t		blocks;
 	xfs_agino_t		count;
 	xfs_agino_t		freecount;
 	int			error;
@@ -829,6 +830,18 @@ xrep_agi_calc_from_btrees(
 
 	agi->agi_count = cpu_to_be32(count);
 	agi->agi_freecount = cpu_to_be32(freecount);
+
+	/* Update the AGI counters from the finobt. */
+	if (xfs_sb_version_hasfinobtblocks(&mp->m_sb)) {
+		cur = xfs_inobt_init_cursor(mp, sc->tp, agi_bp, sc->sa.agno,
+				XFS_BTNUM_FINO);
+		error = xfs_btree_count_blocks(cur, &blocks);
+		if (error)
+			goto err;
+		xfs_btree_del_cursor(cur, error);
+		agi->agi_fino_blocks = cpu_to_be32(blocks);
+	}
+
 	return 0;
 err:
 	xfs_btree_del_cursor(cur, error);

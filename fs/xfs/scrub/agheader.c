@@ -781,6 +781,25 @@ xchk_agi_xref_icounts(
 		xchk_block_xref_set_corrupt(sc, sc->sa.agi_bp);
 }
 
+/* Check agi_fino_blocks against tree size */
+static inline void
+xchk_agi_xref_finoblks(
+	struct xfs_scrub	*sc)
+{
+	struct xfs_agi		*agi = XFS_BUF_TO_AGI(sc->sa.agi_bp);
+	xfs_agblock_t		blocks;
+	int			error;
+
+	if (!sc->sa.fino_cur || !xfs_sb_version_hasfinobtblocks(&sc->mp->m_sb))
+		return;
+
+	error = xfs_btree_count_blocks(sc->sa.fino_cur, &blocks);
+	if (!xchk_should_check_xref(sc, &error, &sc->sa.fino_cur))
+		return;
+	if (blocks != be32_to_cpu(agi->agi_fino_blocks))
+		xchk_block_xref_set_corrupt(sc, sc->sa.agi_bp);
+}
+
 /* Cross-reference with the other btrees. */
 STATIC void
 xchk_agi_xref(
@@ -804,6 +823,7 @@ xchk_agi_xref(
 	xchk_agi_xref_icounts(sc);
 	xchk_xref_is_owned_by(sc, agbno, 1, &XFS_RMAP_OINFO_FS);
 	xchk_xref_is_not_shared(sc, agbno, 1);
+	xchk_agi_xref_finoblks(sc);
 
 	/* scrub teardown will take care of sc->sa for us */
 }
