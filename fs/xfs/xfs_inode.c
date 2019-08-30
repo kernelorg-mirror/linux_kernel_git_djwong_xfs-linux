@@ -1211,10 +1211,11 @@ out:
 
 int
 xfs_release(
-	xfs_inode_t	*ip)
+	struct xfs_inode	*ip,
+	bool			want_free_eofblocks)
 {
-	xfs_mount_t	*mp = ip->i_mount;
-	int		error;
+	struct xfs_mount	*mp = ip->i_mount;
+	int			error;
 
 	if (!S_ISREG(VFS_I(ip)->i_mode) || (VFS_I(ip)->i_mode == 0))
 		return 0;
@@ -1250,7 +1251,7 @@ xfs_release(
 	if (VFS_I(ip)->i_nlink == 0)
 		return 0;
 
-	if (xfs_can_free_eofblocks(ip, false)) {
+	if (want_free_eofblocks && xfs_can_free_eofblocks(ip, false)) {
 
 		/*
 		 * Check if the inode is being opened, written and closed
