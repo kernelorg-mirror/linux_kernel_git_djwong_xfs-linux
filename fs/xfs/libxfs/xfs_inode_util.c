@@ -348,7 +348,7 @@ xfs_inode_init(
  * are not linked into the directory structure - they are attached
  * directly to the superblock - and so have no parent.
  */
-int
+STATIC int
 xfs_ialloc(
 	struct xfs_trans		*tp,
 	const struct xfs_ialloc_args	*args,
@@ -399,5 +399,111 @@ xfs_ialloc(
 
 	xfs_inode_init(tp, args, ip);
 	*ipp = ip;
+	return 0;
+}
+
+/*
+ * Allocates a new inode from disk and return a pointer to the
+ * incore copy. This routine will internally commit the current
+ * transaction and allocate a new one if the Space Manager needed
+ * to do an allocation to replenish the inode free-list.
+ *
+ * This routine is designed to be called from xfs_create and
+ * xfs_create_dir.
+ *
+ */
+int
+xfs_dir_ialloc(
+	struct xfs_trans		**tpp,
+	const struct xfs_ialloc_args	*args,
+	struct xfs_inode		**ipp)
+{
+	struct xfs_trans		*tp;
+	struct xfs_inode		*ip;
+	struct xfs_buf			*ialloc_context = NULL;
+	int				error;
+
+	tp = *tpp;
+	ASSERT(tp->t_flags & XFS_TRANS_PERM_LOG_RES);
+
+	/*
+	 * xfs_ialloc will return a pointer to an incore inode if
+	 * the Space Manager has an available inode on the free
+	 * list. Otherwise, it will do an allocation and replenish
+	 * the freelist.  Since we can only do one allocation per
+	 * transaction without deadlocks, we will need to commit the
+	 * current transaction and start a new one.  We will then
+	 * need to call xfs_ialloc again to get the inode.
+	 *
+	 * If xfs_ialloc did an allocation to replenish the freelist,
+	 * it returns the bp containing the head of the freelist as
+	 * ialloc_context. We will hold a lock on it across the
+	 * transaction commit so that no other process can steal
+	 * the inode(s) that we've just allocated.
+	 */
+	error = xfs_ialloc(tp, args, &ialloc_context, &ip);
+
+	/*
+	 * Return an error if we were unable to allocate a new inode.
+	 * This should only happen if we run out of space on disk or
+	 * encounter a disk error.
+	 */
+	if (error) {
+		*ipp = NULL;
+		return error;
+	}
+	if (!ialloc_context && !ip) {
+		*ipp = NULL;
+		return -ENOSPC;
+	}
+
+	/*
+	 * If the AGI buffer is non-NULL, then we were unable to get an
+	 * inode in one operation.  We need to commit the current
+	 * transaction and call xfs_ialloc() again.  It is guaranteed
+	 * to succeed the second time.
+	 */
+	if (ialloc_context) {
+		/*
+		 * Normally, xfs_trans_commit releases all the locks.
+		 * We call bhold to hang on to the ialloc_context across
+		 * the commit.  Holding this buffer prevents any other
+		 * processes from doing any allocations in this
+		 * allocation group.
+		 */
+		xfs_trans_bhold(tp, ialloc_context);
+
+		error = xfs_dir_ialloc_roll(&tp);
+		if (error) {
+			xfs_buf_relse(ialloc_context);
+			*tpp = tp;
+			*ipp = NULL;
+			return error;
+		}
+		xfs_trans_bjoin(tp, ialloc_context);
+
+		/*
+		 * Call ialloc again. Since we've locked out all
+		 * other allocations in this allocation group,
+		 * this call should always succeed.
+		 */
+		error = xfs_ialloc(tp, args, &ialloc_context, &ip);
+
+		/*
+		 * If we get an error at this point, return to the caller
+		 * so that the current transaction can be aborted.
+		 */
+		if (error) {
+			*tpp = tp;
+			*ipp = NULL;
+			return error;
+		}
+		ASSERT(!ialloc_context && ip);
+
+	}
+
+	*ipp = ip;
+	*tpp = tp;
+
 	return 0;
 }
