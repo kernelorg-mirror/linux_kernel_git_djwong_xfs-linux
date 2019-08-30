@@ -332,3 +332,17 @@ xbitmap_empty(
 {
 	return bitmap->root.rb_root.rb_node == NULL;
 }
+
+/* Count the number of set regions in this bitmap. */
+uint64_t
+xbitmap_count_set_regions(
+	struct xbitmap			*bitmap)
+{
+	struct interval_tree_node	*itn, *n;
+	uint64_t			nr = 0;
+
+	for_each_xbitmap_extent(itn, n, bitmap)
+		nr++;
+
+	return nr;
+}
