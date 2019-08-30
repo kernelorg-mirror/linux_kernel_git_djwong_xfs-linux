@@ -85,6 +85,7 @@ int xrep_quota(struct xfs_scrub *sc);
 #else
 # define xrep_quota			xrep_notsupported
 #endif /* CONFIG_XFS_QUOTA */
+int xrep_fscounters(struct xfs_scrub *sc);
 
 struct xrep_newbt_resv {
 	/* Link to list of extents that we've reserved. */
@@ -203,6 +204,7 @@ xrep_rmapbt_setup(
 #define xrep_symlink			xrep_notsupported
 #define xrep_xattr			xrep_notsupported
 #define xrep_quota			xrep_notsupported
+#define xrep_fscounters			xrep_notsupported
 
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
