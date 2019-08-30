@@ -785,6 +785,5 @@ xfs_qm_dqrele_all_inodes(
 	};
 
 	ASSERT(mp->m_quotainfo);
-	xfs_inode_ag_iterator(mp, XFS_AGITER_INEW_WAIT, xfs_dqrele_inode, &dqr,
-			XFS_ICI_NO_TAG);
+	xfs_ici_walk_all(mp, xfs_dqrele_inode, &dqr);
 }
