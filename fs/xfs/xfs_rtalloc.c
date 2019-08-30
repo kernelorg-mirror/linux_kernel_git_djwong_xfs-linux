@@ -20,6 +20,7 @@
 #include "xfs_rtalloc.h"
 #include "xfs_da_format.h"
 #include "xfs_imeta.h"
+#include "xfs_rtrmap_btree.h"
 
 /*
  * Read and return the summary information for a given extent size,
@@ -875,6 +876,60 @@ xfs_alloc_rsum_cache(
  * Visible (exported) functions.
  */
 
+
+/* Add a realtime rmap btree inode. */
+STATIC int
+xfs_growfs_rt_rmap(
+	struct xfs_mount	*mp)
+{
+	struct xfs_imeta_end	ic;
+	struct xfs_inode	*ip = NULL;
+	struct xfs_trans	*tp;
+	int			error;
+
+	if (!xfs_sb_version_hasrmapbt(&mp->m_sb) || mp->m_rrmapip != NULL)
+		return 0;
+
+	/* rtrmapbt requires metadir */
+	if (!xfs_sb_version_hasmetadir(&mp->m_sb))
+		return -EINVAL;
+
+	/* Ensure the path to the rtrmapbt inode exists. */
+	error = xfs_imeta_ensure_dirpath(mp, &XFS_IMETA_RTRMAPBT);
+	if (error)
+		return error;
+
+	/* Create the rtrmapbt inode. */
+	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_imeta_create,
+			xfs_imeta_create_space_res(mp), 0, 0, &tp);
+	if (error)
+		return error;
+
+	error = xfs_rtrmapbt_create(&tp, &ic, &ip);
+	if (error)
+		goto out_cancel;
+
+	error = xfs_trans_commit(tp);
+	xfs_finish_inode_setup(ip);
+	xfs_imeta_end_update(mp, &ic, error);
+	if (error) {
+		xfs_irele(ip);
+		return error;
+	}
+
+	mp->m_rrmapip = ip;
+	return 0;
+
+out_cancel:
+	xfs_trans_cancel(tp);
+	xfs_imeta_end_update(mp, &ic, error);
+	if (ip) {
+		xfs_finish_inode_setup(ip);
+		xfs_irele(ip);
+	}
+	return error;
+}
+
 /*
  * Grow the realtime area of the filesystem.
  */
@@ -954,6 +1009,9 @@ xfs_growfs_rt(
 	if (error)
 		return error;
 	error = xfs_growfs_rt_alloc(mp, rsumblocks, nrsumblocks, mp->m_rsumip);
+	if (error)
+		return error;
+	error = xfs_growfs_rt_rmap(mp);
 	if (error)
 		return error;
 
