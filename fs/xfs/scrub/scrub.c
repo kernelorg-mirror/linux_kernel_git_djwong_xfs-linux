@@ -495,7 +495,10 @@ retry_op:
 		goto out_teardown;
 
 	/* Scrub for errors. */
-	error = sc.ops->scrub(&sc);
+	if ((sc.flags & XREP_ALREADY_FIXED) && sc.ops->repair_eval != NULL)
+		error = sc.ops->repair_eval(&sc);
+	else
+		error = sc.ops->scrub(&sc);
 	if (!(sc.flags & XCHK_TRY_HARDER) && error == -EDEADLOCK) {
 		/*
 		 * Scrubbers return -EDEADLOCK to mean 'try harder'.
