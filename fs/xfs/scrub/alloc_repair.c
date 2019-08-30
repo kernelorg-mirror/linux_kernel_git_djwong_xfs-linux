@@ -405,7 +405,7 @@ xrep_abt_dispose_reservations(
 		/* Add a deferred rmap for each extent we used. */
 		if (resv->used > 0)
 			xfs_rmap_alloc_extent(sc->tp, resv->fsbno, resv->used,
-					XFS_RMAP_OWN_AG);
+					XFS_RMAP_OWN_AG, false);
 
 		/*
 		 * Add a deferred free for each block we didn't use and now
