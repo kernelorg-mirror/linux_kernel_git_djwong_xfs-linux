@@ -521,7 +521,8 @@ xfs_init_mount_workqueues(
 		goto out_destroy_eofb;
 
 	mp->m_inactive_workqueue = alloc_workqueue("xfs-inactive/%s",
-			WQ_MEM_RECLAIM | WQ_FREEZABLE, 0, mp->m_super->s_id);
+			WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_FREEZABLE, 0,
+			mp->m_super->s_id);
 	if (!mp->m_inactive_workqueue)
 		goto out_destroy_sync;
 
@@ -1449,6 +1450,7 @@ xfs_configure_background_workqueues(
 
 	max_active = min_t(unsigned int, max_active, WQ_UNBOUND_MAX_ACTIVE);
 	workqueue_set_max_active(mp->m_blockgc_workqueue, max_active);
+	workqueue_set_max_active(mp->m_inactive_workqueue, max_active);
 }
 
 static int
@@ -1856,7 +1858,6 @@ static int xfs_init_fs_context(
 	atomic_set(&mp->m_active_trans, 0);
 	INIT_WORK(&mp->m_flush_inodes_work, xfs_flush_inodes_worker);
 	INIT_DELAYED_WORK(&mp->m_reclaim_work, xfs_reclaim_worker);
-	INIT_DELAYED_WORK(&mp->m_inactive_work, xfs_inactive_worker);
 	mp->m_kobj.kobject.kset = xfs_kset;
 	/*
 	 * We don't create the finobt per-ag space reservation until after log
