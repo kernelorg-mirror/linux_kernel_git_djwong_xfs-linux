@@ -287,6 +287,7 @@ static const struct ioctl_sick_map fs_map[] = {
 static const struct ioctl_sick_map rt_map[] = {
 	{ XFS_SICK_RT_BITMAP,	XFS_FSOP_GEOM_SICK_RT_BITMAP },
 	{ XFS_SICK_RT_SUMMARY,	XFS_FSOP_GEOM_SICK_RT_SUMMARY },
+	{ XFS_SICK_RT_RMAPBT,	XFS_FSOP_GEOM_SICK_RT_RMAPBT },
 	{ 0, 0 },
 };
 
