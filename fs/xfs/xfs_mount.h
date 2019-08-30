@@ -221,6 +221,12 @@ typedef struct xfs_mount {
 	 * into a single flush.
 	 */
 	struct work_struct	m_flush_inodes_work;
+
+	/*
+	 * Use this to wait for the inode inactivation workqueue to finish
+	 * inactivating all the inodes.
+	 */
+	struct wait_queue_head	m_inactive_wait;
 } xfs_mount_t;
 
 #define M_IGEO(mp)		(&(mp)->m_ino_geo)
