@@ -867,7 +867,7 @@ restart:
 			if ((iter_flags & XFS_ICI_WALK_INEW_WAIT) &&
 			    xfs_iflags_test(batch[i], XFS_INEW))
 				xfs_inew_wait(batch[i]);
-			error = execute(batch[i], args);
+			error = execute(batch[i], pag, args);
 			xfs_irele(batch[i]);
 			if (error == -EAGAIN) {
 				skipped++;
@@ -1475,6 +1475,7 @@ xfs_inode_matches_eofb(
 STATIC int
 xfs_inode_free_eofblocks(
 	struct xfs_inode	*ip,
+	struct xfs_perag	*pag,
 	void			*args)
 {
 	struct xfs_eofblocks	*eofb = args;
@@ -1770,6 +1771,7 @@ xfs_prep_free_cowblocks(
 STATIC int
 xfs_inode_free_cowblocks(
 	struct xfs_inode	*ip,
+	struct xfs_perag	*pag,
 	void			*args)
 {
 	struct xfs_eofblocks	*eofb = args;
