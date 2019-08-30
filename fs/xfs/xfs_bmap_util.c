@@ -898,6 +898,7 @@ xfs_alloc_file_space(
 	 */
 	while (allocatesize_fsb && !error) {
 		xfs_fileoff_t	s, e;
+		bool		cleared_space = false;
 
 		/*
 		 * Determine space reservations for data/realtime.
@@ -940,6 +941,7 @@ xfs_alloc_file_space(
 		/*
 		 * Allocate and setup the transaction.
 		 */
+retry:
 		error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks,
 				resrtextents, 0, &tp);
 
@@ -956,6 +958,20 @@ xfs_alloc_file_space(
 		xfs_ilock(ip, XFS_ILOCK_EXCL);
 		error = xfs_trans_reserve_quota_nblks(tp, ip, qblocks,
 						      0, quota_flag);
+		/*
+		 * We weren't able to reserve enough quota to handle fallocate.
+		 * Flush any disk space that was being held in the hopes of
+		 * speeding up the filesystem.  We hold the IOLOCK so we cannot
+		 * do a synchronous scan.
+		 */
+		if ((error == -ENOSPC || error == -EDQUOT) && !cleared_space) {
+			xfs_trans_cancel(tp);
+			xfs_iunlock(ip, XFS_ILOCK_EXCL);
+			cleared_space = xfs_inode_free_quota_blocks(ip, false);
+			if (cleared_space)
+				goto retry;
+			goto error2;
+		}
 		if (error)
 			goto error1;
 
@@ -994,6 +1010,7 @@ error0:	/* unlock inode, unreserve quota blocks, cancel trans */
 error1:	/* Just cancel transaction */
 	xfs_trans_cancel(tp);
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
+error2:
 	return error;
 }
 
