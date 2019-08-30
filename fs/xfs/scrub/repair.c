@@ -25,6 +25,8 @@
 #include "xfs_ag_resv.h"
 #include "xfs_quota.h"
 #include "xfs_bmap.h"
+#include "xfs_defer.h"
+#include "xfs_extfree_item.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -409,7 +411,8 @@ int
 xrep_newbt_add_blocks(
 	struct xrep_newbt		*xnr,
 	xfs_fsblock_t			fsbno,
-	xfs_extlen_t			len)
+	xfs_extlen_t			len,
+	void				*priv)
 {
 	struct xrep_newbt_resv	*resv;
 
@@ -421,8 +424,53 @@ xrep_newbt_add_blocks(
 	resv->fsbno = fsbno;
 	resv->len = len;
 	resv->used = 0;
+	resv->priv = priv;
 	list_add_tail(&resv->list, &xnr->resv_list);
 	return 0;
+}
+
+/*
+ * Set up automatic reaping of the blocks reserved for btree reconstruction in
+ * case we crash by logging a deferred free item for each extent we allocate so
+ * that we can get all of the space back if we crash before we can commit the
+ * new btree.  This function returns a token that can be used to cancel
+ * automatic reaping if repair is successful.
+ */
+static void *
+xrep_newbt_schedule_reap(
+	struct xfs_trans		*tp,
+	struct xfs_owner_info		*oinfo,
+	xfs_fsblock_t			fsbno,
+	xfs_extlen_t			len)
+{
+	struct xfs_extent_free_item	efi_item = {
+		.xefi_startblock	= fsbno,
+		.xefi_blockcount	= len,
+		.xefi_oinfo		= *oinfo, /* struct copy */
+		.xefi_skip_discard	= true,
+	};
+	struct xfs_efi_log_item		*efi;
+
+	INIT_LIST_HEAD(&efi_item.xefi_list);
+	efi = xfs_extent_free_defer_type.create_intent(tp, 1);
+	xfs_extent_free_defer_type.log_item(tp, efi, &efi_item.xefi_list);
+	return efi;
+}
+
+/*
+ * Cancel a previously scheduled automatic reap (see above) by logging a
+ * deferred free done for each extent we allocated.  We cheat since we know
+ * that log recovery has never looked at the extents attached to an EFD.
+ */
+static void
+xrep_newbt_cancel_reap(
+	struct xfs_trans	*tp,
+	void			*token)
+{
+	struct xfs_efd_log_item	*efd;
+
+	efd = xfs_extent_free_defer_type.create_done(tp, token, 0);
+	set_bit(XFS_LI_DIRTY, &efd->efd_item.li_flags);
 }
 
 /* Allocate disk space for our new btree. */
@@ -454,6 +502,7 @@ xrep_newbt_alloc_blocks(
 			.prod		= nr_blocks,
 			.resv		= xnr->resv,
 		};
+		void			*token;
 
 		error = xfs_alloc_vextent(&args);
 		if (error)
@@ -466,7 +515,9 @@ xrep_newbt_alloc_blocks(
 				XFS_FSB_TO_AGBNO(sc->mp, args.fsbno),
 				args.len, xnr->oinfo.oi_owner);
 
-		error = xrep_newbt_add_blocks(xnr, args.fsbno, args.len);
+		token = xrep_newbt_schedule_reap(sc->tp, &xnr->oinfo,
+				args.fsbno, args.len);
+		error = xrep_newbt_add_blocks(xnr, args.fsbno, args.len, token);
 		if (error)
 			break;
 
@@ -509,6 +560,13 @@ xrep_newbt_destroy_reservation(
 			return xfs_trans_roll_inode(&sc->tp, sc->ip);
 		return xrep_roll_ag_trans(sc);
 	}
+
+	/*
+	 * Since we succeeded in rebuilding the btree, we need to log an EFD
+	 * for every extent we reserved to prevent log recovery from freeing
+	 * them mistakenly.
+	 */
+	xrep_newbt_cancel_reap(sc->tp, resv->priv);
 
 	/*
 	 * Use the deferred freeing mechanism to schedule for deletion any
@@ -564,6 +622,7 @@ junkit:
 	 * reservations.
 	 */
 	list_for_each_entry_safe(resv, n, &xnr->resv_list, list) {
+		xfs_extent_free_defer_type.abort_intent(resv->priv);
 		list_del(&resv->list);
 		kmem_free(resv);
 	}
