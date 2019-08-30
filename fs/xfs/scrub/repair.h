@@ -67,6 +67,8 @@ struct xrep_newbt_resv {
 	/* Link to list of extents that we've reserved. */
 	struct list_head	list;
 
+	void			*priv;
+
 	/* FSB of the block we reserved. */
 	xfs_fsblock_t		fsbno;
 
@@ -106,7 +108,7 @@ void xrep_newbt_init_ag(struct xrep_newbt *xba, struct xfs_scrub *sc,
 void xrep_newbt_init_inode(struct xrep_newbt *xba, struct xfs_scrub *sc,
 		int whichfork, const struct xfs_owner_info *oinfo);
 int xrep_newbt_add_blocks(struct xrep_newbt *xba, xfs_fsblock_t fsbno,
-		xfs_extlen_t len);
+		xfs_extlen_t len, void *priv);
 int xrep_newbt_alloc_blocks(struct xrep_newbt *xba, uint64_t nr_blocks);
 void xrep_newbt_destroy(struct xrep_newbt *xba, int error);
 int xrep_newbt_claim_block(struct xfs_btree_cur *cur, struct xrep_newbt *xba,
