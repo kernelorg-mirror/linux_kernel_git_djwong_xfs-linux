@@ -1406,7 +1406,7 @@ xfs_fs_remount(
 		 * inodes.  Since this can involve finobt updates, do it now
 		 * before we lose the per-AG space reservations.
 		 */
-		xfs_inactive_force(mp);
+		xfs_inactive_force_poll(mp);
 
 		/* Free the per-AG metadata reservation pool. */
 		error = xfs_fs_unreserve_ag_blocks(mp);
@@ -1645,6 +1645,7 @@ xfs_mount_alloc(
 	INIT_WORK(&mp->m_flush_inodes_work, xfs_flush_inodes_worker);
 	INIT_DELAYED_WORK(&mp->m_reclaim_work, xfs_reclaim_worker);
 	mp->m_kobj.kobject.kset = xfs_kset;
+	init_waitqueue_head(&mp->m_inactive_wait);
 	/*
 	 * We don't create the finobt per-ag space reservation until after log
 	 * recovery, so we must set this to true so that an ifree transaction
