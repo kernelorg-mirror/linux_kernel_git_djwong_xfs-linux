@@ -168,6 +168,9 @@ xrep_dinode_flags(
 		flags2 &= ~XFS_DIFLAG2_REFLINK;
 	if (flags2 & XFS_DIFLAG2_REFLINK)
 		flags2 &= ~XFS_DIFLAG2_DAX;
+	if (!xfs_sb_version_hasmetadir(&mp->m_sb) &&
+	    (flags2 & XFS_DIFLAG2_METADATA))
+		flags2 &= ~XFS_DIFLAG2_METADATA;
 	dip->di_flags = cpu_to_be16(flags);
 	dip->di_flags2 = cpu_to_be64(flags2);
 }
