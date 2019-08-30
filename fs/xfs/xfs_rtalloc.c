@@ -1228,12 +1228,13 @@ xfs_rtmount_init(
  * Get the bitmap and summary inodes and the summary cache into the mount
  * structure at mount time.
  */
-int					/* error */
+int
 xfs_rtmount_inodes(
-	xfs_mount_t	*mp)		/* file system mount structure */
+	struct xfs_mount	*mp)
 {
-	int		error;		/* error return value */
-	xfs_sb_t	*sbp;
+	struct xfs_sb		*sbp;
+	xfs_ino_t		ino;
+	int			error;
 
 	sbp = &mp->m_sb;
 	error = xfs_imeta_iget(mp, mp->m_sb.sb_rbmino, XFS_DIR3_FT_REG_FILE,
@@ -1244,13 +1245,37 @@ xfs_rtmount_inodes(
 
 	error = xfs_imeta_iget(mp, mp->m_sb.sb_rsumino, XFS_DIR3_FT_REG_FILE,
 			&mp->m_rsumip);
-	if (error) {
-		xfs_imeta_irele(mp->m_rbmip);
-		return error;
-	}
+	if (error)
+		goto out_rbm;
+
 	ASSERT(mp->m_rsumip != NULL);
+
+	/* If we have rmap and a realtime device, look for the rtrmapbt. */
+	if (xfs_sb_version_hasrtrmapbt(&mp->m_sb)) {
+		error = xfs_imeta_lookup(mp, &XFS_IMETA_RTRMAPBT, &ino);
+		if (error)
+			goto out_rsum;
+
+		error = xfs_imeta_iget(mp, ino, XFS_DIR3_FT_REG_FILE,
+				&mp->m_rrmapip);
+		if (error)
+			goto out_rsum;
+
+		if (mp->m_rrmapip->i_d.di_format != XFS_DINODE_FMT_RMAP) {
+			error = -EFSCORRUPTED;
+			goto out_rrmap;
+		}
+	}
+
 	xfs_alloc_rsum_cache(mp, sbp->sb_rbmblocks);
 	return 0;
+out_rrmap:
+	xfs_imeta_irele(mp->m_rrmapip);
+out_rsum:
+	xfs_imeta_irele(mp->m_rsumip);
+out_rbm:
+	xfs_imeta_irele(mp->m_rbmip);
+	return error;
 }
 
 void
@@ -1258,6 +1283,8 @@ xfs_rtunmount_inodes(
 	struct xfs_mount	*mp)
 {
 	kmem_free(mp->m_rsum_cache);
+	if (mp->m_rrmapip)
+		xfs_imeta_irele(mp->m_rrmapip);
 	if (mp->m_rbmip)
 		xfs_imeta_irele(mp->m_rbmip);
 	if (mp->m_rsumip)
