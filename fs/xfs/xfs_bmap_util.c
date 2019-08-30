@@ -946,7 +946,17 @@ xfs_alloc_file_space(
 retry:
 		error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks,
 				resrtextents, 0, &tp);
-
+		/*
+		 * We weren't able to reserve enough space to handle fallocate.
+		 * Flush any disk space that was being held in the hopes of
+		 * speeding up the filesystem.  We hold the IOLOCK so we cannot
+		 * do a synchronous scan.
+		 */
+		if (error == -ENOSPC && !cleared_space) {
+			cleared_space = true;
+			xfs_inode_free_blocks(ip->i_mount, false);
+			goto retry;
+		}
 		/*
 		 * Check for running out of space
 		 */
