@@ -9,6 +9,7 @@
 struct xblob {
 	struct file	*filp;
 	loff_t		last_offset;
+	unsigned int	io_flags;
 };
 
 typedef loff_t		xblob_cookie;
