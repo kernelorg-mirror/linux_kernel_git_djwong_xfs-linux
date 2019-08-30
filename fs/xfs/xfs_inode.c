@@ -667,42 +667,6 @@ xfs_dir_ialloc_roll(
 	return error;
 }
 
-/*
- * Decrement the link count on an inode & log the change.  If this causes the
- * link count to go to zero, move the inode to AGI unlinked list so that it can
- * be freed when the last active reference goes away via xfs_inactive().
- */
-static int			/* error */
-xfs_droplink(
-	xfs_trans_t *tp,
-	xfs_inode_t *ip)
-{
-	xfs_trans_ichgtime(tp, ip, XFS_ICHGTIME_CHG);
-
-	drop_nlink(VFS_I(ip));
-	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
-
-	if (VFS_I(ip)->i_nlink)
-		return 0;
-
-	return xfs_iunlink(tp, ip);
-}
-
-/*
- * Increment the link count on an inode & log the change.
- */
-static void
-xfs_bumplink(
-	xfs_trans_t *tp,
-	xfs_inode_t *ip)
-{
-	xfs_trans_ichgtime(tp, ip, XFS_ICHGTIME_CHG);
-
-	ASSERT(ip->i_d.di_version > 1);
-	inc_nlink(VFS_I(ip));
-	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
-}
-
 int
 xfs_create(
 	struct xfs_inode		*dp,
