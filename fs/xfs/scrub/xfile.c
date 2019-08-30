@@ -41,14 +41,76 @@ xfile_destroy(
 	fput(filp);
 }
 
+struct xfile_io_args {
+	struct work_struct	work;
+	struct completion	*done;
+
+	struct file		*filp;
+	void			*ptr;
+	loff_t			*pos;
+	size_t			count;
+	ssize_t			ret;
+	bool			is_read;
+};
+
+static void
+xfile_io_worker(
+	struct work_struct	*work)
+{
+	struct xfile_io_args	*args;
+	unsigned int		pflags;
+
+	args = container_of(work, struct xfile_io_args, work);
+	pflags = memalloc_nofs_save();
+
+	if (args->is_read)
+		args->ret = kernel_read(args->filp, args->ptr, args->count,
+				args->pos);
+	else
+		args->ret = kernel_write(args->filp, args->ptr, args->count,
+				args->pos);
+	complete(args->done);
+
+	memalloc_nofs_restore(pflags);
+}
+
 /*
- * Perform a read or write IO to the file backing the array.  We can defer
- * the work to a workqueue if the caller so desires, either to reduce stack
- * usage or because the xfs is frozen and we want to avoid deadlocking on the
- * page fault that might be about to happen.
+ * Perform a read or write IO to the file backing the array.  Defer the work to
+ * a workqueue to avoid recursing into the filesystem while we have locks held.
  */
-int
-xfile_io(
+static int
+xfile_io_async(
+	struct file	*filp,
+	unsigned int	cmd_flags,
+	loff_t		*pos,
+	void		*ptr,
+	size_t		count)
+{
+	DECLARE_COMPLETION_ONSTACK(done);
+	struct xfile_io_args	args = {
+		.filp = filp,
+		.ptr = ptr,
+		.pos = pos,
+		.count = count,
+		.done = &done,
+		.is_read = (cmd_flags & XFILE_IO_MASK) == XFILE_IO_READ,
+	};
+
+	INIT_WORK_ONSTACK(&args.work, xfile_io_worker);
+	schedule_work(&args.work);
+	wait_for_completion(&done);
+	destroy_work_on_stack(&args.work);
+
+	/*
+	 * Since we're treating this file as "memory", any IO error should be
+	 * treated as a failure to find any memory.
+	 */
+	return args.ret == count ? 0 : -ENOMEM;
+}
+
+/* Perform a read or write IO to the file backing the array. */
+static int
+xfile_io_sync(
 	struct file	*filp,
 	unsigned int	cmd_flags,
 	loff_t		*pos,
@@ -69,6 +131,20 @@ xfile_io(
 	 * treated as a failure to find any memory.
 	 */
 	return ret == count ? 0 : -ENOMEM;
+}
+
+/* Perform a read or write IO to the file backing the array. */
+int
+xfile_io(
+	struct file	*filp,
+	unsigned int	cmd_flags,
+	loff_t		*pos,
+	void		*ptr,
+	size_t		count)
+{
+	if (cmd_flags & XFILE_IO_ASYNC)
+		return xfile_io_async(filp, cmd_flags, pos, ptr, count);
+	return xfile_io_sync(filp, cmd_flags, pos, ptr, count);
 }
 
 /* Discard pages backing a range of the file. */
