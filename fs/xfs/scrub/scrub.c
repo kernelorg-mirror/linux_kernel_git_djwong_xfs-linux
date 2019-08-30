@@ -151,6 +151,8 @@ xchk_teardown(
 	struct xfs_inode	*ip_in,
 	int			error)
 {
+	int				err2;
+
 	xchk_ag_free(sc, &sc->sa);
 	if (sc->tp) {
 		if (error == 0 && (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR))
@@ -166,6 +168,11 @@ xchk_teardown(
 		    !xfs_internal_inum(sc->mp, sc->ip->i_ino))
 			xfs_irele(sc->ip);
 		sc->ip = NULL;
+	}
+	if (sc->flags & XCHK_FS_FROZEN) {
+		err2 = xchk_fs_thaw(sc);
+		if (!error && err2)
+			error = err2;
 	}
 	if (sc->flags & XCHK_REAPING_DISABLED)
 		xchk_start_reaping(sc);
