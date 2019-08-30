@@ -381,6 +381,17 @@ xfs_reflink_allocate_cow(
 	xfs_iunlock(ip, *lockmode);
 retry:
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, 0, 0, &tp);
+	/*
+	 * We weren't able to reserve enough space to handle copy on write.
+	 * Flush any disk space that was being held in the hopes of speeding up
+	 * the filesystem.  We potentially hold the IOLOCK so we cannot do a
+	 * synchronous scan.
+	 */
+	if (error == -ENOSPC && !cleared_space) {
+		cleared_space = true;
+		xfs_inode_free_blocks(ip->i_mount, false);
+		goto retry;
+	}
 	*lockmode = XFS_ILOCK_EXCL;
 	xfs_ilock(ip, *lockmode);
 
@@ -1043,6 +1054,16 @@ xfs_reflink_remap_extent(
 	resblks = XFS_EXTENTADD_SPACE_RES(ip->i_mount, XFS_DATA_FORK);
 retry:
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, 0, 0, &tp);
+	/*
+	 * We weren't able to reserve enough space for the remapping.  Flush
+	 * any disk space that was being held in the hopes of speeding up the
+	 * filesystem.  We still hold the IOLOCK so we cannot do a sync scan.
+	 */
+	if (error == -ENOSPC && !cleared_space) {
+		cleared_space = true;
+		xfs_inode_free_blocks(mp, false);
+		goto retry;
+	}
 	if (error)
 		goto out;
 

@@ -3794,6 +3794,7 @@ DEFINE_EVENT(xfs_eofblocks_class, name,	\
 	TP_ARGS(mp, eofb, caller_ip))
 DEFINE_EOFBLOCKS_EVENT(xfs_ioc_free_eofblocks);
 DEFINE_EOFBLOCKS_EVENT(xfs_inode_free_quota_blocks);
+DEFINE_EOFBLOCKS_EVENT(xfs_inode_free_blocks);
 
 #endif /* _TRACE_XFS_H */
 
