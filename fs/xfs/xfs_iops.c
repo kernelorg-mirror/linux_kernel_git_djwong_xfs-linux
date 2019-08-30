@@ -121,42 +121,52 @@ xfs_cleanup_inode(
 
 STATIC int
 xfs_generic_create(
-	struct inode	*dir,
-	struct dentry	*dentry,
-	umode_t		mode,
-	dev_t		rdev,
-	bool		tmpfile)	/* unnamed file */
+	struct inode		*dir,
+	struct dentry		*dentry,
+	umode_t			mode,
+	dev_t			rdev,
+	bool			tmpfile)	/* unnamed file */
 {
-	struct inode	*inode;
-	struct xfs_inode *ip = NULL;
-	struct posix_acl *default_acl, *acl;
-	struct xfs_name	name;
-	int		error;
+	struct xfs_ialloc_args args = {
+		.pip		= XFS_I(dir),
+		.uid		= xfs_kuid_to_uid(current_fsuid()),
+		.gid		= xfs_kgid_to_gid(current_fsgid()),
+		.prid		= xfs_get_initial_prid(XFS_I(dir)),
+		.nlink		= tmpfile ? 0 : (S_ISDIR(mode) ? 2 : 1),
+		.rdev		= rdev,
+		.mode		= mode,
+	};
+	struct inode		*inode;
+	struct xfs_inode	*ip = NULL;
+	struct posix_acl	*default_acl, *acl;
+	struct xfs_name		name;
+	int			error;
 
 	/*
 	 * Irix uses Missed'em'V split, but doesn't want to see
 	 * the upper 5 bits of (14bit) major.
 	 */
-	if (S_ISCHR(mode) || S_ISBLK(mode)) {
-		if (unlikely(!sysv_valid_dev(rdev) || MAJOR(rdev) & ~0x1ff))
+	if (S_ISCHR(args.mode) || S_ISBLK(args.mode)) {
+		if (unlikely(!sysv_valid_dev(args.rdev) ||
+			     MAJOR(args.rdev) & ~0x1ff))
 			return -EINVAL;
 	} else {
-		rdev = 0;
+		args.rdev = 0;
 	}
 
-	error = posix_acl_create(dir, &mode, &default_acl, &acl);
+	error = posix_acl_create(dir, &args.mode, &default_acl, &acl);
 	if (error)
 		return error;
 
 	/* Verify mode is valid also for tmpfile case */
-	error = xfs_dentry_mode_to_name(&name, dentry, mode);
+	error = xfs_dentry_mode_to_name(&name, dentry, args.mode);
 	if (unlikely(error))
 		goto out_free_acl;
 
 	if (!tmpfile) {
-		error = xfs_create(XFS_I(dir), &name, mode, rdev, &ip);
+		error = xfs_create(XFS_I(dir), &name, &args, &ip);
 	} else {
-		error = xfs_create_tmpfile(XFS_I(dir), mode, &ip);
+		error = xfs_create_tmpfile(XFS_I(dir), &args, &ip);
 	}
 	if (unlikely(error))
 		goto out_free_acl;
