@@ -231,6 +231,16 @@ xfs_dir2_leaf_tail_p(struct xfs_da_geometry *geo, struct xfs_dir2_leaf *lp)
 }
 
 /*
+ * For a given dir/attr geometry and extent mapping record, walk every file
+ * offset block (xfs_dablk_t) in the mapping that corresponds to the start
+ * of a logical directory block (xfs_dir2_db_t).
+ */
+#define for_each_xfs_bmap_dabno(geo, irec, dabno) \
+	for ((dabno) = round_up((irec)->br_startoff, (geo)->fsbcount); \
+	     (dabno) < (irec)->br_startoff + (irec)->br_blockcount; \
+	     (dabno) += (geo)->fsbcount)
+
+/*
  * The Linux API doesn't pass down the total size of the buffer
  * we read into down to the filesystem.  With the filldir concept
  * it's not needed for correct information, but the XFS dir2 leaf
