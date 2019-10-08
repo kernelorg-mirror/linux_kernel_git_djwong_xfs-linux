@@ -21,6 +21,7 @@
 #include "xfs_errortag.h"
 #include "xfs_error.h"
 #include "xfs_inode.h"
+#include "xfs_health.h"
 #include "xfs_rtrmap_btree.h"
 
 /* By convention, the rtrmapbt's "AG" number is NULLAGNUMBER. */
@@ -196,19 +197,26 @@ xfs_rmap_btrec_to_irec(
 	union xfs_btree_rec	*rec,
 	struct xfs_rmap_irec	*irec)
 {
+	int			error;
+
 	if (cur->bc_flags & XFS_BTREE_LONG_PTRS) {
 		irec->rm_startblock = be64_to_cpu(rec->rtrmap.rm_startblock);
 		irec->rm_blockcount = be64_to_cpu(rec->rtrmap.rm_blockcount);
 		irec->rm_owner = be64_to_cpu(rec->rtrmap.rm_owner);
-		return xfs_rmap_irec_offset_unpack(
+		error = xfs_rmap_irec_offset_unpack(
 				be64_to_cpu(rec->rtrmap.rm_offset), irec);
 	} else {
 		irec->rm_startblock = be32_to_cpu(rec->rmap.rm_startblock);
 		irec->rm_blockcount = be32_to_cpu(rec->rmap.rm_blockcount);
 		irec->rm_owner = be64_to_cpu(rec->rmap.rm_owner);
-		return xfs_rmap_irec_offset_unpack(
+		error = xfs_rmap_irec_offset_unpack(
 				be64_to_cpu(rec->rmap.rm_offset), irec);
 	}
+
+	if (xfs_metadata_is_sick(error))
+		xfs_btree_mark_sick(cur);
+
+	return error;
 }
 
 /*
@@ -281,6 +289,7 @@ out_bad_rec:
 		"Owner 0x%llx, flags 0x%x, start block 0x%llx block count 0x%llx",
 		irec->rm_owner, irec->rm_flags, irec->rm_startblock,
 		irec->rm_blockcount);
+	xfs_btree_mark_sick(cur);
 	return -EFSCORRUPTED;
 }
 
