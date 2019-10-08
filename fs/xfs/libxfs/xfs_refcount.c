@@ -22,6 +22,7 @@
 #include "xfs_bit.h"
 #include "xfs_refcount.h"
 #include "xfs_rmap.h"
+#include "xfs_health.h"
 
 /* Allowable refcount adjustment amounts. */
 enum xfs_refc_adjust_op {
@@ -153,6 +154,7 @@ out_bad_rec:
 	xfs_warn(mp,
 		"Start block 0x%x, block count 0x%x, references 0x%x",
 		irec->rc_startblock, irec->rc_blockcount, irec->rc_refcount);
+	xfs_btree_mark_sick(cur);
 	return -EFSCORRUPTED;
 }
 
@@ -1591,6 +1593,7 @@ xfs_refcount_recover_extent(
 
 	if (be32_to_cpu(rec->refc.rc_refcount) != 1) {
 		XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, cur->bc_mp);
+		xfs_btree_mark_sick(cur);
 		return -EFSCORRUPTED;
 	}
 
