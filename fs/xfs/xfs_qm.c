@@ -23,6 +23,7 @@
 #include "xfs_trace.h"
 #include "xfs_icache.h"
 #include "xfs_error.h"
+#include "xfs_health.h"
 
 /*
  * The global quota manager. There is only one of these for the entire
@@ -757,6 +758,7 @@ xfs_qm_qino_alloc(
 			ino = mp->m_sb.sb_gquotino;
 			if (XFS_CORRUPT_ON(mp,
 			    mp->m_sb.sb_pquotino != NULLFSINO)) {
+				xfs_quota_mark_sick(mp, XFS_DQ_PROJ);
 				return -EFSCORRUPTED;
 			}
 		} else if ((flags & XFS_QMOPT_GQUOTA) &&
@@ -764,6 +766,7 @@ xfs_qm_qino_alloc(
 			ino = mp->m_sb.sb_pquotino;
 			if (XFS_CORRUPT_ON(mp,
 			    mp->m_sb.sb_gquotino != NULLFSINO)) {
+				xfs_quota_mark_sick(mp, XFS_DQ_GROUP);
 				return -EFSCORRUPTED;
 			}
 		}
