@@ -1324,6 +1324,7 @@ xfs_rtmount_inodes(
 			goto out_rsum;
 
 		if (mp->m_rrmapip->i_d.di_format != XFS_DINODE_FMT_RMAP) {
+			xfs_rt_mark_sick(mp, XFS_SICK_RT_RMAPBT);
 			error = -EFSCORRUPTED;
 			goto out_rrmap;
 		}
