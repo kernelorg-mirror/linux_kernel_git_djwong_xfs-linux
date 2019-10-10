@@ -511,8 +511,10 @@ int xfs_btree_query_all(struct xfs_btree_cur *cur, xfs_btree_query_range_fn fn,
 
 typedef int (*xfs_btree_visit_blocks_fn)(struct xfs_btree_cur *cur, int level,
 		void *data);
+/* Only visit record blocks. */
+#define XFS_BTREE_VISIT_RECORDS_ONLY	(0x1)
 int xfs_btree_visit_blocks(struct xfs_btree_cur *cur,
-		xfs_btree_visit_blocks_fn fn, void *data);
+		xfs_btree_visit_blocks_fn fn, unsigned int flags, void *data);
 
 int xfs_btree_count_blocks(struct xfs_btree_cur *cur, xfs_extlen_t *blocks);
 

@@ -427,7 +427,7 @@ xrep_rmap_scan_bmbt(
 	}
 
 	/* Record all the blocks in the bmbt itself. */
-	error = xfs_btree_visit_blocks(cur, xrep_rmap_visit_bmbt_block, rf);
+	error = xfs_btree_visit_blocks(cur, xrep_rmap_visit_bmbt_block, 0, rf);
 	if (error)
 		goto out_cur;
 	xfs_btree_del_cursor(cur, error);
@@ -685,7 +685,7 @@ xrep_rmap_find_inode_rmaps(
 	if (xfs_sb_version_hasfinobt(&sc->mp->m_sb)) {
 		cur = xfs_inobt_init_cursor(sc->mp, sc->tp, sc->sa.agi_bp,
 				sc->sa.agno, XFS_BTNUM_FINO);
-		error = xfs_btree_visit_blocks(cur, xrep_rmap_visit_btblock,
+		error = xfs_btree_visit_blocks(cur, xrep_rmap_visit_btblock, 0,
 				&ri.inobt_blocks);
 		xfs_btree_del_cursor(cur, error);
 		if (error)
@@ -751,7 +751,7 @@ xrep_rmap_find_refcount_rmaps(
 	/* refcountbt */
 	cur = xfs_refcountbt_init_cursor(sc->mp, sc->tp, sc->sa.agf_bp,
 			sc->sa.agno);
-	error = xfs_btree_visit_blocks(cur, xrep_rmap_visit_btblock,
+	error = xfs_btree_visit_blocks(cur, xrep_rmap_visit_btblock, 0,
 			&refcountbt_blocks);
 	if (error) {
 		xfs_btree_del_cursor(cur, error);
@@ -917,7 +917,7 @@ xrep_rmap_try_reserve(
 	/* Set all the bnobt blocks in the bitmap. */
 	cur = xfs_allocbt_init_cursor(sc->mp, sc->tp, sc->sa.agf_bp,
 			sc->sa.agno, XFS_BTNUM_BNO);
-	error = xfs_btree_visit_blocks(cur, xrep_rmap_visit_btblock,
+	error = xfs_btree_visit_blocks(cur, xrep_rmap_visit_btblock, 0,
 			freesp_blocks);
 	xfs_btree_del_cursor(cur, error);
 	if (error)
@@ -926,7 +926,7 @@ xrep_rmap_try_reserve(
 	/* Set all the cntbt blocks in the bitmap. */
 	cur = xfs_allocbt_init_cursor(sc->mp, sc->tp, sc->sa.agf_bp,
 			sc->sa.agno, XFS_BTNUM_CNT);
-	error = xfs_btree_visit_blocks(cur, xrep_rmap_visit_btblock,
+	error = xfs_btree_visit_blocks(cur, xrep_rmap_visit_btblock, 0,
 			freesp_blocks);
 	xfs_btree_del_cursor(cur, error);
 	if (error)

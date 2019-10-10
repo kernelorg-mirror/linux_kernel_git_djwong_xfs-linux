@@ -252,7 +252,7 @@ xbitmap_set_btblocks(
 	struct xbitmap		*bitmap,
 	struct xfs_btree_cur	*cur)
 {
-	return xfs_btree_visit_blocks(cur, xbitmap_collect_btblock, bitmap);
+	return xfs_btree_visit_blocks(cur, xbitmap_collect_btblock, 0, bitmap);
 }
 
 /* How many bits are set in this bitmap? */

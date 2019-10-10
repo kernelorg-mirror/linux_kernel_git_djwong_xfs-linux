@@ -4393,6 +4393,7 @@ int
 xfs_btree_visit_blocks(
 	struct xfs_btree_cur		*cur,
 	xfs_btree_visit_blocks_fn	fn,
+	unsigned int			flags,
 	void				*data)
 {
 	union xfs_btree_ptr		lptr;
@@ -4419,6 +4420,9 @@ xfs_btree_visit_blocks(
 			/* save for the next iteration of the loop */
 			xfs_btree_copy_ptrs(cur, &lptr, ptr, 1);
 		}
+
+		if ((flags & XFS_BTREE_VISIT_RECORDS_ONLY) && level > 0)
+			continue;
 
 		/* for each buffer in the level */
 		do {
@@ -4519,7 +4523,7 @@ xfs_btree_change_owner(
 	bbcoi.new_owner = new_owner;
 	bbcoi.buffer_list = buffer_list;
 
-	return xfs_btree_visit_blocks(cur, xfs_btree_block_change_owner,
+	return xfs_btree_visit_blocks(cur, xfs_btree_block_change_owner, 0,
 			&bbcoi);
 }
 
@@ -4971,7 +4975,7 @@ xfs_btree_count_blocks(
 	xfs_extlen_t		*blocks)
 {
 	*blocks = 0;
-	return xfs_btree_visit_blocks(cur, xfs_btree_count_blocks_helper,
+	return xfs_btree_visit_blocks(cur, xfs_btree_count_blocks_helper, 0,
 			blocks);
 }
 
