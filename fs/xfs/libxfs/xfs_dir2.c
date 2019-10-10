@@ -21,6 +21,7 @@
 #include "xfs_shared.h"
 #include "xfs_bmap_btree.h"
 #include "xfs_trans_space.h"
+#include "xfs_health.h"
 
 struct xfs_name xfs_name_dotdot = { (unsigned char *)"..", 2, XFS_DIR3_FT_DIR };
 
@@ -605,6 +606,7 @@ xfs_dir2_isblock(
 	rval = XFS_FSB_TO_B(args->dp->i_mount, last) == args->geo->blksize;
 	if (rval != 0 && args->dp->i_d.di_size != args->geo->blksize) {
 		XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, args->dp->i_mount);
+		xfs_da_mark_sick(args);
 		return -EFSCORRUPTED;
 	}
 	*vp = rval;
