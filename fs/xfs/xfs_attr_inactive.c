@@ -22,6 +22,7 @@
 #include "xfs_attr_leaf.h"
 #include "xfs_quota.h"
 #include "xfs_dir2.h"
+#include "xfs_error.h"
 
 /*
  * Look at all the extents for this logical region,
@@ -209,6 +210,7 @@ xfs_attr3_node_inactive(
 	 */
 	if (level > XFS_DA_NODE_MAXDEPTH) {
 		xfs_trans_brelse(*trans, bp);	/* no locks for later trans */
+		xfs_verifier_error(bp, -EFSCORRUPTED, __this_address);
 		return -EFSCORRUPTED;
 	}
 
@@ -259,6 +261,7 @@ xfs_attr3_node_inactive(
 			break;
 		default:
 			error = -EFSCORRUPTED;
+			xfs_verifier_error(child_bp, error, __this_address);
 			xfs_trans_brelse(*trans, child_bp);
 			break;
 		}
@@ -342,6 +345,7 @@ xfs_attr3_root_inactive(
 		break;
 	default:
 		error = -EFSCORRUPTED;
+		xfs_verifier_error(bp, error, __this_address);
 		xfs_trans_brelse(*trans, bp);
 		break;
 	}

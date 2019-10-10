@@ -24,6 +24,7 @@
 #include "xfs_icache.h"
 #include "xfs_imeta.h"
 #include "xfs_da_format.h"
+#include "xfs_error.h"
 
 /*
  * The global quota manager. There is only one of these for the entire
@@ -783,13 +784,17 @@ xfs_qm_qino_switch(
 	if ((flags & XFS_QMOPT_PQUOTA) &&
 	    (mp->m_sb.sb_gquotino != NULLFSINO)) {
 		ino = mp->m_sb.sb_gquotino;
-		if (mp->m_sb.sb_pquotino != NULLFSINO)
+		if (mp->m_sb.sb_pquotino != NULLFSINO) {
+			XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, mp);
 			return -EFSCORRUPTED;
+		}
 	} else if ((flags & XFS_QMOPT_GQUOTA) &&
 		   (mp->m_sb.sb_pquotino != NULLFSINO)) {
 		ino = mp->m_sb.sb_pquotino;
-		if (mp->m_sb.sb_gquotino != NULLFSINO)
+		if (mp->m_sb.sb_gquotino != NULLFSINO) {
+			XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, mp);
 			return -EFSCORRUPTED;
+		}
 	}
 
 	if (ino == NULLFSINO)

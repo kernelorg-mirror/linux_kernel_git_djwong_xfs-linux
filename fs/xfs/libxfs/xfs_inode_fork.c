@@ -82,11 +82,15 @@ xfs_iformat_fork(
 			error = xfs_iformat_rmap(ip, dip);
 			break;
 		default:
+			xfs_inode_verifier_error(ip, -EFSCORRUPTED, __func__,
+					dip, sizeof(*dip), __this_address);
 			return -EFSCORRUPTED;
 		}
 		break;
 
 	default:
+		xfs_inode_verifier_error(ip, -EFSCORRUPTED, __func__, dip,
+				sizeof(*dip), __this_address);
 		return -EFSCORRUPTED;
 	}
 	if (error)
@@ -118,6 +122,8 @@ xfs_iformat_fork(
 		break;
 	default:
 		error = -EFSCORRUPTED;
+		xfs_inode_verifier_error(ip, error, __func__, dip,
+				sizeof(*dip), __this_address);
 		break;
 	}
 	if (error) {
