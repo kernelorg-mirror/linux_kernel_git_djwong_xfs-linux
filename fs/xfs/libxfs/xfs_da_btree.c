@@ -22,6 +22,7 @@
 #include "xfs_trace.h"
 #include "xfs_buf_item.h"
 #include "xfs_log.h"
+#include "xfs_health.h"
 
 /*
  * xfs_da_btree.c
@@ -310,6 +311,7 @@ xfs_da3_node_read(
 					tp->t_mountp, info, sizeof(*info));
 			xfs_trans_brelse(tp, *bpp);
 			*bpp = NULL;
+			xfs_dirattr_mark_sick(dp, which_fork);
 			return -EFSCORRUPTED;
 		}
 		xfs_trans_buf_set_type(tp, *bpp, type);
@@ -505,6 +507,7 @@ xfs_da3_split(
 	if (node->hdr.info.forw) {
 		if (be32_to_cpu(node->hdr.info.forw) != addblk->blkno) {
 			xfs_buf_corruption_error(oldblk->bp);
+			xfs_da_mark_sick(state->args);
 			error = -EFSCORRUPTED;
 			goto out;
 		}
@@ -518,6 +521,7 @@ xfs_da3_split(
 	if (node->hdr.info.back) {
 		if (be32_to_cpu(node->hdr.info.back) != addblk->blkno) {
 			xfs_buf_corruption_error(oldblk->bp);
+			xfs_da_mark_sick(state->args);
 			error = -EFSCORRUPTED;
 			goto out;
 		}
@@ -1545,6 +1549,7 @@ xfs_da3_node_lookup_int(
 
 		if (magic != XFS_DA_NODE_MAGIC && magic != XFS_DA3_NODE_MAGIC) {
 			xfs_buf_corruption_error(blk->bp);
+			xfs_da_mark_sick(args);
 			return -EFSCORRUPTED;
 		}
 
@@ -1560,6 +1565,7 @@ xfs_da3_node_lookup_int(
 		/* Tree taller than we can handle; bail out! */
 		if (nodehdr.level >= XFS_DA_NODE_MAXDEPTH) {
 			xfs_buf_corruption_error(blk->bp);
+			xfs_da_mark_sick(args);
 			return -EFSCORRUPTED;
 		}
 
@@ -1568,6 +1574,7 @@ xfs_da3_node_lookup_int(
 			expected_level = nodehdr.level - 1;
 		else if (expected_level != nodehdr.level) {
 			xfs_buf_corruption_error(blk->bp);
+			xfs_da_mark_sick(args);
 			return -EFSCORRUPTED;
 		} else
 			expected_level--;
@@ -1622,12 +1629,14 @@ xfs_da3_node_lookup_int(
 		if (blkno == args->geo->leafblk) {
 			XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW,
 					dp->i_mount);
+			xfs_da_mark_sick(args);
 			return -EFSCORRUPTED;
 		}
 	}
 
 	if (expected_level != 0) {
 		XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, dp->i_mount);
+		xfs_da_mark_sick(args);
 		return -EFSCORRUPTED;
 	}
 
@@ -1647,6 +1656,7 @@ xfs_da3_node_lookup_int(
 			args->blkno = blk->blkno;
 		} else {
 			ASSERT(0);
+			xfs_da_mark_sick(args);
 			return -EFSCORRUPTED;
 		}
 		if (((retval == -ENOENT) || (retval == -ENOATTR)) &&
@@ -2228,6 +2238,7 @@ xfs_da3_swap_lastblock(
 	if (unlikely(lastoff == 0)) {
 		XFS_ERROR_REPORT("xfs_da_swap_lastblock(1)", XFS_ERRLEVEL_LOW,
 				 mp);
+		xfs_da_mark_sick(args);
 		return -EFSCORRUPTED;
 	}
 	/*
@@ -2279,6 +2290,7 @@ xfs_da3_swap_lastblock(
 		    sib_info->magic != dead_info->magic)) {
 			XFS_ERROR_REPORT("xfs_da_swap_lastblock(2)",
 					 XFS_ERRLEVEL_LOW, mp);
+			xfs_da_mark_sick(args);
 			error = -EFSCORRUPTED;
 			goto done;
 		}
@@ -2301,6 +2313,7 @@ xfs_da3_swap_lastblock(
 		       sib_info->magic != dead_info->magic)) {
 			XFS_ERROR_REPORT("xfs_da_swap_lastblock(3)",
 					 XFS_ERRLEVEL_LOW, mp);
+			xfs_da_mark_sick(args);
 			error = -EFSCORRUPTED;
 			goto done;
 		}
@@ -2324,6 +2337,7 @@ xfs_da3_swap_lastblock(
 		if (level >= 0 && level != par_hdr.level + 1) {
 			XFS_ERROR_REPORT("xfs_da_swap_lastblock(4)",
 					 XFS_ERRLEVEL_LOW, mp);
+			xfs_da_mark_sick(args);
 			error = -EFSCORRUPTED;
 			goto done;
 		}
@@ -2337,6 +2351,7 @@ xfs_da3_swap_lastblock(
 		if (entno == par_hdr.count) {
 			XFS_ERROR_REPORT("xfs_da_swap_lastblock(5)",
 					 XFS_ERRLEVEL_LOW, mp);
+			xfs_da_mark_sick(args);
 			error = -EFSCORRUPTED;
 			goto done;
 		}
@@ -2364,6 +2379,7 @@ xfs_da3_swap_lastblock(
 		if (unlikely(par_blkno == 0)) {
 			XFS_ERROR_REPORT("xfs_da_swap_lastblock(6)",
 					 XFS_ERRLEVEL_LOW, mp);
+			xfs_da_mark_sick(args);
 			error = -EFSCORRUPTED;
 			goto done;
 		}
@@ -2375,6 +2391,7 @@ xfs_da3_swap_lastblock(
 		if (par_hdr.level != level) {
 			XFS_ERROR_REPORT("xfs_da_swap_lastblock(7)",
 					 XFS_ERRLEVEL_LOW, mp);
+			xfs_da_mark_sick(args);
 			error = -EFSCORRUPTED;
 			goto done;
 		}
@@ -2589,6 +2606,7 @@ xfs_dabuf_map(
 			}
 		}
 		XFS_ERROR_REPORT("xfs_da_do_buf(1)", XFS_ERRLEVEL_LOW, mp);
+		xfs_dirattr_mark_sick(dp, whichfork);
 		error = -EFSCORRUPTED;
 		goto out;
 	}
@@ -2681,6 +2699,8 @@ xfs_da_read_buf(
 	error = xfs_trans_read_buf_map(dp->i_mount, trans,
 					dp->i_mount->m_ddev_targp,
 					mapp, nmap, 0, &bp, ops);
+	if (xfs_metadata_is_sick(error))
+		xfs_dirattr_mark_sick(dp, whichfork);
 	if (error)
 		goto out_free;
 
