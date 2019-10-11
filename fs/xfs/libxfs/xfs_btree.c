@@ -1902,8 +1902,7 @@ xfs_btree_lookup(
 	XFS_BTREE_STATS_INC(cur, lookup);
 
 	/* No such thing as a zero-level tree. */
-	if (cur->bc_nlevels == 0) {
-		XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, cur->bc_mp);
+	if (XFS_CORRUPT_ON(cur->bc_mp, cur->bc_nlevels == 0)) {
 		xfs_btree_mark_sick(cur);
 		return -EFSCORRUPTED;
 	}
