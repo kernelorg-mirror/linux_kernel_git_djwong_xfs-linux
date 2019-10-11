@@ -785,16 +785,14 @@ xfs_qm_qino_switch(
 	if ((flags & XFS_QMOPT_PQUOTA) &&
 	    (mp->m_sb.sb_gquotino != NULLFSINO)) {
 		ino = mp->m_sb.sb_gquotino;
-		if (mp->m_sb.sb_pquotino != NULLFSINO) {
-			XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, mp);
+		if (XFS_CORRUPT_ON(mp, mp->m_sb.sb_pquotino != NULLFSINO)) {
 			xfs_quota_mark_sick(mp, XFS_DQ_PROJ);
 			return -EFSCORRUPTED;
 		}
 	} else if ((flags & XFS_QMOPT_GQUOTA) &&
 		   (mp->m_sb.sb_pquotino != NULLFSINO)) {
 		ino = mp->m_sb.sb_pquotino;
-		if (mp->m_sb.sb_gquotino != NULLFSINO) {
-			XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, mp);
+		if (XFS_CORRUPT_ON(mp, mp->m_sb.sb_gquotino != NULLFSINO)) {
 			xfs_quota_mark_sick(mp, XFS_DQ_GROUP);
 			return -EFSCORRUPTED;
 		}
