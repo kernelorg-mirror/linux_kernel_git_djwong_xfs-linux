@@ -70,8 +70,7 @@ xfs_rtbuf_get(
 	if (error)
 		return error;
 
-	if (nmap == 0 || !xfs_bmap_is_real_extent(&map)) {
-		XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, mp);
+	if (XFS_CORRUPT_ON(mp, nmap == 0 || !xfs_bmap_is_real_extent(&map))) {
 		return -EFSCORRUPTED;
 	}
 
