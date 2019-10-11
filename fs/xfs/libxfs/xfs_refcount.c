@@ -1668,8 +1668,8 @@ xfs_refcount_recover_extent(
 	struct list_head		*debris = priv;
 	struct xfs_refcount_recovery	*rr;
 
-	if (be32_to_cpu(rec->refc.rc_refcount) != 1) {
-		XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, cur->bc_mp);
+	if (XFS_CORRUPT_ON(cur->bc_mp,
+	    be32_to_cpu(rec->refc.rc_refcount) != 1)) {
 		return -EFSCORRUPTED;
 	}
 
