@@ -71,10 +71,9 @@ xfs_rtbuf_get(
 	if (error)
 		return error;
 
-	if (nmap == 0 || !xfs_bmap_is_real_extent(&map)) {
-		XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, mp);
-		xfs_rt_mark_sick(mp, issum ? XFS_SICK_RT_SUMMARY :
-					     XFS_SICK_RT_BITMAP);
+	if (XFS_CORRUPT_ON(mp, nmap == 0 || !xfs_bmap_is_real_extent(&map))) {
+		xfs_rt_mark_sick(mp,
+				 issum ? XFS_SICK_RT_SUMMARY : XFS_SICK_RT_BITMAP);
 		return -EFSCORRUPTED;
 	}
 
