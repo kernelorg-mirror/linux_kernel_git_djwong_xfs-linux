@@ -768,8 +768,7 @@ xfs_alloc_ag_vextent_small(
 		struct xfs_buf	*bp;
 
 		bp = xfs_btree_get_bufs(args->mp, args->tp, args->agno, fbno);
-		if (!bp) {
-			XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, args->mp);
+		if (XFS_CORRUPT_ON(args->mp, !bp)) {
 			error = -EFSCORRUPTED;
 			goto error;
 		}
@@ -2204,8 +2203,7 @@ xfs_free_agfl_block(
 		return error;
 
 	bp = xfs_btree_get_bufs(tp->t_mountp, tp, agno, agbno);
-	if (!bp) {
-		XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, tp->t_mountp);
+	if (XFS_CORRUPT_ON(tp->t_mountp, !bp)) {
 		return -EFSCORRUPTED;
 	}
 	xfs_trans_binval(tp, bp);
