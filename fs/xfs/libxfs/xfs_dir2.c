@@ -604,8 +604,7 @@ xfs_dir2_isblock(
 	if ((rval = xfs_bmap_last_offset(args->dp, &last, XFS_DATA_FORK)))
 		return rval;
 	rval = XFS_FSB_TO_B(args->dp->i_mount, last) == args->geo->blksize;
-	if (rval != 0 && args->dp->i_d.di_size != args->geo->blksize) {
-		XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, args->dp->i_mount);
+	if (XFS_CORRUPT_ON(args->dp->i_mount, rval != 0 && args->dp->i_d.di_size != args->geo->blksize)) {
 		xfs_da_mark_sick(args);
 		return -EFSCORRUPTED;
 	}

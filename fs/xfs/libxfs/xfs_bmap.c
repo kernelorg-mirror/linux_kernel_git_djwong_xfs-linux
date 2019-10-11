@@ -5920,11 +5920,7 @@ xfs_bmap_collapse_extents(
 	int			error = 0;
 	int			logflags = 0;
 
-	if (unlikely(XFS_TEST_ERROR(
-	    (XFS_IFORK_FORMAT(ip, whichfork) != XFS_DINODE_FMT_EXTENTS &&
-	     XFS_IFORK_FORMAT(ip, whichfork) != XFS_DINODE_FMT_BTREE),
-	     mp, XFS_ERRTAG_BMAPIFORMAT))) {
-		XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, mp);
+	if (XFS_CORRUPT_ON(mp, unlikely(XFS_TEST_ERROR((XFS_IFORK_FORMAT(ip, whichfork) != XFS_DINODE_FMT_EXTENTS && XFS_IFORK_FORMAT(ip, whichfork) != XFS_DINODE_FMT_BTREE), mp, XFS_ERRTAG_BMAPIFORMAT)))) {
 		xfs_bmap_mark_sick(ip, whichfork);
 		return -EFSCORRUPTED;
 	}
@@ -6042,11 +6038,7 @@ xfs_bmap_insert_extents(
 	int			error = 0;
 	int			logflags = 0;
 
-	if (unlikely(XFS_TEST_ERROR(
-	    (XFS_IFORK_FORMAT(ip, whichfork) != XFS_DINODE_FMT_EXTENTS &&
-	     XFS_IFORK_FORMAT(ip, whichfork) != XFS_DINODE_FMT_BTREE),
-	     mp, XFS_ERRTAG_BMAPIFORMAT))) {
-		XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, mp);
+	if (XFS_CORRUPT_ON(mp, unlikely(XFS_TEST_ERROR((XFS_IFORK_FORMAT(ip, whichfork) != XFS_DINODE_FMT_EXTENTS && XFS_IFORK_FORMAT(ip, whichfork) != XFS_DINODE_FMT_BTREE), mp, XFS_ERRTAG_BMAPIFORMAT)))) {
 		xfs_bmap_mark_sick(ip, whichfork);
 		return -EFSCORRUPTED;
 	}

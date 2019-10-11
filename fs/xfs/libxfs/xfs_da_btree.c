@@ -1631,16 +1631,13 @@ xfs_da3_node_lookup_int(
 		}
 
 		/* We can't point back to the root. */
-		if (blkno == args->geo->leafblk) {
-			XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW,
-					dp->i_mount);
+		if (XFS_CORRUPT_ON(dp->i_mount, blkno == args->geo->leafblk)) {
 			xfs_da_mark_sick(args);
 			return -EFSCORRUPTED;
 		}
 	}
 
-	if (expected_level != 0) {
-		XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, dp->i_mount);
+	if (XFS_CORRUPT_ON(dp->i_mount, expected_level != 0)) {
 		xfs_da_mark_sick(args);
 		return -EFSCORRUPTED;
 	}
