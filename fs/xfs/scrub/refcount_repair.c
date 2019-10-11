@@ -180,7 +180,10 @@ xrep_refc_next_rrm(
 		error = xfs_rmap_get_rec(cur, &rmap, &have_gt);
 		if (error)
 			goto out_error;
-		XFS_WANT_CORRUPTED_GOTO(mp, have_gt == 1, out_error);
+		if (XFS_CORRUPT_ON(mp, have_gt != 1)) {
+			error = -EFSCORRUPTED;
+			goto out_error;
+		}
 
 		if (rmap.rm_owner == XFS_RMAP_OWN_COW) {
 			error = xrep_refc_remember_cow(rr, rmap.rm_startblock,
@@ -303,7 +306,10 @@ xrep_refc_find_refcounts(
 		error = xfs_btree_decrement(cur, 0, &have_gt);
 		if (error)
 			goto out;
-		XFS_WANT_CORRUPTED_GOTO(sc->mp, have_gt, out);
+		if (XFS_CORRUPT_ON(sc->mp, !have_gt)) {
+			error = -EFSCORRUPTED;
+			goto out;
+		}
 
 		/* Set nbno to the bno of the next refcount change */
 		nbno = xrep_refc_next_edge(rmap_bag, &rrm, have);
@@ -347,7 +353,10 @@ xrep_refc_find_refcounts(
 			error = xfs_btree_decrement(cur, 0, &have_gt);
 			if (error)
 				goto out;
-			XFS_WANT_CORRUPTED_GOTO(sc->mp, have_gt, out);
+			if (XFS_CORRUPT_ON(sc->mp, !have_gt)) {
+				error = -EFSCORRUPTED;
+				goto out;
+			}
 
 			/* Emit refcount if necessary */
 			ASSERT(nbno > cbno);
