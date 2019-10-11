@@ -17,6 +17,7 @@
 #include "xfs_extent_busy.h"
 #include "xfs_trace.h"
 #include "xfs_log.h"
+#include "xfs_health.h"
 
 STATIC int
 xfs_trim_extents(
@@ -71,6 +72,7 @@ xfs_trim_extents(
 		if (error)
 			goto out_del_cursor;
 		if (XFS_CORRUPT_ON(mp, i != 1)) {
+			xfs_btree_mark_sick(cur);
 			error = -EFSCORRUPTED;
 			goto out_del_cursor;
 		}
