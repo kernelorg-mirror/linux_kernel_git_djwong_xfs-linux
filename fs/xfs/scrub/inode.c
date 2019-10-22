@@ -190,6 +190,11 @@ xchk_inode_flags2(
 	if ((flags2 & XFS_DIFLAG2_DAX) && (flags2 & XFS_DIFLAG2_REFLINK))
 		goto bad;
 
+	/* the incore bigtime iflag always follows the feature flag */
+	if (!!xfs_sb_version_hasbigtime(&mp->m_sb) ^
+	    !!(flags2 & XFS_DIFLAG2_BIGTIME))
+		goto bad;
+
 	return;
 bad:
 	xchk_ino_set_corrupt(sc, ino);
@@ -294,13 +299,13 @@ xchk_dinode(
 	}
 
 	/* di_[amc]time.nsec */
-	xfs_inode_from_disk_timestamp(&tv, &dip->di_atime);
+	xfs_inode_from_disk_timestamp(dip, &tv, &dip->di_atime);
 	if (tv.tv_nsec >= NSEC_PER_SEC)
 		xchk_ino_set_corrupt(sc, ino);
-	xfs_inode_from_disk_timestamp(&tv, &dip->di_mtime);
+	xfs_inode_from_disk_timestamp(dip, &tv, &dip->di_mtime);
 	if (tv.tv_nsec >= NSEC_PER_SEC)
 		xchk_ino_set_corrupt(sc, ino);
-	xfs_inode_from_disk_timestamp(&tv, &dip->di_ctime);
+	xfs_inode_from_disk_timestamp(dip, &tv, &dip->di_ctime);
 	if (tv.tv_nsec >= NSEC_PER_SEC)
 		xchk_ino_set_corrupt(sc, ino);
 
@@ -407,7 +412,7 @@ xchk_dinode(
 	}
 
 	if (dip->di_version >= 3) {
-		xfs_inode_from_disk_timestamp(&tv, &dip->di_crtime);
+		xfs_inode_from_disk_timestamp(dip, &tv, &dip->di_crtime);
 		if (tv.tv_nsec >= NSEC_PER_SEC)
 			xchk_ino_set_corrupt(sc, ino);
 		xchk_inode_flags2(sc, dip, ino, mode, flags, flags2);
