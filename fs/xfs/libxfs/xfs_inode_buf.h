@@ -37,7 +37,7 @@ struct xfs_icdinode {
 	uint64_t	di_flags2;	/* more random flags */
 	uint32_t	di_cowextsize;	/* basic cow extent size for file */
 
-	xfs_ictimestamp_t di_crtime;	/* time created */
+	struct xfs_ictimestamp di_crtime;	/* time created */
 };
 
 /*
