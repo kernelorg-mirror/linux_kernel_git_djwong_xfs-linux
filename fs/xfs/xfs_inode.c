@@ -850,6 +850,8 @@ xfs_ialloc(
 	if (ip->i_d.di_version == 3) {
 		inode_set_iversion(inode, 1);
 		ip->i_d.di_flags2 = 0;
+		if (xfs_sb_version_hasbigtime(&ip->i_mount->m_sb))
+			ip->i_d.di_flags2 |= XFS_DIFLAG2_BIGTIME;
 		ip->i_d.di_cowextsize = 0;
 		ip->i_d.di_crtime = tv;
 	}
@@ -911,16 +913,12 @@ xfs_ialloc(
 		    (pip->i_d.di_flags2 & XFS_DIFLAG2_ANY) &&
 		    pip->i_d.di_version == 3 &&
 		    ip->i_d.di_version == 3) {
-			uint64_t	di_flags2 = 0;
-
 			if (pip->i_d.di_flags2 & XFS_DIFLAG2_COWEXTSIZE) {
-				di_flags2 |= XFS_DIFLAG2_COWEXTSIZE;
+				ip->i_d.di_flags2 |= XFS_DIFLAG2_COWEXTSIZE;
 				ip->i_d.di_cowextsize = pip->i_d.di_cowextsize;
 			}
 			if (pip->i_d.di_flags2 & XFS_DIFLAG2_DAX)
-				di_flags2 |= XFS_DIFLAG2_DAX;
-
-			ip->i_d.di_flags2 |= di_flags2;
+				ip->i_d.di_flags2 |= XFS_DIFLAG2_DAX;
 		}
 		/* FALLTHROUGH */
 	case S_IFLNK:
@@ -3000,6 +2998,8 @@ xfs_ifree(
 	VFS_I(ip)->i_mode = 0;		/* mark incore inode as free */
 	ip->i_d.di_flags = 0;
 	ip->i_d.di_flags2 = 0;
+	if (xfs_sb_version_hasbigtime(&ip->i_mount->m_sb))
+		ip->i_d.di_flags2 |= XFS_DIFLAG2_BIGTIME;
 	ip->i_d.di_dmevmask = 0;
 	ip->i_d.di_forkoff = 0;		/* mark the attr fork not in use */
 	ip->i_d.di_format = XFS_DINODE_FMT_EXTENTS;
@@ -4081,6 +4081,13 @@ xfs_iflush_int(
 		xfs_alert_tag(mp, XFS_PTAG_IFLUSH,
 			"%s: bad inode %Lu, forkoff 0x%x, ptr "PTR_FMT,
 			__func__, ip->i_ino, ip->i_d.di_forkoff, ip);
+		goto corrupt_out;
+	}
+	if (xfs_sb_version_hasbigtime(&mp->m_sb) &&
+	    !(ip->i_d.di_flags2 & XFS_DIFLAG2_BIGTIME)) {
+		xfs_alert_tag(mp, XFS_PTAG_IFLUSH,
+			"%s: bad inode %Lu, bigtime unset, ptr "PTR_FMT,
+			__func__, ip->i_ino, ip);
 		goto corrupt_out;
 	}
 
