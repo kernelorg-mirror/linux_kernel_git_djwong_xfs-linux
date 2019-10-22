@@ -861,8 +861,8 @@ xrep_inode_timestamps(
 	if ((unsigned long)VFS_I(ip)->i_ctime.tv_nsec >= NSEC_PER_SEC)
 		VFS_I(ip)->i_ctime.tv_nsec = 0;
 	if (ip->i_d.di_version > 2 &&
-	    (unsigned long)ip->i_d.di_crtime.t_nsec >= NSEC_PER_SEC)
-		ip->i_d.di_crtime.t_nsec = 0;
+	    (unsigned long)ip->i_d.di_crtime.tv_nsec >= NSEC_PER_SEC)
+		ip->i_d.di_crtime.tv_nsec = 0;
 }
 
 /* Fix inode flags that don't make sense together. */
