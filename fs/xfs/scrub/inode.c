@@ -202,6 +202,7 @@ xchk_dinode(
 	struct xfs_dinode	*dip,
 	xfs_ino_t		ino)
 {
+	struct timespec64	tv;
 	struct xfs_mount	*mp = sc->mp;
 	size_t			fork_recs;
 	unsigned long long	isize;
@@ -293,11 +294,14 @@ xchk_dinode(
 	}
 
 	/* di_[amc]time.nsec */
-	if (be32_to_cpu(dip->di_atime.t_nsec) >= NSEC_PER_SEC)
+	xfs_inode_from_disk_timestamp(&tv, &dip->di_atime);
+	if (tv.tv_nsec >= NSEC_PER_SEC)
 		xchk_ino_set_corrupt(sc, ino);
-	if (be32_to_cpu(dip->di_mtime.t_nsec) >= NSEC_PER_SEC)
+	xfs_inode_from_disk_timestamp(&tv, &dip->di_mtime);
+	if (tv.tv_nsec >= NSEC_PER_SEC)
 		xchk_ino_set_corrupt(sc, ino);
-	if (be32_to_cpu(dip->di_ctime.t_nsec) >= NSEC_PER_SEC)
+	xfs_inode_from_disk_timestamp(&tv, &dip->di_ctime);
+	if (tv.tv_nsec >= NSEC_PER_SEC)
 		xchk_ino_set_corrupt(sc, ino);
 
 	/*
@@ -403,7 +407,8 @@ xchk_dinode(
 	}
 
 	if (dip->di_version >= 3) {
-		if (be32_to_cpu(dip->di_crtime.t_nsec) >= NSEC_PER_SEC)
+		xfs_inode_from_disk_timestamp(&tv, &dip->di_crtime);
+		if (tv.tv_nsec >= NSEC_PER_SEC)
 			xchk_ino_set_corrupt(sc, ino);
 		xchk_inode_flags2(sc, dip, ino, mode, flags, flags2);
 		xchk_inode_cowextsize(sc, dip, ino, mode, flags,
