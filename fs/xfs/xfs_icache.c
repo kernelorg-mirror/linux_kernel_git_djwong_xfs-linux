@@ -963,12 +963,12 @@ xfs_ici_walk_all(
  */
 static void
 xfs_queue_blockgc(
-	struct xfs_mount	*mp)
+	struct xfs_perag	*pag)
 {
 	rcu_read_lock();
-	if (radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_BLOCK_GC_TAG))
-		queue_delayed_work(mp->m_blockgc_workqueue,
-				   &mp->m_blockgc_work,
+	if (radix_tree_tagged(&pag->pag_ici_root, XFS_ICI_BLOCK_GC_TAG))
+		queue_delayed_work(pag->pag_mount->m_blockgc_workqueue,
+				   &pag->pag_blockgc_work,
 				   msecs_to_jiffies(xfs_blockgc_secs * 1000));
 	rcu_read_unlock();
 }
@@ -988,6 +988,16 @@ xfs_blockgc_scan_inode(
 	return xfs_inode_free_cowblocks(ip, args);
 }
 
+/* Scan an AG's inodes for block preallocations that we can remove. */
+static int
+xfs_blockgc_scan_pag(
+	struct xfs_perag	*pag,
+	struct xfs_eofblocks	*eofb)
+{
+	return xfs_ici_walk_ag(pag->pag_mount, pag, xfs_blockgc_scan_inode,
+			eofb, XFS_ICI_BLOCK_GC_TAG, 0);
+}
+
 /* Scan all incore inodes for block preallocations that we can remove. */
 static inline int
 xfs_blockgc_scan(
@@ -1003,22 +1013,35 @@ void
 xfs_blockgc_worker(
 	struct work_struct	*work)
 {
-	struct xfs_mount	*mp = container_of(to_delayed_work(work),
-					struct xfs_mount, m_blockgc_work);
+	struct xfs_perag	*pag = container_of(to_delayed_work(work),
+					struct xfs_perag, pag_blockgc_work);
 	int			error;
 
-	error = xfs_blockgc_scan(mp, NULL);
+	error = xfs_blockgc_scan_pag(pag, NULL);
 	if (error)
-		xfs_info(mp, "preallocation gc worker failed, err=%d", error);
-	xfs_queue_blockgc(mp);
+		xfs_info(pag->pag_mount,
+				"AG %u preallocation gc worker failed, err=%d",
+				pag->pag_agno, error);
+	xfs_queue_blockgc(pag);
 }
+
+#define for_each_perag_tag(mp, next_agno, pag, tag) \
+	for ((next_agno) = 0, (pag) = xfs_perag_get_tag((mp), 0, (tag)); \
+	     (pag) != NULL; \
+	     (next_agno) = (pag)->pag_agno + 1, \
+	     xfs_perag_put(pag), \
+	     (pag) = xfs_perag_get_tag((mp), (next_agno), (tag)))
 
 /* Disable post-EOF and CoW block auto-reclamation. */
 void
 xfs_blockgc_stop(
 	struct xfs_mount	*mp)
 {
-	cancel_delayed_work_sync(&mp->m_blockgc_work);
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+
+	for_each_perag_tag(mp, agno, pag, XFS_ICI_BLOCK_GC_TAG)
+		cancel_delayed_work_sync(&pag->pag_blockgc_work);
 }
 
 /* Enable post-EOF and CoW block auto-reclamation. */
@@ -1026,7 +1049,11 @@ void
 xfs_blockgc_start(
 	struct xfs_mount	*mp)
 {
-	xfs_queue_blockgc(mp);
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+
+	for_each_perag_tag(mp, agno, pag, XFS_ICI_BLOCK_GC_TAG)
+		xfs_queue_blockgc(pag);
 }
 
 /*
@@ -1666,7 +1693,7 @@ __xfs_inode_set_blocks_tag(
 		spin_unlock(&ip->i_mount->m_perag_lock);
 
 		/* kick off background trimming */
-		xfs_queue_blockgc(ip->i_mount);
+		xfs_queue_blockgc(pag);
 
 		trace_xfs_perag_set_blockgc(ip->i_mount, pag->pag_agno, -1,
 				_RET_IP_);
