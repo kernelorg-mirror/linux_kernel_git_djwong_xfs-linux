@@ -445,6 +445,15 @@ xfs_mount_alloc(
 	return mp;
 }
 
+static void
+xfs_mount_free(
+	struct xfs_mount	*mp)
+{
+	kfree(mp->m_rtname);
+	kfree(mp->m_logname);
+	kmem_free(mp);
+}
+
 struct proc_xfs_info {
 	uint64_t	flag;
 	char		*str;
@@ -1057,14 +1066,6 @@ xfs_fs_drop_inode(
 	return generic_drop_inode(inode) || (ip->i_flags & XFS_IDONTCACHE);
 }
 
-STATIC void
-xfs_free_names(
-	struct xfs_mount	*mp)
-{
-	kfree(mp->m_rtname);
-	kfree(mp->m_logname);
-}
-
 STATIC int
 xfs_fs_sync_fs(
 	struct super_block	*sb,
@@ -1237,8 +1238,7 @@ xfs_test_remount_options(
 
 	tmp_mp->m_super = sb;
 	error = xfs_parseargs(tmp_mp, options);
-	xfs_free_names(tmp_mp);
-	kmem_free(tmp_mp);
+	xfs_mount_free(tmp_mp);
 
 	return error;
 }
@@ -1746,8 +1746,7 @@ xfs_fs_fill_super(
 	xfs_close_devices(mp);
  out_free_names:
 	sb->s_fs_info = NULL;
-	xfs_free_names(mp);
-	kmem_free(mp);
+	xfs_mount_free(mp);
  out:
 	return error;
 
@@ -1778,8 +1777,7 @@ xfs_fs_put_super(
 	xfs_close_devices(mp);
 
 	sb->s_fs_info = NULL;
-	xfs_free_names(mp);
-	kmem_free(mp);
+	xfs_mount_free(mp);
 }
 
 STATIC struct dentry *
