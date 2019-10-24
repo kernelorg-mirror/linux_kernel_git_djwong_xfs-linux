@@ -313,68 +313,13 @@ xfs_fc_parse_param(
 	return 0;
 }
 
-/*
- * This function fills in xfs_mount_t fields based on mount args.
- * Note: the superblock has _not_ yet been read in.
- *
- * Note that this function leaks the various device name allocations on
- * failure.  The caller takes care of them.
- *
- * *sb is const because this is also used to test options on the remount
- * path, and we don't want this to have any side effects at remount time.
- * Today this function does not change *sb, but just to future-proof...
- */
 static int
-xfs_parseargs(
+xfs_fc_validate_params(
 	struct xfs_mount	*mp,
-	char			*options)
+	int			dsunit,
+	int			dswidth,
+	uint8_t			iosizelog)
 {
-	const struct super_block *sb = mp->m_super;
-	char			*p;
-	substring_t		args[MAX_OPT_ARGS];
-	int			dsunit = 0;
-	int			dswidth = 0;
-	uint8_t			iosizelog = 0;
-
-	/*
-	 * Copy binary VFS mount flags we are interested in.
-	 */
-	if (sb_rdonly(sb))
-		mp->m_flags |= XFS_MOUNT_RDONLY;
-	if (sb->s_flags & SB_DIRSYNC)
-		mp->m_flags |= XFS_MOUNT_DIRSYNC;
-	if (sb->s_flags & SB_SYNCHRONOUS)
-		mp->m_flags |= XFS_MOUNT_WSYNC;
-
-	/*
-	 * Set some default flags that could be cleared by the mount option
-	 * parsing.
-	 */
-	mp->m_flags |= XFS_MOUNT_COMPAT_IOSIZE;
-
-	/*
-	 * These can be overridden by the mount option parsing.
-	 */
-	mp->m_logbufs = -1;
-	mp->m_logbsize = -1;
-
-	if (!options)
-		return 0;
-
-	while ((p = strsep(&options, ",")) != NULL) {
-		int		token;
-		int		ret;
-
-		if (!*p)
-			continue;
-
-		token = match_token(p, tokens, args);
-		ret = xfs_fc_parse_param(token, p, args, mp, &dsunit, &dswidth,
-					 &iosizelog);
-		if (ret)
-			return ret;
-	}
-
 	/*
 	 * no recovery flag requires a read-only mount
 	 */
@@ -597,6 +542,71 @@ xfs_remount_ro(
 	mp->m_flags |= XFS_MOUNT_RDONLY;
 
 	return 0;
+}
+
+/*
+ * This function fills in xfs_mount_t fields based on mount args.
+ * Note: the superblock has _not_ yet been read in.
+ *
+ * Note that this function leaks the various device name allocations on
+ * failure.  The caller takes care of them.
+ *
+ * *sb is const because this is also used to test options on the remount
+ * path, and we don't want this to have any side effects at remount time.
+ * Today this function does not change *sb, but just to future-proof...
+ */
+static int
+xfs_parseargs(
+	struct xfs_mount	*mp,
+	char			*options)
+{
+	const struct super_block *sb = mp->m_super;
+	char			*p;
+	substring_t		args[MAX_OPT_ARGS];
+	int			dsunit = 0;
+	int			dswidth = 0;
+	uint8_t			iosizelog = 0;
+
+	/*
+	 * Copy binary VFS mount flags we are interested in.
+	 */
+	if (sb_rdonly(sb))
+		mp->m_flags |= XFS_MOUNT_RDONLY;
+	if (sb->s_flags & SB_DIRSYNC)
+		mp->m_flags |= XFS_MOUNT_DIRSYNC;
+	if (sb->s_flags & SB_SYNCHRONOUS)
+		mp->m_flags |= XFS_MOUNT_WSYNC;
+
+	/*
+	 * Set some default flags that could be cleared by the mount option
+	 * parsing.
+	 */
+	mp->m_flags |= XFS_MOUNT_COMPAT_IOSIZE;
+
+	/*
+	 * These can be overridden by the mount option parsing.
+	 */
+	mp->m_logbufs = -1;
+	mp->m_logbsize = -1;
+
+	if (!options)
+		return 0;
+
+	while ((p = strsep(&options, ",")) != NULL) {
+		int		token;
+		int		ret;
+
+		if (!*p)
+			continue;
+
+		token = match_token(p, tokens, args);
+		ret = xfs_fc_parse_param(token, p, args, mp, &dsunit, &dswidth,
+					 &iosizelog);
+		if (ret)
+			return ret;
+	}
+
+	return xfs_fc_validate_params(mp, dsunit, dswidth, iosizelog);
 }
 
 struct proc_xfs_info {
