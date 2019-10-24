@@ -416,7 +416,7 @@ xfs_attr_copy_value(
 	}
 
 	if (args->op_flags & XFS_DA_OP_ALLOCVAL) {
-		args->value = kmem_alloc_large(valuelen, 0);
+		args->value = kmem_alloc_large(valuelen, KM_NOFS);
 		if (!args->value)
 			return -ENOMEM;
 	}
