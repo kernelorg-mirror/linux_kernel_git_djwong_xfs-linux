@@ -210,7 +210,7 @@ xfs_parseargs(
 	mp->m_logbsize = -1;
 
 	if (!options)
-		goto done;
+		return 0;
 
 	while ((p = strsep(&options, ",")) != NULL) {
 		int		token;
@@ -389,7 +389,6 @@ xfs_parseargs(
 		return -EINVAL;
 	}
 
-done:
 	if (dsunit && !(mp->m_flags & XFS_MOUNT_NOALIGN)) {
 		/*
 		 * At this point the superblock has not been read
