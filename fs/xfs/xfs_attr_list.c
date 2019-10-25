@@ -84,6 +84,11 @@ xfs_attr_shortform_list(xfs_attr_list_context_t *context)
 	    (XFS_ISRESET_CURSOR(cursor) &&
 	     (dp->i_afp->if_bytes + sf->hdr.count * 16) < context->bufsize)) {
 		for (i = 0, sfe = &sf->list[0]; i < sf->hdr.count; i++) {
+			if (!xfs_attr_namecheck(sfe->nameval, sfe->namelen)) {
+				XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW,
+						 context->dp->i_mount);
+				return -EFSCORRUPTED;
+			}
 			context->put_listent(context,
 					     sfe->flags,
 					     sfe->nameval,
@@ -173,6 +178,11 @@ xfs_attr_shortform_list(xfs_attr_list_context_t *context)
 		if (cursor->hashval != sbp->hash) {
 			cursor->hashval = sbp->hash;
 			cursor->offset = 0;
+		}
+		if (!xfs_attr_namecheck(sbp->name, sbp->namelen)) {
+			XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW,
+					 context->dp->i_mount);
+			return -EFSCORRUPTED;
 		}
 		context->put_listent(context,
 				     sbp->flags,
@@ -284,7 +294,7 @@ xfs_attr_node_list(
 	struct xfs_buf			*bp;
 	struct xfs_inode		*dp = context->dp;
 	struct xfs_mount		*mp = dp->i_mount;
-	int				error;
+	int				error = 0;
 
 	trace_xfs_attr_node_list(context);
 
@@ -358,7 +368,9 @@ xfs_attr_node_list(
 	 */
 	for (;;) {
 		leaf = bp->b_addr;
-		xfs_attr3_leaf_list_int(bp, context);
+		error = xfs_attr3_leaf_list_int(bp, context);
+		if (error)
+			break;
 		xfs_attr3_leaf_hdr_from_disk(mp->m_attr_geo, &leafhdr, leaf);
 		if (context->seen_enough || leafhdr.forw == 0)
 			break;
@@ -369,13 +381,13 @@ xfs_attr_node_list(
 			return error;
 	}
 	xfs_trans_brelse(context->tp, bp);
-	return 0;
+	return error;
 }
 
 /*
  * Copy out attribute list entries for attr_list(), for leaf attribute lists.
  */
-void
+int
 xfs_attr3_leaf_list_int(
 	struct xfs_buf			*bp,
 	struct xfs_attr_list_context	*context)
@@ -417,7 +429,7 @@ xfs_attr3_leaf_list_int(
 		}
 		if (i == ichdr.count) {
 			trace_xfs_attr_list_notfound(context);
-			return;
+			return 0;
 		}
 	} else {
 		entry = &entries[0];
@@ -457,6 +469,11 @@ xfs_attr3_leaf_list_int(
 			valuelen = be32_to_cpu(name_rmt->valuelen);
 		}
 
+		if (!xfs_attr_namecheck(name, namelen)) {
+			XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW,
+					 context->dp->i_mount);
+			return -EFSCORRUPTED;
+		}
 		context->put_listent(context, entry->flags,
 					      name, namelen, valuelen);
 		if (context->seen_enough)
@@ -464,7 +481,7 @@ xfs_attr3_leaf_list_int(
 		cursor->offset++;
 	}
 	trace_xfs_attr_list_leaf_end(context);
-	return;
+	return 0;
 }
 
 /*
@@ -483,9 +500,9 @@ xfs_attr_leaf_list(xfs_attr_list_context_t *context)
 	if (error)
 		return error;
 
-	xfs_attr3_leaf_list_int(bp, context);
+	error = xfs_attr3_leaf_list_int(bp, context);
 	xfs_trans_brelse(context->tp, bp);
-	return 0;
+	return error;
 }
 
 int
@@ -556,6 +573,13 @@ xfs_attr_put_listent(
 	ASSERT(context->count < (ATTR_MAX_VALUELEN/8));
 	ASSERT(context->firstu >= sizeof(*alist));
 	ASSERT(context->firstu <= context->bufsize);
+
+	if (!xfs_attr_namecheck(name, namelen)) {
+		XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW,
+				 context->dp->i_mount);
+		context->seen_enough = -EFSCORRUPTED;
+		return;
+	}
 
 	/*
 	 * Only list entries in the right namespace.
