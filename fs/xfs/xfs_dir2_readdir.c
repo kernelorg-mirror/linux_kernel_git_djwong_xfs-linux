@@ -18,6 +18,7 @@
 #include "xfs_bmap.h"
 #include "xfs_trans.h"
 #include "xfs_error.h"
+#include "xfs_health.h"
 
 /*
  * Directory file type support functions
@@ -117,8 +118,10 @@ xfs_dir2_sf_getdents(
 		filetype = dp->d_ops->sf_get_ftype(sfep);
 		ctx->pos = off & 0x7fffffff;
 		if (XFS_IS_CORRUPT(dp->i_mount,
-		    !xfs_dir2_namecheck(sfep->name, sfep->namelen)))
+		    !xfs_dir2_namecheck(sfep->name, sfep->namelen))) {
+			xfs_dirattr_mark_sick(dp, XFS_DATA_FORK);
 			return -EFSCORRUPTED;
+		}
 		if (!dir_emit(ctx, (char *)sfep->name, sfep->namelen, ino,
 			    xfs_dir3_get_dtype(dp->i_mount, filetype)))
 			return 0;
@@ -466,6 +469,7 @@ xfs_dir2_leaf_getdents(
 		ctx->pos = xfs_dir2_byte_to_dataptr(curoff) & 0x7fffffff;
 		if (XFS_IS_CORRUPT(dp->i_mount,
 		    !xfs_dir2_namecheck(dep->name, dep->namelen))) {
+			xfs_dirattr_mark_sick(dp, XFS_DATA_FORK);
 			error = -EFSCORRUPTED;
 			break;
 		}
