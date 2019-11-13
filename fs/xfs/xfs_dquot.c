@@ -126,21 +126,27 @@ xfs_dquot_clamp_timer(
 /* Set a quota grace period expiration timer. */
 static inline void
 xfs_quota_set_timer(
+	time64_t		*itimer,
 	__be32			*dtimer,
 	time_t			limit)
 {
-	time64_t		new_timeout;
+	struct timespec64	tv = { 0 };
 
-	new_timeout = xfs_dquot_clamp_timer(get_seconds() + limit);
-	*dtimer = cpu_to_be32(new_timeout);
+	tv.tv_sec = xfs_dquot_clamp_timer(ktime_get_real_seconds() + limit);
+	*itimer = tv.tv_sec;
+	xfs_dquot_to_disk_timestamp(dtimer, &tv);
 }
 
 /* Clear a quota grace period expiration timer. */
 static inline void
 xfs_quota_clear_timer(
+	time64_t		*itimer,
 	__be32			*dtimer)
 {
-	*dtimer = cpu_to_be32(0);
+	struct timespec64	tv = { 0 };
+
+	*itimer = tv.tv_sec;
+	xfs_dquot_to_disk_timestamp(dtimer, &tv);
 }
 
 /*
@@ -180,46 +186,46 @@ xfs_qm_adjust_dqtimers(
 
 	over = xfs_quota_exceeded(&d->d_bcount, dqp->q_ina_bcount,
 			&d->d_blk_softlimit, &d->d_blk_hardlimit);
-	if (!d->d_btimer) {
+	if (!dqp->q_btimer) {
 		if (over) {
-			xfs_quota_set_timer(&d->d_btimer,
+			xfs_quota_set_timer(&dqp->q_btimer, &d->d_btimer,
 					mp->m_quotainfo->qi_btimelimit);
 		} else {
 			d->d_bwarns = 0;
 		}
 	} else {
 		if (!over) {
-			xfs_quota_clear_timer(&d->d_btimer);
+			xfs_quota_clear_timer(&dqp->q_btimer, &d->d_btimer);
 		}
 	}
 
 	over = xfs_quota_exceeded(&d->d_icount, dqp->q_ina_icount,
 			&d->d_ino_softlimit, &d->d_ino_hardlimit);
-	if (!d->d_itimer) {
+	if (!dqp->q_itimer) {
 		if (over) {
-			xfs_quota_set_timer(&d->d_itimer,
+			xfs_quota_set_timer(&dqp->q_itimer, &d->d_itimer,
 					mp->m_quotainfo->qi_itimelimit);
 		} else {
 			d->d_iwarns = 0;
 		}
 	} else {
 		if (!over) {
-			xfs_quota_clear_timer(&d->d_itimer);
+			xfs_quota_clear_timer(&dqp->q_itimer, &d->d_itimer);
 		}
 	}
 
 	over = xfs_quota_exceeded(&d->d_rtbcount, dqp->q_ina_rtbcount,
 			&d->d_rtb_softlimit, &d->d_rtb_hardlimit);
-	if (!d->d_rtbtimer) {
+	if (!dqp->q_rtbtimer) {
 		if (over) {
-			xfs_quota_set_timer(&d->d_rtbtimer,
+			xfs_quota_set_timer(&dqp->q_rtbtimer, &d->d_rtbtimer,
 					mp->m_quotainfo->qi_rtbtimelimit);
 		} else {
 			d->d_rtbwarns = 0;
 		}
 	} else {
 		if (!over) {
-			xfs_quota_clear_timer(&d->d_rtbtimer);
+			xfs_quota_clear_timer(&dqp->q_rtbtimer, &d->d_rtbtimer);
 		}
 	}
 }
@@ -520,6 +526,7 @@ xfs_dquot_from_disk(
 	struct xfs_dquot	*dqp,
 	struct xfs_buf		*bp)
 {
+	struct timespec64	tv;
 	struct xfs_disk_dquot	*ddqp = bp->b_addr + dqp->q_bufoffset;
 
 	/* copy everything from disk dquot to the incore dquot */
@@ -532,6 +539,13 @@ xfs_dquot_from_disk(
 	dqp->q_res_bcount = be64_to_cpu(ddqp->d_bcount);
 	dqp->q_res_icount = be64_to_cpu(ddqp->d_icount);
 	dqp->q_res_rtbcount = be64_to_cpu(ddqp->d_rtbcount);
+
+	xfs_dquot_from_disk_timestamp(&tv, ddqp->d_btimer);
+	dqp->q_btimer = tv.tv_sec;
+	xfs_dquot_from_disk_timestamp(&tv, ddqp->d_itimer);
+	dqp->q_itimer = tv.tv_sec;
+	xfs_dquot_from_disk_timestamp(&tv, ddqp->d_rtbtimer);
+	dqp->q_rtbtimer = tv.tv_sec;
 
 	/* initialize the dquot speculative prealloc thresholds */
 	xfs_dquot_set_prealloc_limits(dqp);
