@@ -135,6 +135,11 @@ xchk_quota_item(
 	if (d->d_pad0 != cpu_to_be32(0) || d->d_pad != cpu_to_be16(0))
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, offset);
 
+	/* incore should always have bigtime iflag set except for root */
+	if (xfs_sb_version_hasbigtime(&mp->m_sb) && d->d_id &&
+	    !(d->d_flags & XFS_DQ_BIGTIME))
+		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, offset);
+
 	/* Check the limits. */
 	bhard = be64_to_cpu(d->d_blk_hardlimit);
 	ihard = be64_to_cpu(d->d_ino_hardlimit);
