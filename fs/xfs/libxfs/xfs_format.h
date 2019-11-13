@@ -1188,6 +1188,10 @@ static inline void xfs_dinode_put_rdev(struct xfs_dinode *dip, xfs_dev_t rdev)
  * time zero is the Unix epoch, Jan  1 00:00:01 UTC 1970.  An expiration value
  * of zero means that the quota limit has not been reached, and therefore no
  * expiration has been set.
+ *
+ * The length of quota grace periods are unsigned 32-bit quantities in units of
+ * seconds (which are stored in the root dquot).  A value of zero means to use
+ * the default period.
  */
 
 /*
@@ -1201,6 +1205,10 @@ static inline void xfs_dinode_put_rdev(struct xfs_dinode *dip, xfs_dev_t rdev)
  * Feb  7 06:28:15 UTC 2106.
  */
 #define XFS_DQ_TIMEOUT_MAX	((int64_t)U32_MAX)
+
+/* Quota grace periods, ranging from zero (use the defaults) to ~136 years. */
+#define XFS_DQ_GRACE_MIN	((int64_t)0)
+#define XFS_DQ_GRACE_MAX	((int64_t)U32_MAX)
 
 /*
  * This is the main portion of the on-disk representation of quota

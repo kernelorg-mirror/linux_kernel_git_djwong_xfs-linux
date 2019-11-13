@@ -438,6 +438,20 @@ xfs_qm_scall_quotaon(
 	return 0;
 }
 
+/* Set a new quota grace period. */
+static inline void
+xfs_qm_set_grace(
+	time_t			*qi_limit,
+	__be32			*dtimer,
+	const s64		grace)
+{
+	time64_t		new_grace;
+
+	new_grace = clamp_t(time64_t, grace, XFS_DQ_GRACE_MIN,
+					     XFS_DQ_GRACE_MAX);
+	*dtimer = cpu_to_be32(new_grace);
+}
+
 #define XFS_QC_MASK \
 	(QC_LIMIT_MASK | QC_TIMER_MASK | QC_WARNS_MASK)
 
@@ -567,18 +581,15 @@ xfs_qm_scall_setqlim(
 		 * soft and hard limit values (already done, above), and
 		 * for warnings.
 		 */
-		if (newlim->d_fieldmask & QC_SPC_TIMER) {
-			q->qi_btimelimit = newlim->d_spc_timer;
-			ddq->d_btimer = cpu_to_be32(newlim->d_spc_timer);
-		}
-		if (newlim->d_fieldmask & QC_INO_TIMER) {
-			q->qi_itimelimit = newlim->d_ino_timer;
-			ddq->d_itimer = cpu_to_be32(newlim->d_ino_timer);
-		}
-		if (newlim->d_fieldmask & QC_RT_SPC_TIMER) {
-			q->qi_rtbtimelimit = newlim->d_rt_spc_timer;
-			ddq->d_rtbtimer = cpu_to_be32(newlim->d_rt_spc_timer);
-		}
+		if (newlim->d_fieldmask & QC_SPC_TIMER)
+			xfs_qm_set_grace(&q->qi_btimelimit, &ddq->d_btimer,
+					newlim->d_spc_timer);
+		if (newlim->d_fieldmask & QC_INO_TIMER)
+			xfs_qm_set_grace(&q->qi_itimelimit, &ddq->d_itimer,
+					newlim->d_ino_timer);
+		if (newlim->d_fieldmask & QC_RT_SPC_TIMER)
+			xfs_qm_set_grace(&q->qi_rtbtimelimit, &ddq->d_rtbtimer,
+					newlim->d_rt_spc_timer);
 		if (newlim->d_fieldmask & QC_SPC_WARNS)
 			q->qi_bwarnlimit = newlim->d_spc_warns;
 		if (newlim->d_fieldmask & QC_INO_WARNS)

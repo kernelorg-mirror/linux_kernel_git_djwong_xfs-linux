@@ -563,6 +563,14 @@ xfs_quota_warn(
 			   mp->m_super->s_dev, type);
 }
 
+/* Has a quota grace period expired? */
+static inline bool
+xfs_quota_timer_exceeded(
+	time64_t		timer)
+{
+	return timer != 0 && ktime_get_real_seconds() > timer;
+}
+
 /*
  * This reserves disk blocks and inodes against a dquot.
  * Flags indicate if the dquot is to be locked here and also
@@ -635,8 +643,7 @@ xfs_trans_dqresv(
 				goto error_return;
 			}
 			if (softlimit && total_count > softlimit) {
-				if ((timer != 0 &&
-				     ktime_get_real_seconds() > timer) ||
+				if (xfs_quota_timer_exceeded(timer) ||
 				    (warns != 0 && warns >= warnlimit)) {
 					xfs_quota_warn(mp, dqp,
 						       QUOTA_NL_BSOFTLONGWARN);
@@ -663,9 +670,8 @@ xfs_trans_dqresv(
 				goto error_return;
 			}
 			if (softlimit && total_count > softlimit) {
-				if  ((timer != 0 &&
-				      ktime_get_real_seconds() > timer) ||
-				     (warns != 0 && warns >= warnlimit)) {
+				if (xfs_quota_timer_exceeded(timer) ||
+				    (warns != 0 && warns >= warnlimit)) {
 					xfs_quota_warn(mp, dqp,
 						       QUOTA_NL_ISOFTLONGWARN);
 					goto error_return;
