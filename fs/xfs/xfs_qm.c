@@ -589,6 +589,7 @@ xfs_qm_init_timelimits(
 	struct xfs_mount	*mp,
 	struct xfs_quotainfo	*qinf)
 {
+	struct timespec64	tv;
 	struct xfs_disk_dquot	*ddqp;
 	struct xfs_dquot	*dqp;
 	uint			type;
@@ -628,12 +629,18 @@ xfs_qm_init_timelimits(
 	 * a user or group before he or she can not perform any
 	 * more writing. If it is zero, a default is used.
 	 */
-	if (ddqp->d_btimer)
-		qinf->qi_btimelimit = be32_to_cpu(ddqp->d_btimer);
-	if (ddqp->d_itimer)
-		qinf->qi_itimelimit = be32_to_cpu(ddqp->d_itimer);
-	if (ddqp->d_rtbtimer)
-		qinf->qi_rtbtimelimit = be32_to_cpu(ddqp->d_rtbtimer);
+	if (ddqp->d_btimer) {
+		xfs_dquot_from_disk_timestamp(&tv, ddqp->d_btimer);
+		qinf->qi_btimelimit = tv.tv_sec;
+	}
+	if (ddqp->d_itimer) {
+		xfs_dquot_from_disk_timestamp(&tv, ddqp->d_itimer);
+		qinf->qi_itimelimit = tv.tv_sec;
+	}
+	if (ddqp->d_rtbtimer) {
+		xfs_dquot_from_disk_timestamp(&tv, ddqp->d_rtbtimer);
+		qinf->qi_rtbtimelimit = tv.tv_sec;
+	}
 	if (ddqp->d_bwarns)
 		qinf->qi_bwarnlimit = be16_to_cpu(ddqp->d_bwarns);
 	if (ddqp->d_iwarns)
@@ -848,16 +855,23 @@ xfs_qm_reset_dqintervals(
 	struct xfs_mount	*mp,
 	struct xfs_disk_dquot	*ddq)
 {
+	struct timespec64	tv = { 0 };
 	struct xfs_quotainfo	*qinf = mp->m_quotainfo;
 
-	if (qinf->qi_btimelimit != XFS_QM_BTIMELIMIT)
-		ddq->d_btimer = cpu_to_be32(qinf->qi_btimelimit);
+	if (qinf->qi_btimelimit != XFS_QM_BTIMELIMIT) {
+		tv.tv_sec = qinf->qi_btimelimit;
+		xfs_dquot_to_disk_timestamp(&ddq->d_btimer, &tv);
+	}
 
-	if (qinf->qi_itimelimit != XFS_QM_ITIMELIMIT)
-		ddq->d_itimer = cpu_to_be32(qinf->qi_itimelimit);
+	if (qinf->qi_itimelimit != XFS_QM_ITIMELIMIT) {
+		tv.tv_sec = qinf->qi_itimelimit;
+		xfs_dquot_to_disk_timestamp(&ddq->d_itimer, &tv);
+	}
 
-	if (qinf->qi_rtbtimelimit != XFS_QM_RTBTIMELIMIT)
-		ddq->d_rtbtimer = cpu_to_be32(qinf->qi_rtbtimelimit);
+	if (qinf->qi_rtbtimelimit != XFS_QM_RTBTIMELIMIT) {
+		tv.tv_sec = qinf->qi_rtbtimelimit;
+		xfs_dquot_to_disk_timestamp(&ddq->d_rtbtimer, &tv);
+	}
 }
 
 STATIC void

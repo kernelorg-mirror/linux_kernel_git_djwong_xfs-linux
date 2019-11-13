@@ -60,6 +60,14 @@ struct xfs_dquot {
 	xfs_qcnt_t		q_prealloc_lo_wmark;
 	xfs_qcnt_t		q_prealloc_hi_wmark;
 	int64_t			q_low_space[XFS_QLOWSP_MAX];
+
+	/* incore block grace timeout */
+	time64_t		q_btimer;
+	/* incore inode grace timeout */
+	time64_t		q_itimer;
+	/* incore rt block grace timeout */
+	time64_t		q_rtbtimer;
+
 	struct mutex		q_qlock;
 	struct completion	q_flush;
 	atomic_t		q_pincount;
