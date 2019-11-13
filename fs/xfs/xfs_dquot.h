@@ -51,6 +51,9 @@ typedef struct xfs_dquot {
 	xfs_qcnt_t	 q_prealloc_lo_wmark;/* prealloc throttle wmark */
 	xfs_qcnt_t	 q_prealloc_hi_wmark;/* prealloc disabled wmark */
 	int64_t		 q_low_space[XFS_QLOWSP_MAX];
+	time64_t	 q_btimer;	/* incore block grace timeout */
+	time64_t	 q_itimer;	/* incore inode grace timeout */
+	time64_t	 q_rtbtimer;	/* incore rt block grace timeout */
 	struct mutex	 q_qlock;	/* quota lock */
 	struct completion q_flush;	/* flush completion queue */
 	atomic_t          q_pincount;	/* dquot pin count */
