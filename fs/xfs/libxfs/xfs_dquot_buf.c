@@ -40,6 +40,8 @@ xfs_dquot_verify(
 	xfs_dqid_t		id,
 	uint			type)	/* used only during quotacheck */
 {
+	uint8_t			dtype;
+
 	/*
 	 * We can encounter an uninitialized dquot buffer for 2 reasons:
 	 * 1. If we crash while deleting the quotainode(s), and those blks got
@@ -60,11 +62,22 @@ xfs_dquot_verify(
 	if (ddq->d_version != XFS_DQUOT_VERSION)
 		return __this_address;
 
-	if (type && ddq->d_flags != type)
+	dtype = ddq->d_flags & XFS_DQ_ALLTYPES;
+	if (type && dtype != type)
 		return __this_address;
-	if (ddq->d_flags != XFS_DQ_USER &&
-	    ddq->d_flags != XFS_DQ_PROJ &&
-	    ddq->d_flags != XFS_DQ_GROUP)
+	if (dtype != XFS_DQ_USER &&
+	    dtype != XFS_DQ_PROJ &&
+	    dtype != XFS_DQ_GROUP)
+		return __this_address;
+
+	if (ddq->d_flags & ~(XFS_DQ_ALLTYPES | XFS_DQ_BIGTIME))
+		return __this_address;
+
+	if ((ddq->d_flags & XFS_DQ_BIGTIME) &&
+	    !xfs_sb_version_hasbigtime(&mp->m_sb))
+		return __this_address;
+
+	if ((ddq->d_flags & XFS_DQ_BIGTIME) && !ddq->d_id)
 		return __this_address;
 
 	if (id != -1 && id != be32_to_cpu(ddq->d_id))
@@ -290,17 +303,68 @@ const struct xfs_buf_ops xfs_dquot_buf_ra_ops = {
 
 void
 xfs_dquot_from_disk_timestamp(
+	struct xfs_disk_dquot	*ddq,
 	struct timespec64	*tv,
 	__be32			dtimer)
 {
 	tv->tv_nsec = 0;
+
+	/* Zero always means zero, regardless of encoding. */
+	if (!dtimer) {
+		tv->tv_sec = 0;
+		return;
+	}
+
+	if (ddq->d_flags & XFS_DQ_BIGTIME) {
+		uint64_t	t;
+
+		t = be32_to_cpu(dtimer);
+		tv->tv_sec = t << XFS_DQ_BIGTIME_SHIFT;
+		return;
+	}
+
 	tv->tv_sec = be32_to_cpu(dtimer);
 }
 
 void
 xfs_dquot_to_disk_timestamp(
+	struct xfs_disk_dquot	*ddq,
 	__be32			*dtimer,
 	const struct timespec64	*tv)
 {
+	/* Zero always means zero, regardless of encoding. */
+	if ((ddq->d_flags & XFS_DQ_BIGTIME) && tv->tv_sec != 0) {
+		uint64_t	t = tv->tv_sec;
+
+		/*
+		 * Round the end of the grace period up to the nearest bigtime
+		 * interval that we support, to give users the most time to fix
+		 * the problems.
+		 */
+		t = roundup_64(t, 1U << XFS_DQ_BIGTIME_SHIFT);
+		*dtimer = cpu_to_be32(t >> XFS_DQ_BIGTIME_SHIFT);
+		return;
+	}
+
 	*dtimer = cpu_to_be32(tv->tv_sec);
+}
+
+/*
+ * Convert the dquot to bigtime format incore so that we'll write out the new
+ * values the next time we flush the dquot to disk.  Skip this for d_id == 0
+ * because that dquot stores the grace period intervals.  Returns true if we
+ * upgraded the format, false otherwise.
+ */
+bool
+xfs_dquot_add_bigtime(
+	struct xfs_mount	*mp,
+	struct xfs_disk_dquot	*ddq)
+{
+	if (xfs_sb_version_hasbigtime(&mp->m_sb) && ddq->d_id &&
+	    !(ddq->d_flags & XFS_DQ_BIGTIME)) {
+		ddq->d_flags |= XFS_DQ_BIGTIME;
+		return true;
+	}
+
+	return false;
 }
