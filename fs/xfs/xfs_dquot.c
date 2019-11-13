@@ -99,6 +99,17 @@ xfs_qm_adjust_dqlimits(
 		xfs_dquot_set_prealloc_limits(dq);
 }
 
+static inline bool
+xfs_quota_exceeded(
+	const __be64		*count,
+	const __be64		*softlimit,
+	const __be64		*hardlimit) {
+
+	if (*softlimit && be64_to_cpup(count) > be64_to_cpup(softlimit))
+		return true;
+	return *hardlimit && be64_to_cpup(count) > be64_to_cpup(hardlimit);
+}
+
 /*
  * Check the limits and timers of a dquot and start or reset timers
  * if necessary.
@@ -117,6 +128,8 @@ xfs_qm_adjust_dqtimers(
 	struct xfs_mount	*mp,
 	struct xfs_disk_dquot	*d)
 {
+	bool			over;
+
 	ASSERT(d->d_id);
 
 #ifdef DEBUG
@@ -131,71 +144,47 @@ xfs_qm_adjust_dqtimers(
 		       be64_to_cpu(d->d_rtb_hardlimit));
 #endif
 
+	over = xfs_quota_exceeded(&d->d_bcount, &d->d_blk_softlimit,
+			&d->d_blk_hardlimit);
 	if (!d->d_btimer) {
-		if ((d->d_blk_softlimit &&
-		     (be64_to_cpu(d->d_bcount) >
-		      be64_to_cpu(d->d_blk_softlimit))) ||
-		    (d->d_blk_hardlimit &&
-		     (be64_to_cpu(d->d_bcount) >
-		      be64_to_cpu(d->d_blk_hardlimit)))) {
+		if (over) {
 			d->d_btimer = cpu_to_be32(get_seconds() +
 					mp->m_quotainfo->qi_btimelimit);
 		} else {
 			d->d_bwarns = 0;
 		}
 	} else {
-		if ((!d->d_blk_softlimit ||
-		     (be64_to_cpu(d->d_bcount) <=
-		      be64_to_cpu(d->d_blk_softlimit))) &&
-		    (!d->d_blk_hardlimit ||
-		    (be64_to_cpu(d->d_bcount) <=
-		     be64_to_cpu(d->d_blk_hardlimit)))) {
+		if (!over) {
 			d->d_btimer = 0;
 		}
 	}
 
+	over = xfs_quota_exceeded(&d->d_icount, &d->d_ino_softlimit,
+			&d->d_ino_hardlimit);
 	if (!d->d_itimer) {
-		if ((d->d_ino_softlimit &&
-		     (be64_to_cpu(d->d_icount) >
-		      be64_to_cpu(d->d_ino_softlimit))) ||
-		    (d->d_ino_hardlimit &&
-		     (be64_to_cpu(d->d_icount) >
-		      be64_to_cpu(d->d_ino_hardlimit)))) {
+		if (over) {
 			d->d_itimer = cpu_to_be32(get_seconds() +
 					mp->m_quotainfo->qi_itimelimit);
 		} else {
 			d->d_iwarns = 0;
 		}
 	} else {
-		if ((!d->d_ino_softlimit ||
-		     (be64_to_cpu(d->d_icount) <=
-		      be64_to_cpu(d->d_ino_softlimit)))  &&
-		    (!d->d_ino_hardlimit ||
-		     (be64_to_cpu(d->d_icount) <=
-		      be64_to_cpu(d->d_ino_hardlimit)))) {
+		if (!over) {
 			d->d_itimer = 0;
 		}
 	}
 
+	over = xfs_quota_exceeded(&d->d_rtbcount, &d->d_rtb_softlimit,
+			&d->d_rtb_hardlimit);
 	if (!d->d_rtbtimer) {
-		if ((d->d_rtb_softlimit &&
-		     (be64_to_cpu(d->d_rtbcount) >
-		      be64_to_cpu(d->d_rtb_softlimit))) ||
-		    (d->d_rtb_hardlimit &&
-		     (be64_to_cpu(d->d_rtbcount) >
-		      be64_to_cpu(d->d_rtb_hardlimit)))) {
+		if (over) {
 			d->d_rtbtimer = cpu_to_be32(get_seconds() +
 					mp->m_quotainfo->qi_rtbtimelimit);
 		} else {
 			d->d_rtbwarns = 0;
 		}
 	} else {
-		if ((!d->d_rtb_softlimit ||
-		     (be64_to_cpu(d->d_rtbcount) <=
-		      be64_to_cpu(d->d_rtb_softlimit))) &&
-		    (!d->d_rtb_hardlimit ||
-		     (be64_to_cpu(d->d_rtbcount) <=
-		      be64_to_cpu(d->d_rtb_hardlimit)))) {
+		if (!over) {
 			d->d_rtbtimer = 0;
 		}
 	}
