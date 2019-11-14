@@ -101,13 +101,16 @@ xfs_qm_adjust_dqlimits(
 
 static inline bool
 xfs_quota_exceeded(
-	const __be64		*count,
+	const __be64		*dcount,
+	xfs_qcnt_t		ina_count,
 	const __be64		*softlimit,
-	const __be64		*hardlimit) {
+	const __be64		*hardlimit)
+{
+	uint64_t		count = be64_to_cpup(dcount) - ina_count;
 
-	if (*softlimit && be64_to_cpup(count) > be64_to_cpup(softlimit))
+	if (*softlimit && count > be64_to_cpup(softlimit))
 		return true;
-	return *hardlimit && be64_to_cpup(count) > be64_to_cpup(hardlimit);
+	return *hardlimit && count > be64_to_cpup(hardlimit);
 }
 
 /*
@@ -126,8 +129,9 @@ xfs_quota_exceeded(
 void
 xfs_qm_adjust_dqtimers(
 	struct xfs_mount	*mp,
-	struct xfs_disk_dquot	*d)
+	struct xfs_dquot	*dqp)
 {
+	struct xfs_disk_dquot	*d = &dqp->q_core;
 	bool			over;
 
 	ASSERT(d->d_id);
@@ -144,8 +148,8 @@ xfs_qm_adjust_dqtimers(
 		       be64_to_cpu(d->d_rtb_hardlimit));
 #endif
 
-	over = xfs_quota_exceeded(&d->d_bcount, &d->d_blk_softlimit,
-			&d->d_blk_hardlimit);
+	over = xfs_quota_exceeded(&d->d_bcount, dqp->q_ina_bcount,
+			&d->d_blk_softlimit, &d->d_blk_hardlimit);
 	if (!d->d_btimer) {
 		if (over) {
 			d->d_btimer = cpu_to_be32(get_seconds() +
@@ -159,8 +163,8 @@ xfs_qm_adjust_dqtimers(
 		}
 	}
 
-	over = xfs_quota_exceeded(&d->d_icount, &d->d_ino_softlimit,
-			&d->d_ino_hardlimit);
+	over = xfs_quota_exceeded(&d->d_icount, dqp->q_ina_icount,
+			&d->d_ino_softlimit, &d->d_ino_hardlimit);
 	if (!d->d_itimer) {
 		if (over) {
 			d->d_itimer = cpu_to_be32(get_seconds() +
@@ -174,8 +178,8 @@ xfs_qm_adjust_dqtimers(
 		}
 	}
 
-	over = xfs_quota_exceeded(&d->d_rtbcount, &d->d_rtb_softlimit,
-			&d->d_rtb_hardlimit);
+	over = xfs_quota_exceeded(&d->d_rtbcount, dqp->q_ina_rtbcount,
+			&d->d_rtb_softlimit, &d->d_rtb_hardlimit);
 	if (!d->d_rtbtimer) {
 		if (over) {
 			d->d_rtbtimer = cpu_to_be32(get_seconds() +
@@ -1279,6 +1283,8 @@ xfs_dquot_adjust(
 	dqp->q_ina_icount += inodes;
 	dqp->q_ina_bcount += dblocks;
 	dqp->q_ina_rtbcount += rblocks;
+	if (dqp->q_core.d_id)
+		xfs_qm_adjust_dqtimers(dqp->q_mount, dqp);
 	xfs_dqunlock(dqp);
 }
 
