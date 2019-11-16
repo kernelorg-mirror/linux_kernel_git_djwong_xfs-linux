@@ -842,6 +842,23 @@ xfs_qm_qino_alloc(
 	return error;
 }
 
+/* Save the grace period intervals when zeroing dquots for quotacheck. */
+static inline void
+xfs_qm_reset_dqintervals(
+	struct xfs_mount	*mp,
+	struct xfs_disk_dquot	*ddq)
+{
+	struct xfs_quotainfo	*qinf = mp->m_quotainfo;
+
+	if (qinf->qi_btimelimit != XFS_QM_BTIMELIMIT)
+		ddq->d_btimer = cpu_to_be32(qinf->qi_btimelimit);
+
+	if (qinf->qi_itimelimit != XFS_QM_ITIMELIMIT)
+		ddq->d_itimer = cpu_to_be32(qinf->qi_itimelimit);
+
+	if (qinf->qi_rtbtimelimit != XFS_QM_RTBTIMELIMIT)
+		ddq->d_rtbtimer = cpu_to_be32(qinf->qi_rtbtimelimit);
+}
 
 STATIC void
 xfs_qm_reset_dqcounts(
@@ -895,6 +912,8 @@ xfs_qm_reset_dqcounts(
 		ddq->d_bwarns = 0;
 		ddq->d_iwarns = 0;
 		ddq->d_rtbwarns = 0;
+		if (!ddq->d_id)
+			xfs_qm_reset_dqintervals(mp, ddq);
 
 		if (xfs_sb_version_hascrc(&mp->m_sb)) {
 			xfs_update_cksum((char *)&dqb[j],
