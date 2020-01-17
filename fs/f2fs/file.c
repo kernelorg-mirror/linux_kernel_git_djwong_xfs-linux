@@ -51,7 +51,7 @@ static vm_fault_t f2fs_vm_page_mkwrite(struct vm_fault *vmf)
 	struct inode *inode = file_inode(vmf->vma->vm_file);
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
 	struct dnode_of_data dn = { .node_changed = false };
-	int err;
+	int offset, err;
 
 	if (unlikely(f2fs_cp_error(sbi))) {
 		err = -EIO;
@@ -70,11 +70,12 @@ static vm_fault_t f2fs_vm_page_mkwrite(struct vm_fault *vmf)
 	file_update_time(vmf->vma->vm_file);
 	down_read(&F2FS_I(inode)->i_mmap_sem);
 	lock_page(page);
-	if (unlikely(page->mapping != inode->i_mapping ||
-			page_offset(page) > i_size_read(inode) ||
-			!PageUptodate(page))) {
+	offset = -EFAULT;
+	if (likely(PageUptodate(page)))
+		offset = page_mkwrite_check_truncate(page, inode);
+	if (unlikely(offset < 0)) {
 		unlock_page(page);
-		err = -EFAULT;
+		err = offset;
 		goto out_sem;
 	}
 
@@ -101,14 +102,8 @@ static vm_fault_t f2fs_vm_page_mkwrite(struct vm_fault *vmf)
 	if (PageMappedToDisk(page))
 		goto out_sem;
 
-	/* page is wholly or partially inside EOF */
-	if (((loff_t)(page->index + 1) << PAGE_SHIFT) >
-						i_size_read(inode)) {
-		loff_t offset;
-
-		offset = i_size_read(inode) & ~PAGE_MASK;
+	if (offset != PAGE_SIZE)
 		zero_user_segment(page, offset, PAGE_SIZE);
-	}
 	set_page_dirty(page);
 	if (!PageUptodate(page))
 		SetPageUptodate(page);

@@ -636,4 +636,6 @@ static inline unsigned long dir_pages(struct inode *inode)
 			       PAGE_SHIFT;
 }
 
+int page_mkwrite_check_truncate(struct page *page, struct inode *inode);
+
 #endif /* _LINUX_PAGEMAP_H */
