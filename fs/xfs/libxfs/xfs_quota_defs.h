@@ -26,6 +26,7 @@ typedef uint16_t	xfs_qwarncnt_t;
 #define XFS_DQ_GROUP		0x0004		/* a group quota */
 #define XFS_DQ_DIRTY		0x0008		/* dquot is dirty */
 #define XFS_DQ_FREEING		0x0010		/* dquot is being torn down */
+#define XFS_DQ_BIGTIME		0x0020		/* big timestamp format */
 
 #define XFS_DQ_ALLTYPES		(XFS_DQ_USER|XFS_DQ_PROJ|XFS_DQ_GROUP)
 
@@ -34,7 +35,8 @@ typedef uint16_t	xfs_qwarncnt_t;
 	{ XFS_DQ_PROJ,		"PROJ" }, \
 	{ XFS_DQ_GROUP,		"GROUP" }, \
 	{ XFS_DQ_DIRTY,		"DIRTY" }, \
-	{ XFS_DQ_FREEING,	"FREEING" }
+	{ XFS_DQ_FREEING,	"FREEING" }, \
+	{ XFS_DQ_BIGTIME,	"BIGTIME" }
 
 /*
  * We have the possibility of all three quota types being active at once, and
@@ -144,7 +146,10 @@ extern xfs_failaddr_t xfs_dqblk_verify(struct xfs_mount *mp,
 extern int xfs_calc_dquots_per_chunk(unsigned int nbblks);
 extern void xfs_dqblk_repair(struct xfs_mount *mp, struct xfs_dqblk *dqb,
 		xfs_dqid_t id, uint type);
-void xfs_dquot_from_disk_timestamp(struct timespec64 *tv, __be32 dtimer);
-void xfs_dquot_to_disk_timestamp(__be32 *dtimer, const struct timespec64 *tv);
+void xfs_dquot_from_disk_timestamp(struct xfs_disk_dquot *ddq,
+		struct timespec64 *tv, __be32 dtimer);
+void xfs_dquot_to_disk_timestamp(struct xfs_disk_dquot *ddq,
+		__be32 *dtimer, const struct timespec64 *tv);
+bool xfs_dquot_add_bigtime(struct xfs_mount *mp, struct xfs_disk_dquot *ddq);
 
 #endif	/* __XFS_QUOTA_H__ */
