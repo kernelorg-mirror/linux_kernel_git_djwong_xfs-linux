@@ -1571,8 +1571,8 @@ xfs_fc_fill_super(
 	sb->s_maxbytes = MAX_LFS_FILESIZE;
 	sb->s_max_links = XFS_MAXLINK;
 	sb->s_time_gran = 1;
-	sb->s_time_min = S32_MIN;
-	sb->s_time_max = S32_MAX;
+	sb->s_time_min = XFS_INO_TIME_MIN;
+	sb->s_time_max = XFS_INO_TIME_MAX;
 	sb->s_iflags |= SB_I_CGROUPWB;
 
 	set_posix_acl_flag(sb);
@@ -2168,6 +2168,7 @@ init_xfs_fs(void)
 {
 	int			error;
 
+	xfs_check_limits();
 	xfs_check_ondisk_structs();
 
 	printk(KERN_INFO XFS_VERSION_STRING " with "
