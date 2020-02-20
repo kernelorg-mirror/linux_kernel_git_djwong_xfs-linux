@@ -841,10 +841,29 @@ typedef struct xfs_agfl {
 	    ASSERT(xfs_daddr_to_agno(mp, d) == \
 		   xfs_daddr_to_agno(mp, (d) + (len) - 1)))
 
+/*
+ * XFS Timestamps
+ * ==============
+ *
+ * Inode timestamps consist of signed 32-bit counters for seconds and
+ * nanoseconds; time zero is the Unix epoch, Jan  1 00:00:00 UTC 1970.
+ */
 typedef struct xfs_timestamp {
 	__be32		t_sec;		/* timestamp seconds */
 	__be32		t_nsec;		/* timestamp nanoseconds */
 } xfs_timestamp_t;
+
+/*
+ * Smallest possible timestamp with traditional timestamps, which is
+ * Dec 13 20:45:52 UTC 1901.
+ */
+#define XFS_INO_TIME_MIN	((int64_t)S32_MIN)
+
+/*
+ * Largest possible timestamp with traditional timestamps, which is
+ * Jan 19 03:14:07 UTC 2038.
+ */
+#define XFS_INO_TIME_MAX	((int64_t)S32_MAX)
 
 /*
  * On-disk inode structure.
