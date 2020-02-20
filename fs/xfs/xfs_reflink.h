@@ -6,12 +6,6 @@
 #ifndef __XFS_REFLINK_H
 #define __XFS_REFLINK_H 1
 
-static inline bool xfs_is_always_cow_inode(struct xfs_inode *ip)
-{
-	return ip->i_mount->m_always_cow &&
-		xfs_sb_version_hasreflink(&ip->i_mount->m_sb);
-}
-
 static inline bool xfs_is_cow_inode(struct xfs_inode *ip)
 {
 	return xfs_is_reflink_inode(ip) || xfs_is_always_cow_inode(ip);
