@@ -576,23 +576,30 @@ xfs_qm_scall_setqlim(
 	 * For other IDs, userspace can bump out the grace period if over
 	 * the soft limit.
 	 */
-	if (newlim->d_fieldmask & QC_SPC_TIMER)
-		dqp->q_btimer = newlim->d_spc_timer;
-	if (newlim->d_fieldmask & QC_INO_TIMER)
-		dqp->q_itimer = newlim->d_ino_timer;
-	if (newlim->d_fieldmask & QC_RT_SPC_TIMER)
-		dqp->q_rtbtimer = newlim->d_rt_spc_timer;
-
 	if (id == 0) {
-		if (newlim->d_fieldmask & QC_SPC_TIMER)
+		if (newlim->d_fieldmask & QC_SPC_TIMER) {
+			dqp->q_btimer = newlim->d_spc_timer;
 			defq->btimelimit = newlim->d_spc_timer;
-		if (newlim->d_fieldmask & QC_INO_TIMER)
+		}
+		if (newlim->d_fieldmask & QC_INO_TIMER) {
+			dqp->q_itimer = newlim->d_ino_timer;
 			defq->itimelimit = newlim->d_ino_timer;
-		if (newlim->d_fieldmask & QC_RT_SPC_TIMER)
+		}
+		if (newlim->d_fieldmask & QC_RT_SPC_TIMER) {
+			dqp->q_rtbtimer = newlim->d_rt_spc_timer;
 			defq->rtbtimelimit = newlim->d_rt_spc_timer;
-	}
+		}
+	} else {
+		if (newlim->d_fieldmask & QC_SPC_TIMER)
+			xfs_dquot_set_timer(&dqp->q_btimer,
+					    newlim->d_spc_timer);
+		if (newlim->d_fieldmask & QC_INO_TIMER)
+			xfs_dquot_set_timer(&dqp->q_itimer,
+					    newlim->d_ino_timer);
+		if (newlim->d_fieldmask & QC_RT_SPC_TIMER)
+			xfs_dquot_set_timer(&dqp->q_rtbtimer,
+					    newlim->d_rt_spc_timer);
 
-	if (id != 0) {
 		/*
 		 * If the user is now over quota, start the timelimit.
 		 * The user will not be 'warned'.
