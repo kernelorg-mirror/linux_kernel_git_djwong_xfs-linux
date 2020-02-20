@@ -199,7 +199,7 @@ static inline void
 xchk_dinode_nsec(
 	struct xfs_scrub		*sc,
 	xfs_ino_t			ino,
-	const struct xfs_timestamp	*ts)
+	const union xfs_timestamp	*ts)
 {
 	struct timespec64		tv;
 
