@@ -442,15 +442,17 @@ xfs_qm_scall_quotaon(
 static inline void
 xfs_qm_set_grace(
 	time64_t		*qi_limit,
+	time64_t		*itimer,
 	__be32			*dtimer,
 	const s64		grace)
 {
-	time64_t		new_grace;
+	struct timespec64	tv = { 0 };
 
-	new_grace = clamp_t(time64_t, grace, XFS_DQ_GRACE_MIN,
+	tv.tv_sec = clamp_t(time64_t, grace, XFS_DQ_GRACE_MIN,
 					     XFS_DQ_GRACE_MAX);
-	*qi_limit = new_grace;
-	*dtimer = cpu_to_be32(new_grace);
+	*qi_limit = tv.tv_sec;
+	*itimer = tv.tv_sec;
+	xfs_dquot_to_disk_timestamp(dtimer, &tv);
 }
 
 #define XFS_QC_MASK \
@@ -583,13 +585,14 @@ xfs_qm_scall_setqlim(
 		 * for warnings.
 		 */
 		if (newlim->d_fieldmask & QC_SPC_TIMER)
-			xfs_qm_set_grace(&q->qi_btimelimit, &ddq->d_btimer,
-					newlim->d_spc_timer);
+			xfs_qm_set_grace(&q->qi_btimelimit, &dqp->q_btimer,
+					&ddq->d_btimer, newlim->d_spc_timer);
 		if (newlim->d_fieldmask & QC_INO_TIMER)
-			xfs_qm_set_grace(&q->qi_itimelimit, &ddq->d_itimer,
-					newlim->d_ino_timer);
+			xfs_qm_set_grace(&q->qi_itimelimit, &dqp->q_itimer,
+					&ddq->d_itimer, newlim->d_ino_timer);
 		if (newlim->d_fieldmask & QC_RT_SPC_TIMER)
-			xfs_qm_set_grace(&q->qi_rtbtimelimit, &ddq->d_rtbtimer,
+			xfs_qm_set_grace(&q->qi_rtbtimelimit, &dqp->q_rtbtimer,
+					&ddq->d_rtbtimer,
 					newlim->d_rt_spc_timer);
 		if (newlim->d_fieldmask & QC_SPC_WARNS)
 			q->qi_bwarnlimit = newlim->d_spc_warns;
@@ -636,8 +639,8 @@ xfs_qm_scall_getquota_fill_qc(
 	dst->d_ino_softlimit = be64_to_cpu(dqp->q_core.d_ino_softlimit);
 	dst->d_space = XFS_FSB_TO_B(mp, dqp->q_res_bcount - dqp->q_ina_bcount);
 	dst->d_ino_count = dqp->q_res_icount - dqp->q_ina_icount;
-	dst->d_spc_timer = be32_to_cpu(dqp->q_core.d_btimer);
-	dst->d_ino_timer = be32_to_cpu(dqp->q_core.d_itimer);
+	dst->d_spc_timer = dqp->q_btimer;
+	dst->d_ino_timer = dqp->q_itimer;
 	dst->d_ino_warns = be16_to_cpu(dqp->q_core.d_iwarns);
 	dst->d_spc_warns = be16_to_cpu(dqp->q_core.d_bwarns);
 	dst->d_rt_spc_hardlimit =
@@ -646,7 +649,7 @@ xfs_qm_scall_getquota_fill_qc(
 		XFS_FSB_TO_B(mp, be64_to_cpu(dqp->q_core.d_rtb_softlimit));
 	dst->d_rt_space =
 		XFS_FSB_TO_B(mp, dqp->q_res_rtbcount - dqp->q_ina_rtbcount);
-	dst->d_rt_spc_timer = be32_to_cpu(dqp->q_core.d_rtbtimer);
+	dst->d_rt_spc_timer = dqp->q_rtbtimer;
 	dst->d_rt_spc_warns = be16_to_cpu(dqp->q_core.d_rtbwarns);
 
 	/*
