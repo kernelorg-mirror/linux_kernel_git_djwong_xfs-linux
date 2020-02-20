@@ -856,9 +856,11 @@ struct xfs_agfl {
  * Inode timestamps consist of signed 32-bit counters for seconds and
  * nanoseconds; time zero is the Unix epoch, Jan  1 00:00:00 UTC 1970.
  */
-struct xfs_timestamp {
-	__be32		t_sec;		/* timestamp seconds */
-	__be32		t_nsec;		/* timestamp nanoseconds */
+union xfs_timestamp {
+	struct {
+		__be32		t_sec;		/* timestamp seconds */
+		__be32		t_nsec;		/* timestamp nanoseconds */
+	};
 };
 
 /*
@@ -904,9 +906,9 @@ typedef struct xfs_dinode {
 	__be16		di_projid_hi;	/* higher part owner's project id */
 	__u8		di_pad[6];	/* unused, zeroed space */
 	__be16		di_flushiter;	/* incremented on flush */
-	struct xfs_timestamp di_atime;	/* time last accessed */
-	struct xfs_timestamp di_mtime;	/* time last modified */
-	struct xfs_timestamp di_ctime;	/* time created/inode modified */
+	union xfs_timestamp di_atime;	/* time last accessed */
+	union xfs_timestamp di_mtime;	/* time last modified */
+	union xfs_timestamp di_ctime;	/* time created/inode modified */
 	__be64		di_size;	/* number of bytes in file */
 	__be64		di_nblocks;	/* # of direct & btree blocks used */
 	__be32		di_extsize;	/* basic/minimum extent size for file */
@@ -931,7 +933,7 @@ typedef struct xfs_dinode {
 	__u8		di_pad2[12];	/* more padding for future expansion */
 
 	/* fields only written to during inode creation */
-	struct xfs_timestamp di_crtime;	/* time created */
+	union xfs_timestamp di_crtime;	/* time created */
 	__be64		di_ino;		/* inode number */
 	uuid_t		di_uuid;	/* UUID of the filesystem */
 
