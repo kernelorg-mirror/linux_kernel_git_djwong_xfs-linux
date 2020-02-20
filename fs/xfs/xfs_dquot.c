@@ -97,6 +97,33 @@ xfs_qm_adjust_dqlimits(
 		xfs_dquot_set_prealloc_limits(dq);
 }
 
+/* Determine if this quota counter is over either limit. */
+static inline bool
+xfs_quota_exceeded(
+	const xfs_qcnt_t	count,
+	const xfs_qcnt_t	softlimit,
+	const xfs_qcnt_t	hardlimit)
+{
+	return (softlimit && count > softlimit) ||
+	       (hardlimit && count > hardlimit);
+}
+
+/* Adjust the quota timer and warning counters as necessary. */
+static inline void
+xfs_dqtimer_adj(
+	bool			over,
+	time64_t		grace,
+	time64_t		*timer,
+	uint16_t		*warns)
+{
+	if (over && *timer == 0)
+		*timer = ktime_get_real_seconds() + grace;
+	else if (!over && *timer != 0)
+		*timer = 0;
+	else if (!over && *timer == 0)
+		*warns = 0;
+}
+
 /*
  * Check the limits and timers of a dquot and start or reset timers
  * if necessary.
@@ -117,6 +144,7 @@ xfs_qm_adjust_dqtimers(
 	struct xfs_mount	*mp = dq->q_mount;
 	struct xfs_quotainfo	*qi = mp->m_quotainfo;
 	struct xfs_def_quota	*defq;
+	bool			over;
 
 	ASSERT(dq->q_id);
 	defq = xfs_get_defquota(qi, xfs_dquot_type(dq));
@@ -130,62 +158,18 @@ xfs_qm_adjust_dqtimers(
 		ASSERT(dq->q_rtb_softlimit <= dq->q_rtb_hardlimit);
 #endif
 
-	if (!dq->q_btimer) {
-		if ((dq->q_blk_softlimit &&
-		     (dq->q_bcount > dq->q_blk_softlimit)) ||
-		    (dq->q_blk_hardlimit &&
-		     (dq->q_bcount > dq->q_blk_hardlimit))) {
-			dq->q_btimer = ktime_get_real_seconds() +
-					defq->btimelimit;
-		} else {
-			dq->q_bwarns = 0;
-		}
-	} else {
-		if ((!dq->q_blk_softlimit ||
-		     (dq->q_bcount <= dq->q_blk_softlimit)) &&
-		    (!dq->q_blk_hardlimit ||
-		    (dq->q_bcount <= dq->q_blk_hardlimit))) {
-			dq->q_btimer = 0;
-		}
-	}
+	over = xfs_quota_exceeded(dq->q_bcount, dq->q_blk_softlimit,
+			dq->q_blk_hardlimit);
+	xfs_dqtimer_adj(over, defq->btimelimit, &dq->q_btimer, &dq->q_bwarns);
 
-	if (!dq->q_itimer) {
-		if ((dq->q_ino_softlimit &&
-		     (dq->q_icount > dq->q_ino_softlimit)) ||
-		    (dq->q_ino_hardlimit &&
-		     (dq->q_icount > dq->q_ino_hardlimit))) {
-			dq->q_itimer = ktime_get_real_seconds() +
-					defq->itimelimit;
-		} else {
-			dq->q_iwarns = 0;
-		}
-	} else {
-		if ((!dq->q_ino_softlimit ||
-		     (dq->q_icount <= dq->q_ino_softlimit))  &&
-		    (!dq->q_ino_hardlimit ||
-		     (dq->q_icount <= dq->q_ino_hardlimit))) {
-			dq->q_itimer = 0;
-		}
-	}
+	over = xfs_quota_exceeded(dq->q_icount, dq->q_ino_softlimit,
+			dq->q_ino_hardlimit);
+	xfs_dqtimer_adj(over, defq->itimelimit, &dq->q_itimer, &dq->q_iwarns);
 
-	if (!dq->q_rtbtimer) {
-		if ((dq->q_rtb_softlimit &&
-		     (dq->q_rtbcount > dq->q_rtb_softlimit)) ||
-		    (dq->q_rtb_hardlimit &&
-		     (dq->q_rtbcount > dq->q_rtb_hardlimit))) {
-			dq->q_rtbtimer = ktime_get_real_seconds() +
-					defq->rtbtimelimit;
-		} else {
-			dq->q_rtbwarns = 0;
-		}
-	} else {
-		if ((!dq->q_rtb_softlimit ||
-		     (dq->q_rtbcount <= dq->q_rtb_softlimit)) &&
-		    (!dq->q_rtb_hardlimit ||
-		     (dq->q_rtbcount <= dq->q_rtb_hardlimit))) {
-			dq->q_rtbtimer = 0;
-		}
-	}
+	over = xfs_quota_exceeded(dq->q_rtbcount, dq->q_rtb_softlimit,
+			dq->q_rtb_hardlimit);
+	xfs_dqtimer_adj(over, defq->rtbtimelimit, &dq->q_rtbtimer,
+			&dq->q_rtbwarns);
 }
 
 /*
