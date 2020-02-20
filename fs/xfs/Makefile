@@ -154,6 +154,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   rmap.o \
 				   scrub.o \
 				   symlink.o \
+				   xfile.o \
 				   )
 
 xfs-$(CONFIG_XFS_RT)		+= scrub/rtbitmap.o
@@ -163,6 +164,7 @@ xfs-$(CONFIG_XFS_QUOTA)		+= scrub/quota.o
 ifeq ($(CONFIG_XFS_ONLINE_REPAIR),y)
 xfs-y				+= $(addprefix scrub/, \
 				   agheader_repair.o \
+				   array.o \
 				   bitmap.o \
 				   repair.o \
 				   )
