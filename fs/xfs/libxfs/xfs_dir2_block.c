@@ -154,6 +154,7 @@ xfs_dir3_block_read(
 		(*bpp)->b_flags &= ~XBF_DONE;
 		xfs_trans_brelse(tp, *bpp);
 		*bpp = NULL;
+		xfs_dirattr_mark_sick(dp, XFS_DATA_FORK);
 		return -EFSCORRUPTED;
 	}
 
