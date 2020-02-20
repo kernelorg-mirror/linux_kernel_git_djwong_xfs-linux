@@ -287,3 +287,20 @@ const struct xfs_buf_ops xfs_dquot_buf_ra_ops = {
 	.verify_read = xfs_dquot_buf_readahead_verify,
 	.verify_write = xfs_dquot_buf_write_verify,
 };
+
+void
+xfs_dquot_from_disk_timestamp(
+	struct timespec64	*tv,
+	__be32			dtimer)
+{
+	tv->tv_nsec = 0;
+	tv->tv_sec = be32_to_cpu(dtimer);
+}
+
+void
+xfs_dquot_to_disk_timestamp(
+	__be32			*dtimer,
+	const struct timespec64	*tv)
+{
+	*dtimer = cpu_to_be32(tv->tv_sec);
+}
