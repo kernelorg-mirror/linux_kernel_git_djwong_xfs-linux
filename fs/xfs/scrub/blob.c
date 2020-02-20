@@ -44,6 +44,7 @@ xblob_init(void)
 
 	blob->filp = filp;
 	blob->last_offset = PAGE_SIZE;
+	blob->io_flags = 0;
 	return blob;
 out_filp:
 	fput(filp);
@@ -71,7 +72,8 @@ xblob_get(
 	loff_t		pos = cookie;
 	int		error;
 
-	error = xfile_io(blob->filp, XFILE_IO_READ, &pos, &key, sizeof(key));
+	error = xfile_io(blob->filp, blob->io_flags | XFILE_IO_READ, &pos,
+			&key, sizeof(key));
 	if (error)
 		return error;
 
@@ -84,7 +86,8 @@ xblob_get(
 		return -EFBIG;
 	}
 
-	return xfile_io(blob->filp, XFILE_IO_READ, &pos, ptr, key.size);
+	return xfile_io(blob->filp, blob->io_flags | XFILE_IO_READ, &pos, ptr,
+			key.size);
 }
 
 /* Store a blob. */
@@ -103,11 +106,13 @@ xblob_put(
 	loff_t		pos = blob->last_offset;
 	int		error;
 
-	error = xfile_io(blob->filp, XFILE_IO_WRITE, &pos, &key, sizeof(key));
+	error = xfile_io(blob->filp, blob->io_flags | XFILE_IO_WRITE, &pos,
+			&key, sizeof(key));
 	if (error)
 		goto out_err;
 
-	error = xfile_io(blob->filp, XFILE_IO_WRITE, &pos, ptr, size);
+	error = xfile_io(blob->filp, blob->io_flags | XFILE_IO_WRITE, &pos,
+			ptr, size);
 	if (error)
 		goto out_err;
 
@@ -129,7 +134,8 @@ xblob_free(
 	loff_t		pos = cookie;
 	int		error;
 
-	error = xfile_io(blob->filp, XFILE_IO_READ, &pos, &key, sizeof(key));
+	error = xfile_io(blob->filp, blob->io_flags | XFILE_IO_READ, &pos,
+			&key, sizeof(key));
 	if (error)
 		return error;
 
