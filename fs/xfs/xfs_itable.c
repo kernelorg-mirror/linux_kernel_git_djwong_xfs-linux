@@ -75,6 +75,17 @@ xfs_bulkstat_one_int(
 	if (error)
 		goto out;
 
+	/*
+	 * Inodes marked as being metadata are treated the same as "internal"
+	 * metadata inodes (which are rooted in the superblock).
+	 */
+	if (xfs_is_metadata_inode(ip)) {
+		xfs_iunlock(ip, XFS_ILOCK_SHARED);
+		xfs_irele(ip);
+		error = -EINVAL;
+		goto out_advance;
+	}
+
 	ASSERT(ip != NULL);
 	ASSERT(ip->i_imap.im_blkno != 0);
 	inode = VFS_I(ip);
