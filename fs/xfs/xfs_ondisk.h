@@ -15,6 +15,18 @@
 		"XFS: offsetof(" #structname ", " #member ") is wrong, " \
 		"expected " #off)
 
+#define XFS_CHECK_VALUE(value, expected) \
+	BUILD_BUG_ON_MSG((value) != (expected), \
+		"XFS: value of " #value " is wrong, expected " #expected)
+
+static inline void __init
+xfs_check_limits(void)
+{
+	/* make sure timestamp limits are correct */
+	XFS_CHECK_VALUE(XFS_INO_TIME_MIN,			-2147483648LL);
+	XFS_CHECK_VALUE(XFS_INO_TIME_MAX,			2147483647LL);
+}
+
 static inline void __init
 xfs_check_ondisk_structs(void)
 {
