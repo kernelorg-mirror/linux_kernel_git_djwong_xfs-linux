@@ -1960,6 +1960,142 @@ xfs_fs_eofblocks_from_user(
 	return 0;
 }
 
+static inline int
+xfs_ioc_getfsuuid(
+	struct xfs_mount		*mp,
+	struct ioc_fsuuid __user	*user_fu)
+{
+	struct ioc_fsuuid		fu;
+
+	if (copy_from_user(&fu, user_fu, sizeof(fu)))
+		return -EFAULT;
+
+	if (fu.fu_reserved || fu.fu_reserved1 || fu.fu_flags)
+		return -EINVAL;
+
+	if (fu.fu_length == 0) {
+		fu.fu_length = sizeof(uuid_t);
+		goto out;
+	}
+
+	if (fu.fu_length < sizeof(uuid_t))
+		return -EINVAL;
+
+	if (copy_to_user(user_fu + 1, &mp->m_super->s_uuid, sizeof(uuid_t)))
+		return -EFAULT;
+	fu.fu_length = sizeof(uuid_t);
+
+out:
+	if (copy_to_user(user_fu, &fu, sizeof(fu)))
+		return -EFAULT;
+	return 0;
+}
+
+static inline int
+xfs_ioc_setfsuuid(
+	struct file			*filp,
+	struct xfs_mount		*mp,
+	struct ioc_fsuuid __user	*user_fu)
+{
+	struct ioc_fsuuid		fu;
+	uuid_t				old_uuid;
+	uuid_t				new_uuid;
+	uuid_t				*forget_uuid = NULL;
+	int				error;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	if (copy_from_user(&fu, user_fu, sizeof(fu)))
+		return -EFAULT;
+
+	if (fu.fu_reserved || fu.fu_reserved1 ||
+	    (fu.fu_flags & ~FS_IOC_SETFSUUID_ALL) ||
+	    fu.fu_length != sizeof(uuid_t))
+		return -EINVAL;
+
+	if (copy_from_user(&new_uuid, user_fu + 1, sizeof(uuid_t)))
+		return -EFAULT;
+	if (uuid_is_null(&new_uuid))
+		return -EINVAL;
+
+	error = mnt_want_write_file(filp);
+	if (error)
+		return error;
+
+	/* Save a slot in the uuid table, if desired. */
+	if (!(mp->m_flags & XFS_MOUNT_NOUUID)) {
+		error = xfs_uuid_remember(&new_uuid);
+		if (error)
+			goto out_drop_write;
+		forget_uuid = &new_uuid;
+	}
+
+	spin_lock(&mp->m_sb_lock);
+	uuid_copy(&old_uuid, &mp->m_sb.sb_uuid);
+
+	/*
+	 * Before v5, the uuid was only set in the superblock, so all we need
+	 * to do here is update the incore sb and write that out to disk.
+	 *
+	 * On a v5 filesystem, every metadata object has a uuid stamped into
+	 * the header.  The particular uuid used is either sb_uuid or
+	 * sb_meta_uuid, depending on whether the meta_uuid feature is set.
+	 *
+	 * If the meta_uuid feature is set and the new uuid matches the
+	 * meta_uuid, then we'll deactivate the feature and set sb_uuid to the
+	 * new uuid.
+	 *
+	 * If the meta_uuid feature is not set, the new uuid does not match the
+	 * existing sb_uuid, we need to turn on the meta_uuid feature.  If
+	 * userspace did not set FORCE_INCOMPAT we have to bail out.
+	 * Otherwise, copy sb_uuid to sb_meta_uuid, set the meta_uuid feature
+	 * bit, and set sb_uuid to the new uuid.
+	 */
+	if (xfs_sb_version_hasmetauuid(&mp->m_sb) &&
+	    uuid_equal(&new_uuid, &mp->m_sb.sb_meta_uuid)) {
+		mp->m_sb.sb_features_incompat &= ~XFS_SB_FEAT_INCOMPAT_META_UUID;
+	} else if (xfs_sb_version_hascrc(&mp->m_sb) &&
+		   !xfs_sb_version_hasmetauuid(&mp->m_sb) &&
+		   !uuid_equal(&new_uuid, &mp->m_sb.sb_uuid)) {
+		if (!(fu.fu_flags & FS_IOC_SETFSUUID_FORCE_INCOMPAT)) {
+			spin_unlock(&mp->m_sb_lock);
+			error = -EOPNOTSUPP;
+			goto out_drop_uuid;
+		}
+		uuid_copy(&mp->m_sb.sb_meta_uuid, &mp->m_sb.sb_uuid);
+		mp->m_sb.sb_features_incompat |= XFS_SB_FEAT_INCOMPAT_META_UUID;
+	}
+	uuid_copy(&mp->m_sb.sb_uuid, &new_uuid);
+	spin_unlock(&mp->m_sb_lock);
+
+	error = xfs_sync_sb_buf(mp);
+	if (error)
+		goto out_drop_uuid;
+
+	/* Update incore state and prepare to drop the old uuid. */
+	uuid_copy(&mp->m_super->s_uuid, &new_uuid);
+	if (!(mp->m_flags & XFS_MOUNT_NOUUID))
+		forget_uuid = &old_uuid;
+
+	/*
+	 * Update the secondary supers, being aware that growfs also updates
+	 * backup supers so we need to lock against that.
+	 */
+	mutex_lock(&mp->m_growlock);
+	error = xfs_update_secondary_sbs(mp);
+	mutex_unlock(&mp->m_growlock);
+
+	invalidate_bdev(mp->m_ddev_targp->bt_bdev);
+
+out_drop_uuid:
+	if (forget_uuid)
+		xfs_uuid_forget(forget_uuid);
+out_drop_write:
+	mnt_drop_write_file(filp);
+	return error;
+}
+
 /*
  * Note: some of the ioctl's return positive numbers as a
  * byte count indicating success, such as readlink_by_handle.
@@ -2245,6 +2381,11 @@ xfs_file_ioctl(
 
 		return xfs_icache_free_eofblocks(mp, &keofb);
 	}
+
+	case FS_IOC_GETFSUUID:
+		return xfs_ioc_getfsuuid(mp, arg);
+	case FS_IOC_SETFSUUID:
+		return xfs_ioc_setfsuuid(filp, mp, arg);
 
 	default:
 		return -ENOTTY;

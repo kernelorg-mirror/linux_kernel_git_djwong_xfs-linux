@@ -58,7 +58,7 @@ xfs_uuid_mount(
 	struct xfs_mount	*mp)
 {
 	uuid_t			*uuid = &mp->m_sb.sb_uuid;
-	int			hole, i;
+	int			error;
 
 	/* Publish UUID in struct super_block */
 	uuid_copy(&mp->m_super->s_uuid, uuid);
@@ -70,6 +70,21 @@ xfs_uuid_mount(
 		xfs_warn(mp, "Filesystem has null UUID - can't mount");
 		return -EINVAL;
 	}
+
+	error = xfs_uuid_remember(uuid);
+	if (!error)
+		return 0;
+
+	xfs_warn(mp, "Filesystem has duplicate UUID %pU - can't mount", uuid);
+	return error;
+}
+
+int
+xfs_uuid_remember(
+	const uuid_t	*uuid)
+{
+	int		hole;
+	int		i;
 
 	mutex_lock(&xfs_uuid_table_mutex);
 	for (i = 0, hole = -1; i < xfs_uuid_table_size; i++) {
@@ -94,7 +109,6 @@ xfs_uuid_mount(
 
  out_duplicate:
 	mutex_unlock(&xfs_uuid_table_mutex);
-	xfs_warn(mp, "Filesystem has duplicate UUID %pU - can't mount", uuid);
 	return -EINVAL;
 }
 
@@ -102,11 +116,17 @@ STATIC void
 xfs_uuid_unmount(
 	struct xfs_mount	*mp)
 {
-	uuid_t			*uuid = &mp->m_sb.sb_uuid;
-	int			i;
-
 	if (mp->m_flags & XFS_MOUNT_NOUUID)
 		return;
+
+	xfs_uuid_forget(&mp->m_sb.sb_uuid);
+}
+
+void
+xfs_uuid_forget(
+	const uuid_t		*uuid)
+{
+	int			i;
 
 	mutex_lock(&xfs_uuid_table_mutex);
 	for (i = 0; i < xfs_uuid_table_size; i++) {

@@ -448,4 +448,7 @@ void xfs_force_summary_recalc(struct xfs_mount *mp);
 void xfs_mod_delalloc(struct xfs_mount *mp, int64_t delta);
 unsigned int xfs_guess_metadata_threads(struct xfs_mount *mp);
 
+int xfs_uuid_remember(const uuid_t *uuid);
+void xfs_uuid_forget(const uuid_t *uuid);
+
 #endif	/* __XFS_MOUNT_H__ */
