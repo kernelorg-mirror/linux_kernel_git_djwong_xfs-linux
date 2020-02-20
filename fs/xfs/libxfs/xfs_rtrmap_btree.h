@@ -101,4 +101,9 @@ void xfs_rtrmapbt_to_disk(struct xfs_mount *mp,
 		struct xfs_btree_block *rblock, int rblocklen,
 		struct xfs_rtrmap_root *dblock, int dblocklen);
 
+struct xfs_imeta_end;
+
+int xfs_rtrmapbt_create(struct xfs_trans **tpp, struct xfs_imeta_end *ic,
+		struct xfs_inode **ipp);
+
 #endif	/* __XFS_RTRMAP_BTREE_H__ */
