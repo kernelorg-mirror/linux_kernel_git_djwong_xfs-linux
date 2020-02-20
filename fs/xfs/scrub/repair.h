@@ -41,7 +41,7 @@ int xrep_set_file_contents(struct xfs_scrub *sc, xrep_setfile_getbuf_fn getbuf,
 
 struct xbitmap;
 
-int xrep_fix_freelist(struct xfs_scrub *sc, bool can_shrink);
+int xrep_fix_freelist(struct xfs_scrub *sc, int alloc_flags);
 int xrep_reap_extents(struct xfs_scrub *sc, struct xbitmap *exlist,
 		const struct xfs_owner_info *oinfo, enum xfs_ag_resv_type type);
 
@@ -64,6 +64,7 @@ int xrep_ino_dqattach(struct xfs_scrub *sc);
 int xrep_reset_perag_resv(struct xfs_scrub *sc);
 int xrep_xattr_reset_fork(struct xfs_scrub *sc, struct xfs_inode *ip);
 int xrep_metadata_inode_forks(struct xfs_scrub *sc);
+int xrep_rmapbt_setup(struct xfs_scrub *sc, struct xfs_inode *ip);
 
 /* Metadata revalidators */
 
@@ -79,6 +80,7 @@ int xrep_agfl(struct xfs_scrub *sc);
 int xrep_agi(struct xfs_scrub *sc);
 int xrep_allocbt(struct xfs_scrub *sc);
 int xrep_iallocbt(struct xfs_scrub *sc);
+int xrep_rmapbt(struct xfs_scrub *sc);
 int xrep_refcountbt(struct xfs_scrub *sc);
 int xrep_inode(struct xfs_scrub *sc);
 int xrep_bmap_data(struct xfs_scrub *sc);
@@ -184,6 +186,16 @@ xrep_reset_perag_resv(
 	return -EOPNOTSUPP;
 }
 
+/* rmap setup function for CONFIG_XFS_REPAIR=n */
+static inline int
+xrep_rmapbt_setup(
+	struct xfs_scrub	*sc,
+	struct xfs_inode		*ip)
+{
+	/* We don't support rmap repair, but we can still do a scan. */
+	return xchk_setup_ag_btree(sc, ip, false);
+}
+
 #define xrep_revalidate_allocbt		(NULL)
 #define xrep_revalidate_iallocbt	(NULL)
 
@@ -194,6 +206,7 @@ xrep_reset_perag_resv(
 #define xrep_agi			xrep_notsupported
 #define xrep_allocbt			xrep_notsupported
 #define xrep_iallocbt			xrep_notsupported
+#define xrep_rmapbt			xrep_notsupported
 #define xrep_refcountbt			xrep_notsupported
 #define xrep_inode			xrep_notsupported
 #define xrep_bmap_data			xrep_notsupported
