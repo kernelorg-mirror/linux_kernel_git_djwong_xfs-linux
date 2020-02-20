@@ -467,6 +467,7 @@ xfs_sb_has_ro_compat_feature(
 #define XFS_SB_FEAT_INCOMPAT_FTYPE	(1 << 0)	/* filetype in dirent */
 #define XFS_SB_FEAT_INCOMPAT_SPINODES	(1 << 1)	/* sparse inode chunks */
 #define XFS_SB_FEAT_INCOMPAT_META_UUID	(1 << 2)	/* metadata UUID */
+#define XFS_SB_FEAT_INCOMPAT_BIGTIME	(1 << 3)	/* large timestamps */
 #define XFS_SB_FEAT_INCOMPAT_ALL \
 		(XFS_SB_FEAT_INCOMPAT_FTYPE|	\
 		 XFS_SB_FEAT_INCOMPAT_SPINODES|	\
@@ -546,6 +547,12 @@ static inline bool xfs_sb_version_hasreflink(struct xfs_sb *sbp)
 {
 	return XFS_SB_VERSION_NUM(sbp) == XFS_SB_VERSION_5 &&
 		(sbp->sb_features_ro_compat & XFS_SB_FEAT_RO_COMPAT_REFLINK);
+}
+
+static inline bool xfs_sb_version_hasbigtime(struct xfs_sb *sbp)
+{
+	return XFS_SB_VERSION_NUM(sbp) == XFS_SB_VERSION_5 &&
+		(sbp->sb_features_incompat & XFS_SB_FEAT_INCOMPAT_BIGTIME);
 }
 
 /*
@@ -847,12 +854,18 @@ typedef struct xfs_agfl {
  *
  * Inode timestamps consist of signed 32-bit counters for seconds and
  * nanoseconds; time zero is the Unix epoch, Jan  1 00:00:00 UTC 1970.
+ *
+ * When bigtime is enabled, timestamps become an unsigned 64-bit nanoseconds
+ * counter.  Time zero is the start of the classic timestamp range.
  */
 union xfs_timestamp {
 	struct {
 		__be32		t_sec;		/* timestamp seconds */
 		__be32		t_nsec;		/* timestamp nanoseconds */
 	};
+
+	/* Nanoseconds since the bigtime epoch. */
+	__be64			t_bigtime;
 };
 
 /*
@@ -866,6 +879,25 @@ union xfs_timestamp {
  * Jan 19 03:14:07 UTC 2038.
  */
 #define XFS_INO_TIME_MAX	((int64_t)S32_MAX)
+
+/*
+ * Number of seconds between the start of the bigtime timestamp range and the
+ * start of the Unix epoch.
+ */
+#define XFS_INO_BIGTIME_EPOCH	(-XFS_INO_TIME_MIN)
+
+/*
+ * Smallest possible timestamp with big timestamps, which is
+ * Dec 13 20:45:52 UTC 1901.
+ */
+#define XFS_INO_BIGTIME_MIN	(XFS_INO_TIME_MIN)
+
+/*
+ * Largest possible timestamp with big timestamps, which is
+ * Jul  2 20:20:25 UTC 2486.
+ */
+#define XFS_INO_BIGTIME_MAX	((int64_t)((-1ULL / NSEC_PER_SEC) - \
+					   XFS_INO_BIGTIME_EPOCH))
 
 /*
  * On-disk inode structure.
@@ -1094,12 +1126,16 @@ static inline void xfs_dinode_put_rdev(struct xfs_dinode *dip, xfs_dev_t rdev)
 #define XFS_DIFLAG2_DAX_BIT	0	/* use DAX for this inode */
 #define XFS_DIFLAG2_REFLINK_BIT	1	/* file's blocks may be shared */
 #define XFS_DIFLAG2_COWEXTSIZE_BIT   2  /* copy on write extent size hint */
+#define XFS_DIFLAG2_BIGTIME_BIT	3	/* big timestamps */
+
 #define XFS_DIFLAG2_DAX		(1 << XFS_DIFLAG2_DAX_BIT)
 #define XFS_DIFLAG2_REFLINK     (1 << XFS_DIFLAG2_REFLINK_BIT)
 #define XFS_DIFLAG2_COWEXTSIZE  (1 << XFS_DIFLAG2_COWEXTSIZE_BIT)
+#define XFS_DIFLAG2_BIGTIME	(1 << XFS_DIFLAG2_BIGTIME_BIT)
 
 #define XFS_DIFLAG2_ANY \
-	(XFS_DIFLAG2_DAX | XFS_DIFLAG2_REFLINK | XFS_DIFLAG2_COWEXTSIZE)
+	(XFS_DIFLAG2_DAX | XFS_DIFLAG2_REFLINK | XFS_DIFLAG2_COWEXTSIZE | \
+	 XFS_DIFLAG2_BIGTIME)
 
 /*
  * Inode number format:

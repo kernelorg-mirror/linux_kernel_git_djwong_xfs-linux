@@ -373,6 +373,9 @@ union xfs_ictimestamp {
 		int32_t		t_sec;		/* timestamp seconds */
 		int32_t		t_nsec;		/* timestamp nanoseconds */
 	};
+
+	/* Nanoseconds since the bigtime epoch. */
+	uint64_t		t_bigtime;
 };
 
 /*
