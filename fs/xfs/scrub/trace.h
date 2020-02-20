@@ -651,6 +651,42 @@ TRACE_EVENT(xchk_fscounters_within_range,
 		  __entry->old_value)
 )
 
+TRACE_EVENT(xfile_destroy,
+	TP_PROTO(struct file *xfile),
+	TP_ARGS(xfile),
+	TP_STRUCT__entry(
+		__field(long long, size)
+		__field(long long, bytes)
+		__array(char, pathname, 256)
+	),
+	TP_fast_assign(
+		char		pathname[257];
+		char		*path;
+		struct kstat	statbuf;
+		int		ret;
+
+		memset(pathname, 0, sizeof(pathname));
+		path = file_path(xfile, pathname, sizeof(pathname) - 1);
+		if (IS_ERR(path))
+			path = "(unknown)";
+		strncpy(__entry->pathname, path, sizeof(__entry->pathname));
+
+		ret = vfs_getattr_nosec(&xfile->f_path, &statbuf,
+				STATX_SIZE | STATX_BLOCKS, AT_STATX_DONT_SYNC);
+		if (!ret) {
+			__entry->size = statbuf.size;
+			__entry->bytes = statbuf.blocks * 512;
+		} else {
+			__entry->size = -1;
+			__entry->bytes = -1;
+		}
+	),
+	TP_printk("path %s size %lld bytes %lld",
+		  __entry->pathname,
+		  __entry->size,
+		  __entry->bytes)
+)
+
 /* repair tracepoints */
 #if IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR)
 
@@ -939,6 +975,29 @@ DEFINE_EVENT(xrep_newbt_extent_class, name, \
 DEFINE_NEWBT_EXTENT_EVENT(xrep_newbt_alloc_blocks);
 DEFINE_NEWBT_EXTENT_EVENT(xrep_newbt_free_blocks);
 DEFINE_NEWBT_EXTENT_EVENT(xrep_newbt_claim_block);
+
+TRACE_EVENT(xfbma_sort_stats,
+	TP_PROTO(uint64_t nr, unsigned int max_stack_depth,
+		 unsigned int max_stack_used, int error),
+	TP_ARGS(nr, max_stack_depth, max_stack_used, error),
+	TP_STRUCT__entry(
+		__field(uint64_t, nr)
+		__field(unsigned int, max_stack_depth)
+		__field(unsigned int, max_stack_used)
+		__field(int, error)
+	),
+	TP_fast_assign(
+		__entry->nr = nr;
+		__entry->max_stack_depth = max_stack_depth;
+		__entry->max_stack_used = max_stack_used;
+		__entry->error = error;
+	),
+	TP_printk("nr %llu max_depth %u max_used %u error %d",
+		  __entry->nr,
+		  __entry->max_stack_depth,
+		  __entry->max_stack_used,
+		  __entry->error)
+);
 
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
 
