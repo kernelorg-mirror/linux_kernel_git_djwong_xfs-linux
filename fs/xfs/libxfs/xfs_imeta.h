@@ -33,6 +33,7 @@ struct xfs_imeta_end {
 /* Lookup keys for static metadata inodes. */
 extern const struct xfs_imeta_path XFS_IMETA_RTBITMAP;
 extern const struct xfs_imeta_path XFS_IMETA_RTSUMMARY;
+extern const struct xfs_imeta_path XFS_IMETA_RTRMAPBT;
 extern const struct xfs_imeta_path XFS_IMETA_USRQUOTA;
 extern const struct xfs_imeta_path XFS_IMETA_GRPQUOTA;
 extern const struct xfs_imeta_path XFS_IMETA_PRJQUOTA;
