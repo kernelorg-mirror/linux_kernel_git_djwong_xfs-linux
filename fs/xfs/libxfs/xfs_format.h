@@ -1189,6 +1189,28 @@ static inline void xfs_dinode_put_rdev(struct xfs_dinode *dip, xfs_dev_t rdev)
 #define XFS_DQUOT_VERSION	(uint8_t)0x01	/* latest version number */
 
 /*
+ * XFS Quota Timers
+ * ================
+ *
+ * Quota grace period expiration timers are an unsigned 32-bit seconds counter;
+ * time zero is the Unix epoch, Jan  1 00:00:01 UTC 1970.  An expiration value
+ * of zero means that the quota limit has not been reached, and therefore no
+ * expiration has been set.
+ */
+
+/*
+ * Smallest possible quota expiration with traditional timestamps, which is
+ * Jan  1 00:00:01 UTC 1970.
+ */
+#define XFS_DQ_TIMEOUT_MIN	((int64_t)1)
+
+/*
+ * Largest possible quota expiration with traditional timestamps, which is
+ * Feb  7 06:28:15 UTC 2106.
+ */
+#define XFS_DQ_TIMEOUT_MAX	((int64_t)U32_MAX)
+
+/*
  * This is the main portion of the on-disk representation of quota
  * information for a user. This is the q_core of the struct xfs_dquot that
  * is kept in kernel memory. We pad this with some more expansion room
