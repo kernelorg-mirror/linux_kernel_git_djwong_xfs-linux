@@ -259,6 +259,7 @@ xchk_bmap_rt_iextent_xref(
 
 	xchk_xref_is_used_rt_space(info->sc, irec->br_startblock,
 			irec->br_blockcount);
+	xchk_bmap_xref_rmap(info, irec, irec->br_startblock);
 
 	xchk_rt_free(info->sc, &info->sc->sa);
 
