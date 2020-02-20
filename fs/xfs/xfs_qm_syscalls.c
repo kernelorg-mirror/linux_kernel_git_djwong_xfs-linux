@@ -442,6 +442,7 @@ xfs_qm_scall_quotaon(
 /* Set a new quota grace period. */
 static inline void
 xfs_qm_set_grace(
+	struct xfs_disk_dquot	*ddq,
 	time64_t		*qi_limit,
 	time64_t		*itimer,
 	__be32			*dtimer,
@@ -453,7 +454,7 @@ xfs_qm_set_grace(
 					     XFS_DQ_GRACE_MAX);
 	*qi_limit = tv.tv_sec;
 	*itimer = tv.tv_sec;
-	xfs_dquot_to_disk_timestamp(dtimer, &tv);
+	xfs_dquot_to_disk_timestamp(ddq, dtimer, &tv);
 }
 
 #define XFS_QC_MASK \
@@ -586,14 +587,14 @@ xfs_qm_scall_setqlim(
 		 * for warnings.
 		 */
 		if (newlim->d_fieldmask & QC_SPC_TIMER)
-			xfs_qm_set_grace(&q->qi_btimelimit, &dqp->q_btimer,
+			xfs_qm_set_grace(ddq, &q->qi_btimelimit, &dqp->q_btimer,
 					&ddq->d_btimer, newlim->d_spc_timer);
 		if (newlim->d_fieldmask & QC_INO_TIMER)
-			xfs_qm_set_grace(&q->qi_itimelimit, &dqp->q_itimer,
+			xfs_qm_set_grace(ddq, &q->qi_itimelimit, &dqp->q_itimer,
 					&ddq->d_itimer, newlim->d_ino_timer);
 		if (newlim->d_fieldmask & QC_RT_SPC_TIMER)
-			xfs_qm_set_grace(&q->qi_rtbtimelimit, &dqp->q_rtbtimer,
-					&ddq->d_rtbtimer,
+			xfs_qm_set_grace(ddq, &q->qi_rtbtimelimit,
+					&dqp->q_rtbtimer, &ddq->d_rtbtimer,
 					newlim->d_rt_spc_timer);
 		if (newlim->d_fieldmask & QC_SPC_WARNS)
 			q->qi_bwarnlimit = newlim->d_spc_warns;
@@ -659,11 +660,11 @@ xfs_qm_scall_getquota_fill_qc(
 	 * so return zeroes in that case.
 	 */
 	if ((!XFS_IS_UQUOTA_ENFORCED(mp) &&
-	     dqp->q_core.d_flags == XFS_DQ_USER) ||
+	     (dqp->q_core.d_flags & XFS_DQ_ALLTYPES) == XFS_DQ_USER) ||
 	    (!XFS_IS_GQUOTA_ENFORCED(mp) &&
-	     dqp->q_core.d_flags == XFS_DQ_GROUP) ||
+	     (dqp->q_core.d_flags & XFS_DQ_ALLTYPES) == XFS_DQ_GROUP) ||
 	    (!XFS_IS_PQUOTA_ENFORCED(mp) &&
-	     dqp->q_core.d_flags == XFS_DQ_PROJ)) {
+	     (dqp->q_core.d_flags & XFS_DQ_ALLTYPES) == XFS_DQ_PROJ)) {
 		dst->d_spc_timer = 0;
 		dst->d_ino_timer = 0;
 		dst->d_rt_spc_timer = 0;
