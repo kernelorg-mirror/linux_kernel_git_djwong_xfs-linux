@@ -163,4 +163,6 @@ static inline bool xfs_scrub_needs_repair(struct xfs_scrub_metadata *sm)
 			       XFS_SCRUB_OFLAG_PREEN);
 }
 
+uint xchk_quota_to_dqtype(struct xfs_scrub *sc);
+
 #endif	/* __XFS_SCRUB_COMMON_H__ */

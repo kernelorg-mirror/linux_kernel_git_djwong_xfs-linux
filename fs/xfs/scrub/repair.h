@@ -90,6 +90,12 @@ int xrep_symlink(struct xfs_scrub *sc);
 int xrep_dir(struct xfs_scrub *sc);
 int xrep_xattr(struct xfs_scrub *sc);
 
+#ifdef CONFIG_XFS_QUOTA
+int xrep_quota(struct xfs_scrub *sc);
+#else
+# define xrep_quota			xrep_notsupported
+#endif /* CONFIG_XFS_QUOTA */
+
 #ifdef CONFIG_XFS_RT
 int xrep_rtsummary(struct xfs_scrub *sc);
 #else
@@ -202,6 +208,7 @@ xrep_reset_perag_resv(
 #define xrep_dir			xrep_notsupported
 #define xrep_xattr			xrep_notsupported
 #define xrep_rtsummary			xrep_notsupported
+#define xrep_quota			xrep_notsupported
 
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 

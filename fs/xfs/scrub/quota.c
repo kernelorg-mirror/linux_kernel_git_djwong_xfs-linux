@@ -18,7 +18,7 @@
 #include "scrub/common.h"
 
 /* Convert a scrub type code to a DQ flag, or return 0 if error. */
-static inline uint
+uint
 xchk_quota_to_dqtype(
 	struct xfs_scrub	*sc)
 {
@@ -219,7 +219,10 @@ xchk_quota(
 
 	dqtype = xchk_quota_to_dqtype(sc);
 
-	/* Look for problem extents. */
+	/*
+	 * Look for problem extents.  Leave the quota inode ILOCKd if we find
+	 * any.
+	 */
 	error = xchk_quota_data_fork(sc);
 	if (error)
 		goto out;
@@ -233,11 +236,11 @@ xchk_quota(
 	 */
 	xfs_iunlock(sc->ip, sc->ilock_flags);
 	sc->ilock_flags = 0;
+
+	/* Now look for things that the quota verifiers won't complain about. */
 	sqi.sc = sc;
 	sqi.last_id = 0;
 	error = xfs_qm_dqiterate(mp, dqtype, xchk_quota_item, &sqi);
-	sc->ilock_flags = XFS_ILOCK_EXCL;
-	xfs_ilock(sc->ip, sc->ilock_flags);
 	if (!xchk_fblock_process_error(sc, XFS_DATA_FORK,
 			sqi.last_id * qi->qi_dqperchunk, &error))
 		goto out;
