@@ -113,6 +113,36 @@ xfs_quota_exceeded(
 }
 
 /*
+ * Clamp a quota grace period expiration timer to the range that we support.
+ */
+static inline time64_t
+xfs_dquot_clamp_timer(
+	time64_t			timer)
+{
+	return clamp_t(time64_t, timer, XFS_DQ_TIMEOUT_MIN, XFS_DQ_TIMEOUT_MAX);
+}
+
+/* Set a quota grace period expiration timer. */
+static inline void
+xfs_quota_set_timer(
+	__be32			*dtimer,
+	time_t			limit)
+{
+	time64_t		new_timeout;
+
+	new_timeout = xfs_dquot_clamp_timer(ktime_get_real_seconds() + limit);
+	*dtimer = cpu_to_be32(new_timeout);
+}
+
+/* Clear a quota grace period expiration timer. */
+static inline void
+xfs_quota_clear_timer(
+	__be32			*dtimer)
+{
+	*dtimer = cpu_to_be32(0);
+}
+
+/*
  * Check the limits and timers of a dquot and start or reset timers
  * if necessary.
  * This gets called even when quota enforcement is OFF, which makes our
@@ -151,14 +181,14 @@ xfs_qm_adjust_dqtimers(
 			d->d_blk_softlimit, d->d_blk_hardlimit);
 	if (!d->d_btimer) {
 		if (over) {
-			d->d_btimer = cpu_to_be32(ktime_get_real_seconds() +
+			xfs_quota_set_timer(&d->d_btimer,
 					mp->m_quotainfo->qi_btimelimit);
 		} else {
 			d->d_bwarns = 0;
 		}
 	} else {
 		if (!over) {
-			d->d_btimer = 0;
+			xfs_quota_clear_timer(&d->d_btimer);
 		}
 	}
 
@@ -166,14 +196,14 @@ xfs_qm_adjust_dqtimers(
 			d->d_ino_softlimit, d->d_ino_hardlimit);
 	if (!d->d_itimer) {
 		if (over) {
-			d->d_itimer = cpu_to_be32(ktime_get_real_seconds() +
+			xfs_quota_set_timer(&d->d_itimer,
 					mp->m_quotainfo->qi_itimelimit);
 		} else {
 			d->d_iwarns = 0;
 		}
 	} else {
 		if (!over) {
-			d->d_itimer = 0;
+			xfs_quota_clear_timer(&d->d_itimer);
 		}
 	}
 
@@ -181,14 +211,14 @@ xfs_qm_adjust_dqtimers(
 			d->d_rtb_softlimit, d->d_rtb_hardlimit);
 	if (!d->d_rtbtimer) {
 		if (over) {
-			d->d_rtbtimer = cpu_to_be32(ktime_get_real_seconds() +
+			xfs_quota_set_timer(&d->d_rtbtimer,
 					mp->m_quotainfo->qi_rtbtimelimit);
 		} else {
 			d->d_rtbwarns = 0;
 		}
 	} else {
 		if (!over) {
-			d->d_rtbtimer = 0;
+			xfs_quota_clear_timer(&d->d_rtbtimer);
 		}
 	}
 }
