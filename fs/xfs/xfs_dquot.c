@@ -117,35 +117,42 @@ xfs_quota_exceeded(
  */
 static inline time64_t
 xfs_dquot_clamp_timer(
-	time64_t			timer)
+	struct xfs_disk_dquot	*ddq,
+	time64_t		timer)
 {
+	if (ddq->d_flags & XFS_DQ_BIGTIME)
+		return clamp_t(time64_t, timer, XFS_DQ_BIGTIMEOUT_MIN,
+						XFS_DQ_BIGTIMEOUT_MAX);
 	return clamp_t(time64_t, timer, XFS_DQ_TIMEOUT_MIN, XFS_DQ_TIMEOUT_MAX);
 }
 
 /* Set a quota grace period expiration timer. */
 static inline void
 xfs_quota_set_timer(
+	struct xfs_disk_dquot	*ddq,
 	time64_t		*itimer,
 	__be32			*dtimer,
-	time_t			limit)
+	time64_t		limit)
 {
 	struct timespec64	tv = { 0 };
 
-	tv.tv_sec = xfs_dquot_clamp_timer(ktime_get_real_seconds() + limit);
+	tv.tv_sec = xfs_dquot_clamp_timer(ddq,
+			ktime_get_real_seconds() + limit);
 	*itimer = tv.tv_sec;
-	xfs_dquot_to_disk_timestamp(dtimer, &tv);
+	xfs_dquot_to_disk_timestamp(ddq, dtimer, &tv);
 }
 
 /* Clear a quota grace period expiration timer. */
 static inline void
 xfs_quota_clear_timer(
+	struct xfs_disk_dquot	*ddq,
 	time64_t		*itimer,
 	__be32			*dtimer)
 {
 	struct timespec64	tv = { 0 };
 
 	*itimer = tv.tv_sec;
-	xfs_dquot_to_disk_timestamp(dtimer, &tv);
+	xfs_dquot_to_disk_timestamp(ddq, dtimer, &tv);
 }
 
 /*
@@ -187,14 +194,14 @@ xfs_qm_adjust_dqtimers(
 			d->d_blk_softlimit, d->d_blk_hardlimit);
 	if (!dqp->q_btimer) {
 		if (over) {
-			xfs_quota_set_timer(&dqp->q_btimer, &d->d_btimer,
+			xfs_quota_set_timer(d, &dqp->q_btimer, &d->d_btimer,
 					mp->m_quotainfo->qi_btimelimit);
 		} else {
 			d->d_bwarns = 0;
 		}
 	} else {
 		if (!over) {
-			xfs_quota_clear_timer(&dqp->q_btimer, &d->d_btimer);
+			xfs_quota_clear_timer(d, &dqp->q_btimer, &d->d_btimer);
 		}
 	}
 
@@ -202,14 +209,14 @@ xfs_qm_adjust_dqtimers(
 			d->d_ino_softlimit, d->d_ino_hardlimit);
 	if (!dqp->q_itimer) {
 		if (over) {
-			xfs_quota_set_timer(&dqp->q_itimer, &d->d_itimer,
+			xfs_quota_set_timer(d, &dqp->q_itimer, &d->d_itimer,
 					mp->m_quotainfo->qi_itimelimit);
 		} else {
 			d->d_iwarns = 0;
 		}
 	} else {
 		if (!over) {
-			xfs_quota_clear_timer(&dqp->q_itimer, &d->d_itimer);
+			xfs_quota_clear_timer(d, &dqp->q_itimer, &d->d_itimer);
 		}
 	}
 
@@ -217,14 +224,16 @@ xfs_qm_adjust_dqtimers(
 			d->d_rtb_softlimit, d->d_rtb_hardlimit);
 	if (!dqp->q_rtbtimer) {
 		if (over) {
-			xfs_quota_set_timer(&dqp->q_rtbtimer, &d->d_rtbtimer,
+			xfs_quota_set_timer(d, &dqp->q_rtbtimer,
+					&d->d_rtbtimer,
 					mp->m_quotainfo->qi_rtbtimelimit);
 		} else {
 			d->d_rtbwarns = 0;
 		}
 	} else {
 		if (!over) {
-			xfs_quota_clear_timer(&dqp->q_rtbtimer, &d->d_rtbtimer);
+			xfs_quota_clear_timer(d, &dqp->q_rtbtimer,
+					&d->d_rtbtimer);
 		}
 	}
 }
@@ -260,6 +269,7 @@ xfs_qm_init_dquot_blk(
 		d->dd_diskdq.d_version = XFS_DQUOT_VERSION;
 		d->dd_diskdq.d_id = cpu_to_be32(curid);
 		d->dd_diskdq.d_flags = type;
+		xfs_dquot_add_bigtime(mp, &d->dd_diskdq);
 		if (xfs_sb_version_hascrc(&mp->m_sb)) {
 			uuid_copy(&d->dd_uuid, &mp->m_sb.sb_meta_uuid);
 			xfs_update_cksum((char *)d, sizeof(struct xfs_dqblk),
@@ -527,9 +537,10 @@ xfs_dquot_from_disk(
 {
 	struct timespec64	tv;
 	struct xfs_disk_dquot	*ddqp = bp->b_addr + dqp->q_bufoffset;
+	struct xfs_disk_dquot	*iddq = &dqp->q_core;
 
 	/* copy everything from disk dquot to the incore dquot */
-	memcpy(&dqp->q_core, ddqp, sizeof(struct xfs_disk_dquot));
+	memcpy(iddq, ddqp, sizeof(struct xfs_disk_dquot));
 
 	/*
 	 * Reservation counters are defined as reservation plus current usage
@@ -539,12 +550,27 @@ xfs_dquot_from_disk(
 	dqp->q_res_icount = be64_to_cpu(ddqp->d_icount);
 	dqp->q_res_rtbcount = be64_to_cpu(ddqp->d_rtbcount);
 
-	xfs_dquot_from_disk_timestamp(&tv, ddqp->d_btimer);
+	xfs_dquot_from_disk_timestamp(ddqp, &tv, ddqp->d_btimer);
 	dqp->q_btimer = tv.tv_sec;
-	xfs_dquot_from_disk_timestamp(&tv, ddqp->d_itimer);
+	xfs_dquot_from_disk_timestamp(ddqp, &tv, ddqp->d_itimer);
 	dqp->q_itimer = tv.tv_sec;
-	xfs_dquot_from_disk_timestamp(&tv, ddqp->d_rtbtimer);
+	xfs_dquot_from_disk_timestamp(ddqp, &tv, ddqp->d_rtbtimer);
 	dqp->q_rtbtimer = tv.tv_sec;
+
+	/* Upgrade to bigtime if possible. */
+	if (xfs_dquot_add_bigtime(dqp->q_mount, iddq)) {
+		tv.tv_sec = xfs_dquot_clamp_timer(iddq, dqp->q_btimer);
+		xfs_dquot_to_disk_timestamp(iddq, &iddq->d_btimer, &tv);
+		dqp->q_btimer = tv.tv_sec;
+
+		tv.tv_sec = xfs_dquot_clamp_timer(iddq, dqp->q_itimer);
+		xfs_dquot_to_disk_timestamp(iddq, &iddq->d_itimer, &tv);
+		dqp->q_itimer = tv.tv_sec;
+
+		tv.tv_sec = xfs_dquot_clamp_timer(iddq, dqp->q_rtbtimer);
+		xfs_dquot_to_disk_timestamp(iddq, &iddq->d_rtbtimer, &tv);
+		dqp->q_rtbtimer = tv.tv_sec;
+	}
 
 	/* initialize the dquot speculative prealloc thresholds */
 	xfs_dquot_set_prealloc_limits(dqp);
@@ -1173,6 +1199,21 @@ xfs_qm_dqflush(
 
 	/* This is the only portion of data that needs to persist */
 	memcpy(ddqp, &dqp->q_core, sizeof(struct xfs_disk_dquot));
+
+	/*
+	 * We should never write non-bigtime dquots to a bigtime fs, except for
+	 * the root dquot.
+	 */
+	if (!(dqp->q_core.d_flags & XFS_DQ_BIGTIME) && dqp->q_core.d_id &&
+	    xfs_sb_version_hasbigtime(&mp->m_sb)) {
+		xfs_alert(mp, "corrupt dquot ID 0x%x in memory at %pS",
+				be32_to_cpu(ddqp->d_id), __this_address);
+		xfs_buf_relse(bp);
+		xfs_dqfunlock(dqp);
+		xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_INCORE);
+		xfs_quota_mark_sick(mp, dqp->dq_flags);
+		return -EFSCORRUPTED;
+	}
 
 	/*
 	 * Clear the dirty field and remember the flush lsn for later use.
