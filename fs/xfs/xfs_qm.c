@@ -634,15 +634,15 @@ xfs_qm_init_timelimits(
 	 * more writing. If it is zero, a default is used.
 	 */
 	if (ddqp->d_btimer) {
-		xfs_dquot_from_disk_timestamp(&tv, ddqp->d_btimer);
+		xfs_dquot_from_disk_timestamp(ddqp, &tv, ddqp->d_btimer);
 		qinf->qi_btimelimit = tv.tv_sec;
 	}
 	if (ddqp->d_itimer) {
-		xfs_dquot_from_disk_timestamp(&tv, ddqp->d_itimer);
+		xfs_dquot_from_disk_timestamp(ddqp, &tv, ddqp->d_itimer);
 		qinf->qi_itimelimit = tv.tv_sec;
 	}
 	if (ddqp->d_rtbtimer) {
-		xfs_dquot_from_disk_timestamp(&tv, ddqp->d_rtbtimer);
+		xfs_dquot_from_disk_timestamp(ddqp, &tv, ddqp->d_rtbtimer);
 		qinf->qi_rtbtimelimit = tv.tv_sec;
 	}
 	if (ddqp->d_bwarns)
@@ -908,12 +908,13 @@ xfs_qm_reset_dqcounts(
 		 * should not reset them.
 		 */
 		if (ddq->d_id != 0) {
-			xfs_dquot_to_disk_timestamp(&ddq->d_btimer, &tv);
-			xfs_dquot_to_disk_timestamp(&ddq->d_itimer, &tv);
-			xfs_dquot_to_disk_timestamp(&ddq->d_rtbtimer, &tv);
+			xfs_dquot_to_disk_timestamp(ddq, &ddq->d_btimer, &tv);
+			xfs_dquot_to_disk_timestamp(ddq, &ddq->d_itimer, &tv);
+			xfs_dquot_to_disk_timestamp(ddq, &ddq->d_rtbtimer, &tv);
 			ddq->d_bwarns = 0;
 			ddq->d_iwarns = 0;
 			ddq->d_rtbwarns = 0;
+			xfs_dquot_add_bigtime(mp, ddq);
 		}
 
 		if (xfs_sb_version_hascrc(&mp->m_sb)) {
