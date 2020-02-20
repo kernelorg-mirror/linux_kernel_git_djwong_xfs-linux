@@ -33,6 +33,12 @@
 /* flags used only as arguments to access routines */
 #define XBF_TRYLOCK	 (1 << 16)/* lock requested, but do not wait */
 #define XBF_UNMAPPED	 (1 << 17)/* do not map the buffer */
+/*
+ * The caller is scanning for incore buffers to mark stale after a repair.
+ * Don't complain if we find a non-stale buffer of the wrong length, that's
+ * exactly the point.
+ */
+#define XBF_SCAN_STALE	 (1 << 18)
 
 /* flags used only internally */
 #define _XBF_PAGES	 (1 << 20)/* backed by refcounted pages */
@@ -102,6 +108,8 @@ typedef void (*xfs_buf_iodone_t)(struct xfs_buf *);
 struct xfs_buf_map {
 	xfs_daddr_t		bm_bn;	/* block number for I/O */
 	int			bm_len;	/* size of I/O */
+	unsigned int		bm_flags;
+#define XBM_SCAN_STALE		(1 << 0) /* see XBF_SCAN_STALE */
 };
 
 #define DEFINE_SINGLE_BUF_MAP(map, blkno, numblk) \
