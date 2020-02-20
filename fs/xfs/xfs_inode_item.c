@@ -297,8 +297,8 @@ xfs_inode_item_format_attr_fork(
 
 static inline void
 xfs_from_log_timestamp(
-	struct xfs_timestamp		*ts,
-	const struct xfs_ictimestamp	*its)
+	union xfs_timestamp		*ts,
+	const union xfs_ictimestamp	*its)
 {
 	ts->t_sec = cpu_to_be32(its->t_sec);
 	ts->t_nsec = cpu_to_be32(its->t_nsec);
@@ -354,7 +354,7 @@ xfs_log_dinode_to_disk(
 
 static inline void
 xfs_to_log_timestamp(
-	struct xfs_ictimestamp		*its,
+	union xfs_ictimestamp		*its,
 	const struct timespec64		*ts)
 {
 	its->t_sec = ts->tv_sec;
