@@ -40,4 +40,7 @@ extern int xfs_inode_item_format_convert(xfs_log_iovec_t *,
 
 extern struct kmem_zone	*xfs_ili_zone;
 
+void	xfs_log_dinode_to_disk(struct xfs_log_dinode *from,
+			       struct xfs_dinode *to);
+
 #endif	/* __XFS_INODE_ITEM_H__ */
