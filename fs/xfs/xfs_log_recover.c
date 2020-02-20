@@ -5096,6 +5096,13 @@ xlog_recover_process_iunlinks(
 		}
 		xfs_buf_rele(agibp);
 	}
+
+	/*
+	 * Now that we've put all the iunlink inodes on the lru, let's make
+	 * sure that we perform all the on-disk metadata updates to actually
+	 * free those inodes.
+	 */
+	xfs_inactive_force(mp);
 }
 
 STATIC void
