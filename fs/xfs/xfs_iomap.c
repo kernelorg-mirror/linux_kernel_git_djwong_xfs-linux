@@ -352,6 +352,46 @@ xfs_quota_calc_throttle(
 }
 
 /*
+ * Determine if the previous extent's range of offsets is contiguous with
+ * @offset_fsb.  If so, set @prev_contig to the number of blocks that are
+ * physically contiguous with that previous extent and return true.  If there
+ * is no previous extent or there's a hole right before @offset_fsb, return
+ * false.
+ *
+ * Note that we don't care if the previous extents are written or not.
+ */
+static inline bool
+xfs_iomap_prev_contiguous(
+	struct xfs_ifork	*ifp,
+	struct xfs_iext_cursor	*cur,
+	xfs_fileoff_t		offset_fsb,
+	xfs_extlen_t		*prev_contig)
+{
+	struct xfs_iext_cursor	ncur = *cur;
+	struct xfs_bmbt_irec	got, old;
+
+	xfs_iext_prev(ifp, &ncur);
+	if (!xfs_iext_get_extent(ifp, &ncur, &old))
+		return false;
+	if (old.br_startoff + old.br_blockcount < offset_fsb)
+		return false;
+
+	*prev_contig = old.br_blockcount;
+
+	xfs_iext_prev(ifp, &ncur);
+	while (xfs_iext_get_extent(ifp, &ncur, &got) &&
+	       got.br_blockcount + got.br_startoff == old.br_startoff &&
+	       got.br_blockcount + got.br_startblock == old.br_startblock &&
+	       *prev_contig <= MAXEXTLEN) {
+		*prev_contig += got.br_blockcount;
+		old = got; /* struct copy */
+		xfs_iext_prev(ifp, &ncur);
+	}
+
+	return true;
+}
+
+/*
  * If we are doing a write at the end of the file and there are no allocations
  * past this one, then extend the allocation out to the file system's write
  * iosize.
@@ -380,12 +420,12 @@ xfs_iomap_prealloc_size(
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_ifork	*ifp = XFS_IFORK_PTR(ip, whichfork);
 	xfs_fileoff_t		offset_fsb = XFS_B_TO_FSBT(mp, offset);
-	struct xfs_bmbt_irec	prev;
 	int			shift = 0;
 	int64_t			freesp;
 	xfs_fsblock_t		qblocks;
 	int			qshift = 0;
 	xfs_fsblock_t		alloc_blocks = 0;
+	xfs_extlen_t		plen = 0;
 
 	if (offset + count <= XFS_ISIZE(ip))
 		return 0;
@@ -400,9 +440,9 @@ xfs_iomap_prealloc_size(
 	 */
 	if ((mp->m_flags & XFS_MOUNT_ALLOCSIZE) ||
 	    XFS_ISIZE(ip) < XFS_FSB_TO_B(mp, mp->m_dalign) ||
-	    !xfs_iext_peek_prev_extent(ifp, icur, &prev) ||
-	    prev.br_startoff + prev.br_blockcount < offset_fsb)
+	    !xfs_iomap_prev_contiguous(ifp, icur, offset_fsb, &plen)) {
 		return mp->m_allocsize_blocks;
+	}
 
 	/*
 	 * Determine the initial size of the preallocation. We are beyond the
@@ -413,15 +453,16 @@ xfs_iomap_prealloc_size(
 	 * preallocation size.
 	 *
 	 * If the extent is a hole, then preallocation is essentially disabled.
-	 * Otherwise we take the size of the preceding data extent as the basis
-	 * for the preallocation size. If the size of the extent is greater than
-	 * half the maximum extent length, then use the current offset as the
-	 * basis. This ensures that for large files the preallocation size
-	 * always extends to MAXEXTLEN rather than falling short due to things
-	 * like stripe unit/width alignment of real extents.
+	 * Otherwise we take the size of the contiguous preceding data extents
+	 * as the basis for the preallocation size. If the size of the extent
+	 * is greater than half the maximum extent length, then use the current
+	 * offset as the basis. This ensures that for large files the
+	 * preallocation size always extends to MAXEXTLEN rather than falling
+	 * short due to things like stripe unit/width alignment of real
+	 * extents.
 	 */
-	if (prev.br_blockcount <= (MAXEXTLEN >> 1))
-		alloc_blocks = prev.br_blockcount << 1;
+	if (plen <= (MAXEXTLEN >> 1))
+		alloc_blocks = plen << 1;
 	else
 		alloc_blocks = XFS_B_TO_FSB(mp, offset);
 	if (!alloc_blocks)
