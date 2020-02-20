@@ -69,9 +69,9 @@ void xfs_inode_set_cowblocks_tag(struct xfs_inode *ip);
 void xfs_inode_clear_cowblocks_tag(struct xfs_inode *ip);
 int xfs_icache_free_cowblocks(struct xfs_mount *, struct xfs_eofblocks *);
 
-int xfs_ici_walk_all(struct xfs_mount *mp,
-	int (*execute)(struct xfs_inode *ip, struct xfs_perag *pag, void *args),
-	void *args);
+typedef int (*xfs_ici_walk_fn)(struct xfs_inode *ip, struct xfs_perag *pag,
+			       void *args);
+int xfs_ici_walk_all(struct xfs_mount *mp, xfs_ici_walk_fn iwalk, void *args);
 
 int xfs_icache_inode_is_allocated(struct xfs_mount *mp, struct xfs_trans *tp,
 				  xfs_ino_t ino, bool *inuse);
