@@ -28,6 +28,7 @@
 #include "xfs_dquot.h"
 #include "xfs_reflink.h"
 #include "xfs_health.h"
+#include "xfs_icache.h"
 
 #define XFS_ALLOC_ALIGN(mp, off) \
 	(((off) >> mp->m_allocsize_log) << mp->m_allocsize_log)
@@ -202,6 +203,7 @@ xfs_iomap_write_direct(
 	int			error;
 	int			bmapi_flags = XFS_BMAPI_PREALLOC;
 	uint			tflags = 0;
+	bool			cleared_space = false;
 
 	ASSERT(count_fsb > 0);
 
@@ -241,6 +243,7 @@ xfs_iomap_write_direct(
 			resblks = XFS_DIOSTRAT_SPACE_RES(mp, 0) << 1;
 		}
 	}
+retry:
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, resrtextents,
 			tflags, &tp);
 	if (error)
@@ -249,6 +252,22 @@ xfs_iomap_write_direct(
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
 
 	error = xfs_trans_reserve_quota_nblks(tp, ip, qblocks, 0, quota_flag);
+	/*
+	 * We weren't able to reserve enough quota for the direct write.
+	 * Flush any disk space that was being held in the hopes of speeding up
+	 * the filesystem.  Historically, we expected callers to have
+	 * preallocated all the space before a direct write, but this is not an
+	 * absolute requirement.  We still hold the IOLOCK so we cannot do a
+	 * sync scan.
+	 */
+	if ((error == -ENOSPC || error == -EDQUOT) && !cleared_space) {
+		xfs_trans_cancel(tp);
+		xfs_iunlock(ip, XFS_ILOCK_EXCL);
+		cleared_space = xfs_inode_free_quota_blocks(ip, false);
+		if (cleared_space)
+			goto retry;
+		return error;
+	}
 	if (error)
 		goto out_trans_cancel;
 
