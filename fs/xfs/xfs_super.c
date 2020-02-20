@@ -1624,6 +1624,10 @@ xfs_fc_fill_super(
 		}
 	}
 
+	if (xfs_sb_version_hasmetadir(&mp->m_sb))
+		xfs_warn(mp,
+"EXPERIMENTAL metadata directory feature in use. Use at your own risk!");
+
 	if (xfs_sb_version_hasreflink(&mp->m_sb)) {
 		if (mp->m_sb.sb_rblocks) {
 			xfs_alert(mp,
