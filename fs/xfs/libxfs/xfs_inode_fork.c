@@ -78,8 +78,13 @@ xfs_iformat_fork(
 			error = xfs_iformat_btree(ip, dip, XFS_DATA_FORK);
 			break;
 		case XFS_DINODE_FMT_RMAP:
-			if (!xfs_sb_version_hasrtrmapbt(&ip->i_mount->m_sb))
+			if (!xfs_sb_version_hasrtrmapbt(&ip->i_mount->m_sb)) {
+				xfs_inode_verifier_error(ip, -EFSCORRUPTED,
+						__func__, dip, sizeof(*dip),
+						__this_address);
+				xfs_inode_mark_sick(ip, XFS_SICK_INO_CORE);
 				return -EFSCORRUPTED;
+			}
 			error = xfs_iformat_rmap(ip, dip);
 			break;
 		default:
