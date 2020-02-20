@@ -10,6 +10,7 @@ struct xfs_buf;
 struct xfs_inode;
 struct xfs_mount;
 struct xfs_trans;
+struct xfs_ifork;
 
 extern kmem_zone_t	*xfs_btree_cur_zone;
 
@@ -198,6 +199,18 @@ struct xfs_btree_priv_ag {			/* needed for BNO, CNT, INO */
 	union xfs_btree_cur_private	priv;
 };
 
+/* Private information for an inode-rooted btree. */
+struct xfs_btree_priv_inode {			/* needed for BMAP */
+	struct xfs_inode	*ip;		/* pointer to our inode */
+	struct xbtree_ifakeroot	*ifake;		/* fake inode fork */
+	int			allocated;	/* count of alloced */
+	short			forksize;	/* fork's inode space */
+	char			whichfork;	/* data or attr fork */
+	char			flags;		/* flags */
+#define	XFS_BTCUR_BPRV_WASDEL		(1<<0)	/* was delayed */
+#define	XFS_BTCUR_BPRV_INVALID_OWNER	(1<<1)	/* for ext swap */
+};
+
 /*
  * Btree cursor structure.
  * This collects all information needed by the btree code in one place.
@@ -220,15 +233,7 @@ typedef struct xfs_btree_cur
 	int		bc_statoff;	/* offset of btre stats array */
 	union {
 		struct xfs_btree_priv_ag a;
-		struct {			/* needed for BMAP */
-			struct xfs_inode *ip;	/* pointer to our inode */
-			int		allocated;	/* count of alloced */
-			short		forksize;	/* fork's inode space */
-			char		whichfork;	/* data or attr fork */
-			char		flags;		/* flags */
-#define	XFS_BTCUR_BPRV_WASDEL		(1<<0)		/* was delayed */
-#define	XFS_BTCUR_BPRV_INVALID_OWNER	(1<<1)		/* for ext swap */
-		} b;
+		struct xfs_btree_priv_inode b;
 	}		bc_private;	/* per-btree type data */
 } xfs_btree_cur_t;
 
@@ -506,6 +511,7 @@ union xfs_btree_key *xfs_btree_high_key_from_key(struct xfs_btree_cur *cur,
 int xfs_btree_has_record(struct xfs_btree_cur *cur, union xfs_btree_irec *low,
 		union xfs_btree_irec *high, bool *exists);
 bool xfs_btree_has_more_records(struct xfs_btree_cur *cur);
+struct xfs_ifork *xfs_btree_ifork_ptr(struct xfs_btree_cur *cur);
 
 /* Does this cursor point to the last block in the given level? */
 static inline bool
