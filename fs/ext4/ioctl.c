@@ -813,6 +813,132 @@ static int ext4_ioctl_get_es_cache(struct file *filp, unsigned long arg)
 	return error;
 }
 
+static int ext4_ioc_getfsuuid(struct super_block *sb,
+			      struct ioc_fsuuid __user *user_fu)
+{
+	struct ioc_fsuuid fu;
+	struct ext4_super_block *es = EXT4_SB(sb)->s_es;
+
+	BUILD_BUG_ON(sizeof(es->s_uuid) != sizeof(uuid_t));
+
+	if (copy_from_user(&fu, user_fu, sizeof(fu)))
+		return -EFAULT;
+
+	if (fu.fu_reserved || fu.fu_reserved1 || fu.fu_flags)
+		return -EINVAL;
+
+	if (fu.fu_length == 0) {
+		fu.fu_length = sizeof(es->s_uuid);
+		goto out;
+	}
+
+	if (fu.fu_length < sizeof(es->s_uuid))
+		return -EINVAL;
+
+	if (copy_to_user(user_fu + 1, es->s_uuid, sizeof(es->s_uuid)))
+		return -EFAULT;
+	fu.fu_length = sizeof(es->s_uuid);
+
+out:
+	if (copy_to_user(user_fu, &fu, sizeof(fu)))
+		return -EFAULT;
+	return 0;
+}
+
+static int ext4_ioc_setfsuuid(struct file *filp, struct super_block *sb,
+			      struct ioc_fsuuid __user *user_fu)
+{
+	struct ioc_fsuuid fu;
+	uuid_t new_uuid;
+	struct ext4_sb_info *sbi = EXT4_SB(sb);
+	handle_t *handle;
+	int err, err2;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	if (copy_from_user(&fu, user_fu, sizeof(fu)))
+		return -EFAULT;
+
+	if (fu.fu_reserved || fu.fu_reserved1 ||
+	    (fu.fu_flags & ~FS_IOC_SETFSUUID_ALL) ||
+	    fu.fu_length != sizeof(uuid_t))
+		return -EINVAL;
+
+	if (copy_from_user(&new_uuid, user_fu + 1, sizeof(uuid_t)))
+		return -EFAULT;
+	if (uuid_is_null(&new_uuid))
+		return -EINVAL;
+
+	err = mnt_want_write_file(filp);
+	if (err)
+		return err;
+
+	handle = ext4_journal_start_sb(sb, EXT4_HT_RESIZE, 1);
+	if (IS_ERR(handle)) {
+		err = PTR_ERR(handle);
+		goto out_drop_write;
+	}
+	err = ext4_journal_get_write_access(handle, sbi->s_sbh);
+	if (err)
+		goto out_cancel_trans;
+
+	/*
+	 * Older ext4 filesystems with the group descriptor checksum feature
+	 * but not the general metadata checksum features require all group
+	 * descriptors to be rewritten to change the UUID.  We can't do that
+	 * here, so just bail out.
+	 */
+	if (ext4_has_feature_gdt_csum(sb) && !ext4_has_metadata_csum(sb)) {
+		err = -EOPNOTSUPP;
+		goto out_cancel_trans;
+	}
+
+	/*
+	 * Prior to the addition of metadata checksumming, the uuid was only
+	 * used in the superblock, so for those filesystems, all we need to do
+	 * here is update the incore uuid and write the super to disk.
+	 *
+	 * On a metadata_csum filesystem, every metadata object has a checksum
+	 * that is seeded with the checksum of the uuid that was set at
+	 * mkfs time.  The seed value can be stored in the ondisk superblock
+	 * or computed at mount time, depending on feature flags.
+	 *
+	 * If the csum_seed feature is not set, we need to turn on the
+	 * csum_seed feature.  If userspace did not set FORCE_INCOMPAT we have
+	 * to bail out.  Otherwise, copy the incore checksum seed to the ondisk
+	 * superblock, set the csum_seed feature bit, and then we can update
+	 * the incore uuid.
+	 */
+	if ((ext4_has_metadata_csum(sb) || ext4_has_feature_ea_inode(sb)) &&
+	    !ext4_has_feature_csum_seed(sb) &&
+	    memcmp(&new_uuid, sbi->s_es->s_uuid, sizeof(sbi->s_es->s_uuid))) {
+		if (!(fu.fu_flags & FS_IOC_SETFSUUID_FORCE_INCOMPAT)) {
+			err = -EOPNOTSUPP;
+			goto out_cancel_trans;
+		}
+		sbi->s_es->s_checksum_seed = cpu_to_le32(sbi->s_csum_seed);
+		ext4_set_feature_csum_seed(sb);
+	}
+	memcpy(sbi->s_es->s_uuid, &new_uuid, sizeof(uuid_t));
+
+	err = ext4_handle_dirty_super(handle, sb);
+	if (err)
+		goto out_cancel_trans;
+
+	/* Update incore state. */
+	uuid_copy(&sb->s_uuid, &new_uuid);
+	invalidate_bdev(sb->s_bdev);
+
+out_cancel_trans:
+	err2 = ext4_journal_stop(handle);
+	if (!err)
+		err = err2;
+out_drop_write:
+	mnt_drop_write_file(filp);
+	return err;
+}
+
 long ext4_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	struct inode *inode = file_inode(filp);
@@ -1303,6 +1429,12 @@ out:
 		if (!ext4_has_feature_verity(sb))
 			return -EOPNOTSUPP;
 		return fsverity_ioctl_measure(filp, (void __user *)arg);
+
+	case FS_IOC_GETFSUUID:
+		return ext4_ioc_getfsuuid(sb, (struct ioc_fsuuid __user *)arg);
+	case FS_IOC_SETFSUUID:
+		return ext4_ioc_setfsuuid(filp, sb,
+					  (struct ioc_fsuuid __user *)arg);
 
 	default:
 		return -ENOTTY;
