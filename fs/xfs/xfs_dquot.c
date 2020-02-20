@@ -110,6 +110,16 @@ xfs_quota_exceeded(
 	       (hardlimit && (count - inactive_count) > hardlimit);
 }
 
+/* Set a quota grace period expiration timer. */
+void
+xfs_dquot_set_timer(
+	time64_t		*timer,
+	time64_t		value)
+{
+	*timer = clamp_t(time64_t, value, XFS_DQ_TIMEOUT_MIN,
+					  XFS_DQ_TIMEOUT_MAX);
+}
+
 /* Adjust the quota timer and warning counters as necessary. */
 static inline void
 xfs_dqtimer_adj(
@@ -119,7 +129,7 @@ xfs_dqtimer_adj(
 	uint16_t		*warns)
 {
 	if (over && *timer == 0)
-		*timer = ktime_get_real_seconds() + grace;
+		xfs_dquot_set_timer(timer, ktime_get_real_seconds() + grace);
 	else if (!over && *timer != 0)
 		*timer = 0;
 	else if (!over && *timer == 0)
