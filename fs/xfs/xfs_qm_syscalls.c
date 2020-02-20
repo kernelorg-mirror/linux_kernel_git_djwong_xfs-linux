@@ -599,13 +599,13 @@ xfs_qm_scall_setqlim(
 					newlim->d_rt_spc_timer);
 	} else {
 		if (newlim->d_fieldmask & QC_SPC_TIMER)
-			xfs_dquot_set_timer(&dqp->q_btimer,
+			xfs_dquot_set_timer(dqp, &dqp->q_btimer,
 					    newlim->d_spc_timer);
 		if (newlim->d_fieldmask & QC_INO_TIMER)
-			xfs_dquot_set_timer(&dqp->q_itimer,
+			xfs_dquot_set_timer(dqp, &dqp->q_itimer,
 					    newlim->d_ino_timer);
 		if (newlim->d_fieldmask & QC_RT_SPC_TIMER)
-			xfs_dquot_set_timer(&dqp->q_rtbtimer,
+			xfs_dquot_set_timer(dqp, &dqp->q_rtbtimer,
 					    newlim->d_rt_spc_timer);
 
 		/*
