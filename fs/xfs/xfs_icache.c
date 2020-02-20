@@ -26,8 +26,10 @@
 
 #include <linux/iversion.h>
 
-STATIC int xfs_inode_free_eofblocks(struct xfs_inode *ip, void *args);
-STATIC int xfs_inode_free_cowblocks(struct xfs_inode *ip, void *args);
+STATIC int xfs_inode_free_eofblocks(struct xfs_inode *ip, struct xfs_perag *pag,
+		void *args);
+STATIC int xfs_inode_free_cowblocks(struct xfs_inode *ip, struct xfs_perag *pag,
+		void *args);
 
 /*
  * Allocate and initialise an xfs_inode.
@@ -798,7 +800,8 @@ STATIC int
 xfs_ici_walk_ag(
 	struct xfs_mount	*mp,
 	struct xfs_perag	*pag,
-	int			(*execute)(struct xfs_inode *ip, void *args),
+	int			(*execute)(struct xfs_inode *ip,
+					   struct xfs_perag *pag, void *args),
 	void			*args,
 	int			tag,
 	int			iter_flags)
@@ -874,7 +877,7 @@ restart:
 			if ((iter_flags & XFS_ICI_WALK_INEW_WAIT) &&
 			    xfs_iflags_test(batch[i], XFS_INEW))
 				xfs_inew_wait(batch[i]);
-			error = execute(batch[i], args);
+			error = execute(batch[i], pag, args);
 			xfs_irele(batch[i]);
 			if (error == -EAGAIN) {
 				skipped++;
@@ -919,7 +922,8 @@ STATIC int
 xfs_ici_walk(
 	struct xfs_mount	*mp,
 	int			iter_flags,
-	int			(*execute)(struct xfs_inode *ip, void *args),
+	int			(*execute)(struct xfs_inode *ip,
+					   struct xfs_perag *pag, void *args),
 	void			*args,
 	int			tag)
 {
@@ -950,7 +954,8 @@ xfs_ici_walk(
 int
 xfs_ici_walk_all(
 	struct xfs_mount	*mp,
-	int			(*execute)(struct xfs_inode *ip, void *args),
+	int			(*execute)(struct xfs_inode *ip,
+					   struct xfs_perag *pag, void *args),
 	void			*args)
 {
 	return xfs_ici_walk(mp, XFS_ICI_WALK_INEW_WAIT, execute, args,
@@ -977,15 +982,16 @@ xfs_queue_blockgc(
 static int
 xfs_blockgc_scan_inode(
 	struct xfs_inode	*ip,
+	struct xfs_perag	*pag,
 	void			*args)
 {
 	int			error;
 
-	error = xfs_inode_free_eofblocks(ip, args);
+	error = xfs_inode_free_eofblocks(ip, pag, args);
 	if (error && error != -EAGAIN)
 		return error;
 
-	return xfs_inode_free_cowblocks(ip, args);
+	return xfs_inode_free_cowblocks(ip, pag, args);
 }
 
 /* Scan an AG's inodes for block preallocations that we can remove. */
@@ -1528,6 +1534,7 @@ xfs_inode_matches_eofb(
 STATIC int
 xfs_inode_free_eofblocks(
 	struct xfs_inode	*ip,
+	struct xfs_perag	*pag,
 	void			*args)
 {
 	struct xfs_eofblocks	*eofb = args;
@@ -1806,6 +1813,7 @@ xfs_prep_free_cowblocks(
 STATIC int
 xfs_inode_free_cowblocks(
 	struct xfs_inode	*ip,
+	struct xfs_perag	*pag,
 	void			*args)
 {
 	struct xfs_eofblocks	*eofb = args;

@@ -733,6 +733,7 @@ struct xfs_dqrele {
 STATIC int
 xfs_dqrele_inode(
 	struct xfs_inode	*ip,
+	struct xfs_perag	*pag,
 	void			*args)
 {
 	struct xfs_dqrele	*dqr = args;
