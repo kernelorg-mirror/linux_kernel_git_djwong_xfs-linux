@@ -8,6 +8,7 @@
 
 #include "scrub/bitmap.h"
 #include "xfs_btree.h"
+#include "xfs_btree_staging.h"
 union xfs_btree_ptr;
 
 static inline int xrep_notsupported(struct xfs_scrub *sc)
@@ -56,6 +57,10 @@ int xrep_find_ag_btree_roots(struct xfs_scrub *sc, struct xfs_buf *agf_bp,
 void xrep_force_quotacheck(struct xfs_scrub *sc, uint dqtype);
 int xrep_ino_dqattach(struct xfs_scrub *sc);
 
+/* Metadata revalidators */
+
+int xrep_revalidate_allocbt(struct xfs_scrub *sc);
+
 /* Metadata repairers */
 
 int xrep_probe(struct xfs_scrub *sc);
@@ -63,6 +68,7 @@ int xrep_superblock(struct xfs_scrub *sc);
 int xrep_agf(struct xfs_scrub *sc);
 int xrep_agfl(struct xfs_scrub *sc);
 int xrep_agi(struct xfs_scrub *sc);
+int xrep_allocbt(struct xfs_scrub *sc);
 
 struct xrep_newbt_resv {
 	/* Link to list of extents that we've reserved. */
@@ -102,6 +108,9 @@ struct xrep_newbt {
 	enum xfs_ag_resv_type	resv;
 };
 
+#define for_each_xrep_newbt_reservation(xnr, resv, n)	\
+	list_for_each_entry_safe((resv), (n), &(xnr)->resv_list, list)
+
 void xrep_newbt_init_bare(struct xrep_newbt *xnr, struct xfs_scrub *sc);
 void xrep_newbt_init_ag(struct xrep_newbt *xnr, struct xfs_scrub *sc,
 		const struct xfs_owner_info *oinfo, xfs_fsblock_t alloc_hint,
@@ -135,11 +144,14 @@ xrep_calc_ag_resblks(
 	return 0;
 }
 
+#define xrep_revalidate_allocbt		(NULL)
+
 #define xrep_probe			xrep_notsupported
 #define xrep_superblock			xrep_notsupported
 #define xrep_agf			xrep_notsupported
 #define xrep_agfl			xrep_notsupported
 #define xrep_agi			xrep_notsupported
+#define xrep_allocbt			xrep_notsupported
 
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
