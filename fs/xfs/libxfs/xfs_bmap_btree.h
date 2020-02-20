@@ -114,5 +114,7 @@ void xfs_bmbt_commit_staged_btree(struct xfs_btree_cur *cur, int whichfork);
 
 extern unsigned long long xfs_bmbt_calc_size(struct xfs_mount *mp,
 		unsigned long long len);
+extern void xfs_bmbt_iroot_realloc(struct xfs_inode *ip, int rec_diff,
+		int whichfork);
 
 #endif	/* __XFS_BMAP_BTREE_H__ */
