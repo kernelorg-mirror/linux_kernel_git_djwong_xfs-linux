@@ -28,6 +28,7 @@
 #include "xfs_attr.h"
 #include "xfs_reflink.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_error.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -85,6 +86,12 @@ __xchk_process_error(
 		*error = 0;
 		/* fall through */
 	default:
+		xchk_whine(sc->mp, "type %d agno %u agbno %u error %d ret_ip %pS",
+				sc->sm->sm_type,
+				agno,
+				bno,
+				*error,
+				ret_ip);
 		trace_xchk_op_error(sc, agno, bno, *error,
 				ret_ip);
 		break;
@@ -138,6 +145,13 @@ __xchk_fblock_process_error(
 		*error = 0;
 		/* fall through */
 	default:
+		xchk_whine(sc->mp, "ino %llu fork %d type %d offset %llu error %d ret_ip %pS",
+				sc->ip->i_ino,
+				whichfork,
+				sc->sm->sm_type,
+				offset,
+				*error,
+				ret_ip);
 		trace_xchk_file_op_error(sc, whichfork, offset, *error,
 				ret_ip);
 		break;
@@ -209,6 +223,8 @@ xchk_set_corrupt(
 	struct xfs_scrub	*sc)
 {
 	sc->sm->sm_flags |= XFS_SCRUB_OFLAG_CORRUPT;
+	xchk_whine(sc->mp, "type %d ret_ip %pS", sc->sm->sm_type,
+			__return_address);
 	trace_xchk_fs_error(sc, 0, __return_address);
 }
 
@@ -219,6 +235,11 @@ xchk_block_set_corrupt(
 	struct xfs_buf		*bp)
 {
 	sc->sm->sm_flags |= XFS_SCRUB_OFLAG_CORRUPT;
+	xchk_whine(sc->mp, "type %d agno %u agbno %u ret_ip %pS",
+			sc->sm->sm_type,
+			XFS_FSB_TO_AGNO(sc->mp, XFS_DADDR_TO_FSB(sc->mp, bp->b_bn)),
+			XFS_FSB_TO_AGBNO(sc->mp, XFS_DADDR_TO_FSB(sc->mp, bp->b_bn)),
+			__return_address);
 	trace_xchk_block_error(sc, bp->b_bn, __return_address);
 }
 
@@ -229,6 +250,11 @@ xchk_block_xref_set_corrupt(
 	struct xfs_buf		*bp)
 {
 	sc->sm->sm_flags |= XFS_SCRUB_OFLAG_XCORRUPT;
+	xchk_whine(sc->mp, "type %d agno %u agbno %u ret_ip %pS",
+			sc->sm->sm_type,
+			XFS_FSB_TO_AGNO(sc->mp, XFS_DADDR_TO_FSB(sc->mp, bp->b_bn)),
+			XFS_FSB_TO_AGBNO(sc->mp, XFS_DADDR_TO_FSB(sc->mp, bp->b_bn)),
+			__return_address);
 	trace_xchk_block_error(sc, bp->b_bn, __return_address);
 }
 
@@ -243,6 +269,8 @@ xchk_ino_set_corrupt(
 	xfs_ino_t		ino)
 {
 	sc->sm->sm_flags |= XFS_SCRUB_OFLAG_CORRUPT;
+	xchk_whine(sc->mp, "ino %llu type %d ret_ip %pS",
+			ino, sc->sm->sm_type, __return_address);
 	trace_xchk_ino_error(sc, ino, __return_address);
 }
 
@@ -253,6 +281,8 @@ xchk_ino_xref_set_corrupt(
 	xfs_ino_t		ino)
 {
 	sc->sm->sm_flags |= XFS_SCRUB_OFLAG_XCORRUPT;
+	xchk_whine(sc->mp, "ino %llu type %d ret_ip %pS",
+			ino, sc->sm->sm_type, __return_address);
 	trace_xchk_ino_error(sc, ino, __return_address);
 }
 
@@ -264,6 +294,12 @@ xchk_fblock_set_corrupt(
 	xfs_fileoff_t		offset)
 {
 	sc->sm->sm_flags |= XFS_SCRUB_OFLAG_CORRUPT;
+	xchk_whine(sc->mp, "ino %llu fork %d type %d offset %llu ret_ip %pS",
+			sc->ip->i_ino,
+			whichfork,
+			sc->sm->sm_type,
+			offset,
+			__return_address);
 	trace_xchk_fblock_error(sc, whichfork, offset, __return_address);
 }
 
@@ -275,6 +311,12 @@ xchk_fblock_xref_set_corrupt(
 	xfs_fileoff_t		offset)
 {
 	sc->sm->sm_flags |= XFS_SCRUB_OFLAG_XCORRUPT;
+	xchk_whine(sc->mp, "ino %llu fork %d type %d offset %llu ret_ip %pS",
+			sc->ip->i_ino,
+			whichfork,
+			sc->sm->sm_type,
+			offset,
+			__return_address);
 	trace_xchk_fblock_error(sc, whichfork, offset, __return_address);
 }
 
@@ -288,6 +330,8 @@ xchk_ino_set_warning(
 	xfs_ino_t		ino)
 {
 	sc->sm->sm_flags |= XFS_SCRUB_OFLAG_WARNING;
+	xchk_whine(sc->mp, "ino %llu type %d agno %u agbno %u ret_ip %pS",
+			ino, sc->sm->sm_type, __return_address);
 	trace_xchk_ino_warning(sc, ino, __return_address);
 }
 
@@ -299,6 +343,12 @@ xchk_fblock_set_warning(
 	xfs_fileoff_t		offset)
 {
 	sc->sm->sm_flags |= XFS_SCRUB_OFLAG_WARNING;
+	xchk_whine(sc->mp, "ino %llu fork %d type %d offset %llu ret_ip %pS",
+			sc->ip->i_ino,
+			whichfork,
+			sc->sm->sm_type,
+			offset,
+			__return_address);
 	trace_xchk_fblock_warning(sc, whichfork, offset, __return_address);
 }
 
@@ -753,6 +803,12 @@ xchk_get_inode(
 		error = -EFSCORRUPTED;
 		/* fall through */
 	default:
+		xchk_whine(mp, "type %d agno %u agbno %u error %d ret_ip %pS",
+				sc->sm->sm_type,
+				XFS_INO_TO_AGNO(mp, sc->sm->sm_ino),
+				XFS_INO_TO_AGBNO(mp, sc->sm->sm_ino),
+				error,
+				__return_address);
 		trace_xchk_op_error(sc,
 				XFS_INO_TO_AGNO(mp, sc->sm->sm_ino),
 				XFS_INO_TO_AGBNO(mp, sc->sm->sm_ino),
@@ -825,6 +881,10 @@ xchk_should_check_xref(
 	}
 
 	sc->sm->sm_flags |= XFS_SCRUB_OFLAG_XFAIL;
+	xchk_whine(sc->mp, "type %d xref error %d ret_ip %pS",
+			sc->sm->sm_type,
+			*error,
+			__return_address);
 	trace_xchk_xref_error(sc, *error, __return_address);
 
 	/*
@@ -855,6 +915,11 @@ xchk_buffer_recheck(
 	if (!fa)
 		return;
 	sc->sm->sm_flags |= XFS_SCRUB_OFLAG_CORRUPT;
+	xchk_whine(sc->mp, "type %d agno %u agbno %u ret_ip %pS",
+			sc->sm->sm_type,
+			XFS_FSB_TO_AGNO(sc->mp, XFS_DADDR_TO_FSB(sc->mp, bp->b_bn)),
+			XFS_FSB_TO_AGBNO(sc->mp, XFS_DADDR_TO_FSB(sc->mp, bp->b_bn)),
+			fa);
 	trace_xchk_block_error(sc, bp->b_bn, fa);
 }
 
@@ -1038,4 +1103,30 @@ xchk_fs_thaw(
 	error = thaw_super(sc->mp->m_super);
 	mutex_unlock(&sc->mp->m_scrub_freeze);
 	return error;
+}
+
+/* Complain about failures... */
+void
+xchk_whine(
+	const struct xfs_mount	*mp,
+	const char		*fmt,
+	...)
+{
+	struct va_format	vaf;
+	va_list			args;
+	int			level;
+
+	va_start(args, fmt);
+
+	vaf.fmt = fmt;
+	vaf.va = &args;
+
+	printk(KERN_INFO "XFS (%s) %pS: %pV\n", mp->m_super->s_id,
+			__return_address, &vaf);
+	va_end(args);
+
+	if (!kstrtoint(KERN_INFO, 0, &level) &&
+	    level <= LOGLEVEL_ERR &&
+	    xfs_error_level >= XFS_ERRLEVEL_HIGH)
+		xfs_stack_trace();
 }
