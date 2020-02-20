@@ -26,6 +26,8 @@
 #include "xfs_ag_resv.h"
 #include "xfs_quota.h"
 #include "xfs_bmap.h"
+#include "xfs_defer.h"
+#include "xfs_extfree_item.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -421,12 +423,39 @@ xrep_newbt_init_bare(
 			XFS_AG_RESV_NONE);
 }
 
+/*
+ * Set up automatic reaping of the blocks reserved for btree reconstruction in
+ * case we crash by logging a deferred free item for each extent we allocate so
+ * that we can get all of the space back if we crash before we can commit the
+ * new btree.  This function returns a token that can be used to cancel
+ * automatic reaping if repair is successful.
+ */
+static void
+xrep_newbt_schedule_reap(
+	struct xrep_newbt		*xnr,
+	struct xrep_newbt_resv		*resv)
+{
+	struct xfs_extent_free_item	efi_item = {
+		.xefi_startblock	= resv->fsbno,
+		.xefi_blockcount	= resv->len,
+		.xefi_oinfo		= xnr->oinfo, /* struct copy */
+		.xefi_skip_discard	= true,
+	};
+	LIST_HEAD(items);
+
+	INIT_LIST_HEAD(&efi_item.xefi_list);
+	list_add(&efi_item.xefi_list, &items);
+	resv->efi = xfs_extent_free_defer_type.create_intent(xnr->sc->tp,
+			&items, 1, false);
+}
+
 /* Designate specific blocks to be used to build our new btree. */
-int
-xrep_newbt_add_blocks(
+static int
+__xrep_newbt_add_blocks(
 	struct xrep_newbt		*xnr,
 	xfs_fsblock_t			fsbno,
-	xfs_extlen_t			len)
+	xfs_extlen_t			len,
+	bool				auto_reap)
 {
 	struct xrep_newbt_resv		*resv;
 
@@ -438,8 +467,23 @@ xrep_newbt_add_blocks(
 	resv->fsbno = fsbno;
 	resv->len = len;
 	resv->used = 0;
+	if (auto_reap)
+		xrep_newbt_schedule_reap(xnr, resv);
 	list_add_tail(&resv->list, &xnr->resv_list);
 	return 0;
+}
+
+/*
+ * Allow certain callers to add disk space directly to the reservation.
+ * Callers are responsible for cleaning up the reservations.
+ */
+int
+xrep_newbt_add_blocks(
+	struct xrep_newbt		*xnr,
+	xfs_fsblock_t			fsbno,
+	xfs_extlen_t			len)
+{
+	return __xrep_newbt_add_blocks(xnr, fsbno, len, false);
 }
 
 /* Allocate disk space for our new btree. */
@@ -483,7 +527,8 @@ xrep_newbt_alloc_blocks(
 				XFS_FSB_TO_AGBNO(sc->mp, args.fsbno),
 				args.len, xnr->oinfo.oi_owner);
 
-		error = xrep_newbt_add_blocks(xnr, args.fsbno, args.len);
+		error = __xrep_newbt_add_blocks(xnr, args.fsbno, args.len,
+				true);
 		if (error)
 			return error;
 
@@ -511,6 +556,18 @@ xrep_newbt_destroy_reservation(
 	bool			cancel_repair)
 {
 	struct xfs_scrub	*sc = xnr->sc;
+	struct xfs_log_item	*lip;
+
+	/*
+	 * Earlier, we logged EFIs for the extents that we allocated to hold
+	 * the new btree so that we could automatically roll back those
+	 * allocations if the system crashed.  Now we log an EFD to cancel the
+	 * EFI, either because the repair succeeded and the new blocks are in
+	 * use; or because the repair was cancelled and we're about to free
+	 * the extents directly.
+	 */
+	lip = xfs_extent_free_defer_type.create_done(sc->tp, resv->efi, 0);
+	set_bit(XFS_LI_DIRTY, &lip->li_flags);
 
 	if (cancel_repair) {
 		int		error;
@@ -579,6 +636,7 @@ junkit:
 	 * reservations.
 	 */
 	list_for_each_entry_safe(resv, n, &xnr->resv_list, list) {
+		xfs_extent_free_defer_type.abort_intent(resv->efi);
 		list_del(&resv->list);
 		kmem_free(resv);
 	}

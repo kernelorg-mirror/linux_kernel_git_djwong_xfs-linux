@@ -68,6 +68,8 @@ struct xrep_newbt_resv {
 	/* Link to list of extents that we've reserved. */
 	struct list_head	list;
 
+	struct xfs_log_item	*efi;
+
 	/* FSB of the block we reserved. */
 	xfs_fsblock_t		fsbno;
 
