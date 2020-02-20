@@ -621,15 +621,15 @@ xfs_qm_scall_getquota_fill_qc(
 	dst->d_spc_softlimit = XFS_FSB_TO_B(mp, dqp->q_blk_softlimit);
 	dst->d_ino_hardlimit = dqp->q_ino_hardlimit;
 	dst->d_ino_softlimit = dqp->q_ino_softlimit;
-	dst->d_space = XFS_FSB_TO_B(mp, dqp->q_res_bcount);
-	dst->d_ino_count = dqp->q_res_icount;
+	dst->d_space = XFS_FSB_TO_B(mp, dqp->q_res_bcount - dqp->q_ina_bcount);
+	dst->d_ino_count = dqp->q_res_icount - dqp->q_ina_icount;
 	dst->d_spc_timer = dqp->q_btimer;
 	dst->d_ino_timer = dqp->q_itimer;
 	dst->d_ino_warns = dqp->q_iwarns;
 	dst->d_spc_warns = dqp->q_bwarns;
 	dst->d_rt_spc_hardlimit = XFS_FSB_TO_B(mp, dqp->q_rtb_hardlimit);
 	dst->d_rt_spc_softlimit = XFS_FSB_TO_B(mp, dqp->q_rtb_softlimit);
-	dst->d_rt_space = XFS_FSB_TO_B(mp, dqp->q_res_rtbcount);
+	dst->d_rt_space = XFS_FSB_TO_B(mp, dqp->q_res_rtbcount - dqp->q_ina_rtbcount);
 	dst->d_rt_spc_timer = dqp->q_rtbtimer;
 	dst->d_rt_spc_warns = dqp->q_rtbwarns;
 

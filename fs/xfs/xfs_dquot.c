@@ -103,10 +103,11 @@ static inline bool
 xfs_quota_exceeded(
 	const xfs_qcnt_t	count,
 	const xfs_qcnt_t	softlimit,
-	const xfs_qcnt_t	hardlimit)
+	const xfs_qcnt_t	hardlimit,
+	const xfs_qcnt_t	inactive_count)
 {
-	return (softlimit && count > softlimit) ||
-	       (hardlimit && count > hardlimit);
+	return (softlimit && (count - inactive_count) > softlimit) ||
+	       (hardlimit && (count - inactive_count) > hardlimit);
 }
 
 /* Adjust the quota timer and warning counters as necessary. */
@@ -160,15 +161,15 @@ xfs_qm_adjust_dqtimers(
 #endif
 
 	over = xfs_quota_exceeded(dq->q_bcount, dq->q_blk_softlimit,
-			dq->q_blk_hardlimit);
+			dq->q_blk_hardlimit, dq->q_ina_bcount);
 	xfs_dqtimer_adj(over, defq->btimelimit, &dq->q_btimer, &dq->q_bwarns);
 
 	over = xfs_quota_exceeded(dq->q_icount, dq->q_ino_softlimit,
-			dq->q_ino_hardlimit);
+			dq->q_ino_hardlimit, dq->q_ina_icount);
 	xfs_dqtimer_adj(over, defq->itimelimit, &dq->q_itimer, &dq->q_iwarns);
 
 	over = xfs_quota_exceeded(dq->q_rtbcount, dq->q_rtb_softlimit,
-			dq->q_rtb_hardlimit);
+			dq->q_rtb_hardlimit, dq->q_ina_rtbcount);
 	xfs_dqtimer_adj(over, defq->rtbtimelimit, &dq->q_rtbtimer,
 			&dq->q_rtbwarns);
 }
@@ -1348,4 +1349,51 @@ xfs_qm_dqiterate(
 	} while (error == 0 && id != 0);
 
 	return error;
+}
+
+/* Update dquot pending-inactivation counters. */
+STATIC void
+xfs_dquot_iadjust(
+	struct xfs_dquot	*dqp,
+	int			direction,
+	int64_t			inodes,
+	int64_t			dblocks,
+	int64_t			rblocks)
+{
+	xfs_dqlock(dqp);
+	dqp->q_ina_total += direction;
+	dqp->q_ina_icount += inodes;
+	dqp->q_ina_bcount += dblocks;
+	dqp->q_ina_rtbcount += rblocks;
+	if (dqp->q_id)
+		xfs_qm_adjust_dqtimers(dqp);
+	xfs_dqunlock(dqp);
+}
+
+/* Update pending-inactivation counters for all dquots attach to inode. */
+void
+xfs_qm_iadjust(
+	struct xfs_inode	*ip,
+	int			direction,
+	int64_t			inodes,
+	int64_t			dblocks,
+	int64_t			rblocks)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+
+	if (!XFS_IS_QUOTA_RUNNING(mp) || !XFS_IS_QUOTA_ON(mp) ||
+	    xfs_is_quota_inode(&mp->m_sb, ip->i_ino))
+		return;
+
+	if (XFS_IS_UQUOTA_ON(mp) && ip->i_udquot)
+		xfs_dquot_iadjust(ip->i_udquot, direction, inodes, dblocks,
+				rblocks);
+
+	if (XFS_IS_GQUOTA_ON(mp) && ip->i_gdquot)
+		xfs_dquot_iadjust(ip->i_gdquot, direction, inodes, dblocks,
+				rblocks);
+
+	if (XFS_IS_PQUOTA_ON(mp) && ip->i_pdquot)
+		xfs_dquot_iadjust(ip->i_pdquot, direction, inodes, dblocks,
+				rblocks);
 }
