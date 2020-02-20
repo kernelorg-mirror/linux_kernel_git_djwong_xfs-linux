@@ -351,13 +351,14 @@ xfs_reflink_allocate_cow(
 	bool			convert_now)
 {
 	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_trans	*tp;
 	xfs_fileoff_t		offset_fsb = imap->br_startoff;
 	xfs_filblks_t		count_fsb = imap->br_blockcount;
-	struct xfs_trans	*tp;
-	int			nimaps, error = 0;
-	bool			found;
 	xfs_filblks_t		resaligned;
 	xfs_extlen_t		resblks = 0;
+	bool			found;
+	bool			cleared_space = false;
+	int			nimaps, error = 0;
 
 	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL));
 	if (!ip->i_cowfp) {
@@ -376,6 +377,7 @@ xfs_reflink_allocate_cow(
 	resblks = XFS_DIOSTRAT_SPACE_RES(mp, resaligned);
 
 	xfs_iunlock(ip, *lockmode);
+retry:
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, 0, 0, &tp);
 	*lockmode = XFS_ILOCK_EXCL;
 	xfs_ilock(ip, *lockmode);
@@ -400,6 +402,23 @@ xfs_reflink_allocate_cow(
 
 	error = xfs_trans_reserve_quota_nblks(tp, ip, resblks, 0,
 			XFS_QMOPT_RES_REGBLKS);
+	/*
+	 * We weren't able to reserve enough quota to handle copy on write.
+	 * Flush any disk space that was being held in the hopes of speeding up
+	 * the filesystem.  We potentially hold the IOLOCK so we cannot do a
+	 * synchronous scan.
+	 */
+	if ((error == -ENOSPC || error == -EDQUOT) && !cleared_space) {
+		xfs_trans_cancel(tp);
+		xfs_iunlock(ip, *lockmode);
+		*lockmode = 0;
+		cleared_space = xfs_inode_free_quota_blocks(ip, false);
+		if (cleared_space)
+			goto retry;
+		*lockmode = XFS_ILOCK_EXCL;
+		xfs_ilock(ip, *lockmode);
+		return error;
+	}
 	if (error)
 		goto out_trans_cancel;
 
@@ -1000,9 +1019,11 @@ xfs_reflink_remap_extent(
 	int64_t			ip_delta = 0;
 	unsigned int		resblks;
 	bool			real_extent = xfs_bmap_is_real_extent(imap);
+	bool			cleared_space = false;
 	int			nimaps;
 	int			error;
 
+retry:
 	/* Start a rolling transaction to switch the mappings */
 	resblks = XFS_EXTENTADD_SPACE_RES(mp, XFS_DATA_FORK);
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, 0, 0, &tp);
@@ -1061,6 +1082,19 @@ xfs_reflink_remap_extent(
 		/* Do we have enough quota? */
 		error = xfs_trans_reserve_quota_nblks(tp, ip,
 				imap->br_blockcount, 0, XFS_QMOPT_RES_REGBLKS);
+		/*
+		 * We weren't able to reserve enough quota for the remapping.
+		 * Flush any disk space that was being held in the hopes of
+		 * speeding up the filesystem.  We still hold the IOLOCK so we
+		 * cannot do a sync scan.
+		 */
+		if ((error == -ENOSPC || error == -EDQUOT) && !cleared_space) {
+			xfs_trans_cancel(tp);
+			xfs_iunlock(ip, XFS_ILOCK_EXCL);
+			cleared_space = xfs_inode_free_quota_blocks(ip, false);
+			if (cleared_space)
+				goto retry;
+		}
 		if (error)
 			goto out_cancel;
 	}
