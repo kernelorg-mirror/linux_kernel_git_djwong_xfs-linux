@@ -113,9 +113,15 @@ xfs_quota_exceeded(
 /* Set a quota grace period expiration timer. */
 void
 xfs_dquot_set_timer(
+	struct xfs_dquot	*dqp,
 	time64_t		*timer,
 	time64_t		value)
 {
+	if (dqp->dq_flags & XFS_DQ_BIGTIME) {
+		*timer = clamp_t(time64_t, value, XFS_DQ_BIGTIMEOUT_MIN,
+						  XFS_DQ_BIGTIMEOUT_MAX);
+		return;
+	}
 	*timer = clamp_t(time64_t, value, XFS_DQ_TIMEOUT_MIN,
 					  XFS_DQ_TIMEOUT_MAX);
 }
@@ -123,13 +129,15 @@ xfs_dquot_set_timer(
 /* Adjust the quota timer and warning counters as necessary. */
 static inline void
 xfs_dqtimer_adj(
+	struct xfs_dquot	*dqp,
 	bool			over,
 	time64_t		grace,
 	time64_t		*timer,
 	uint16_t		*warns)
 {
 	if (over && *timer == 0)
-		xfs_dquot_set_timer(timer, ktime_get_real_seconds() + grace);
+		xfs_dquot_set_timer(dqp, timer,
+				    ktime_get_real_seconds() + grace);
 	else if (!over && *timer != 0)
 		*timer = 0;
 	else if (!over && *timer == 0)
@@ -172,15 +180,17 @@ xfs_qm_adjust_dqtimers(
 
 	over = xfs_quota_exceeded(dq->q_bcount, dq->q_blk_softlimit,
 			dq->q_blk_hardlimit, dq->q_ina_bcount);
-	xfs_dqtimer_adj(over, defq->btimelimit, &dq->q_btimer, &dq->q_bwarns);
+	xfs_dqtimer_adj(dq, over, defq->btimelimit, &dq->q_btimer,
+			&dq->q_bwarns);
 
 	over = xfs_quota_exceeded(dq->q_icount, dq->q_ino_softlimit,
 			dq->q_ino_hardlimit, dq->q_ina_icount);
-	xfs_dqtimer_adj(over, defq->itimelimit, &dq->q_itimer, &dq->q_iwarns);
+	xfs_dqtimer_adj(dq, over, defq->itimelimit, &dq->q_itimer,
+			&dq->q_iwarns);
 
 	over = xfs_quota_exceeded(dq->q_rtbcount, dq->q_rtb_softlimit,
 			dq->q_rtb_hardlimit, dq->q_ina_rtbcount);
-	xfs_dqtimer_adj(over, defq->rtbtimelimit, &dq->q_rtbtimer,
+	xfs_dqtimer_adj(dq, over, defq->rtbtimelimit, &dq->q_rtbtimer,
 			&dq->q_rtbwarns);
 }
 
@@ -217,6 +227,8 @@ xfs_qm_init_dquot_blk(
 		d->dd_diskdq.d_version = XFS_DQUOT_VERSION;
 		d->dd_diskdq.d_id = cpu_to_be32(curid);
 		d->dd_diskdq.d_flags = type;
+		if (curid > 0 && xfs_sb_version_hasbigtime(&mp->m_sb))
+			d->dd_diskdq.d_flags |= XFS_DQ_BIGTIME;
 		if (xfs_sb_version_hascrc(&mp->m_sb)) {
 			uuid_copy(&d->dd_uuid, &mp->m_sb.sb_meta_uuid);
 			xfs_update_cksum((char *)d, sizeof(struct xfs_dqblk),
@@ -527,6 +539,8 @@ xfs_dquot_from_disk(
 	}
 
 	/* copy everything from disk dquot to the incore dquot */
+	dqp->dq_flags &= ~XFS_DQ_ONDISK;
+	dqp->dq_flags |= (ddqp->d_flags & XFS_DQ_ONDISK);
 	dqp->q_blk_hardlimit = be64_to_cpu(ddqp->d_blk_hardlimit);
 	dqp->q_blk_softlimit = be64_to_cpu(ddqp->d_blk_softlimit);
 	dqp->q_ino_hardlimit = be64_to_cpu(ddqp->d_ino_hardlimit);
@@ -542,9 +556,17 @@ xfs_dquot_from_disk(
 	dqp->q_iwarns = be16_to_cpu(ddqp->d_iwarns);
 	dqp->q_rtbwarns = be16_to_cpu(ddqp->d_rtbwarns);
 
-	dqp->q_btimer = be32_to_cpu(ddqp->d_btimer);
-	dqp->q_itimer = be32_to_cpu(ddqp->d_itimer);
-	dqp->q_rtbtimer = be32_to_cpu(ddqp->d_rtbtimer);
+	xfs_dquot_from_disk_timestamp(ddqp, &dqp->q_btimer, ddqp->d_btimer);
+	xfs_dquot_from_disk_timestamp(ddqp, &dqp->q_itimer, ddqp->d_itimer);
+	xfs_dquot_from_disk_timestamp(ddqp, &dqp->q_rtbtimer, ddqp->d_rtbtimer);
+
+	/*
+	 * Set the bigtime flag on the incore dquot so that the next dquot
+	 * update will write quota timer expiration timestamps to disk in the
+	 * new format.
+	 */
+	if (dqp->q_id != 0 && xfs_sb_version_hasbigtime(&dqp->q_mount->m_sb))
+		dqp->dq_flags |= XFS_DQ_BIGTIME;
 
 	/*
 	 * Reservation counters are defined as reservation plus current usage
@@ -587,9 +609,9 @@ xfs_dquot_to_disk(
 	ddqp->d_iwarns = cpu_to_be16(dqp->q_iwarns);
 	ddqp->d_rtbwarns = cpu_to_be16(dqp->q_rtbwarns);
 
-	ddqp->d_btimer = cpu_to_be32(dqp->q_btimer);
-	ddqp->d_itimer = cpu_to_be32(dqp->q_itimer);
-	ddqp->d_rtbtimer = cpu_to_be32(dqp->q_rtbtimer);
+	xfs_dquot_to_disk_timestamp(dqp, &ddqp->d_btimer, dqp->q_btimer);
+	xfs_dquot_to_disk_timestamp(dqp, &ddqp->d_itimer, dqp->q_itimer);
+	xfs_dquot_to_disk_timestamp(dqp, &ddqp->d_rtbtimer, dqp->q_rtbtimer);
 }
 
 /* Allocate and initialize the dquot buffer for this in-core dquot. */
@@ -1160,6 +1182,15 @@ xfs_qm_dqflush_check(
 
 	if (dqp->q_rtb_softlimit && dqp->q_rtbcount > dqp->q_rtb_softlimit &&
 	    !dqp->q_rtbtimer)
+		return __this_address;
+
+	/*
+	 * Except for the root dquot (whose timer values are the default grace
+	 * period expirations) we should never write non-bigtime quota timers
+	 * to a bigtime fs.
+	 */
+	if (dqp->q_id != 0 && xfs_sb_version_hasbigtime(&dqp->q_mount->m_sb) &&
+	    !(dqp->dq_flags & XFS_DQ_BIGTIME))
 		return __this_address;
 
 	return NULL;

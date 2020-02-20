@@ -40,6 +40,8 @@ xfs_dquot_verify(
 	xfs_dqid_t		id,
 	uint			type)	/* used only during quotacheck */
 {
+	uint8_t			dtype;
+
 	/*
 	 * We can encounter an uninitialized dquot buffer for 2 reasons:
 	 * 1. If we crash while deleting the quotainode(s), and those blks got
@@ -60,11 +62,22 @@ xfs_dquot_verify(
 	if (ddq->d_version != XFS_DQUOT_VERSION)
 		return __this_address;
 
-	if (type && ddq->d_flags != type)
+	dtype = ddq->d_flags & XFS_DQ_ALLTYPES;
+	if (type && dtype != type)
 		return __this_address;
-	if (ddq->d_flags != XFS_DQ_USER &&
-	    ddq->d_flags != XFS_DQ_PROJ &&
-	    ddq->d_flags != XFS_DQ_GROUP)
+	if (dtype != XFS_DQ_USER &&
+	    dtype != XFS_DQ_PROJ &&
+	    dtype != XFS_DQ_GROUP)
+		return __this_address;
+
+	if (ddq->d_flags & ~(XFS_DQ_ALLTYPES | XFS_DQ_BIGTIME))
+		return __this_address;
+
+	if ((ddq->d_flags & XFS_DQ_BIGTIME) &&
+	    !xfs_sb_version_hasbigtime(&mp->m_sb))
+		return __this_address;
+
+	if ((ddq->d_flags & XFS_DQ_BIGTIME) && !ddq->d_id)
 		return __this_address;
 
 	if (id != -1 && id != be32_to_cpu(ddq->d_id))
@@ -287,3 +300,56 @@ const struct xfs_buf_ops xfs_dquot_buf_ra_ops = {
 	.verify_read = xfs_dquot_buf_readahead_verify,
 	.verify_write = xfs_dquot_buf_write_verify,
 };
+
+/* Convert an on-disk timer value into an incore timer value. */
+void
+xfs_dquot_from_disk_timestamp(
+	struct xfs_disk_dquot	*ddq,
+	time64_t		*timer,
+	__be32			dtimer)
+{
+	/* Zero always means zero, regardless of encoding. */
+	if (!dtimer) {
+		*timer = 0;
+		return;
+	}
+
+	if (ddq->d_flags & XFS_DQ_BIGTIME) {
+		uint64_t	t;
+
+		t = be32_to_cpu(dtimer);
+		*timer = t << XFS_DQ_BIGTIME_SHIFT;
+		return;
+	}
+
+	*timer = be32_to_cpu(dtimer);
+}
+
+/* Convert an incore timer value into an on-disk timer value. */
+void
+xfs_dquot_to_disk_timestamp(
+	struct xfs_dquot	*dqp,
+	__be32			*dtimer,
+	time64_t		timer)
+{
+	/* Zero always means zero, regardless of encoding. */
+	if (!timer) {
+		*dtimer = cpu_to_be32(0);
+		return;
+	}
+
+	if (dqp->dq_flags & XFS_DQ_BIGTIME) {
+		uint64_t	t = timer;
+
+		/*
+		 * Round the end of the grace period up to the nearest bigtime
+		 * interval that we support, to give users the most time to fix
+		 * the problems.
+		 */
+		t = roundup_64(t, 1U << XFS_DQ_BIGTIME_SHIFT);
+		*dtimer = cpu_to_be32(t >> XFS_DQ_BIGTIME_SHIFT);
+		return;
+	}
+
+	*dtimer = cpu_to_be32(timer);
+}
