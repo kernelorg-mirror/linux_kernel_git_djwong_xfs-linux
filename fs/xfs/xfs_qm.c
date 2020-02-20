@@ -589,6 +589,7 @@ xfs_qm_init_timelimits(
 	struct xfs_mount	*mp,
 	struct xfs_quotainfo	*qinf)
 {
+	struct timespec64	tv;
 	struct xfs_disk_dquot	*ddqp;
 	struct xfs_dquot	*dqp;
 	uint			type;
@@ -628,12 +629,18 @@ xfs_qm_init_timelimits(
 	 * a user or group before he or she can not perform any
 	 * more writing. If it is zero, a default is used.
 	 */
-	if (ddqp->d_btimer)
-		qinf->qi_btimelimit = be32_to_cpu(ddqp->d_btimer);
-	if (ddqp->d_itimer)
-		qinf->qi_itimelimit = be32_to_cpu(ddqp->d_itimer);
-	if (ddqp->d_rtbtimer)
-		qinf->qi_rtbtimelimit = be32_to_cpu(ddqp->d_rtbtimer);
+	if (ddqp->d_btimer) {
+		xfs_dquot_from_disk_timestamp(&tv, ddqp->d_btimer);
+		qinf->qi_btimelimit = tv.tv_sec;
+	}
+	if (ddqp->d_itimer) {
+		xfs_dquot_from_disk_timestamp(&tv, ddqp->d_itimer);
+		qinf->qi_itimelimit = tv.tv_sec;
+	}
+	if (ddqp->d_rtbtimer) {
+		xfs_dquot_from_disk_timestamp(&tv, ddqp->d_rtbtimer);
+		qinf->qi_rtbtimelimit = tv.tv_sec;
+	}
 	if (ddqp->d_bwarns)
 		qinf->qi_bwarnlimit = be16_to_cpu(ddqp->d_bwarns);
 	if (ddqp->d_iwarns)
@@ -844,11 +851,12 @@ xfs_qm_qino_alloc(
 
 STATIC void
 xfs_qm_reset_dqcounts(
-	xfs_mount_t	*mp,
-	xfs_buf_t	*bp,
-	xfs_dqid_t	id,
-	uint		type)
+	struct xfs_mount	*mp,
+	struct xfs_buf		*bp,
+	xfs_dqid_t		id,
+	unsigned int		type)
 {
+	struct timespec64	tv = { 0 };
 	struct xfs_dqblk	*dqb;
 	int			j;
 	xfs_failaddr_t		fa;
@@ -895,9 +903,9 @@ xfs_qm_reset_dqcounts(
 		 * should not reset them.
 		 */
 		if (ddq->d_id != 0) {
-			ddq->d_btimer = 0;
-			ddq->d_itimer = 0;
-			ddq->d_rtbtimer = 0;
+			xfs_dquot_to_disk_timestamp(&ddq->d_btimer, &tv);
+			xfs_dquot_to_disk_timestamp(&ddq->d_itimer, &tv);
+			xfs_dquot_to_disk_timestamp(&ddq->d_rtbtimer, &tv);
 			ddq->d_bwarns = 0;
 			ddq->d_iwarns = 0;
 			ddq->d_rtbwarns = 0;
