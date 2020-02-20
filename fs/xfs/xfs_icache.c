@@ -25,6 +25,7 @@
 #include "xfs_health.h"
 
 #include <linux/iversion.h>
+#include <linux/nmi.h>
 
 STATIC int xfs_inode_free_eofblocks(struct xfs_inode *ip, struct xfs_perag *pag,
 		void *args);
@@ -2284,8 +2285,12 @@ static int
 xfs_inactive_inodes_pag(
 	struct xfs_perag	*pag)
 {
-	return xfs_ici_walk_ag(pag, &xfs_inactive_iwalk_ops, 0, NULL,
+	int			error;
+
+	error = xfs_ici_walk_ag(pag, &xfs_inactive_iwalk_ops, 0, NULL,
 			XFS_ICI_INACTIVE_TAG);
+	wake_up(&pag->pag_mount->m_inactive_wait);
+	return error;
 }
 
 /*
@@ -2298,8 +2303,12 @@ xfs_inactive_inodes(
 	struct xfs_mount	*mp,
 	struct xfs_eofblocks	*eofb)
 {
-	return xfs_ici_walk_fns(mp, &xfs_inactive_iwalk_ops, 0, eofb,
+	int			error;
+
+	error = xfs_ici_walk_fns(mp, &xfs_inactive_iwalk_ops, 0, eofb,
 			XFS_ICI_INACTIVE_TAG);
+	wake_up(&mp->m_inactive_wait);
+	return error;
 }
 
 /* Try to get inode inactivation moving. */
@@ -2404,5 +2413,44 @@ xfs_inactive_schedule_now(
 					&pag->pag_inactive_work, 0);
 		}
 		spin_unlock(&pag->pag_ici_lock);
+	}
+}
+
+/* Return true if there are inodes still being inactivated. */
+static bool
+xfs_inactive_pending(
+	struct xfs_mount	*mp)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno = 0;
+	bool			ret = false;
+
+	while (!ret &&
+	       (pag = xfs_perag_get_tag(mp, agno, XFS_ICI_INACTIVE_TAG))) {
+		agno = pag->pag_agno + 1;
+		spin_lock(&pag->pag_ici_lock);
+		if (pag->pag_ici_inactive)
+			ret = true;
+		spin_unlock(&pag->pag_ici_lock);
+		xfs_perag_put(pag);
+	}
+
+	return ret;
+}
+
+/*
+ * Flush all pending inactivation work and poll until finished.  This function
+ * is for callers that must flush with vfs locks held, such as unmount,
+ * remount, and iunlinks processing during mount.
+ */
+void
+xfs_inactive_force_poll(
+	struct xfs_mount	*mp)
+{
+	xfs_inactive_schedule_now(mp);
+
+	while (!wait_event_timeout(mp->m_inactive_wait,
+				   xfs_inactive_pending(mp) == false, HZ)) {
+		touch_softlockup_watchdog();
 	}
 }
