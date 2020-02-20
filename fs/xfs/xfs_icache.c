@@ -792,20 +792,38 @@ out_unlock_noent:
 	return false;
 }
 
+struct xfs_ici_walk_ops {
+	/*
+	 * Examine the given inode to decide if we want to pass it to the
+	 * execute function.  If so, this function should do whatever is needed
+	 * to prevent others from grabbing it.  If not, this function should
+	 * release the inode.
+	 */
+	bool		(*igrab)(struct xfs_inode *ip, int iter_flags);
+
+	/* Do something with the given inode. */
+	xfs_ici_walk_fn	iwalk;
+
+	/*
+	 * Release an inode after the execution function runs.  This function
+	 * is optional.
+	 */
+	void		(*irele)(struct xfs_inode *ip);
+};
+
 /*
  * For a given per-AG structure @pag, @grab, @execute, and @rele all incore
  * inodes with the given radix tree @tag.
  */
 STATIC int
 xfs_ici_walk_ag(
-	struct xfs_mount	*mp,
 	struct xfs_perag	*pag,
-	int			(*execute)(struct xfs_inode *ip,
-					   struct xfs_perag *pag, void *args),
+	const struct xfs_ici_walk_ops *ops,
+	int			iter_flags,
 	void			*args,
-	int			tag,
-	int			iter_flags)
+	int			tag)
 {
+	struct xfs_mount	*mp = pag->pag_mount;
 	uint32_t		first_index;
 	int			last_error = 0;
 	int			skipped;
@@ -846,7 +864,7 @@ restart:
 		for (i = 0; i < nr_found; i++) {
 			struct xfs_inode *ip = batch[i];
 
-			if (done || !xfs_inode_ag_walk_grab(ip, iter_flags))
+			if (done || !ops->igrab(ip, iter_flags))
 				batch[i] = NULL;
 
 			/*
@@ -877,8 +895,9 @@ restart:
 			if ((iter_flags & XFS_ICI_WALK_INEW_WAIT) &&
 			    xfs_iflags_test(batch[i], XFS_INEW))
 				xfs_inew_wait(batch[i]);
-			error = execute(batch[i], pag, args);
-			xfs_irele(batch[i]);
+			error = ops->iwalk(batch[i], pag, args);
+			if (ops->irele)
+				ops->irele(batch[i]);
 			if (error == -EAGAIN) {
 				skipped++;
 				continue;
@@ -915,15 +934,14 @@ xfs_ici_walk_get_perag(
 }
 
 /*
- * Call the @execute function on all incore inodes matching the radix tree
- * @tag.
+ * Call the @grab, @execute, and @rele functions on all incore inodes matching
+ * the radix tree @tag.
  */
 STATIC int
-xfs_ici_walk(
+xfs_ici_walk_fns(
 	struct xfs_mount	*mp,
+	const struct xfs_ici_walk_ops *ops,
 	int			iter_flags,
-	int			(*execute)(struct xfs_inode *ip,
-					   struct xfs_perag *pag, void *args),
 	void			*args,
 	int			tag)
 {
@@ -935,8 +953,7 @@ xfs_ici_walk(
 	ag = 0;
 	while ((pag = xfs_ici_walk_get_perag(mp, ag, tag))) {
 		ag = pag->pag_agno + 1;
-		error = xfs_ici_walk_ag(mp, pag, execute, args, tag,
-				iter_flags);
+		error = xfs_ici_walk_ag(pag, ops, iter_flags, args, tag);
 		xfs_perag_put(pag);
 		if (error) {
 			last_error = error;
@@ -948,17 +965,37 @@ xfs_ici_walk(
 }
 
 /*
+ * Call the @execute function on all incore inodes matching a given radix tree
+ * @tag.
+ */
+STATIC int
+xfs_ici_walk(
+	struct xfs_mount	*mp,
+	int			iter_flags,
+	xfs_ici_walk_fn		iwalk,
+	void			*args,
+	int			tag)
+{
+	struct xfs_ici_walk_ops	ops = {
+		.igrab		= xfs_inode_ag_walk_grab,
+		.iwalk		= iwalk,
+		.irele		= xfs_irele,
+	};
+
+	return xfs_ici_walk_fns(mp, &ops, iter_flags, args, tag);
+}
+
+/*
  * Walk all incore inodes in the filesystem.  Knowledge of radix tree tags
  * is hidden and we always wait for INEW inodes.
  */
 int
 xfs_ici_walk_all(
 	struct xfs_mount	*mp,
-	int			(*execute)(struct xfs_inode *ip,
-					   struct xfs_perag *pag, void *args),
+	xfs_ici_walk_fn		iwalk,
 	void			*args)
 {
-	return xfs_ici_walk(mp, XFS_ICI_WALK_INEW_WAIT, execute, args,
+	return xfs_ici_walk(mp, XFS_ICI_WALK_INEW_WAIT, iwalk, args,
 			XFS_ICI_NO_TAG);
 }
 
@@ -1000,8 +1037,13 @@ xfs_blockgc_scan_pag(
 	struct xfs_perag	*pag,
 	struct xfs_eofblocks	*eofb)
 {
-	return xfs_ici_walk_ag(pag->pag_mount, pag, xfs_blockgc_scan_inode,
-			eofb, XFS_ICI_BLOCK_GC_TAG, 0);
+	static const struct xfs_ici_walk_ops	ops = {
+		.igrab		= xfs_inode_ag_walk_grab,
+		.iwalk		= xfs_blockgc_scan_inode,
+		.irele		= xfs_irele,
+	};
+
+	return xfs_ici_walk_ag(pag, &ops, 0, eofb, XFS_ICI_BLOCK_GC_TAG);
 }
 
 /* Scan all incore inodes for block preallocations that we can remove. */
