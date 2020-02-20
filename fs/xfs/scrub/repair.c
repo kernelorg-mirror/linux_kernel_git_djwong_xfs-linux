@@ -1354,3 +1354,31 @@ xrep_reset_perag_resv(
 out:
 	return error;
 }
+
+/*
+ * See if this buffer can pass the given ->verify_struct() function.  b_ops
+ * and b_error will be reset before this function returns.
+ */
+bool
+xrep_buf_verify_struct(
+	struct xfs_buf			*bp,
+	const struct xfs_buf_ops	*ops)
+{
+	xfs_failaddr_t			fa;
+	bool				reset_ops = true;
+	int				old_error;
+
+	if (bp->b_ops) {
+		if (bp->b_ops != ops)
+			return false;
+		reset_ops = false;
+	}
+
+	old_error = bp->b_error;
+	bp->b_ops = ops;
+	fa = bp->b_ops->verify_struct(bp);
+	if (reset_ops)
+		bp->b_ops = NULL;
+	bp->b_error = old_error;
+	return fa == NULL;
+}
