@@ -4611,7 +4611,7 @@ xlog_recover_cancel_efi(
 /* Recover the RUI if necessary. */
 STATIC int
 xlog_recover_process_rui(
-	struct xfs_mount		*mp,
+	struct xfs_trans		*parent_tp,
 	struct xfs_ail			*ailp,
 	struct xfs_log_item		*lip)
 {
@@ -4626,7 +4626,7 @@ xlog_recover_process_rui(
 		return 0;
 
 	spin_unlock(&ailp->ail_lock);
-	error = xfs_rui_recover(mp, ruip);
+	error = xfs_rui_recover(parent_tp, ruip);
 	spin_lock(&ailp->ail_lock);
 
 	return error;
@@ -4855,7 +4855,7 @@ xlog_recover_process_intents(
 			error = xlog_recover_process_efi(log->l_mp, ailp, lip);
 			break;
 		case XFS_LI_RUI:
-			error = xlog_recover_process_rui(log->l_mp, ailp, lip);
+			error = xlog_recover_process_rui(parent_tp, ailp, lip);
 			break;
 		case XFS_LI_CUI:
 			error = xlog_recover_process_cui(parent_tp, ailp, lip);
