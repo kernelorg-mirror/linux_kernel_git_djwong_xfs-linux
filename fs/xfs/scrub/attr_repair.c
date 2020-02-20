@@ -583,7 +583,7 @@ xrep_xattr_stale_block(
  * join the inode to the transaction.  This function returns with the inode
  * joined to a clean scrub transaction.
  */
-STATIC int
+int
 xrep_xattr_reset_fork(
 	struct xfs_scrub	*sc)
 {
