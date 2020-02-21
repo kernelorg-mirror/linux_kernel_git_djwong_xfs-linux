@@ -7,7 +7,22 @@
 ccflags-y += -I $(srctree)/$(src)		# needed for trace events
 ccflags-y += -I $(srctree)/$(src)/libxfs
 
-ccflags-$(CONFIG_XFS_DEBUG) += -g
+ccflags-$(CONFIG_XFS_DEBUG) += -g -Werror
+ccflags-$(CONFIG_KASAN) += -Wno-error
+ccflags-y += -femit-struct-debug-detailed=any \
+-Wunused-but-set-variable \
+-Wuninitialized \
+-Wno-pointer-sign \
+-Wall \
+-Wextra \
+-Wno-unused-parameter \
+-fstack-usage \
+-Wno-sign-compare \
+-Wno-ignored-qualifiers \
+-Wno-error=unused-but-set-variable \
+-Wno-error=format=
+
+UBSAN_SANITIZE := y
 
 obj-$(CONFIG_XFS_FS)		+= xfs.o
 
