@@ -25,7 +25,22 @@ xchk_setup_directory(
 	struct xfs_scrub	*sc,
 	struct xfs_inode	*ip)
 {
-	return xchk_setup_inode_contents(sc, ip, 0);
+	unsigned int		sz;
+	int			error;
+
+	error = xchk_setup_inode_contents(sc, ip, 0);
+	if (error)
+		return error;
+
+	if (!(sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR))
+		return 0;
+
+	sz = max_t(unsigned int, MAXNAMELEN + 1, sizeof(struct xfs_da_args));
+	sc->buf = kmem_alloc_large(sz, 0);
+	if (!sc->buf)
+		return -ENOMEM;
+
+	return 0;
 }
 
 /* Directories */
