@@ -163,6 +163,11 @@ xchk_xattr_listent(
 	args.valuelen = valuelen;
 
 	error = xfs_attr_get_ilocked(context->dp, &args);
+	if (error == -ENODATA) {
+		/* ENODATA means the hash lookup failed and the attr is bad */
+		xchk_fblock_set_corrupt(sx->sc, XFS_ATTR_FORK, args.blkno);
+		goto fail_xref;
+	}
 	if (!xchk_fblock_process_error(sx->sc, XFS_ATTR_FORK, args.blkno,
 			&error))
 		goto fail_xref;
