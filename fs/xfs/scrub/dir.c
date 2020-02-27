@@ -39,9 +39,12 @@ struct xchk_dir_ctx {
 	struct xfs_scrub	*sc;
 };
 
-/* Check that an inode's mode matches a given DT_ type. */
+/*
+ * Check that a directory entry's inode pointer directs us to an allocated
+ * inode and (if applicable) the inode mode matches the entry's DT_ type.
+ */
 STATIC int
-xchk_dir_check_ftype(
+xchk_dir_check_iptr(
 	struct xchk_dir_ctx	*sdc,
 	xfs_fileoff_t		offset,
 	xfs_ino_t		inum,
@@ -52,13 +55,6 @@ xchk_dir_check_ftype(
 	int			ino_dtype;
 	int			error = 0;
 
-	if (!xfs_sb_version_hasftype(&mp->m_sb)) {
-		if (dtype != DT_UNKNOWN && dtype != DT_DIR)
-			xchk_fblock_set_corrupt(sdc->sc, XFS_DATA_FORK,
-					offset);
-		goto out;
-	}
-
 	/*
 	 * Grab the inode pointed to by the dirent.  We release the
 	 * inode before we cancel the scrub transaction.  Since we're
@@ -66,17 +62,26 @@ xchk_dir_check_ftype(
 	 * eofblocks cleanup (which allocates what would be a nested
 	 * transaction), we can't use DONTCACHE here because DONTCACHE
 	 * inodes can trigger immediate inactive cleanup of the inode.
+	 *
+	 * We use UNTRUSTED here to force validation of the inode number (using
+	 * the inode btree) before we look up the inode record.  If this fails
+	 * validation for any reason, we will receive EINVAL, which indicates a
+	 * corrupt directory entry.
 	 */
-	error = xfs_iget(mp, sdc->sc->tp, inum, 0, 0, &ip);
+	error = xfs_iget(mp, sdc->sc->tp, inum, XFS_IGET_UNTRUSTED, 0, &ip);
+	if (error == -EINVAL)
+		error = -EFSCORRUPTED;
 	if (!xchk_fblock_xref_process_error(sdc->sc, XFS_DATA_FORK, offset,
 			&error))
 		goto out;
 
-	/* Convert mode to the DT_* values that dir_emit uses. */
-	ino_dtype = xfs_dir3_get_dtype(mp,
-			xfs_mode_to_ftype(VFS_I(ip)->i_mode));
-	if (ino_dtype != dtype)
-		xchk_fblock_set_corrupt(sdc->sc, XFS_DATA_FORK, offset);
+	if (xfs_sb_version_hasftype(&mp->m_sb)) {
+		/* Convert mode to the DT_* values that dir_emit uses. */
+		ino_dtype = xfs_dir3_get_dtype(mp,
+				xfs_mode_to_ftype(VFS_I(ip)->i_mode));
+		if (ino_dtype != dtype)
+			xchk_fblock_set_corrupt(sdc->sc, XFS_DATA_FORK, offset);
+	}
 	xfs_irele(ip);
 out:
 	return error;
@@ -166,8 +171,8 @@ xchk_dir_actor(
 		goto out;
 	}
 
-	/* Verify the file type.  This function absorbs error codes. */
-	error = xchk_dir_check_ftype(sdc, offset, lookup_ino, type);
+	/* Verify the inode pointer.  This function absorbs error codes. */
+	error = xchk_dir_check_iptr(sdc, offset, lookup_ino, type);
 	if (error)
 		goto out;
 out:
