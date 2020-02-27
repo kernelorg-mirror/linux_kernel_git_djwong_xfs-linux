@@ -155,6 +155,11 @@ xchk_dir_actor(
 	xname.type = XFS_DIR3_FT_UNKNOWN;
 
 	error = xfs_dir_lookup(sdc->sc->tp, ip, &xname, &lookup_ino, NULL);
+	if (error == -ENOENT) {
+		/* ENOENT means the hash lookup failed and the dir is corrupt */
+		xchk_fblock_set_corrupt(sdc->sc, XFS_DATA_FORK, offset);
+		return -EFSCORRUPTED;
+	}
 	if (!xchk_fblock_process_error(sdc->sc, XFS_DATA_FORK, offset,
 			&error))
 		goto out;
