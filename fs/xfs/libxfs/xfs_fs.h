@@ -814,6 +814,8 @@ struct xfs_scrub_metadata {
 #define XFS_IOC_FSGEOMETRY	     _IOR ('X', 126, struct xfs_fsop_geom)
 #define XFS_IOC_BULKSTAT	     _IOR ('X', 127, struct xfs_bulkstat_req)
 #define XFS_IOC_INUMBERS	     _IOR ('X', 128, struct xfs_inumbers_req)
+/*	FS_IOC_GETFSUUID ----------- uses 129 */
+/*	FS_IOC_SETFSUUID ----------- uses 130 */
 /*	XFS_IOC_GETFSUUID ---------- deprecated 140	 */
 
 

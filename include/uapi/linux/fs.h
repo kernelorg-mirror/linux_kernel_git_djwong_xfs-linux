@@ -142,6 +142,32 @@ struct fsxattr {
 #define FS_XFLAG_COWEXTSIZE	0x00010000	/* CoW extent size allocator hint */
 #define FS_XFLAG_HASATTR	0x80000000	/* no DIFLAG for this	*/
 
+/* Get and set filesystem UUID. */
+struct ioc_fsuuid {
+	uint32_t	fu_flags;
+	uint16_t	fu_length;
+	uint16_t	fu_reserved;
+	uint64_t	fu_reserved1;
+};
+
+/*
+ * Set the UUID even if that would require setting of an incompat or rocompat
+ * feature flag.  This will make the filesystem unmountable on older kernels.
+ */
+#define FS_IOC_SETFSUUID_FORCE_INCOMPAT	(1 << 0)
+
+#define FS_IOC_SETFSUUID_ALL	(FS_IOC_SETFSUUID_FORCE_INCOMPAT)
+
+static inline size_t ioc_fsuuid_sizeof(size_t payload_len)
+{
+	return sizeof(struct ioc_fsuuid) + payload_len;
+}
+
+static inline char *ioc_fsuuid_payload(struct ioc_fsuuid *fu)
+{
+	return (char *)(fu + 1);
+}
+
 /* the read-only stuff doesn't really belong here, but any other place is
    probably as bad and I don't want to create yet another include file. */
 
@@ -214,6 +240,8 @@ struct fsxattr {
 #define FS_IOC_FSSETXATTR		_IOW('X', 32, struct fsxattr)
 #define FS_IOC_GETFSLABEL		_IOR(0x94, 49, char[FSLABEL_MAX])
 #define FS_IOC_SETFSLABEL		_IOW(0x94, 50, char[FSLABEL_MAX])
+#define FS_IOC_GETFSUUID		_IOR('X', 129, struct ioc_fsuuid)
+#define FS_IOC_SETFSUUID		_IOW('X', 130, struct ioc_fsuuid)
 
 /*
  * Inode flags (FS_IOC_GETFLAGS / FS_IOC_SETFLAGS)
