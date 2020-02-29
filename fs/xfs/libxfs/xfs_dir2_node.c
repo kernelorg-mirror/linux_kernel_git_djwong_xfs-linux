@@ -227,7 +227,9 @@ __xfs_dir3_free_read(
 	fa = xfs_dir3_free_header_check(dp, fbno, *bpp);
 	if (fa) {
 		xfs_verifier_error(*bpp, -EFSCORRUPTED, fa);
+		(*bpp)->b_flags &= ~XBF_DONE;
 		xfs_trans_brelse(tp, *bpp);
+		*bpp = NULL;
 		return -EFSCORRUPTED;
 	}
 
