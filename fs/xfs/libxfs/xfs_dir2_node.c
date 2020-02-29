@@ -228,6 +228,7 @@ __xfs_dir3_free_read(
 	if (fa) {
 		xfs_buf_corruption_error(*bpp, fa);
 		xfs_trans_brelse(tp, *bpp);
+		*bpp = NULL;
 		return -EFSCORRUPTED;
 	}
 
