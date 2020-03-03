@@ -2135,7 +2135,7 @@ xfs_iunlink_update_bucket(
 	 * head of the list.
 	 */
 	if (old_value == new_agino) {
-		xfs_buf_corruption_error(agibp);
+		xfs_buf_corruption_error(agibp, __this_address);
 		return -EFSCORRUPTED;
 	}
 
@@ -2269,7 +2269,7 @@ xfs_iunlink(
 	next_agino = be32_to_cpu(agi->agi_unlinked[bucket_index]);
 	if (next_agino == agino ||
 	    !xfs_verify_agino_or_null(mp, agno, next_agino)) {
-		xfs_buf_corruption_error(agibp);
+		xfs_buf_corruption_error(agibp, __this_address);
 		return -EFSCORRUPTED;
 	}
 
