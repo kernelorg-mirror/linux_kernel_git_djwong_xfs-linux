@@ -161,10 +161,11 @@ __xfs_attr3_rmt_read_verify(
 
 static void
 xfs_attr3_rmt_read_verify(
-	struct xfs_buf	*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
-	xfs_failaddr_t	fa;
-	int		error;
+	xfs_failaddr_t		fa;
+	int			error;
 
 	error = __xfs_attr3_rmt_read_verify(bp, true, &fa);
 	if (error)
@@ -173,10 +174,11 @@ xfs_attr3_rmt_read_verify(
 
 static xfs_failaddr_t
 xfs_attr3_rmt_verify_struct(
-	struct xfs_buf	*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
-	xfs_failaddr_t	fa;
-	int		error;
+	xfs_failaddr_t		fa;
+	int			error;
 
 	error = __xfs_attr3_rmt_read_verify(bp, false, &fa);
 	return error ? fa : NULL;
@@ -184,14 +186,15 @@ xfs_attr3_rmt_verify_struct(
 
 static void
 xfs_attr3_rmt_write_verify(
-	struct xfs_buf	*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
-	struct xfs_mount *mp = bp->b_mount;
-	xfs_failaddr_t	fa;
-	int		blksize = mp->m_attr_geo->blksize;
-	char		*ptr;
-	int		len;
-	xfs_daddr_t	bno;
+	struct xfs_mount	*mp = bp->b_mount;
+	xfs_failaddr_t		fa;
+	int			blksize = mp->m_attr_geo->blksize;
+	char			*ptr;
+	int			len;
+	xfs_daddr_t		bno;
 
 	/* no verification of non-crc buffers */
 	if (!xfs_sb_version_hascrc(&mp->m_sb))

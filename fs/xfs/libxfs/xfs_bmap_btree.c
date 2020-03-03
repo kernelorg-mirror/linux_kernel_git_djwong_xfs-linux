@@ -550,7 +550,8 @@ __xfs_bmbt_iroot_realloc(
 
 static xfs_failaddr_t
 xfs_bmbt_verify(
-	struct xfs_buf		*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
 	struct xfs_mount	*mp = bp->b_mount;
 	struct xfs_btree_block	*block = XFS_BUF_TO_BLOCK(bp);
@@ -586,14 +587,15 @@ xfs_bmbt_verify(
 
 static void
 xfs_bmbt_read_verify(
-	struct xfs_buf	*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
-	xfs_failaddr_t	fa;
+	xfs_failaddr_t		fa;
 
 	if (!xfs_btree_lblock_verify_crc(bp))
 		xfs_verifier_error(bp, -EFSBADCRC, __this_address);
 	else {
-		fa = xfs_bmbt_verify(bp);
+		fa = xfs_bmbt_verify(bp, bv);
 		if (fa)
 			xfs_verifier_error(bp, -EFSCORRUPTED, fa);
 	}
@@ -604,11 +606,12 @@ xfs_bmbt_read_verify(
 
 static void
 xfs_bmbt_write_verify(
-	struct xfs_buf	*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
-	xfs_failaddr_t	fa;
+	xfs_failaddr_t		fa;
 
-	fa = xfs_bmbt_verify(bp);
+	fa = xfs_bmbt_verify(bp, bv);
 	if (fa) {
 		trace_xfs_btree_corrupt(bp, _RET_IP_);
 		xfs_verifier_error(bp, -EFSCORRUPTED, fa);

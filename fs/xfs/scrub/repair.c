@@ -1158,7 +1158,7 @@ xrep_findroot_block(
 		 * to what it was before we touched the buffer.
 		 */
 		bp->b_ops = fab->buf_ops;
-		fab->buf_ops->verify_read(bp);
+		fab->buf_ops->verify_read(bp, NULL);
 		if (bp->b_error) {
 			bp->b_ops = NULL;
 			bp->b_error = 0;
@@ -1398,7 +1398,7 @@ xrep_buf_verify_struct(
 
 	old_error = bp->b_error;
 	bp->b_ops = ops;
-	fa = bp->b_ops->verify_struct(bp);
+	fa = bp->b_ops->verify_struct(bp, NULL);
 	if (reset_ops)
 		bp->b_ops = NULL;
 	bp->b_error = old_error;

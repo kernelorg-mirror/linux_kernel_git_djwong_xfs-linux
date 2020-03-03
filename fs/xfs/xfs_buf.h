@@ -107,15 +107,19 @@ struct xfs_buf_map {
 #define DEFINE_SINGLE_BUF_MAP(map, blkno, numblk) \
 	struct xfs_buf_map (map) = { .bm_bn = (blkno), .bm_len = (numblk) };
 
+struct xfs_buf_verify {
+};
+
 struct xfs_buf_ops {
 	char *name;
 	union {
 		__be32 magic[2];	/* v4 and v5 on disk magic values */
 		__be16 magic16[2];	/* v4 and v5 on disk magic values */
 	};
-	void (*verify_read)(struct xfs_buf *);
-	void (*verify_write)(struct xfs_buf *);
-	xfs_failaddr_t (*verify_struct)(struct xfs_buf *bp);
+	void (*verify_read)(struct xfs_buf *bp, struct xfs_buf_verify *bv);
+	void (*verify_write)(struct xfs_buf *bp, struct xfs_buf_verify *bv);
+	xfs_failaddr_t (*verify_struct)(struct xfs_buf *bp,
+					struct xfs_buf_verify *bv);
 };
 
 typedef struct xfs_buf {

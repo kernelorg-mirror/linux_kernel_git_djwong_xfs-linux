@@ -84,7 +84,8 @@ xfs_symlink_hdr_ok(
 
 static xfs_failaddr_t
 xfs_symlink_verify(
-	struct xfs_buf		*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
 	struct xfs_mount	*mp = bp->b_mount;
 	struct xfs_dsymlink_hdr	*dsl = bp->b_addr;
@@ -110,10 +111,11 @@ xfs_symlink_verify(
 
 static void
 xfs_symlink_read_verify(
-	struct xfs_buf	*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
-	struct xfs_mount *mp = bp->b_mount;
-	xfs_failaddr_t	fa;
+	struct xfs_mount	*mp = bp->b_mount;
+	xfs_failaddr_t		fa;
 
 	/* no verification of non-crc buffers */
 	if (!xfs_sb_version_hascrc(&mp->m_sb))
@@ -122,7 +124,7 @@ xfs_symlink_read_verify(
 	if (!xfs_buf_verify_cksum(bp, XFS_SYMLINK_CRC_OFF))
 		xfs_verifier_error(bp, -EFSBADCRC, __this_address);
 	else {
-		fa = xfs_symlink_verify(bp);
+		fa = xfs_symlink_verify(bp, bv);
 		if (fa)
 			xfs_verifier_error(bp, -EFSCORRUPTED, fa);
 	}
@@ -130,9 +132,10 @@ xfs_symlink_read_verify(
 
 static void
 xfs_symlink_write_verify(
-	struct xfs_buf	*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
-	struct xfs_mount *mp = bp->b_mount;
+	struct xfs_mount	*mp = bp->b_mount;
 	struct xfs_buf_log_item	*bip = bp->b_log_item;
 	xfs_failaddr_t		fa;
 
@@ -140,7 +143,7 @@ xfs_symlink_write_verify(
 	if (!xfs_sb_version_hascrc(&mp->m_sb))
 		return;
 
-	fa = xfs_symlink_verify(bp);
+	fa = xfs_symlink_verify(bp, bv);
 	if (fa) {
 		xfs_verifier_error(bp, -EFSCORRUPTED, fa);
 		return;

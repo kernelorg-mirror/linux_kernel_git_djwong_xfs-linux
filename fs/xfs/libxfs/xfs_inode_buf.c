@@ -121,21 +121,24 @@ xfs_inode_buf_verify(
 
 static void
 xfs_inode_buf_read_verify(
-	struct xfs_buf	*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
 	xfs_inode_buf_verify(bp, false);
 }
 
 static void
 xfs_inode_buf_readahead_verify(
-	struct xfs_buf	*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
 	xfs_inode_buf_verify(bp, true);
 }
 
 static void
 xfs_inode_buf_write_verify(
-	struct xfs_buf	*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
 	xfs_inode_buf_verify(bp, false);
 }

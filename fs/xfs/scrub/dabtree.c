@@ -176,7 +176,8 @@ xchk_da_btree_ptr_ok(
  */
 static void
 xchk_da_btree_read_verify(
-	struct xfs_buf		*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
 	struct xfs_da_blkinfo	*info = bp->b_addr;
 
@@ -184,7 +185,7 @@ xchk_da_btree_read_verify(
 	case XFS_DIR2_LEAF1_MAGIC:
 	case XFS_DIR3_LEAF1_MAGIC:
 		bp->b_ops = &xfs_dir3_leaf1_buf_ops;
-		bp->b_ops->verify_read(bp);
+		bp->b_ops->verify_read(bp, bv);
 		return;
 	default:
 		/*
@@ -192,13 +193,14 @@ xchk_da_btree_read_verify(
 		 * DA*_NODE, ATTR*_LEAF, and DIR*_LEAFN blocks.
 		 */
 		bp->b_ops = &xfs_da3_node_buf_ops;
-		bp->b_ops->verify_read(bp);
+		bp->b_ops->verify_read(bp, bv);
 		return;
 	}
 }
 static void
 xchk_da_btree_write_verify(
-	struct xfs_buf		*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
 	struct xfs_da_blkinfo	*info = bp->b_addr;
 
@@ -206,7 +208,7 @@ xchk_da_btree_write_verify(
 	case XFS_DIR2_LEAF1_MAGIC:
 	case XFS_DIR3_LEAF1_MAGIC:
 		bp->b_ops = &xfs_dir3_leaf1_buf_ops;
-		bp->b_ops->verify_write(bp);
+		bp->b_ops->verify_write(bp, bv);
 		return;
 	default:
 		/*
@@ -214,13 +216,14 @@ xchk_da_btree_write_verify(
 		 * DA*_NODE, ATTR*_LEAF, and DIR*_LEAFN blocks.
 		 */
 		bp->b_ops = &xfs_da3_node_buf_ops;
-		bp->b_ops->verify_write(bp);
+		bp->b_ops->verify_write(bp, bv);
 		return;
 	}
 }
 static void *
 xchk_da_btree_verify(
-	struct xfs_buf		*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
 	struct xfs_da_blkinfo	*info = bp->b_addr;
 
@@ -228,10 +231,10 @@ xchk_da_btree_verify(
 	case XFS_DIR2_LEAF1_MAGIC:
 	case XFS_DIR3_LEAF1_MAGIC:
 		bp->b_ops = &xfs_dir3_leaf1_buf_ops;
-		return bp->b_ops->verify_struct(bp);
+		return bp->b_ops->verify_struct(bp, bv);
 	default:
 		bp->b_ops = &xfs_da3_node_buf_ops;
-		return bp->b_ops->verify_struct(bp);
+		return bp->b_ops->verify_struct(bp, bv);
 	}
 }
 

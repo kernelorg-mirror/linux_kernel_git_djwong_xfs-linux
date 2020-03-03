@@ -92,7 +92,7 @@ xrep_symlink_salvage_remote(
 		 * verifier passed or the magic is ok.  Anything else and we
 		 * stop dead in our tracks.
 		 */
-		fa = bp->b_ops->verify_struct(bp);
+		fa = bp->b_ops->verify_struct(bp, NULL);
 		dsl = bp->b_addr;
 		magic_ok = dsl->sl_magic == cpu_to_be32(XFS_SYMLINK_MAGIC);
 		hdr_ok = xfs_symlink_hdr_ok(ip->i_ino, offset, byte_cnt, bp);

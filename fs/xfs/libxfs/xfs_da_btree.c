@@ -200,7 +200,8 @@ xfs_da3_blkinfo_verify(
 
 static xfs_failaddr_t
 xfs_da3_node_verify(
-	struct xfs_buf		*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
 	struct xfs_mount	*mp = bp->b_mount;
 	struct xfs_da_intnode	*hdr = bp->b_addr;
@@ -235,14 +236,15 @@ xfs_da3_node_verify(
 
 static void
 xfs_da3_node_write_verify(
-	struct xfs_buf	*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
 	struct xfs_mount	*mp = bp->b_mount;
 	struct xfs_buf_log_item	*bip = bp->b_log_item;
 	struct xfs_da3_node_hdr *hdr3 = bp->b_addr;
 	xfs_failaddr_t		fa;
 
-	fa = xfs_da3_node_verify(bp);
+	fa = xfs_da3_node_verify(bp, bv);
 	if (fa) {
 		xfs_verifier_error(bp, -EFSCORRUPTED, fa);
 		return;
@@ -265,7 +267,8 @@ xfs_da3_node_write_verify(
  */
 static void
 xfs_da3_node_read_verify(
-	struct xfs_buf		*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
 	struct xfs_da_blkinfo	*info = bp->b_addr;
 	xfs_failaddr_t		fa;
@@ -279,19 +282,19 @@ xfs_da3_node_read_verify(
 			}
 			/* fall through */
 		case XFS_DA_NODE_MAGIC:
-			fa = xfs_da3_node_verify(bp);
+			fa = xfs_da3_node_verify(bp, bv);
 			if (fa)
 				xfs_verifier_error(bp, -EFSCORRUPTED, fa);
 			return;
 		case XFS_ATTR_LEAF_MAGIC:
 		case XFS_ATTR3_LEAF_MAGIC:
 			bp->b_ops = &xfs_attr3_leaf_buf_ops;
-			bp->b_ops->verify_read(bp);
+			bp->b_ops->verify_read(bp, bv);
 			return;
 		case XFS_DIR2_LEAFN_MAGIC:
 		case XFS_DIR3_LEAFN_MAGIC:
 			bp->b_ops = &xfs_dir3_leafn_buf_ops;
-			bp->b_ops->verify_read(bp);
+			bp->b_ops->verify_read(bp, bv);
 			return;
 		default:
 			xfs_verifier_error(bp, -EFSCORRUPTED, __this_address);
@@ -302,22 +305,23 @@ xfs_da3_node_read_verify(
 /* Verify the structure of a da3 block. */
 static xfs_failaddr_t
 xfs_da3_node_verify_struct(
-	struct xfs_buf		*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
 	struct xfs_da_blkinfo	*info = bp->b_addr;
 
 	switch (be16_to_cpu(info->magic)) {
 	case XFS_DA3_NODE_MAGIC:
 	case XFS_DA_NODE_MAGIC:
-		return xfs_da3_node_verify(bp);
+		return xfs_da3_node_verify(bp, bv);
 	case XFS_ATTR_LEAF_MAGIC:
 	case XFS_ATTR3_LEAF_MAGIC:
 		bp->b_ops = &xfs_attr3_leaf_buf_ops;
-		return bp->b_ops->verify_struct(bp);
+		return bp->b_ops->verify_struct(bp, bv);
 	case XFS_DIR2_LEAFN_MAGIC:
 	case XFS_DIR3_LEAFN_MAGIC:
 		bp->b_ops = &xfs_dir3_leafn_buf_ops;
-		return bp->b_ops->verify_struct(bp);
+		return bp->b_ops->verify_struct(bp, bv);
 	default:
 		return __this_address;
 	}

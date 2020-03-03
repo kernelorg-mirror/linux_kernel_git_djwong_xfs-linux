@@ -790,7 +790,7 @@ xfs_buf_reverify(
 		return 0;
 
 	bp->b_ops = ops;
-	bp->b_ops->verify_read(bp);
+	bp->b_ops->verify_read(bp, NULL);
 	if (bp->b_error)
 		bp->b_flags &= ~XBF_DONE;
 	return bp->b_error;
@@ -1190,7 +1190,7 @@ xfs_buf_ioend(
 	/* Only validate buffers that were read without errors */
 	if (read && !bp->b_error && bp->b_ops) {
 		ASSERT(!bp->b_iodone);
-		bp->b_ops->verify_read(bp);
+		bp->b_ops->verify_read(bp, NULL);
 	}
 
 	if (!bp->b_error)
@@ -1391,7 +1391,7 @@ _xfs_buf_ioapply(
 		 * the IO should not be dispatched.
 		 */
 		if (bp->b_ops) {
-			bp->b_ops->verify_write(bp);
+			bp->b_ops->verify_write(bp, NULL);
 			if (bp->b_error) {
 				xfs_force_shutdown(bp->b_mount,
 						   SHUTDOWN_CORRUPT_INCORE);

@@ -906,7 +906,7 @@ xchk_buffer_recheck(
 		xchk_set_incomplete(sc);
 		return;
 	}
-	fa = bp->b_ops->verify_struct(bp);
+	fa = bp->b_ops->verify_struct(bp, NULL);
 	if (!fa)
 		return;
 	sc->sm->sm_flags |= XFS_SCRUB_OFLAG_CORRUPT;

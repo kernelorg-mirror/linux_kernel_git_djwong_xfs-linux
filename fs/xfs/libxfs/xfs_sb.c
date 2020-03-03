@@ -709,7 +709,8 @@ xfs_sb_to_disk(
  */
 static void
 xfs_sb_read_verify(
-	struct xfs_buf		*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
 	struct xfs_sb		sb;
 	struct xfs_mount	*mp = bp->b_mount;
@@ -760,13 +761,14 @@ out_error:
  */
 static void
 xfs_sb_quiet_read_verify(
-	struct xfs_buf	*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
-	struct xfs_dsb	*dsb = XFS_BUF_TO_SBP(bp);
+	struct xfs_dsb		*dsb = XFS_BUF_TO_SBP(bp);
 
 	if (dsb->sb_magicnum == cpu_to_be32(XFS_SB_MAGIC)) {
 		/* XFS filesystem, verify noisily! */
-		xfs_sb_read_verify(bp);
+		xfs_sb_read_verify(bp, bv);
 		return;
 	}
 	/* quietly fail */
@@ -775,7 +777,8 @@ xfs_sb_quiet_read_verify(
 
 static void
 xfs_sb_write_verify(
-	struct xfs_buf		*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
 	struct xfs_sb		sb;
 	struct xfs_mount	*mp = bp->b_mount;

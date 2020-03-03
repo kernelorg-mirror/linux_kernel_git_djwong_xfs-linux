@@ -98,7 +98,8 @@ xfs_dir3_leaf_check(
 
 static xfs_failaddr_t
 xfs_dir3_free_verify(
-	struct xfs_buf		*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
 	struct xfs_mount	*mp = bp->b_mount;
 	struct xfs_dir2_free_hdr *hdr = bp->b_addr;
@@ -124,7 +125,8 @@ xfs_dir3_free_verify(
 
 static void
 xfs_dir3_free_read_verify(
-	struct xfs_buf	*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
 	struct xfs_mount	*mp = bp->b_mount;
 	xfs_failaddr_t		fa;
@@ -133,7 +135,7 @@ xfs_dir3_free_read_verify(
 	    !xfs_buf_verify_cksum(bp, XFS_DIR3_FREE_CRC_OFF))
 		xfs_verifier_error(bp, -EFSBADCRC, __this_address);
 	else {
-		fa = xfs_dir3_free_verify(bp);
+		fa = xfs_dir3_free_verify(bp, bv);
 		if (fa)
 			xfs_verifier_error(bp, -EFSCORRUPTED, fa);
 	}
@@ -141,14 +143,15 @@ xfs_dir3_free_read_verify(
 
 static void
 xfs_dir3_free_write_verify(
-	struct xfs_buf	*bp)
+	struct xfs_buf		*bp,
+	struct xfs_buf_verify	*bv)
 {
 	struct xfs_mount	*mp = bp->b_mount;
 	struct xfs_buf_log_item	*bip = bp->b_log_item;
 	struct xfs_dir3_blk_hdr	*hdr3 = bp->b_addr;
 	xfs_failaddr_t		fa;
 
-	fa = xfs_dir3_free_verify(bp);
+	fa = xfs_dir3_free_verify(bp, bv);
 	if (fa) {
 		xfs_verifier_error(bp, -EFSCORRUPTED, fa);
 		return;
