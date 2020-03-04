@@ -150,7 +150,7 @@ xfs_dir3_block_read(
 	/* Check things that we can't do in the verifier. */
 	fa = xfs_dir3_block_header_check(dp, *bpp);
 	if (fa) {
-		xfs_buf_corruption_error(*bpp, fa);
+		xfs_buf_corruption_error(tp, *bpp, fa);
 		xfs_trans_brelse(tp, *bpp);
 		*bpp = NULL;
 		xfs_dirattr_mark_sick(dp, XFS_DATA_FORK);

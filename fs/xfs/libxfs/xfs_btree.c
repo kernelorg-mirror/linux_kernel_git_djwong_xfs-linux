@@ -1795,7 +1795,7 @@ xfs_btree_lookup_get_block(
 
 out_bad:
 	*blkp = NULL;
-	xfs_buf_corruption_error(bp, __this_address);
+	xfs_buf_corruption_error(cur->bc_tp, bp, __this_address);
 	xfs_trans_brelse(cur->bc_tp, bp);
 	xfs_btree_mark_sick(cur);
 	return -EFSCORRUPTED;

@@ -14,6 +14,7 @@
 #include "xfs_error.h"
 #include "xfs_sysfs.h"
 #include "xfs_inode.h"
+#include "xfs_trans.h"
 
 #ifdef DEBUG
 
@@ -350,6 +351,7 @@ xfs_corruption_error(
  */
 void
 xfs_buf_corruption_error(
+	struct xfs_trans	*tp,
 	struct xfs_buf		*bp,
 	xfs_failaddr_t		fa)
 {
@@ -363,6 +365,10 @@ xfs_buf_corruption_error(
 
 	if (xfs_error_level >= XFS_ERRLEVEL_HIGH)
 		xfs_stack_trace();
+	if (tp)
+		xfs_trans_binval(tp, bp);
+	else
+		xfs_buf_stale(bp);
 }
 
 /*

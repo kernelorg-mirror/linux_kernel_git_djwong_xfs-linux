@@ -229,7 +229,7 @@ __xfs_dir3_free_read(
 	/* Check things that we can't do in the verifier. */
 	fa = xfs_dir3_free_header_check(dp, fbno, *bpp);
 	if (fa) {
-		xfs_buf_corruption_error(*bpp, fa);
+		xfs_buf_corruption_error(tp, *bpp, fa);
 		xfs_trans_brelse(tp, *bpp);
 		*bpp = NULL;
 		xfs_dirattr_mark_sick(dp, XFS_DATA_FORK);
@@ -444,7 +444,7 @@ xfs_dir2_leaf_to_node(
 	ltp = xfs_dir2_leaf_tail_p(args->geo, leaf);
 	if (be32_to_cpu(ltp->bestcount) >
 				(uint)dp->i_d.di_size / args->geo->blksize) {
-		xfs_buf_corruption_error(lbp, __this_address);
+		xfs_buf_corruption_error(tp, lbp, __this_address);
 		xfs_da_mark_sick(args);
 		return -EFSCORRUPTED;
 	}
@@ -519,7 +519,7 @@ xfs_dir2_leafn_add(
 	 * into other peoples memory
 	 */
 	if (index < 0) {
-		xfs_buf_corruption_error(bp, __this_address);
+		xfs_buf_corruption_error(args->trans, bp, __this_address);
 		xfs_da_mark_sick(args);
 		return -EFSCORRUPTED;
 	}
@@ -808,7 +808,7 @@ xfs_dir2_leafn_lookup_for_entry(
 
 	xfs_dir3_leaf_check(dp, bp);
 	if (leafhdr.count <= 0) {
-		xfs_buf_corruption_error(bp, __this_address);
+		xfs_buf_corruption_error(tp, bp, __this_address);
 		xfs_da_mark_sick(args);
 		return -EFSCORRUPTED;
 	}

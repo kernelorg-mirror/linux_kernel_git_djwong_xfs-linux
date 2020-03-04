@@ -1384,7 +1384,7 @@ xfs_dir2_leaf_removename(
 	ltp = xfs_dir2_leaf_tail_p(geo, leaf);
 	bestsp = xfs_dir2_leaf_bests_p(ltp);
 	if (be16_to_cpu(bestsp[db]) != oldbest) {
-		xfs_buf_corruption_error(lbp, __this_address);
+		xfs_buf_corruption_error(args->trans, lbp, __this_address);
 		xfs_da_mark_sick(args);
 		return -EFSCORRUPTED;
 	}
