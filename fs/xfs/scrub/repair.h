@@ -101,9 +101,11 @@ int xrep_quota(struct xfs_scrub *sc);
 #ifdef CONFIG_XFS_RT
 int xrep_rtsummary(struct xfs_scrub *sc);
 int xrep_rtbitmap(struct xfs_scrub *sc);
+int xrep_rtrmapbt(struct xfs_scrub *sc);
 #else
 # define xrep_rtsummary			xrep_notsupported
 # define xrep_rtbitmap			xrep_notsupported
+# define xrep_rtrmapbt			xrep_notsupported
 #endif /* CONFIG_XFS_RT */
 
 struct xrep_newbt_resv {
@@ -226,6 +228,7 @@ xrep_rmapbt_setup(
 #define xrep_quota			xrep_notsupported
 #define xrep_rtsummary			xrep_notsupported
 #define xrep_rtbitmap			xrep_notsupported
+#define xrep_rtrmapbt			xrep_notsupported
 
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
