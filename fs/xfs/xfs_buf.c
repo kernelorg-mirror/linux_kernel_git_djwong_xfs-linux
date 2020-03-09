@@ -16,6 +16,8 @@
 #include "xfs_log.h"
 #include "xfs_errortag.h"
 #include "xfs_error.h"
+#include "xfs_trans.h"
+#include "xfs_buf_item.h"
 
 static kmem_zone_t *xfs_buf_zone;
 
@@ -1570,6 +1572,29 @@ xfs_buf_zero(
 
 		boff += csize;
 	}
+}
+
+/*
+ * Log a message about and stale a buffer that a caller has decided is corrupt.
+ *
+ * This function should be called for the kinds of metadata corruption that
+ * cannot be detect from a verifier, such as incorrect inter-block relationship
+ * data.  Do /not/ call this function from a verifier function.
+ *
+ * The buffer must not be dirty prior to the call.  Afterwards, the buffer will
+ * be marked stale, but b_error will not be set.  The caller is responsible for
+ * releasing the buffer or fixing it.
+ */
+void
+__xfs_buf_mark_corrupt(
+	struct xfs_buf		*bp,
+	xfs_failaddr_t		fa)
+{
+	ASSERT(bp->b_log_item == NULL ||
+	       !(bp->b_log_item->bli_flags & XFS_BLI_DIRTY));
+
+	xfs_buf_corruption_error(bp);
+	xfs_buf_stale(bp);
 }
 
 /*
