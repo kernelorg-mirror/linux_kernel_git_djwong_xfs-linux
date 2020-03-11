@@ -644,6 +644,17 @@ xfs_btree_ptr_addr(
 		((char *)block + xfs_btree_ptr_offset(cur, n, level));
 }
 
+struct xfs_ifork *
+xfs_btree_ifork_ptr(
+	struct xfs_btree_cur	*cur)
+{
+	ASSERT(cur->bc_flags & XFS_BTREE_ROOT_IN_INODE);
+
+	if (cur->bc_flags & XFS_BTREE_STAGING)
+		return cur->bc_ino.ifake->if_fork;
+	return XFS_IFORK_PTR(cur->bc_ino.ip, cur->bc_ino.whichfork);
+}
+
 /*
  * Get the root block which is stored in the inode.
  *
@@ -654,9 +665,8 @@ STATIC struct xfs_btree_block *
 xfs_btree_get_iroot(
 	struct xfs_btree_cur	*cur)
 {
-	struct xfs_ifork	*ifp;
+	struct xfs_ifork	*ifp = xfs_btree_ifork_ptr(cur);
 
-	ifp = XFS_IFORK_PTR(cur->bc_ino.ip, cur->bc_ino.whichfork);
 	return (struct xfs_btree_block *)ifp->if_broot;
 }
 
@@ -4985,8 +4995,17 @@ xfs_btree_fakeroot_init_ptr_from_cur(
 
 	ASSERT(cur->bc_flags & XFS_BTREE_STAGING);
 
-	afake = cur->bc_ag.afake;
-	ptr->s = cpu_to_be32(afake->af_root);
+	if (cur->bc_flags & XFS_BTREE_ROOT_IN_INODE) {
+		/*
+		 * The root block lives in the inode core, so we zero the
+		 * pointer (like the bmbt code does) to make it obvious if
+		 * anyone ever tries to use this pointer.
+		 */
+		ptr->l = cpu_to_be64(0);
+	} else {
+		afake = cur->bc_ag.afake;
+		ptr->s = cpu_to_be32(afake->af_root);
+	}
 }
 
 /*
@@ -5072,6 +5091,90 @@ xfs_btree_commit_afakeroot(
 
 	kmem_free((void *)cur->bc_ops);
 	cur->bc_ag.agbp = agbp;
+	cur->bc_ops = ops;
+	cur->bc_flags &= ~XFS_BTREE_STAGING;
+	cur->bc_tp = tp;
+}
+
+/*
+ * Bulk Loading for Inode-Rooted Btrees
+ * ====================================
+ *
+ * For a btree rooted in an inode fork, pass a xbtree_ifakeroot structure to
+ * the staging cursor.  This structure should be initialized as follows:
+ *
+ * - if_fork_size field should be set to the number of bytes available to the
+ *   fork in the inode.
+ *
+ * - if_fork should point to a freshly allocated struct xfs_ifork.
+ *
+ * - if_format should be set to the appropriate fork type (e.g.
+ *   XFS_DINODE_FMT_BTREE).
+ *
+ * All other fields must be zero.
+ *
+ * The _stage_cursor() function for a specific btree type should call
+ * xfs_btree_stage_ifakeroot to set up the in-memory cursor as a staging
+ * cursor.  The corresponding _commit_staged_btree() function should log the
+ * new root and call xfs_btree_commit_ifakeroot() to transform the staging
+ * cursor into a regular btree cursor.
+ */
+
+/*
+ * Initialize an inode-rooted btree cursor with the given inode btree fake
+ * root.  The btree cursor's bc_ops will be overridden as needed to make the
+ * staging functionality work.  If new_ops is not NULL, these new ops will be
+ * passed out to the caller for further overriding.
+ */
+void
+xfs_btree_stage_ifakeroot(
+	struct xfs_btree_cur		*cur,
+	struct xbtree_ifakeroot		*ifake,
+	struct xfs_btree_ops		**new_ops)
+{
+	struct xfs_btree_ops		*nops;
+
+	ASSERT(!(cur->bc_flags & XFS_BTREE_STAGING));
+	ASSERT(cur->bc_flags & XFS_BTREE_ROOT_IN_INODE);
+	ASSERT(cur->bc_tp == NULL);
+
+	nops = kmem_alloc(sizeof(struct xfs_btree_ops), KM_NOFS);
+	memcpy(nops, cur->bc_ops, sizeof(struct xfs_btree_ops));
+	nops->alloc_block = xfs_btree_fakeroot_alloc_block;
+	nops->free_block = xfs_btree_fakeroot_free_block;
+	nops->init_ptr_from_cur = xfs_btree_fakeroot_init_ptr_from_cur;
+	nops->dup_cursor = xfs_btree_fakeroot_dup_cursor;
+
+	cur->bc_ino.ifake = ifake;
+	cur->bc_nlevels = ifake->if_levels;
+	cur->bc_ops = nops;
+	cur->bc_flags |= XFS_BTREE_STAGING;
+
+	if (new_ops)
+		*new_ops = nops;
+}
+
+/*
+ * Transform an inode-rooted staging btree cursor back into a regular cursor by
+ * substituting a real btree root for the fake one and restoring normal btree
+ * cursor ops.  The caller must log the btree root change prior to calling
+ * this.
+ */
+void
+xfs_btree_commit_ifakeroot(
+	struct xfs_btree_cur		*cur,
+	struct xfs_trans		*tp,
+	int				whichfork,
+	const struct xfs_btree_ops	*ops)
+{
+	ASSERT(cur->bc_flags & XFS_BTREE_STAGING);
+	ASSERT(cur->bc_tp == NULL);
+
+	trace_xfs_btree_commit_ifakeroot(cur);
+
+	kmem_free((void *)cur->bc_ops);
+	cur->bc_ino.ifake = NULL;
+	cur->bc_ino.whichfork = whichfork;
 	cur->bc_ops = ops;
 	cur->bc_flags &= ~XFS_BTREE_STAGING;
 	cur->bc_tp = tp;
