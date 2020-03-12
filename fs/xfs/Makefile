@@ -179,5 +179,9 @@ xfs-y				+= $(addprefix scrub/, \
 				   repair.o \
 				   symlink_repair.o \
 				   )
+
+xfs-$(CONFIG_XFS_RT)		+= $(addprefix scrub/, \
+				   rtsummary_repair.o \
+				   )
 endif
 endif
