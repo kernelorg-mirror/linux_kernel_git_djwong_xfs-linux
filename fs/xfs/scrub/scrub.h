@@ -69,6 +69,7 @@ struct xfs_scrub {
 	struct xfs_trans		*tp;
 	struct xfs_inode		*ip;
 	void				*buf;
+	struct file			*xfile;
 	uint				ilock_flags;
 
 	/* See the XCHK/XREP state flags below. */

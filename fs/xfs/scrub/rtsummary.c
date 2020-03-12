@@ -59,9 +59,20 @@ xchk_setup_rtsummary(
 	struct xfs_inode	*ip)
 {
 	struct xfs_mount	*mp = sc->mp;
+	unsigned long long	resblks;
 	int			error;
 
-	error = xchk_trans_alloc(sc, 0);
+	/*
+	 * If we're doing a repair, we reserve 2x the summary blocks: once for
+	 * the new summary contents and again for the bmbt blocks and the
+	 * remapping operation.
+	 */
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		resblks = XFS_B_TO_FSB(sc->mp, sc->mp->m_rsumsize) * 2;
+		if (resblks > UINT_MAX)
+			return -EOPNOTSUPP;
+	}
+	error = xchk_trans_alloc(sc, resblks);
 	if (error)
 		return error;
 
@@ -323,6 +334,19 @@ xchk_rtsummary(
 
 	/* Does the computed summary file match the actual rtsummary file? */
 	error = xchk_rtsum_compare(sc, sumfile);
+	if (error)
+		goto out_sumfile;
+
+	/*
+	 * If we're going to repair the rtsummary then save the computed
+	 * rtsummary information for later.  It's ok to drop the rtbitmap
+	 * lock even if we're repairing the rtsummary file because we still
+	 * hold ILOCK_EXCL on the rtsummary file.
+	 */
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		sc->xfile = sumfile;
+		goto out_rbm;
+	}
 
 out_sumfile:
 	fput(sumfile);
