@@ -57,6 +57,7 @@ xchk_setup_rtsummary(
 	struct xfs_inode	*ip)
 {
 	struct xfs_mount	*mp = sc->mp;
+	unsigned long long	resblks = 0;
 	int			error;
 
 	/*
@@ -67,7 +68,17 @@ xchk_setup_rtsummary(
 	if (IS_ERR(sc->xfile))
 		return PTR_ERR(sc->xfile);
 
-	error = xchk_trans_alloc(sc, 0);
+	/*
+	 * If we're doing a repair, we reserve 2x the summary blocks: once for
+	 * the new summary contents and again for the bmbt blocks and the
+	 * remapping operation.
+	 */
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		resblks = XFS_B_TO_FSB(sc->mp, sc->mp->m_rsumsize) * 2;
+		if (resblks > UINT_MAX)
+			return -EOPNOTSUPP;
+	}
+	error = xchk_trans_alloc(sc, resblks);
 	if (error)
 		return error;
 

@@ -35,6 +35,7 @@
 #include "scrub/trace.h"
 #include "scrub/repair.h"
 #include "scrub/bitmap.h"
+#include "scrub/xfile.h"
 
 /*
  * Attempt to repair some metadata, if the metadata is corrupt and userspace
@@ -1481,5 +1482,170 @@ xrep_metadata_inode_forks(
 out:
 	sc->sm->sm_type = smtype;
 	sc->sm->sm_flags = smflags;
+	return error;
+}
+
+/*
+ * Make sure that the given range of the data fork of the metadata file being
+ * checked is mapped to written blocks.  The caller must ensure that the inode
+ * is joined to the transaction.
+ */
+int
+xrep_fallocate(
+	struct xfs_scrub	*sc,
+	xfs_fileoff_t		off,
+	xfs_filblks_t		len)
+{
+	struct xfs_bmbt_irec	map;
+	xfs_fileoff_t		end = off + len;
+	int			nmaps;
+	int			error = 0;
+
+	error = xrep_ino_dqattach(sc);
+	if (error)
+		return error;
+
+	while (off < len) {
+		/*
+		 * If we have a real extent mapping this block then we're
+		 * in ok shape.
+		 */
+		nmaps = 1;
+		error = xfs_bmapi_read(sc->ip, off, end - off, &map, &nmaps,
+				XFS_DATA_FORK);
+		if (error)
+			break;
+
+		if (nmaps == 1 && xfs_bmap_is_real_extent(&map)) {
+			off += map.br_startblock;
+			continue;
+		}
+
+		/*
+		 * If we find a delalloc reservation then something is very
+		 * very wrong.  Bail out.
+		 */
+		if (map.br_startblock == DELAYSTARTBLOCK)
+			return -EFSCORRUPTED;
+
+		/*
+		 * Make sure this rtsum block has a real zeroed extent
+		 * allocated to it.
+		 */
+		nmaps = 1;
+		error = xfs_bmapi_write(sc->tp, sc->ip, off, end - off,
+				XFS_BMAPI_CONVERT | XFS_BMAPI_ZERO, 0, &map,
+				&nmaps);
+		if (error)
+			break;
+
+		error = xrep_roll_trans(sc);
+		if (error)
+			break;
+		off += map.br_startblock;
+	}
+
+	return error;
+}
+
+/*
+ * Write a number of bytes from the xfile into the metadata file being
+ * examined.  The copybuf must be large enough to hold one filesystem block's
+ * worth of data.  The caller must join the inode to the transaction.
+ */
+int
+xrep_set_file_contents(
+	struct xfs_scrub	*sc,
+	const struct xfs_buf_ops *ops,
+	enum xfs_blft		type,
+	xfs_fileoff_t		isize)
+{
+	LIST_HEAD(buffers_list);
+	struct xfs_bmbt_irec	map;
+	struct xfs_mount	*mp = sc->mp;
+	struct xfs_buf		*bp;
+	xfs_rtblock_t		off = 0;
+	loff_t			pos = 0;
+	unsigned int		nr_buffers = 0;
+	int			nmaps;
+	int			error = 0;
+
+	ASSERT(S_ISREG(VFS_I(sc->ip)->i_mode));
+
+	for (; pos < isize; pos += mp->m_sb.sb_blocksize, off++) {
+		loff_t		ppos = pos;
+		size_t		count;
+
+		/* Read block mapping for this file block. */
+		nmaps = 1;
+		error = xfs_bmapi_read(sc->ip, off, 1, &map, &nmaps, 0);
+		if (error)
+			goto out;
+		if (nmaps == 0 || !xfs_bmap_is_real_extent(&map)) {
+			error = -EFSCORRUPTED;
+			goto out;
+		}
+
+		/* Get the metadata buffer for this offset in the file. */
+		error = xfs_trans_get_buf(sc->tp, mp->m_ddev_targp,
+				XFS_FSB_TO_DADDR(mp, map.br_startblock),
+				mp->m_bsize, 0, &bp);
+		if (error)
+			goto out;
+		bp->b_ops = ops;
+		xfs_trans_buf_set_type(sc->tp, bp, type);
+
+		/* Read in a block's worth of data from the xfile. */
+		count = min_t(loff_t, isize - pos, mp->m_sb.sb_blocksize);
+		error = xfile_io(sc->xfile, XFILE_IO_READ, &ppos, bp->b_addr,
+				count);
+		if (error) {
+			xfs_trans_brelse(sc->tp, bp);
+			goto out;
+		}
+
+		/*
+		 * Put this buffer on the delwri list so we can write them all
+		 * out in batches.
+		 */
+		xfs_buf_delwri_queue(bp, &buffers_list);
+		xfs_trans_brelse(sc->tp, bp);
+		nr_buffers++;
+
+		/*
+		 * If we have more than 256K of data to write out, flush it to
+		 * disk so we don't use up too much memory.
+		 */
+		if (XFS_FSB_TO_B(mp, nr_buffers) > 262144) {
+			error = xfs_buf_delwri_submit(&buffers_list);
+			if (error)
+				goto out;
+			nr_buffers = 0;
+		}
+	}
+
+	/*
+	 * Write the new blocks to disk.  If the ordered list isn't empty after
+	 * that, then something went wrong and we have to fail.  This should
+	 * never happen, but we'll check anyway.
+	 */
+	error = xfs_buf_delwri_submit(&buffers_list);
+	if (error)
+		goto out;
+	if (!list_empty(&buffers_list)) {
+		ASSERT(list_empty(&buffers_list));
+		return -EIO;
+	}
+
+	/* Set the new inode size, if needed. */
+	if (sc->ip->i_d.di_size != isize) {
+		sc->ip->i_d.di_size = isize;
+		xfs_trans_log_inode(sc->tp, sc->ip, XFS_ILOG_CORE);
+		return xrep_roll_trans(sc);
+	}
+
+	return 0;
+out:
+	xfs_buf_delwri_cancel(&buffers_list);
 	return error;
 }
