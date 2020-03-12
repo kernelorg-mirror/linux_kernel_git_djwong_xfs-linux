@@ -323,6 +323,19 @@ xchk_rtsummary(
 
 	/* Does the computed summary file match the actual rtsummary file? */
 	error = xchk_rtsum_compare(sc, sumfile);
+	if (error)
+		goto out_sumfile;
+
+	/*
+	 * If we're going to repair the rtsummary then save the computed
+	 * rtsummary information for later.  It's ok to drop the rtbitmap
+	 * lock even if we're repairing the rtsummary file because we still
+	 * hold ILOCK_EXCL on the rtsummary file.
+	 */
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		sc->xfile = sumfile;
+		goto out_rbm;
+	}
 
 out_sumfile:
 	fput(sumfile);

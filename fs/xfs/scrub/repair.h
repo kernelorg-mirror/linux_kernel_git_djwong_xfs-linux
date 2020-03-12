@@ -32,6 +32,12 @@ int xrep_alloc_ag_block(struct xfs_scrub *sc,
 int xrep_init_btblock(struct xfs_scrub *sc, xfs_fsblock_t fsb,
 		struct xfs_buf **bpp, xfs_btnum_t btnum,
 		const struct xfs_buf_ops *ops);
+int xrep_fallocate(struct xfs_scrub *sc, xfs_fileoff_t off, xfs_filblks_t len);
+
+typedef int (*xrep_setfile_getbuf_fn)(struct xfs_scrub *sc,
+		xfs_fileoff_t off, struct xfs_buf **bpp);
+int xrep_set_file_contents(struct xfs_scrub *sc, xrep_setfile_getbuf_fn getbuf,
+		struct file *srcfile, xfs_fileoff_t isize);
 
 struct xbitmap;
 
@@ -85,6 +91,11 @@ int xrep_quota(struct xfs_scrub *sc);
 #else
 # define xrep_quota			xrep_notsupported
 #endif /* CONFIG_XFS_QUOTA */
+#ifdef CONFIG_XFS_RT
+int xrep_rtsummary(struct xfs_scrub *sc);
+#else
+# define xrep_rtsummary			xrep_notsupported
+#endif /* CONFIG_XFS_RT */
 
 struct xrep_newbt_resv {
 	/* Link to list of extents that we've reserved. */
@@ -191,6 +202,7 @@ xrep_reset_perag_resv(
 #define xrep_dir			xrep_notsupported
 #define xrep_xattr			xrep_notsupported
 #define xrep_quota			xrep_notsupported
+#define xrep_rtsummary			xrep_notsupported
 
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
