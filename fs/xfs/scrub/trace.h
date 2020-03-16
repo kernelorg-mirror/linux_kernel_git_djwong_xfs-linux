@@ -651,6 +651,38 @@ TRACE_EVENT(xchk_fscounters_within_range,
 		  __entry->old_value)
 )
 
+TRACE_EVENT(xchk_rtsum_record_free,
+	TP_PROTO(struct xfs_mount *mp, xfs_rtblock_t start, xfs_rtblock_t end,
+		 uint64_t len, unsigned int log, loff_t pos, xfs_suminfo_t v),
+	TP_ARGS(mp, start, end, len, log, pos, v),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_rtblock_t, start)
+		__field(xfs_rtblock_t, end)
+		__field(unsigned long long, len)
+		__field(unsigned int, log)
+		__field(loff_t, pos)
+		__field(xfs_suminfo_t, v)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->start = start;
+		__entry->end = end;
+		__entry->len = len;
+		__entry->log = log;
+		__entry->pos = pos;
+		__entry->v = v;
+	),
+	TP_printk("dev %d:%d start %llu end %llu len %llu log %u pos %lld v %u",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->start,
+		  __entry->end,
+		  __entry->len,
+		  __entry->log,
+		  __entry->pos,
+		  __entry->v)
+)
+
 /* repair tracepoints */
 #if IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR)
 
