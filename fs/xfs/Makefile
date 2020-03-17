@@ -191,6 +191,7 @@ xfs-y				+= $(addprefix scrub/, \
 xfs-$(CONFIG_XFS_QUOTA)		+= scrub/quota_repair.o
 
 xfs-$(CONFIG_XFS_RT)		+= $(addprefix scrub/, \
+				   rtbitmap_repair.o \
 				   rtsummary_repair.o \
 				   )
 endif
