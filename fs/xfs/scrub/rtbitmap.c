@@ -33,6 +33,19 @@ xchk_setup_rt(
 	if (error)
 		return error;
 
+#ifdef CONFIG_XFS_ONLINE_REPAIR
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		/*
+		 * Allocate a memory buffer for faster creation of the new
+		 * bitmap.
+		 */
+		sc->buf = kmem_alloc_large(sc->mp->m_sb.sb_blocksize,
+				KM_MAYFAIL);
+		if (!sc->buf)
+			return -ENOMEM;
+	}
+#endif
+
 	sc->ilock_flags = XFS_ILOCK_EXCL | XFS_ILOCK_RTBITMAP;
 	sc->ip = sc->mp->m_rbmip;
 	xfs_ilock(sc->ip, sc->ilock_flags);
