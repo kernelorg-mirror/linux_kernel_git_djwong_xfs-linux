@@ -27,11 +27,35 @@ xchk_setup_rtbitmap(
 	struct xfs_scrub	*sc,
 	struct xfs_inode	*ip)
 {
+	unsigned long long	resblks = 0;
 	int			error;
 
-	error = xchk_trans_alloc(sc, 0);
+	/*
+	 * If we're doing a repair, we reserve 2x the bitmap blocks: once for
+	 * the new bitmap contents and again for the bmbt blocks and the
+	 * remapping operation.
+	 */
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		resblks = sc->mp->m_sb.sb_rbmblocks * 2;
+		if (resblks > UINT_MAX)
+			return -EOPNOTSUPP;
+	}
+	error = xchk_trans_alloc(sc, resblks);
 	if (error)
 		return error;
+
+#ifdef CONFIG_XFS_ONLINE_REPAIR
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		/*
+		 * Allocate a memory buffer for faster creation of the new
+		 * bitmap.
+		 */
+		sc->buf = kmem_alloc_large(sc->mp->m_sb.sb_blocksize,
+				KM_MAYFAIL);
+		if (!sc->buf)
+			return -ENOMEM;
+	}
+#endif
 
 	sc->ilock_flags = XFS_ILOCK_EXCL | XFS_ILOCK_RTBITMAP;
 	sc->ip = sc->mp->m_rbmip;
