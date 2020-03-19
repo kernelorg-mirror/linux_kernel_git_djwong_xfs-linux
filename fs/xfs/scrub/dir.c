@@ -28,6 +28,12 @@ xchk_setup_directory(
 	unsigned int		sz;
 	int			error;
 
+	if (sc->flags & XCHK_TRY_HARDER) {
+		error = xchk_fs_freeze(sc);
+		if (error)
+			return error;
+	}
+
 	error = xchk_setup_inode_contents(sc, ip, 0);
 	if (error)
 		return error;
