@@ -90,6 +90,7 @@ int xrep_bmap_data(struct xfs_scrub *sc);
 int xrep_bmap_attr(struct xfs_scrub *sc);
 int xrep_symlink(struct xfs_scrub *sc);
 int xrep_dir(struct xfs_scrub *sc);
+int xrep_parent(struct xfs_scrub *sc);
 int xrep_xattr(struct xfs_scrub *sc);
 int xrep_fscounters(struct xfs_scrub *sc);
 #ifdef CONFIG_XFS_QUOTA
@@ -217,6 +218,7 @@ xrep_rmapbt_setup(
 #define xrep_bmap_attr			xrep_notsupported
 #define xrep_symlink			xrep_notsupported
 #define xrep_dir			xrep_notsupported
+#define xrep_parent			xrep_notsupported
 #define xrep_xattr			xrep_notsupported
 #define xrep_fscounters			xrep_notsupported
 #define xrep_quota			xrep_notsupported
