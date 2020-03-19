@@ -67,7 +67,7 @@ xchk_parent_actor(
 }
 
 /* Count the number of dentries in the parent dir that point to this inode. */
-STATIC int
+int
 xchk_parent_count_parent_dentries(
 	struct xfs_scrub	*sc,
 	struct xfs_inode	*parent,
