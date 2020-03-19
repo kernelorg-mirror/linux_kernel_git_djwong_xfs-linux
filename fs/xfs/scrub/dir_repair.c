@@ -24,6 +24,7 @@
 #include "xfs_quota.h"
 #include "xfs_bmap_btree.h"
 #include "xfs_trans_space.h"
+#include "xfs_iwalk.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
@@ -42,18 +43,39 @@
  * which means that if we blow up midway through there's little we can do.
  */
 
+/* Directory entry to be restored in the new directory. */
 struct xrep_dir_key {
+	/* Cookie for retrieval of the dirent name. */
 	xblob_cookie		name_cookie;
+
+	/* Target inode number. */
 	xfs_ino_t		ino;
+
+	/* Hash of the dirent name. */
 	unsigned int		hash;
+
+	/* Length of the dirent name. */
 	uint8_t			namelen;
+
+	/* File type of the dirent. */
 	uint8_t			ftype;
 } __packed;
 
 struct xrep_dir {
 	struct xfs_scrub	*sc;
+
+	/* Fixed-size array of xrep_dir_key structures. */
 	struct xfbma		*dir_entries;
+
+	/* Blobs containing directory entry names. */
 	struct xblob		*dir_names;
+
+	/*
+	 * Potential parent of the directory we're reconstructing.  This can
+	 * be NULLFSINO if we haven't found any parents; 0 if we've found too
+	 * many parents during salvaging; or a regular inode number if we've
+	 * found a good candidate.
+	 */
 	xfs_ino_t		parent_ino;
 };
 
@@ -110,11 +132,23 @@ xrep_dir_salvage_entry(
 
 	trace_xrep_dir_salvage_entry(rd->sc->ip, name, key.namelen, ino);
 
-	/* Save the parent pointer. */
+	/* If this is a '..' entry, we can save it for later... */
 	if (key.namelen == 2 && name[0] == '.' && name[1] == '.') {
-		if (rd->parent_ino != NULLFSINO)
-			return -EFSCORRUPTED;
-		rd->parent_ino = ino;
+		switch (rd->parent_ino) {
+		case NULLFSINO:
+			/* Found a parent, save it for later. */
+			rd->parent_ino = ino;
+			break;
+		default:
+			/*
+			 * Found more than one parent, so force a directory
+			 * tree walk later.
+			 */
+			rd->parent_ino = 0;
+			/* fall through */
+		case 0:
+			break;
+		}
 		return 0;
 	}
 
@@ -122,8 +156,8 @@ xrep_dir_salvage_entry(
 	 * Compute the ftype or dump the entry if we can't.  We don't lock the
 	 * inode because inodes can't change type while we have a reference.
 	 */
-	error = xfs_iget(rd->sc->mp, rd->sc->tp, ino,
-			XFS_IGET_UNTRUSTED | XFS_IGET_DONTCACHE, 0, &ip);
+	error = xfs_iget(rd->sc->mp, rd->sc->tp, ino, XFS_IGET_UNTRUSTED, 0,
+			&ip);
 	if (error)
 		return 0;
 	key.ftype = xfs_mode_to_ftype(VFS_I(ip)->i_mode);
@@ -476,6 +510,8 @@ xrep_dir_reset_fork(
 			return error;
 	}
 
+	trace_xrep_dir_reset_fork(rd->sc->ip, rd->parent_ino);
+
 	/* Reset the data fork to an empty data fork. */
 	xfs_ifork_reset(ifp);
 	ifp->if_flags = XFS_IFINLINE;
@@ -645,6 +681,119 @@ xrep_dir_rebuild_tree(
 }
 
 /*
+ * If this directory entry points to the directory we're rebuilding, then the
+ * directory we're scanning is the parent.  Remember the parent.
+ */
+STATIC int
+xrep_dir_absorb_parent(
+	struct xfs_inode	*dp,
+	struct xfs_name		*name,
+	unsigned int		dtype,
+	void			*data)
+{
+	struct xrep_dir		*rd = data;
+	int			error = 0;
+
+	/* Uhoh, more than one parent for a dir? */
+	if (rd->parent_ino != NULLFSINO)
+		return -EFSCORRUPTED;
+
+	if (xchk_should_terminate(rd->sc, &error))
+		return error;
+
+	/* We found a potential parent; remember this. */
+	rd->parent_ino = dp->i_ino;
+	return 0;
+}
+
+/*
+ * Make sure we return with a valid parent inode.
+ *
+ * If the directory salvaging step found a single '..' entry, check the
+ * alleged parent for a dentry pointing to the directory.  If this succeds,
+ * we're done.  Otherwise, scan the entire filesystem for a parent.
+ */
+STATIC int
+xrep_dir_validate_parent(
+	struct xrep_dir		*rd)
+{
+	struct xfs_scrub	*sc = rd->sc;
+	struct xfs_inode	*parent;
+	xfs_nlink_t		expected_nlink, nlink;
+	int			error;
+
+	/*
+	 * If the alleged parent is obviously garbage, jump to the scan.
+	 */
+	if (rd->parent_ino == NULLFSINO ||
+	    rd->parent_ino == 0 ||
+	    rd->parent_ino == sc->ip->i_ino ||
+	    !xfs_verify_dir_ino(sc->mp, rd->parent_ino))
+		goto scan;
+
+	/*
+	 * Grab this parent inode.  Since we release the inode before we cancel
+	 * the scrub transaction and don't know if releasing the inode will
+	 * trigger eofblocks cleanup (which allocates what would be a nested
+	 * transaction), we avoid DONTCACHE here.
+	 */
+	error = xfs_iget(sc->mp, sc->tp, rd->parent_ino, XFS_IGET_UNTRUSTED, 0,
+			&parent);
+	if (error)
+		goto scan;
+	if (!S_ISDIR(VFS_I(parent)->i_mode))
+		goto rele_scan;
+
+	/*
+	 * We prefer to keep the inode locked while we lock and search its
+	 * alleged parent for a forward reference.  If we can grab the iolock,
+	 * validate the pointers and we're done.  We must use nowait here to
+	 * avoid an ABBA deadlock on the parent and the child inodes.
+	 */
+	if (!xfs_ilock_nowait(parent, XFS_IOLOCK_SHARED))
+		goto rele_scan;
+
+	/*
+	 * If we're an unlinked directory, the parent /won't/ have a link
+	 * to us.  Otherwise, it should have one link.
+	 */
+	expected_nlink = VFS_I(sc->ip)->i_nlink == 0 ? 0 : 1;
+
+	error = xchk_parent_count_parent_dentries(sc, parent, &nlink);
+	if (error)
+		goto unlock_rele_scan;
+
+	/* The parent is an exact match, we're done. */
+	if (nlink == expected_nlink) {
+		xfs_iunlock(parent, XFS_IOLOCK_SHARED);
+		xfs_irele(parent);
+		return 0;
+	}
+
+unlock_rele_scan:
+	xfs_iunlock(parent, XFS_IOLOCK_SHARED);
+rele_scan:
+	xfs_irele(parent);
+scan:
+	/*
+	 * If we're an unlinked directory, the parent /won't/ have a link
+	 * to us.  Set the parent directory to the root.
+	 */
+	if (VFS_I(rd->sc->ip)->i_nlink == 0) {
+		rd->parent_ino = sc->mp->m_sb.sb_rootino;
+		return 0;
+	}
+
+	/* Scan the entire directory tree for the directory's parent. */
+	error = xrep_scan_for_parents(sc, sc->ip->i_ino,
+			xrep_dir_absorb_parent, rd);
+	if (error)
+		return error;
+
+	return rd->parent_ino == NULLFSINO ? -EFSCORRUPTED : 0;
+}
+
+/*
  * Repair the directory metadata.
  *
  * XXX: Directory entry buffers can be multiple fsblocks in size.  The buffer
@@ -689,9 +838,17 @@ xrep_dir(
 	if (error)
 		goto out;
 
-	/* If we can't find the parent pointer, we're sunk. */
-	if (rd.parent_ino == NULLFSINO)
-		return -EFSCORRUPTED;
+	/*
+	 * Validate the parent pointer that we observed while salvaging the
+	 * directory; or scan the filesystem to find one.  We drop the ILOCK
+	 * on the directory being repaired to avoid ABBA deadlocks, though we
+	 * maintain the directory IOLOCK to prevent concurrent modifications.
+	 */
+	xfs_iunlock(sc->ip, XFS_ILOCK_EXCL);
+	error = xrep_dir_validate_parent(&rd);
+	xfs_ilock(sc->ip, XFS_ILOCK_EXCL);
+	if (error)
+		goto out;
 
 	/*
 	 * Invalidate and truncate all data fork extents.  This is the point at
