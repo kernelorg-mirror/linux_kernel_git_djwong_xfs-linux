@@ -156,6 +156,8 @@ void xchk_stop_reaping(struct xfs_scrub *sc);
 void xchk_start_reaping(struct xfs_scrub *sc);
 int xchk_fs_freeze(struct xfs_scrub *sc);
 int xchk_fs_thaw(struct xfs_scrub *sc);
+int xchk_parent_count_parent_dentries(struct xfs_scrub *sc,
+		struct xfs_inode *parent, xfs_nlink_t *nlink);
 
 /* Do we need to invoke the repair tool? */
 static inline bool xfs_scrub_needs_repair(struct xfs_scrub_metadata *sm)

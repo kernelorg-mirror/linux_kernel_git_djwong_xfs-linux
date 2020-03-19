@@ -39,6 +39,11 @@ typedef int (*xrep_setfile_getbuf_fn)(struct xfs_scrub *sc,
 int xrep_set_file_contents(struct xfs_scrub *sc, xrep_setfile_getbuf_fn getbuf,
 		struct file *srcfile, xfs_fileoff_t isize);
 
+typedef int (*xrep_parents_iter_fn)(struct xfs_inode *dp, struct xfs_name *name,
+		unsigned int dtype, void *data);
+int xrep_scan_for_parents(struct xfs_scrub *sc, xfs_ino_t target_ino,
+		xrep_parents_iter_fn fn, void *data);
+
 struct xbitmap;
 
 int xrep_fix_freelist(struct xfs_scrub *sc, int alloc_flags);
