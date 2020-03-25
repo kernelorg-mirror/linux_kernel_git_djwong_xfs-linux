@@ -328,6 +328,41 @@ xfs_validate_sb_common(
 		return -EFSCORRUPTED;
 	}
 
+	/* Validate the realtime geometry; stolen from xfs_repair */
+	if (unlikely(
+	    sbp->sb_rextsize * sbp->sb_blocksize > XFS_MAX_RTEXTSIZE	||
+	    sbp->sb_rextsize * sbp->sb_blocksize < XFS_MIN_RTEXTSIZE)) {
+		xfs_notice(mp,
+			"realtime extent sanity check failed");
+		return -EFSCORRUPTED;
+	}
+
+	if (sbp->sb_rblocks == 0) {
+		if (unlikely(
+		    sbp->sb_rextents != 0				||
+		    sbp->sb_rbmblocks != 0				||
+		    sbp->sb_rextslog != 0				||
+		    sbp->sb_frextents != 0)) {
+			xfs_notice(mp,
+				"realtime zeroed geometry sanity check failed");
+			return -EFSCORRUPTED;
+		}
+	} else {
+		xfs_rtblock_t	rexts;
+		uint32_t	temp;
+
+		rexts = div_u64_rem(sbp->sb_rblocks, sbp->sb_rextsize, &temp);
+		if (unlikely(
+		    rexts != sbp->sb_rextents				||
+		    sbp->sb_rextslog != xfs_highbit32(sbp->sb_rextents)	||
+		    sbp->sb_rbmblocks != howmany(sbp->sb_rextents,
+						NBBY * sbp->sb_blocksize))) {
+			xfs_notice(mp,
+				"realtime geometry sanity check failed");
+			return -EFSCORRUPTED;
+		}
+	}
+
 	if (sbp->sb_unit) {
 		if (!xfs_sb_version_hasdalign(sbp) ||
 		    sbp->sb_unit > sbp->sb_width ||
