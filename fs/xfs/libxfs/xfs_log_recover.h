@@ -169,4 +169,9 @@ extern const struct xlog_recover_intent_type xlog_recover_rmap_type;
 extern const struct xlog_recover_intent_type xlog_recover_refcount_type;
 extern const struct xlog_recover_intent_type xlog_recover_bmap_type;
 
+typedef bool (*xlog_recover_release_intent_fn)(struct xlog *log,
+		struct xfs_log_item *item, uint64_t intent_id);
+void xlog_recover_release_intent(struct xlog *log, unsigned short intent_type,
+		uint64_t intent_id, xlog_recover_release_intent_fn fn);
+
 #endif	/* __XFS_LOG_RECOVER_H__ */
