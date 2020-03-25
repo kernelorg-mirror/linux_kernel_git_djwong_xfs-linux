@@ -18,6 +18,8 @@
 #include "xfs_log.h"
 #include "xfs_rmap.h"
 #include "xfs_error.h"
+#include "xfs_log_priv.h"
+#include "xfs_log_recover.h"
 
 kmem_zone_t	*xfs_rui_zone;
 kmem_zone_t	*xfs_rud_zone;
@@ -27,7 +29,7 @@ static inline struct xfs_rui_log_item *RUI_ITEM(struct xfs_log_item *lip)
 	return container_of(lip, struct xfs_rui_log_item, rui_item);
 }
 
-void
+STATIC void
 xfs_rui_item_free(
 	struct xfs_rui_log_item	*ruip)
 {
@@ -44,7 +46,7 @@ xfs_rui_item_free(
  * committed vs unpin operations in bulk insert operations. Hence the reference
  * count to ensure only the last caller frees the RUI.
  */
-void
+STATIC void
 xfs_rui_release(
 	struct xfs_rui_log_item	*ruip)
 {
@@ -132,7 +134,7 @@ static const struct xfs_item_ops xfs_rui_item_ops = {
 /*
  * Allocate and initialize an rui item with the given number of extents.
  */
-struct xfs_rui_log_item *
+STATIC struct xfs_rui_log_item *
 xfs_rui_init(
 	struct xfs_mount		*mp,
 	uint				nextents)
@@ -160,7 +162,7 @@ xfs_rui_init(
  * RUI format structure.  The RUI/RUD items were designed not to need any
  * special alignment handling.
  */
-int
+STATIC int
 xfs_rui_copy_format(
 	struct xfs_log_iovec		*buf,
 	struct xfs_rui_log_format	*dst_rui_fmt)
@@ -492,7 +494,7 @@ const struct xfs_defer_op_type xfs_rmap_update_defer_type = {
  * Process an rmap update intent item that was recovered from the log.
  * We need to update the rmapbt.
  */
-int
+STATIC int
 xfs_rui_recover(
 	struct xfs_trans		*parent_tp,
 	struct xfs_rui_log_item		*ruip)
@@ -622,3 +624,141 @@ abort_error:
 	xfs_trans_cancel(tp);
 	return error;
 }
+
+/*
+ * This routine is called to create an in-core extent rmap update
+ * item from the rui format structure which was logged on disk.
+ * It allocates an in-core rui, copies the extents from the format
+ * structure into it, and adds the rui to the AIL with the given
+ * LSN.
+ */
+STATIC int
+xlog_recover_rui(
+	struct xlog			*log,
+	struct xlog_recover_item	*item,
+	xfs_lsn_t			lsn)
+{
+	int				error;
+	struct xfs_mount		*mp = log->l_mp;
+	struct xfs_rui_log_item		*ruip;
+	struct xfs_rui_log_format	*rui_formatp;
+
+	rui_formatp = item->ri_buf[0].i_addr;
+
+	ruip = xfs_rui_init(mp, rui_formatp->rui_nextents);
+	error = xfs_rui_copy_format(&item->ri_buf[0], &ruip->rui_format);
+	if (error) {
+		xfs_rui_item_free(ruip);
+		return error;
+	}
+	atomic_set(&ruip->rui_next_extent, rui_formatp->rui_nextents);
+
+	spin_lock(&log->l_ailp->ail_lock);
+	/*
+	 * The RUI has two references. One for the RUD and one for RUI to ensure
+	 * it makes it into the AIL. Insert the RUI into the AIL directly and
+	 * drop the RUI reference. Note that xfs_trans_ail_update() drops the
+	 * AIL lock.
+	 */
+	xfs_trans_ail_update(log->l_ailp, &ruip->rui_item, lsn);
+	xfs_rui_release(ruip);
+	return 0;
+}
+
+
+/*
+ * This routine is called when an RUD format structure is found in a committed
+ * transaction in the log. Its purpose is to cancel the corresponding RUI if it
+ * was still in the log. To do this it searches the AIL for the RUI with an id
+ * equal to that in the RUD format structure. If we find it we drop the RUD
+ * reference, which removes the RUI from the AIL and frees it.
+ */
+STATIC int
+xlog_recover_rud(
+	struct xlog			*log,
+	struct xlog_recover_item	*item)
+{
+	struct xfs_rud_log_format	*rud_formatp;
+	struct xfs_rui_log_item		*ruip = NULL;
+	struct xfs_log_item		*lip;
+	uint64_t			rui_id;
+	struct xfs_ail_cursor		cur;
+	struct xfs_ail			*ailp = log->l_ailp;
+
+	rud_formatp = item->ri_buf[0].i_addr;
+	ASSERT(item->ri_buf[0].i_len == sizeof(struct xfs_rud_log_format));
+	rui_id = rud_formatp->rud_rui_id;
+
+	/*
+	 * Search for the RUI with the id in the RUD format structure in the
+	 * AIL.
+	 */
+	spin_lock(&ailp->ail_lock);
+	lip = xfs_trans_ail_cursor_first(ailp, &cur, 0);
+	while (lip != NULL) {
+		if (lip->li_type == XFS_LI_RUI) {
+			ruip = (struct xfs_rui_log_item *)lip;
+			if (ruip->rui_format.rui_id == rui_id) {
+				/*
+				 * Drop the RUD reference to the RUI. This
+				 * removes the RUI from the AIL and frees it.
+				 */
+				spin_unlock(&ailp->ail_lock);
+				xfs_rui_release(ruip);
+				spin_lock(&ailp->ail_lock);
+				break;
+			}
+		}
+		lip = xfs_trans_ail_cursor_next(ailp, &cur);
+	}
+
+	xfs_trans_ail_cursor_done(&cur);
+	spin_unlock(&ailp->ail_lock);
+
+	return 0;
+}
+
+/* Recover the RUI if necessary. */
+STATIC int
+xlog_recover_process_rui(
+	struct xlog			*log,
+	struct xfs_trans		*parent_tp,
+	struct xfs_log_item		*lip)
+{
+	struct xfs_ail			*ailp = log->l_ailp;
+	struct xfs_rui_log_item		*ruip = RUI_ITEM(lip);
+	int				error;
+
+	/*
+	 * Skip RUIs that we've already processed.
+	 */
+	if (test_bit(XFS_RUI_RECOVERED, &ruip->rui_flags))
+		return 0;
+
+	spin_unlock(&ailp->ail_lock);
+	error = xfs_rui_recover(parent_tp, ruip);
+	spin_lock(&ailp->ail_lock);
+
+	return error;
+}
+
+/* Release the RUI since we're cancelling everything. */
+STATIC void
+xlog_recover_cancel_rui(
+	struct xlog			*log,
+	struct xfs_log_item		*lip)
+{
+	struct xfs_ail			*ailp = log->l_ailp;
+	struct xfs_rui_log_item		*ruip = RUI_ITEM(lip);
+
+	spin_unlock(&ailp->ail_lock);
+	xfs_rui_release(ruip);
+	spin_lock(&ailp->ail_lock);
+}
+
+const struct xlog_recover_intent_type xlog_recover_rmap_type = {
+	.recover_intent		= xlog_recover_rui,
+	.recover_done		= xlog_recover_rud,
+	.process_intent		= xlog_recover_process_rui,
+	.cancel_intent		= xlog_recover_cancel_rui,
+};
