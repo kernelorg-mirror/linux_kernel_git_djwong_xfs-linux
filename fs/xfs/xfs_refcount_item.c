@@ -657,6 +657,28 @@ xlog_recover_cui(
 	return 0;
 }
 
+STATIC bool
+xlog_release_cui(
+	struct xlog		*log,
+	struct xfs_log_item	*lip,
+	uint64_t		intent_id)
+{
+	struct xfs_cui_log_item	*cuip = CUI_ITEM(lip);
+	struct xfs_ail		*ailp = log->l_ailp;
+
+	if (cuip->cui_format.cui_id == intent_id) {
+		/*
+		 * Drop the CUD reference to the CUI. This
+		 * removes the CUI from the AIL and frees it.
+		 */
+		spin_unlock(&ailp->ail_lock);
+		xfs_cui_release(cuip);
+		spin_lock(&ailp->ail_lock);
+		return true;
+	}
+
+	return false;
+}
 
 /*
  * This routine is called when an CUD format structure is found in a committed
@@ -671,45 +693,15 @@ xlog_recover_cud(
 	struct xlog_recover_item	*item)
 {
 	struct xfs_cud_log_format	*cud_formatp;
-	struct xfs_cui_log_item		*cuip = NULL;
-	struct xfs_log_item		*lip;
-	uint64_t			cui_id;
-	struct xfs_ail_cursor		cur;
-	struct xfs_ail			*ailp = log->l_ailp;
 
 	cud_formatp = item->ri_buf[0].i_addr;
 	if (item->ri_buf[0].i_len != sizeof(struct xfs_cud_log_format)) {
 		XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, log->l_mp);
 		return -EFSCORRUPTED;
 	}
-	cui_id = cud_formatp->cud_cui_id;
 
-	/*
-	 * Search for the CUI with the id in the CUD format structure in the
-	 * AIL.
-	 */
-	spin_lock(&ailp->ail_lock);
-	lip = xfs_trans_ail_cursor_first(ailp, &cur, 0);
-	while (lip != NULL) {
-		if (lip->li_type == XFS_LI_CUI) {
-			cuip = (struct xfs_cui_log_item *)lip;
-			if (cuip->cui_format.cui_id == cui_id) {
-				/*
-				 * Drop the CUD reference to the CUI. This
-				 * removes the CUI from the AIL and frees it.
-				 */
-				spin_unlock(&ailp->ail_lock);
-				xfs_cui_release(cuip);
-				spin_lock(&ailp->ail_lock);
-				break;
-			}
-		}
-		lip = xfs_trans_ail_cursor_next(ailp, &cur);
-	}
-
-	xfs_trans_ail_cursor_done(&cur);
-	spin_unlock(&ailp->ail_lock);
-
+	xlog_recover_release_intent(log, XFS_LI_CUI, cud_formatp->cud_cui_id,
+			 xlog_release_cui);
 	return 0;
 }
 

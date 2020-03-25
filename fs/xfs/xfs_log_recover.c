@@ -1770,6 +1770,33 @@ xlog_clear_stale_blocks(
 
 /* Log intent item dispatching. */
 
+/*
+ * Release the recovered intent item in the AIL that matches the given intent
+ * type and intent id.
+ */
+void
+xlog_recover_release_intent(
+	struct xlog		*log,
+	unsigned short		intent_type,
+	uint64_t		intent_id,
+	xlog_recover_release_intent_fn	fn)
+{
+	struct xfs_ail_cursor	cur;
+	struct xfs_log_item	*lip;
+	struct xfs_ail		*ailp = log->l_ailp;
+
+	spin_lock(&ailp->ail_lock);
+	lip = xfs_trans_ail_cursor_first(ailp, &cur, 0);
+	while (lip != NULL) {
+		if (lip->li_type == intent_type && fn(log, lip, intent_id))
+			break;
+		lip = xfs_trans_ail_cursor_next(ailp, &cur);
+	}
+
+	xfs_trans_ail_cursor_done(&cur);
+	spin_unlock(&ailp->ail_lock);
+}
+
 STATIC int xlog_recover_intent_pass2(struct xlog *log,
 		struct list_head *buffer_list, struct xlog_recover_item *item,
 		xfs_lsn_t current_lsn);
