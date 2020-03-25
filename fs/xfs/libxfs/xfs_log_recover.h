@@ -173,5 +173,7 @@ typedef bool (*xlog_recover_release_intent_fn)(struct xlog *log,
 		struct xfs_log_item *item, uint64_t intent_id);
 void xlog_recover_release_intent(struct xlog *log, unsigned short intent_type,
 		uint64_t intent_id, xlog_recover_release_intent_fn fn);
+void xlog_recover_insert_ail(struct xlog *log, struct xfs_log_item *lip,
+		xfs_lsn_t lsn);
 
 #endif	/* __XFS_LOG_RECOVER_H__ */
