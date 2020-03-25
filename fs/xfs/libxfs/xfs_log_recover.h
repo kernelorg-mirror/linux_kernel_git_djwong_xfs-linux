@@ -166,5 +166,6 @@ struct xlog_recover_intent_type {
 
 extern const struct xlog_recover_intent_type xlog_recover_extfree_type;
 extern const struct xlog_recover_intent_type xlog_recover_rmap_type;
+extern const struct xlog_recover_intent_type xlog_recover_refcount_type;
 
 #endif	/* __XFS_LOG_RECOVER_H__ */
