@@ -2012,131 +2012,6 @@ xlog_check_buffer_cancelled(
 	return 1;
 }
 
-
-/*
- * Copy an BUI format buffer from the given buf, and into the destination
- * BUI format structure.  The BUI/BUD items were designed not to need any
- * special alignment handling.
- */
-static int
-xfs_bui_copy_format(
-	struct xfs_log_iovec		*buf,
-	struct xfs_bui_log_format	*dst_bui_fmt)
-{
-	struct xfs_bui_log_format	*src_bui_fmt;
-	uint				len;
-
-	src_bui_fmt = buf->i_addr;
-	len = xfs_bui_log_format_sizeof(src_bui_fmt->bui_nextents);
-
-	if (buf->i_len == len) {
-		memcpy(dst_bui_fmt, src_bui_fmt, len);
-		return 0;
-	}
-	XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, NULL);
-	return -EFSCORRUPTED;
-}
-
-/*
- * This routine is called to create an in-core extent bmap update
- * item from the bui format structure which was logged on disk.
- * It allocates an in-core bui, copies the extents from the format
- * structure into it, and adds the bui to the AIL with the given
- * LSN.
- */
-STATIC int
-xlog_recover_bui_pass2(
-	struct xlog			*log,
-	struct xlog_recover_item	*item,
-	xfs_lsn_t			lsn)
-{
-	int				error;
-	struct xfs_mount		*mp = log->l_mp;
-	struct xfs_bui_log_item		*buip;
-	struct xfs_bui_log_format	*bui_formatp;
-
-	bui_formatp = item->ri_buf[0].i_addr;
-
-	if (bui_formatp->bui_nextents != XFS_BUI_MAX_FAST_EXTENTS) {
-		XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, log->l_mp);
-		return -EFSCORRUPTED;
-	}
-	buip = xfs_bui_init(mp);
-	error = xfs_bui_copy_format(&item->ri_buf[0], &buip->bui_format);
-	if (error) {
-		xfs_bui_item_free(buip);
-		return error;
-	}
-	atomic_set(&buip->bui_next_extent, bui_formatp->bui_nextents);
-
-	spin_lock(&log->l_ailp->ail_lock);
-	/*
-	 * The RUI has two references. One for the RUD and one for RUI to ensure
-	 * it makes it into the AIL. Insert the RUI into the AIL directly and
-	 * drop the RUI reference. Note that xfs_trans_ail_update() drops the
-	 * AIL lock.
-	 */
-	xfs_trans_ail_update(log->l_ailp, &buip->bui_item, lsn);
-	xfs_bui_release(buip);
-	return 0;
-}
-
-
-/*
- * This routine is called when an BUD format structure is found in a committed
- * transaction in the log. Its purpose is to cancel the corresponding BUI if it
- * was still in the log. To do this it searches the AIL for the BUI with an id
- * equal to that in the BUD format structure. If we find it we drop the BUD
- * reference, which removes the BUI from the AIL and frees it.
- */
-STATIC int
-xlog_recover_bud_pass2(
-	struct xlog			*log,
-	struct xlog_recover_item	*item)
-{
-	struct xfs_bud_log_format	*bud_formatp;
-	struct xfs_bui_log_item		*buip = NULL;
-	struct xfs_log_item		*lip;
-	uint64_t			bui_id;
-	struct xfs_ail_cursor		cur;
-	struct xfs_ail			*ailp = log->l_ailp;
-
-	bud_formatp = item->ri_buf[0].i_addr;
-	if (item->ri_buf[0].i_len != sizeof(struct xfs_bud_log_format)) {
-		XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, log->l_mp);
-		return -EFSCORRUPTED;
-	}
-	bui_id = bud_formatp->bud_bui_id;
-
-	/*
-	 * Search for the BUI with the id in the BUD format structure in the
-	 * AIL.
-	 */
-	spin_lock(&ailp->ail_lock);
-	lip = xfs_trans_ail_cursor_first(ailp, &cur, 0);
-	while (lip != NULL) {
-		if (lip->li_type == XFS_LI_BUI) {
-			buip = (struct xfs_bui_log_item *)lip;
-			if (buip->bui_format.bui_id == bui_id) {
-				/*
-				 * Drop the BUD reference to the BUI. This
-				 * removes the BUI from the AIL and frees it.
-				 */
-				spin_unlock(&ailp->ail_lock);
-				xfs_bui_release(buip);
-				spin_lock(&ailp->ail_lock);
-				break;
-			}
-		}
-		lip = xfs_trans_ail_cursor_next(ailp, &cur);
-	}
-
-	xfs_trans_ail_cursor_done(&cur);
-	spin_unlock(&ailp->ail_lock);
-
-	return 0;
-}
-
 STATIC int
 xlog_recover_commit_pass1(
 	struct xlog			*log,
@@ -2170,6 +2045,9 @@ xlog_intent_for_type(
 	case XFS_LI_CUI:
 	case XFS_LI_CUD:
 		return &xlog_recover_refcount_type;
+	case XFS_LI_BUI:
+	case XFS_LI_BUD:
+		return &xlog_recover_bmap_type;
 	default:
 		return NULL;
 	}
@@ -2183,6 +2061,7 @@ xlog_is_intent_done_item(
 	case XFS_LI_EFD:
 	case XFS_LI_RUD:
 	case XFS_LI_CUD:
+	case XFS_LI_BUD:
 		return true;
 	default:
 		return false;
@@ -2199,20 +2078,11 @@ xlog_recover_intent_pass2(
 	const struct xlog_recover_intent_type *type;
 
 	type = xlog_intent_for_type(ITEM_TYPE(item));
-	if (type) {
-		if (xlog_is_intent_done_item(item))
-			return type->recover_done(log, item);
-		return type->recover_intent(log, item, current_lsn);
-	}
-
-	switch (ITEM_TYPE(item)) {
-	case XFS_LI_BUI:
-		return xlog_recover_bui_pass2(log, item, current_lsn);
-	case XFS_LI_BUD:
-		return xlog_recover_bud_pass2(log, item);
-	}
-
-	return -EFSCORRUPTED;
+	if (!type)
+		return -EFSCORRUPTED;
+	if (xlog_is_intent_done_item(item))
+		return type->recover_done(log, item);
+	return type->recover_intent(log, item, current_lsn);
 }
 
 STATIC int
@@ -2739,46 +2609,6 @@ xlog_recover_process_data(
 	return 0;
 }
 
-/* Recover the BUI if necessary. */
-STATIC int
-xlog_recover_process_bui(
-	struct xfs_trans		*parent_tp,
-	struct xfs_ail			*ailp,
-	struct xfs_log_item		*lip)
-{
-	struct xfs_bui_log_item		*buip;
-	int				error;
-
-	/*
-	 * Skip BUIs that we've already processed.
-	 */
-	buip = container_of(lip, struct xfs_bui_log_item, bui_item);
-	if (test_bit(XFS_BUI_RECOVERED, &buip->bui_flags))
-		return 0;
-
-	spin_unlock(&ailp->ail_lock);
-	error = xfs_bui_recover(parent_tp, buip);
-	spin_lock(&ailp->ail_lock);
-
-	return error;
-}
-
-/* Release the BUI since we're cancelling everything. */
-STATIC void
-xlog_recover_cancel_bui(
-	struct xfs_mount		*mp,
-	struct xfs_ail			*ailp,
-	struct xfs_log_item		*lip)
-{
-	struct xfs_bui_log_item		*buip;
-
-	buip = container_of(lip, struct xfs_bui_log_item, bui_item);
-
-	spin_unlock(&ailp->ail_lock);
-	xfs_bui_release(buip);
-	spin_lock(&ailp->ail_lock);
-}
-
 /* Is this log item a deferred action intent? */
 static inline bool xlog_item_is_intent(struct xfs_log_item *lip)
 {
@@ -2882,7 +2712,8 @@ xlog_recover_process_intents(
 		 * We're done when we see something other than an intent.
 		 * There should be no intents left in the AIL now.
 		 */
-		if (!xlog_item_is_intent(lip)) {
+		type = xlog_intent_for_type(lip->li_type);
+		if (!type) {
 #ifdef DEBUG
 			for (; lip; lip = xfs_trans_ail_cursor_next(ailp, &cur))
 				ASSERT(!xlog_item_is_intent(lip));
@@ -2899,21 +2730,11 @@ xlog_recover_process_intents(
 
 		/*
 		 * NOTE: If your intent processing routine can create more
-		 * deferred ops, you /must/ attach them to the dfops in this
-		 * routine or else those subsequent intents will get
+		 * deferred ops, you /must/ attach them to the transaction in
+		 * this routine or else those subsequent intents will get
 		 * replayed in the wrong order!
 		 */
-		switch (lip->li_type) {
-		case XFS_LI_EFI:
-		case XFS_LI_RUI:
-		case XFS_LI_CUI:
-			type = xlog_intent_for_type(lip->li_type);
-			error = type->process_intent(log, parent_tp, lip);
-			break;
-		case XFS_LI_BUI:
-			error = xlog_recover_process_bui(parent_tp, ailp, lip);
-			break;
-		}
+		error = type->process_intent(log, parent_tp, lip);
 		if (error)
 			goto out;
 		lip = xfs_trans_ail_cursor_next(ailp, &cur);
@@ -2950,7 +2771,8 @@ xlog_recover_cancel_intents(
 		 * We're done when we see something other than an intent.
 		 * There should be no intents left in the AIL now.
 		 */
-		if (!xlog_item_is_intent(lip)) {
+		type = xlog_intent_for_type(lip->li_type);
+		if (!type) {
 #ifdef DEBUG
 			for (; lip; lip = xfs_trans_ail_cursor_next(ailp, &cur))
 				ASSERT(!xlog_item_is_intent(lip));
@@ -2958,18 +2780,7 @@ xlog_recover_cancel_intents(
 			break;
 		}
 
-		switch (lip->li_type) {
-		case XFS_LI_EFI:
-		case XFS_LI_RUI:
-		case XFS_LI_CUI:
-			type = xlog_intent_for_type(lip->li_type);
-			type->cancel_intent(log, lip);
-			break;
-		case XFS_LI_BUI:
-			xlog_recover_cancel_bui(log->l_mp, ailp, lip);
-			break;
-		}
-
+		type->cancel_intent(log, lip);
 		lip = xfs_trans_ail_cursor_next(ailp, &cur);
 	}
 
