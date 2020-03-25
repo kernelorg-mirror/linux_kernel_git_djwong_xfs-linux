@@ -1797,6 +1797,23 @@ xlog_recover_release_intent(
 	spin_unlock(&ailp->ail_lock);
 }
 
+/* Insert a recovered intent item into the AIL. */
+void
+xlog_recover_insert_ail(
+	struct xlog		*log,
+	struct xfs_log_item	*lip,
+	xfs_lsn_t		lsn)
+{
+	/*
+	 * The intent has two references. One for the done item and one for the
+	 * intent to ensure it makes it into the AIL. Insert the intent into
+	 * the AIL directly and drop the intent reference. Note that
+	 * xfs_trans_ail_update() drops the AIL lock.
+	 */
+	spin_lock(&log->l_ailp->ail_lock);
+	xfs_trans_ail_update(log->l_ailp, lip, lsn);
+}
+
 STATIC int xlog_recover_intent_pass2(struct xlog *log,
 		struct list_head *buffer_list, struct xlog_recover_item *item,
 		xfs_lsn_t current_lsn);
