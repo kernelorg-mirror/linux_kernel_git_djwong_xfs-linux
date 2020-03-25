@@ -581,7 +581,7 @@ xfs_bui_recover(
 		irec.br_blockcount = count;
 		irec.br_startoff = bmap->me_startoff;
 		irec.br_state = state;
-		xfs_bmap_unmap_extent(tp, ip, &irec);
+		xfs_bmap_unmap_extent(tp, ip, whichfork, &irec);
 	}
 
 	set_bit(XFS_BUI_RECOVERED, &buip->bui_flags);
