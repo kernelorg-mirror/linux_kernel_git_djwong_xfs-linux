@@ -2014,102 +2014,6 @@ xlog_check_buffer_cancelled(
 
 
 /*
- * This routine is called to create an in-core extent free intent
- * item from the efi format structure which was logged on disk.
- * It allocates an in-core efi, copies the extents from the format
- * structure into it, and adds the efi to the AIL with the given
- * LSN.
- */
-STATIC int
-xlog_recover_efi_pass2(
-	struct xlog			*log,
-	struct xlog_recover_item	*item,
-	xfs_lsn_t			lsn)
-{
-	int				error;
-	struct xfs_mount		*mp = log->l_mp;
-	struct xfs_efi_log_item		*efip;
-	struct xfs_efi_log_format	*efi_formatp;
-
-	efi_formatp = item->ri_buf[0].i_addr;
-
-	efip = xfs_efi_init(mp, efi_formatp->efi_nextents);
-	error = xfs_efi_copy_format(&item->ri_buf[0], &efip->efi_format);
-	if (error) {
-		xfs_efi_item_free(efip);
-		return error;
-	}
-	atomic_set(&efip->efi_next_extent, efi_formatp->efi_nextents);
-
-	spin_lock(&log->l_ailp->ail_lock);
-	/*
-	 * The EFI has two references. One for the EFD and one for EFI to ensure
-	 * it makes it into the AIL. Insert the EFI into the AIL directly and
-	 * drop the EFI reference. Note that xfs_trans_ail_update() drops the
-	 * AIL lock.
-	 */
-	xfs_trans_ail_update(log->l_ailp, &efip->efi_item, lsn);
-	xfs_efi_release(efip);
-	return 0;
-}
-
-
-/*
- * This routine is called when an EFD format structure is found in a committed
- * transaction in the log. Its purpose is to cancel the corresponding EFI if it
- * was still in the log. To do this it searches the AIL for the EFI with an id
- * equal to that in the EFD format structure. If we find it we drop the EFD
- * reference, which removes the EFI from the AIL and frees it.
- */
-STATIC int
-xlog_recover_efd_pass2(
-	struct xlog			*log,
-	struct xlog_recover_item	*item)
-{
-	xfs_efd_log_format_t	*efd_formatp;
-	xfs_efi_log_item_t	*efip = NULL;
-	struct xfs_log_item	*lip;
-	uint64_t		efi_id;
-	struct xfs_ail_cursor	cur;
-	struct xfs_ail		*ailp = log->l_ailp;
-
-	efd_formatp = item->ri_buf[0].i_addr;
-	ASSERT((item->ri_buf[0].i_len == (sizeof(xfs_efd_log_format_32_t) +
-		((efd_formatp->efd_nextents - 1) * sizeof(xfs_extent_32_t)))) ||
-	       (item->ri_buf[0].i_len == (sizeof(xfs_efd_log_format_64_t) +
-		((efd_formatp->efd_nextents - 1) * sizeof(xfs_extent_64_t)))));
-	efi_id = efd_formatp->efd_efi_id;
-
-	/*
-	 * Search for the EFI with the id in the EFD format structure in the
-	 * AIL.
-	 */
-	spin_lock(&ailp->ail_lock);
-	lip = xfs_trans_ail_cursor_first(ailp, &cur, 0);
-	while (lip != NULL) {
-		if (lip->li_type == XFS_LI_EFI) {
-			efip = (xfs_efi_log_item_t *)lip;
-			if (efip->efi_format.efi_id == efi_id) {
-				/*
-				 * Drop the EFD reference to the EFI. This
-				 * removes the EFI from the AIL and frees it.
-				 */
-				spin_unlock(&ailp->ail_lock);
-				xfs_efi_release(efip);
-				spin_lock(&ailp->ail_lock);
-				break;
-			}
-		}
-		lip = xfs_trans_ail_cursor_next(ailp, &cur);
-	}
-
-	xfs_trans_ail_cursor_done(&cur);
-	spin_unlock(&ailp->ail_lock);
-
-	return 0;
-}
-
-/*
  * This routine is called to create an in-core extent rmap update
  * item from the rui format structure which was logged on disk.
  * It allocates an in-core rui, copies the extents from the format
@@ -2465,6 +2369,31 @@ xlog_recover_commit_pass1(
 	return item->ri_type->commit_pass1_fn(log, item);
 }
 
+static inline const struct xlog_recover_intent_type *
+xlog_intent_for_type(
+	unsigned short			type)
+{
+	switch (type) {
+	case XFS_LI_EFD:
+	case XFS_LI_EFI:
+		return &xlog_recover_extfree_type;
+	default:
+		return NULL;
+	}
+}
+
+static inline bool
+xlog_is_intent_done_item(
+	struct xlog_recover_item	*item)
+{
+	switch (ITEM_TYPE(item)) {
+	case XFS_LI_EFD:
+		return true;
+	default:
+		return false;
+	}
+}
+
 STATIC int
 xlog_recover_intent_pass2(
 	struct xlog			*log,
@@ -2472,11 +2401,16 @@ xlog_recover_intent_pass2(
 	struct xlog_recover_item	*item,
 	xfs_lsn_t			current_lsn)
 {
+	const struct xlog_recover_intent_type *type;
+
+	type = xlog_intent_for_type(ITEM_TYPE(item));
+	if (type) {
+		if (xlog_is_intent_done_item(item))
+			return type->recover_done(log, item);
+		return type->recover_intent(log, item, current_lsn);
+	}
+
 	switch (ITEM_TYPE(item)) {
-	case XFS_LI_EFI:
-		return xlog_recover_efi_pass2(log, item, current_lsn);
-	case XFS_LI_EFD:
-		return xlog_recover_efd_pass2(log, item);
 	case XFS_LI_RUI:
 		return xlog_recover_rui_pass2(log, item, current_lsn);
 	case XFS_LI_RUD:
@@ -3018,46 +2952,6 @@ xlog_recover_process_data(
 	return 0;
 }
 
-/* Recover the EFI if necessary. */
-STATIC int
-xlog_recover_process_efi(
-	struct xfs_mount		*mp,
-	struct xfs_ail			*ailp,
-	struct xfs_log_item		*lip)
-{
-	struct xfs_efi_log_item		*efip;
-	int				error;
-
-	/*
-	 * Skip EFIs that we've already processed.
-	 */
-	efip = container_of(lip, struct xfs_efi_log_item, efi_item);
-	if (test_bit(XFS_EFI_RECOVERED, &efip->efi_flags))
-		return 0;
-
-	spin_unlock(&ailp->ail_lock);
-	error = xfs_efi_recover(mp, efip);
-	spin_lock(&ailp->ail_lock);
-
-	return error;
-}
-
-/* Release the EFI since we're cancelling everything. */
-STATIC void
-xlog_recover_cancel_efi(
-	struct xfs_mount		*mp,
-	struct xfs_ail			*ailp,
-	struct xfs_log_item		*lip)
-{
-	struct xfs_efi_log_item		*efip;
-
-	efip = container_of(lip, struct xfs_efi_log_item, efi_item);
-
-	spin_unlock(&ailp->ail_lock);
-	xfs_efi_release(efip);
-	spin_lock(&ailp->ail_lock);
-}
-
 /* Recover the RUI if necessary. */
 STATIC int
 xlog_recover_process_rui(
@@ -3275,6 +3169,8 @@ xlog_recover_process_intents(
 	last_lsn = xlog_assign_lsn(log->l_curr_cycle, log->l_curr_block);
 #endif
 	while (lip != NULL) {
+		const struct xlog_recover_intent_type	*type;
+
 		/*
 		 * We're done when we see something other than an intent.
 		 * There should be no intents left in the AIL now.
@@ -3302,7 +3198,8 @@ xlog_recover_process_intents(
 		 */
 		switch (lip->li_type) {
 		case XFS_LI_EFI:
-			error = xlog_recover_process_efi(log->l_mp, ailp, lip);
+			type = xlog_intent_for_type(lip->li_type);
+			error = type->process_intent(log, parent_tp, lip);
 			break;
 		case XFS_LI_RUI:
 			error = xlog_recover_process_rui(parent_tp, ailp, lip);
@@ -3344,6 +3241,8 @@ xlog_recover_cancel_intents(
 	spin_lock(&ailp->ail_lock);
 	lip = xfs_trans_ail_cursor_first(ailp, &cur, 0);
 	while (lip != NULL) {
+		const struct xlog_recover_intent_type	*type;
+
 		/*
 		 * We're done when we see something other than an intent.
 		 * There should be no intents left in the AIL now.
@@ -3358,7 +3257,8 @@ xlog_recover_cancel_intents(
 
 		switch (lip->li_type) {
 		case XFS_LI_EFI:
-			xlog_recover_cancel_efi(log->l_mp, ailp, lip);
+			type = xlog_intent_for_type(lip->li_type);
+			type->cancel_intent(log, lip);
 			break;
 		case XFS_LI_RUI:
 			xlog_recover_cancel_rui(log->l_mp, ailp, lip);
