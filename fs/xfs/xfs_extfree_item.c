@@ -693,6 +693,28 @@ xlog_recover_efi(
 	return 0;
 }
 
+STATIC bool
+xlog_release_efi(
+	struct xlog		*log,
+	struct xfs_log_item	*lip,
+	uint64_t		intent_id)
+{
+	struct xfs_efi_log_item	*efip = EFI_ITEM(lip);
+	struct xfs_ail		*ailp = log->l_ailp;
+
+	if (efip->efi_format.efi_id == intent_id) {
+		/*
+		 * Drop the EFD reference to the EFI. This
+		 * removes the EFI from the AIL and frees it.
+		 */
+		spin_unlock(&ailp->ail_lock);
+		xfs_efi_release(efip);
+		spin_lock(&ailp->ail_lock);
+		return true;
+	}
+
+	return false;
+}
 
 /*
  * This routine is called when an EFD format structure is found in a committed
@@ -706,46 +728,16 @@ xlog_recover_efd(
 	struct xlog			*log,
 	struct xlog_recover_item	*item)
 {
-	struct xfs_ail_cursor		cur;
 	struct xfs_efd_log_format	*efd_formatp;
-	struct xfs_efi_log_item		*efip = NULL;
-	struct xfs_log_item		*lip;
-	struct xfs_ail			*ailp = log->l_ailp;
-	uint64_t			efi_id;
 
 	efd_formatp = item->ri_buf[0].i_addr;
 	ASSERT((item->ri_buf[0].i_len == (sizeof(xfs_efd_log_format_32_t) +
 		((efd_formatp->efd_nextents - 1) * sizeof(xfs_extent_32_t)))) ||
 	       (item->ri_buf[0].i_len == (sizeof(xfs_efd_log_format_64_t) +
 		((efd_formatp->efd_nextents - 1) * sizeof(xfs_extent_64_t)))));
-	efi_id = efd_formatp->efd_efi_id;
 
-	/*
-	 * Search for the EFI with the id in the EFD format structure in the
-	 * AIL.
-	 */
-	spin_lock(&ailp->ail_lock);
-	lip = xfs_trans_ail_cursor_first(ailp, &cur, 0);
-	while (lip != NULL) {
-		if (lip->li_type == XFS_LI_EFI) {
-			efip = (xfs_efi_log_item_t *)lip;
-			if (efip->efi_format.efi_id == efi_id) {
-				/*
-				 * Drop the EFD reference to the EFI. This
-				 * removes the EFI from the AIL and frees it.
-				 */
-				spin_unlock(&ailp->ail_lock);
-				xfs_efi_release(efip);
-				spin_lock(&ailp->ail_lock);
-				break;
-			}
-		}
-		lip = xfs_trans_ail_cursor_next(ailp, &cur);
-	}
-
-	xfs_trans_ail_cursor_done(&cur);
-	spin_unlock(&ailp->ail_lock);
-
+	xlog_recover_release_intent(log, XFS_LI_EFI, efd_formatp->efd_efi_id,
+			 xlog_release_efi);
 	return 0;
 }
 
