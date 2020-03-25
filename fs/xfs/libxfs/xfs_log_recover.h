@@ -124,4 +124,46 @@ void xlog_recover_iodone(struct xfs_buf *bp);
 int xlog_check_buffer_cancelled(struct xlog *log, xfs_daddr_t blkno, uint len,
 		unsigned short flags);
 
+/* Log intent item types */
+
+typedef int (*xlog_recover_intent_fn)(struct xlog *xlog,
+		struct xlog_recover_item *item, xfs_lsn_t lsn);
+typedef int (*xlog_recover_done_fn)(struct xlog *xlog,
+		struct xlog_recover_item *item);
+typedef int (*xlog_recover_process_intent_fn)(struct xlog *log,
+		struct xfs_trans *tp, struct xfs_log_item *lip);
+typedef void (*xlog_recover_cancel_intent_fn)(struct xlog *log,
+		struct xfs_log_item *lip);
+
+struct xlog_recover_intent_type {
+	/*
+	 * This function should parse the recovered log item (which will be an
+	 * intent log item) to construct an in-core log intent item and insert
+	 * it into the AIL.  The in-core log intent item should have 1 refcount
+	 * so that ->recover_done or ->cancel_intent can drop it.
+	 */
+	xlog_recover_intent_fn		recover_intent;
+
+	/*
+	 * This function should do the actual work of replaying an unfinished
+	 * log intent item.
+	 */
+	xlog_recover_process_intent_fn	process_intent;
+
+	/*
+	 * This function is called to release an incore log intent item if
+	 * recovery fails.
+	 */
+	xlog_recover_cancel_intent_fn	cancel_intent;
+
+	/*
+	 * This function should parse the recovered log item (which will be an
+	 * intent done log item) to find the id of the corresponding intent log
+	 * item.  Find the incore item in the AIL and release it.
+	 */
+	xlog_recover_done_fn		recover_done;
+};
+
+extern const struct xlog_recover_intent_type xlog_recover_extfree_type;
+
 #endif	/* __XFS_LOG_RECOVER_H__ */
