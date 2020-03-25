@@ -1393,8 +1393,16 @@ xfs_swap_extent_rmap(
 				&nimaps, 0);
 		if (error)
 			goto out;
-		ASSERT(nimaps == 1);
-		ASSERT(tirec.br_startblock != DELAYSTARTBLOCK);
+		if (nimaps != 1 || tirec.br_startblock == DELAYSTARTBLOCK) {
+			/*
+			 * We should never get no mapping or a delalloc extent
+			 * since the donor file should have been flushed by the
+			 * caller.
+			 */
+			ASSERT(0);
+			error = -EINVAL;
+			goto out;
+		}
 
 		trace_xfs_swap_extent_rmap_remap(tip, &tirec);
 		ilen = tirec.br_blockcount;
@@ -1411,8 +1419,17 @@ xfs_swap_extent_rmap(
 					&nimaps, 0);
 			if (error)
 				goto out;
-			ASSERT(nimaps == 1);
-			ASSERT(tirec.br_startoff == irec.br_startoff);
+			if (nimaps != 1 ||
+			    tirec.br_startoff != irec.br_startoff) {
+				/*
+				 * We should never get no mapping or a mapping
+				 * for another offset, but bail out if that
+				 * ever does.
+				 */
+				ASSERT(0);
+				error = -EFSCORRUPTED;
+				goto out;
+			}
 			trace_xfs_swap_extent_rmap_remap_piece(ip, &irec);
 
 			/* Trim the extent. */
@@ -1451,11 +1468,9 @@ xfs_swap_extent_rmap(
 		offset_fsb += ilen;
 	}
 
-	tip->i_d.di_flags2 = tip_flags2;
-	return 0;
-
 out:
-	trace_xfs_swap_extent_rmap_error(ip, error, _RET_IP_);
+	if (error)
+		trace_xfs_swap_extent_rmap_error(ip, error, _RET_IP_);
 	tip->i_d.di_flags2 = tip_flags2;
 	return error;
 }
@@ -1657,7 +1672,7 @@ xfs_swap_extents(
 	if (xfs_inode_has_cow_data(tip)) {
 		error = xfs_reflink_cancel_cow_range(tip, 0, NULLFILEOFF, true);
 		if (error)
-			return error;
+			goto out_unlock;
 	}
 
 	/*
