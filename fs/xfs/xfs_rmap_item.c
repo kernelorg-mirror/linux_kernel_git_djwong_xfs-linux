@@ -729,15 +729,9 @@ xlog_recover_process_rui(
 /* Release the RUI since we're cancelling everything. */
 STATIC void
 xlog_recover_cancel_rui(
-	struct xlog			*log,
 	struct xfs_log_item		*lip)
 {
-	struct xfs_ail			*ailp = log->l_ailp;
-	struct xfs_rui_log_item		*ruip = RUI_ITEM(lip);
-
-	spin_unlock(&ailp->ail_lock);
-	xfs_rui_release(ruip);
-	spin_lock(&ailp->ail_lock);
+	xfs_rui_release(RUI_ITEM(lip));
 }
 
 const struct xlog_recover_intent_type xlog_recover_rmap_type = {

@@ -724,15 +724,9 @@ xlog_recover_process_cui(
 /* Release the CUI since we're cancelling everything. */
 STATIC void
 xlog_recover_cancel_cui(
-	struct xlog			*log,
 	struct xfs_log_item		*lip)
 {
-	struct xfs_ail			*ailp = log->l_ailp;
-	struct xfs_cui_log_item		*cuip = CUI_ITEM(lip);
-
-	spin_unlock(&ailp->ail_lock);
-	xfs_cui_release(cuip);
-	spin_lock(&ailp->ail_lock);
+	xfs_cui_release(CUI_ITEM(lip));
 }
 
 const struct xlog_recover_intent_type xlog_recover_refcount_type = {

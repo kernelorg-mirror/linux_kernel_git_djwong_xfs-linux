@@ -701,15 +701,9 @@ xlog_recover_process_bui(
 /* Release the BUI since we're cancelling everything. */
 STATIC void
 xlog_recover_cancel_bui(
-	struct xlog			*log,
 	struct xfs_log_item		*lip)
 {
-	struct xfs_ail			*ailp = log->l_ailp;
-	struct xfs_bui_log_item		*buip = BUI_ITEM(lip);
-
-	spin_unlock(&ailp->ail_lock);
-	xfs_bui_release(buip);
-	spin_lock(&ailp->ail_lock);
+	xfs_bui_release(BUI_ITEM(lip));
 }
 
 const struct xlog_recover_intent_type xlog_recover_bmap_type = {
