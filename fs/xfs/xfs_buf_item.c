@@ -16,7 +16,8 @@
 #include "xfs_trans_priv.h"
 #include "xfs_trace.h"
 #include "xfs_log.h"
-
+#include "xfs_log_priv.h"
+#include "xfs_log_recover.h"
 
 kmem_zone_t	*xfs_buf_item_zone;
 
@@ -1287,3 +1288,20 @@ xfs_buf_resubmit_failed_buffers(
 
 	return ret;
 }
+
+STATIC enum xlog_recover_reorder
+xlog_buf_reorder_fn(
+	struct xlog_recover_item	*item)
+{
+	struct xfs_buf_log_format	*buf_f = item->ri_buf[0].i_addr;
+
+	if (buf_f->blf_flags & XFS_BLF_CANCEL)
+		return XLOG_REORDER_CANCEL_LIST;
+	if (buf_f->blf_flags & XFS_BLF_INODE_BUF)
+		return XLOG_REORDER_INODE_BUFFER_LIST;
+	return XLOG_REORDER_BUFFER_LIST;
+}
+
+const struct xlog_recover_item_type xlog_buf_item_type = {
+	.reorder_fn		= xlog_buf_reorder_fn,
+};
