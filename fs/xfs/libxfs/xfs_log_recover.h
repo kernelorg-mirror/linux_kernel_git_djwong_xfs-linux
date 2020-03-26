@@ -25,6 +25,8 @@ typedef enum xlog_recover_reorder (*xlog_recover_reorder_fn)(
 		struct xlog_recover_item *item);
 typedef void (*xlog_recover_ra_pass2_fn)(struct xlog *log,
 		struct xlog_recover_item *item);
+typedef int (*xlog_recover_commit_pass1_fn)(struct xlog *log,
+		struct xlog_recover_item *item);
 
 struct xlog_recover_item_type {
 	/*
@@ -39,6 +41,9 @@ struct xlog_recover_item_type {
 
 	/* Start readahead for pass2, if provided. */
 	xlog_recover_ra_pass2_fn	ra_pass2_fn;
+
+	/* Do whatever work we need to do for pass1, if provided. */
+	xlog_recover_commit_pass1_fn	commit_pass1_fn;
 };
 
 extern const struct xlog_recover_item_type xlog_icreate_item_type;
