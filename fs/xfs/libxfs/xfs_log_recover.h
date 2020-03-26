@@ -132,8 +132,7 @@ typedef int (*xlog_recover_done_fn)(struct xlog *xlog,
 		struct xlog_recover_item *item);
 typedef int (*xlog_recover_process_intent_fn)(struct xlog *log,
 		struct xfs_trans *tp, struct xfs_log_item *lip);
-typedef void (*xlog_recover_cancel_intent_fn)(struct xlog *log,
-		struct xfs_log_item *lip);
+typedef void (*xlog_recover_cancel_intent_fn)(struct xfs_log_item *lip);
 
 struct xlog_recover_intent_type {
 	/*
