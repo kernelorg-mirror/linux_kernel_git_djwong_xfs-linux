@@ -2824,7 +2824,9 @@ xlog_recover_cancel_intents(
 			break;
 		}
 
-		type->cancel_intent(log, lip);
+		spin_unlock(&ailp->ail_lock);
+		type->cancel_intent(lip);
+		spin_lock(&ailp->ail_lock);
 		lip = xfs_trans_ail_cursor_next(ailp, &cur);
 	}
 
