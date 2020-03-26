@@ -23,6 +23,8 @@ enum xlog_recover_reorder {
 
 typedef enum xlog_recover_reorder (*xlog_recover_reorder_fn)(
 		struct xlog_recover_item *item);
+typedef void (*xlog_recover_ra_pass2_fn)(struct xlog *log,
+		struct xlog_recover_item *item);
 
 struct xlog_recover_item_type {
 	/*
@@ -34,6 +36,9 @@ struct xlog_recover_item_type {
 	 */
 	enum xlog_recover_reorder	reorder;
 	xlog_recover_reorder_fn		reorder_fn;
+
+	/* Start readahead for pass2, if provided. */
+	xlog_recover_ra_pass2_fn	ra_pass2_fn;
 };
 
 extern const struct xlog_recover_item_type xlog_icreate_item_type;
@@ -87,5 +92,19 @@ struct xlog_recover {
 #define	XLOG_RECOVER_CRCPASS	0
 #define	XLOG_RECOVER_PASS1	1
 #define	XLOG_RECOVER_PASS2	2
+
+/*
+ * This structure is used during recovery to record the buf log items which
+ * have been canceled and should not be replayed.
+ */
+struct xfs_buf_cancel {
+	xfs_daddr_t		bc_blkno;
+	uint			bc_len;
+	int			bc_refcount;
+	struct list_head	bc_list;
+};
+
+struct xfs_buf_cancel *xlog_peek_buffer_cancelled(struct xlog *log,
+		xfs_daddr_t blkno, uint len, unsigned short flags);
 
 #endif	/* __XFS_LOG_RECOVER_H__ */
