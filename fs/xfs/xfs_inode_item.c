@@ -18,6 +18,8 @@
 #include "xfs_buf_item.h"
 #include "xfs_log.h"
 #include "xfs_error.h"
+#include "xfs_log_priv.h"
+#include "xfs_log_recover.h"
 
 #include <linux/iversion.h>
 
@@ -926,3 +928,7 @@ xfs_inode_item_format_convert(
 	in_f->ilf_boffset = in_f32->ilf_boffset;
 	return 0;
 }
+
+const struct xlog_recover_item_type xlog_inode_item_type = {
+	.reorder		= XLOG_REORDER_INODE_LIST,
+};
