@@ -1779,12 +1779,51 @@ xlog_clear_stale_blocks(
 	return 0;
 }
 
+/* Log intent item dispatching. */
+
+const struct xlog_recover_item_type xlog_intent_item_type = {
+	.reorder		= XLOG_REORDER_INODE_LIST,
+};
+
 /******************************************************************************
  *
  *		Log recover routines
  *
  ******************************************************************************
  */
+
+static const struct xlog_recover_item_type *
+xlog_item_for_type(
+	unsigned short	type)
+{
+	switch (type) {
+	case XFS_LI_ICREATE:
+		return &xlog_icreate_item_type;
+	case XFS_LI_BUF:
+		return &xlog_buf_item_type;
+	case XFS_LI_EFD:
+	case XFS_LI_EFI:
+	case XFS_LI_RUI:
+	case XFS_LI_RUD:
+	case XFS_LI_CUI:
+	case XFS_LI_CUD:
+	case XFS_LI_BUI:
+	case XFS_LI_BUD:
+		return &xlog_intent_item_type;
+	case XFS_LI_INODE:
+		return &xlog_inode_item_type;
+	case XFS_LI_DQUOT:
+		return &xlog_dquot_item_type;
+	case XFS_LI_QUOTAOFF:
+		return &xlog_quotaoff_item_type;
+	case XFS_LI_IUNLINK:
+		/* Not implemented? */
+		return NULL;
+	default:
+		/* Unknown type, go away. */
+		return NULL;
+	}
+}
 
 /*
  * Sort the log items in the transaction.
@@ -1851,41 +1890,34 @@ xlog_recover_reorder_trans(
 
 	list_splice_init(&trans->r_itemq, &sort_list);
 	list_for_each_entry_safe(item, n, &sort_list, ri_list) {
-		xfs_buf_log_format_t	*buf_f = item->ri_buf[0].i_addr;
+		enum xlog_recover_reorder	fate = XLOG_REORDER_UNKNOWN;
 
-		switch (ITEM_TYPE(item)) {
-		case XFS_LI_ICREATE:
+		item->ri_type = xlog_item_for_type(ITEM_TYPE(item));
+		if (item->ri_type) {
+			if (item->ri_type->reorder_fn)
+				fate = item->ri_type->reorder_fn(item);
+			else
+				fate = item->ri_type->reorder;
+		}
+
+		switch (fate) {
+		case XLOG_REORDER_BUFFER_LIST:
 			list_move_tail(&item->ri_list, &buffer_list);
 			break;
-		case XFS_LI_BUF:
-			if (buf_f->blf_flags & XFS_BLF_CANCEL) {
-				trace_xfs_log_recover_item_reorder_head(log,
-							trans, item, pass);
-				list_move(&item->ri_list, &cancel_list);
-				break;
-			}
-			if (buf_f->blf_flags & XFS_BLF_INODE_BUF) {
-				list_move(&item->ri_list, &inode_buffer_list);
-				break;
-			}
-			list_move_tail(&item->ri_list, &buffer_list);
+		case XLOG_REORDER_CANCEL_LIST:
+			trace_xfs_log_recover_item_reorder_head(log,
+					trans, item, pass);
+			list_move(&item->ri_list, &cancel_list);
 			break;
-		case XFS_LI_INODE:
-		case XFS_LI_DQUOT:
-		case XFS_LI_QUOTAOFF:
-		case XFS_LI_EFD:
-		case XFS_LI_EFI:
-		case XFS_LI_RUI:
-		case XFS_LI_RUD:
-		case XFS_LI_CUI:
-		case XFS_LI_CUD:
-		case XFS_LI_BUI:
-		case XFS_LI_BUD:
+		case XLOG_REORDER_INODE_BUFFER_LIST:
+			list_move(&item->ri_list, &inode_buffer_list);
+			break;
+		case XLOG_REORDER_INODE_LIST:
 			trace_xfs_log_recover_item_reorder_tail(log,
-							trans, item, pass);
+					trans, item, pass);
 			list_move_tail(&item->ri_list, &inode_list);
 			break;
-		default:
+		case XLOG_REORDER_UNKNOWN:
 			xfs_warn(log->l_mp,
 				"%s: unrecognized type of log operation (%d)",
 				__func__, ITEM_TYPE(item));
