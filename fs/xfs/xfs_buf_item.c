@@ -29,7 +29,7 @@ static inline struct xfs_buf_log_item *BUF_ITEM(struct xfs_log_item *lip)
 STATIC void	xfs_buf_do_callbacks(struct xfs_buf *bp);
 
 /* Is this log iovec plausibly large enough to contain the buffer log format? */
-bool
+STATIC bool
 xfs_buf_log_check_iovec(
 	struct xfs_log_iovec		*iovec)
 {
@@ -1319,7 +1319,67 @@ xlog_recover_buffer_ra_pass2(
 				buf_f->blf_len, NULL);
 }
 
+/*
+ * Build up the table of buf cancel records so that we don't replay
+ * cancelled data in the second pass.  For buffer records that are
+ * not cancel records, there is nothing to do here so we just return.
+ *
+ * If we get a cancel record which is already in the table, this indicates
+ * that the buffer was cancelled multiple times.  In order to ensure
+ * that during pass 2 we keep the record in the table until we reach its
+ * last occurrence in the log, we keep a reference count in the cancel
+ * record in the table to tell us how many times we expect to see this
+ * record during the second pass.
+ */
+STATIC int
+xlog_recover_buffer_pass1(
+	struct xlog			*log,
+	struct xlog_recover_item	*item)
+{
+	xfs_buf_log_format_t	*buf_f = item->ri_buf[0].i_addr;
+	struct list_head	*bucket;
+	struct xfs_buf_cancel	*bcp;
+
+	if (!xfs_buf_log_check_iovec(&item->ri_buf[0])) {
+		xfs_err(log->l_mp, "bad buffer log item size (%d)",
+				item->ri_buf[0].i_len);
+		return -EFSCORRUPTED;
+	}
+
+	/*
+	 * If this isn't a cancel buffer item, then just return.
+	 */
+	if (!(buf_f->blf_flags & XFS_BLF_CANCEL)) {
+		trace_xfs_log_recover_buf_not_cancel(log, buf_f);
+		return 0;
+	}
+
+	/*
+	 * Insert an xfs_buf_cancel record into the hash table of them.
+	 * If there is already an identical record, bump its reference count.
+	 */
+	bucket = XLOG_BUF_CANCEL_BUCKET(log, buf_f->blf_blkno);
+	list_for_each_entry(bcp, bucket, bc_list) {
+		if (bcp->bc_blkno == buf_f->blf_blkno &&
+		    bcp->bc_len == buf_f->blf_len) {
+			bcp->bc_refcount++;
+			trace_xfs_log_recover_buf_cancel_ref_inc(log, buf_f);
+			return 0;
+		}
+	}
+
+	bcp = kmem_alloc(sizeof(struct xfs_buf_cancel), 0);
+	bcp->bc_blkno = buf_f->blf_blkno;
+	bcp->bc_len = buf_f->blf_len;
+	bcp->bc_refcount = 1;
+	list_add_tail(&bcp->bc_list, bucket);
+
+	trace_xfs_log_recover_buf_cancel_add(log, buf_f);
+	return 0;
+}
+
 const struct xlog_recover_item_type xlog_buf_item_type = {
 	.reorder_fn		= xlog_buf_reorder_fn,
 	.ra_pass2_fn		= xlog_recover_buffer_ra_pass2,
+	.commit_pass1_fn	= xlog_recover_buffer_pass1,
 };
