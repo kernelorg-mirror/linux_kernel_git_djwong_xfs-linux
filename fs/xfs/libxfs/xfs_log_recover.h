@@ -131,5 +131,7 @@ void xlog_recover_release_intent(struct xlog *log, unsigned short intent_type,
 		uint64_t intent_id);
 int xlog_recover_trans_commit(struct xfs_trans *tp,
 		struct xfs_defer_capture **dfcp);
+int xlog_recover_iget(struct xfs_mount *mp, xfs_ino_t ino,
+		struct xfs_inode **ipp);
 
 #endif	/* __XFS_LOG_RECOVER_H__ */
