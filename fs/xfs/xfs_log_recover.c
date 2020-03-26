@@ -1814,9 +1814,59 @@ xlog_recover_insert_ail(
 	xfs_trans_ail_update(log->l_ailp, lip, lsn);
 }
 
-STATIC int xlog_recover_intent_pass2(struct xlog *log,
-		struct list_head *buffer_list, struct xlog_recover_item *item,
-		xfs_lsn_t current_lsn);
+static inline const struct xlog_recover_intent_type *
+xlog_intent_for_type(
+	unsigned short			type)
+{
+	switch (type) {
+	case XFS_LI_EFD:
+	case XFS_LI_EFI:
+		return &xlog_recover_extfree_type;
+	case XFS_LI_RUD:
+	case XFS_LI_RUI:
+		return &xlog_recover_rmap_type;
+	case XFS_LI_CUI:
+	case XFS_LI_CUD:
+		return &xlog_recover_refcount_type;
+	case XFS_LI_BUI:
+	case XFS_LI_BUD:
+		return &xlog_recover_bmap_type;
+	default:
+		return NULL;
+	}
+}
+
+static inline bool
+xlog_is_intent_done_item(
+	struct xlog_recover_item	*item)
+{
+	switch (ITEM_TYPE(item)) {
+	case XFS_LI_EFD:
+	case XFS_LI_RUD:
+	case XFS_LI_CUD:
+	case XFS_LI_BUD:
+		return true;
+	default:
+		return false;
+	}
+}
+
+STATIC int
+xlog_recover_intent_pass2(
+	struct xlog			*log,
+	struct list_head		*buffer_list,
+	struct xlog_recover_item	*item,
+	xfs_lsn_t			current_lsn)
+{
+	const struct xlog_recover_intent_type *type;
+
+	type = xlog_intent_for_type(ITEM_TYPE(item));
+	if (!type)
+		return -EFSCORRUPTED;
+	if (xlog_is_intent_done_item(item))
+		return type->recover_done(log, item);
+	return type->recover_intent(log, item, current_lsn);
+}
 
 const struct xlog_recover_item_type xlog_intent_item_type = {
 	.reorder		= XLOG_REORDER_INODE_LIST,
@@ -2073,60 +2123,6 @@ xlog_recover_commit_pass1(
 	if (!item->ri_type->commit_pass1_fn)
 		return 0;
 	return item->ri_type->commit_pass1_fn(log, item);
-}
-
-static inline const struct xlog_recover_intent_type *
-xlog_intent_for_type(
-	unsigned short			type)
-{
-	switch (type) {
-	case XFS_LI_EFD:
-	case XFS_LI_EFI:
-		return &xlog_recover_extfree_type;
-	case XFS_LI_RUD:
-	case XFS_LI_RUI:
-		return &xlog_recover_rmap_type;
-	case XFS_LI_CUI:
-	case XFS_LI_CUD:
-		return &xlog_recover_refcount_type;
-	case XFS_LI_BUI:
-	case XFS_LI_BUD:
-		return &xlog_recover_bmap_type;
-	default:
-		return NULL;
-	}
-}
-
-static inline bool
-xlog_is_intent_done_item(
-	struct xlog_recover_item	*item)
-{
-	switch (ITEM_TYPE(item)) {
-	case XFS_LI_EFD:
-	case XFS_LI_RUD:
-	case XFS_LI_CUD:
-	case XFS_LI_BUD:
-		return true;
-	default:
-		return false;
-	}
-}
-
-STATIC int
-xlog_recover_intent_pass2(
-	struct xlog			*log,
-	struct list_head		*buffer_list,
-	struct xlog_recover_item	*item,
-	xfs_lsn_t			current_lsn)
-{
-	const struct xlog_recover_intent_type *type;
-
-	type = xlog_intent_for_type(ITEM_TYPE(item));
-	if (!type)
-		return -EFSCORRUPTED;
-	if (xlog_is_intent_done_item(item))
-		return type->recover_done(log, item);
-	return type->recover_intent(log, item, current_lsn);
 }
 
 STATIC int
