@@ -37,6 +37,7 @@ struct xfs_trans_res;
 struct xfs_inobt_rec_incore;
 union xfs_btree_ptr;
 struct xfs_eofblocks;
+struct xfs_swapext_intent;
 
 #define XFS_ATTR_FILTER_FLAGS \
 	{ XFS_ATTR_ROOT,	"ROOT" }, \
@@ -3207,6 +3208,8 @@ DEFINE_INODE_IREC_EVENT(xfs_reflink_cancel_cow);
 DEFINE_INODE_IREC_EVENT(xfs_swap_extent_rmap_remap);
 DEFINE_INODE_IREC_EVENT(xfs_swap_extent_rmap_remap_piece);
 DEFINE_INODE_ERROR_EVENT(xfs_swap_extent_rmap_error);
+DEFINE_INODE_IREC_EVENT(xfs_swapext_extent1);
+DEFINE_INODE_IREC_EVENT(xfs_swapext_extent2);
 
 /* fsmap traces */
 DECLARE_EVENT_CLASS(xfs_fsmap_class,
@@ -3835,6 +3838,46 @@ DEFINE_NAMESPACE_EVENT(xfs_imeta_dir_try_create);
 DEFINE_NAMESPACE_EVENT(xfs_imeta_dir_created);
 DEFINE_NAMESPACE_EVENT(xfs_imeta_dir_unlinked);
 DEFINE_NAMESPACE_EVENT(xfs_imeta_dir_zap);
+
+TRACE_EVENT(xfs_swapext_defer,
+	TP_PROTO(struct xfs_mount *mp, const struct xfs_swapext_intent *sxi),
+	TP_ARGS(mp, sxi),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino1)
+		__field(xfs_ino_t, ino2)
+		__field(int, whichfork)
+		__field(xfs_fileoff_t, startoff1)
+		__field(xfs_fileoff_t, startoff2)
+		__field(xfs_filblks_t, blockcount)
+		__field(xfs_fsize_t, isize1)
+		__field(xfs_fsize_t, isize2)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->ino1 = sxi->si_ip1->i_ino;
+		__entry->ino2 = sxi->si_ip2->i_ino;
+		__entry->whichfork = sxi->si_whichfork;
+		__entry->startoff1 = sxi->si_startoff1;
+		__entry->startoff2 = sxi->si_startoff2;
+		__entry->blockcount = sxi->si_blockcount;
+		if (sxi->si_whichfork == XFS_DATA_FORK) {
+			__entry->isize1 = sxi->si_ip1->i_d.di_size;
+			__entry->isize2 = sxi->si_ip2->i_d.di_size;
+		} else {
+			__entry->isize1 = __entry->isize2 = 0;
+		}
+	),
+	TP_printk("dev %d:%d ino1 0x%llx isize1 %lld ino2 0x%llx isize2 %lld %sfork startoff1 %lld startoff2 %lld blockcount %lld",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino1, __entry->isize1,
+		  __entry->ino2, __entry->isize2,
+		  __entry->whichfork == XFS_DATA_FORK ? "data" : "attr",
+		  __entry->startoff1,
+		  __entry->startoff2,
+		  __entry->blockcount)
+
+);
 
 #endif /* _TRACE_XFS_H */
 
