@@ -27,6 +27,9 @@ typedef void (*xlog_recover_ra_pass2_fn)(struct xlog *log,
 		struct xlog_recover_item *item);
 typedef int (*xlog_recover_commit_pass1_fn)(struct xlog *log,
 		struct xlog_recover_item *item);
+typedef int (*xlog_recover_commit_pass2_fn)(struct xlog *log,
+		struct list_head *buffer_list, struct xlog_recover_item *item,
+		xfs_lsn_t lsn);
 
 struct xlog_recover_item_type {
 	/*
@@ -44,6 +47,12 @@ struct xlog_recover_item_type {
 
 	/* Do whatever work we need to do for pass1, if provided. */
 	xlog_recover_commit_pass1_fn	commit_pass1_fn;
+
+	/*
+	 * This function should do whatever work is needed for pass2 of log
+	 * recovery, if provided.
+	 */
+	xlog_recover_commit_pass2_fn	commit_pass2_fn;
 };
 
 extern const struct xlog_recover_item_type xlog_icreate_item_type;
@@ -111,5 +120,8 @@ struct xfs_buf_cancel {
 
 struct xfs_buf_cancel *xlog_peek_buffer_cancelled(struct xlog *log,
 		xfs_daddr_t blkno, uint len, unsigned short flags);
+void xlog_recover_iodone(struct xfs_buf *bp);
+int xlog_check_buffer_cancelled(struct xlog *log, xfs_daddr_t blkno, uint len,
+		unsigned short flags);
 
 #endif	/* __XFS_LOG_RECOVER_H__ */
