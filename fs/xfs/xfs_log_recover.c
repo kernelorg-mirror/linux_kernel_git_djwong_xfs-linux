@@ -2503,20 +2503,16 @@ xlog_recover_commit_pass2(
 {
 	trace_xfs_log_recover_item_recover(log, trans, item, XLOG_RECOVER_PASS2);
 
-	if (item->ri_type && item->ri_type->commit_pass2_fn)
-		return item->ri_type->commit_pass2_fn(log, buffer_list, item,
-				trans->r_lsn);
-
-	switch (ITEM_TYPE(item)) {
-	case XFS_LI_QUOTAOFF:
-		/* nothing to do in pass2 */
-		return 0;
-	default:
+	if (!item->ri_type) {
 		xfs_warn(log->l_mp, "%s: invalid item type (%d)",
 			__func__, ITEM_TYPE(item));
 		ASSERT(0);
 		return -EFSCORRUPTED;
 	}
+	if (!item->ri_type->commit_pass2_fn)
+		return 0;
+	return item->ri_type->commit_pass2_fn(log, buffer_list, item,
+			trans->r_lsn);
 }
 
 STATIC int
