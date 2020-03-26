@@ -1770,8 +1770,13 @@ xlog_clear_stale_blocks(
 
 /* Log intent item dispatching. */
 
+STATIC int xlog_recover_intent_pass2(struct xlog *log,
+		struct list_head *buffer_list, struct xlog_recover_item *item,
+		xfs_lsn_t current_lsn);
+
 const struct xlog_recover_item_type xlog_intent_item_type = {
 	.reorder		= XLOG_REORDER_INODE_LIST,
+	.commit_pass2_fn	= xlog_recover_intent_pass2,
 };
 
 /******************************************************************************
@@ -2694,6 +2699,35 @@ xlog_recover_commit_pass1(
 }
 
 STATIC int
+xlog_recover_intent_pass2(
+	struct xlog			*log,
+	struct list_head		*buffer_list,
+	struct xlog_recover_item	*item,
+	xfs_lsn_t			current_lsn)
+{
+	switch (ITEM_TYPE(item)) {
+	case XFS_LI_EFI:
+		return xlog_recover_efi_pass2(log, item, current_lsn);
+	case XFS_LI_EFD:
+		return xlog_recover_efd_pass2(log, item);
+	case XFS_LI_RUI:
+		return xlog_recover_rui_pass2(log, item, current_lsn);
+	case XFS_LI_RUD:
+		return xlog_recover_rud_pass2(log, item);
+	case XFS_LI_CUI:
+		return xlog_recover_cui_pass2(log, item, current_lsn);
+	case XFS_LI_CUD:
+		return xlog_recover_cud_pass2(log, item);
+	case XFS_LI_BUI:
+		return xlog_recover_bui_pass2(log, item, current_lsn);
+	case XFS_LI_BUD:
+		return xlog_recover_bud_pass2(log, item);
+	}
+
+	return -EFSCORRUPTED;
+}
+
+STATIC int
 xlog_recover_commit_pass2(
 	struct xlog			*log,
 	struct xlog_recover		*trans,
@@ -2707,22 +2741,6 @@ xlog_recover_commit_pass2(
 				trans->r_lsn);
 
 	switch (ITEM_TYPE(item)) {
-	case XFS_LI_EFI:
-		return xlog_recover_efi_pass2(log, item, trans->r_lsn);
-	case XFS_LI_EFD:
-		return xlog_recover_efd_pass2(log, item);
-	case XFS_LI_RUI:
-		return xlog_recover_rui_pass2(log, item, trans->r_lsn);
-	case XFS_LI_RUD:
-		return xlog_recover_rud_pass2(log, item);
-	case XFS_LI_CUI:
-		return xlog_recover_cui_pass2(log, item, trans->r_lsn);
-	case XFS_LI_CUD:
-		return xlog_recover_cud_pass2(log, item);
-	case XFS_LI_BUI:
-		return xlog_recover_bui_pass2(log, item, trans->r_lsn);
-	case XFS_LI_BUD:
-		return xlog_recover_bud_pass2(log, item);
 	case XFS_LI_DQUOT:
 		return xlog_recover_dquot_pass2(log, buffer_list, item,
 						trans->r_lsn);
