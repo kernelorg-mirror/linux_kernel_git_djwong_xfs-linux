@@ -760,15 +760,9 @@ xlog_recover_process_efi(
 /* Release the EFI since we're cancelling everything. */
 STATIC void
 xlog_recover_cancel_efi(
-	struct xlog			*log,
 	struct xfs_log_item		*lip)
 {
-	struct xfs_ail			*ailp = log->l_ailp;
-	struct xfs_efi_log_item		*efip = EFI_ITEM(lip);
-
-	spin_unlock(&ailp->ail_lock);
-	xfs_efi_release(efip);
-	spin_lock(&ailp->ail_lock);
+	xfs_efi_release(EFI_ITEM(lip));
 }
 
 const struct xlog_recover_intent_type xlog_recover_extfree_type = {
