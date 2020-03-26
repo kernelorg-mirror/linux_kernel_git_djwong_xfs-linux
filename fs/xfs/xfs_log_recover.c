@@ -1851,6 +1851,9 @@ xlog_intent_for_type(
 	case XFS_LI_BUI:
 	case XFS_LI_BUD:
 		return &xlog_recover_bmap_type;
+	case XFS_LI_SXI:
+	case XFS_LI_SXD:
+		return &xlog_recover_swapext_type;
 	default:
 		return NULL;
 	}
@@ -1865,6 +1868,7 @@ xlog_is_intent_done_item(
 	case XFS_LI_RUD:
 	case XFS_LI_CUD:
 	case XFS_LI_BUD:
+	case XFS_LI_SXD:
 		return true;
 	default:
 		return false;
@@ -1917,6 +1921,8 @@ xlog_item_for_type(
 	case XFS_LI_CUD:
 	case XFS_LI_BUI:
 	case XFS_LI_BUD:
+	case XFS_LI_SXI:
+	case XFS_LI_SXD:
 		return &xlog_intent_item_type;
 	case XFS_LI_INODE:
 		return &xlog_inode_item_type;
