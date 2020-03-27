@@ -12,6 +12,7 @@
 #include "xfs_sb.h"
 #include "xfs_mount.h"
 #include "xfs_inode.h"
+#include "xfs_defer.h"
 #include "xfs_trans.h"
 #include "xfs_trans_priv.h"
 #include "xfs_inode_item.h"
@@ -2490,4 +2491,52 @@ xfs_inactive_force_poll(
 				   xfs_inactive_pending(mp) == false, HZ)) {
 		touch_softlockup_watchdog();
 	}
+}
+
+/* Release all the inode resources attached to this freezer. */
+void
+xfs_defer_freezer_irele(
+	struct xfs_defer_freezer	*dff)
+{
+	unsigned int			i;
+
+	for (i = 0; i < XFS_DEFER_FREEZER_INODES; i++) {
+		if (dff->dff_inodes[i]) {
+			xfs_iunlock(dff->dff_inodes[i], XFS_ILOCK_EXCL);
+			xfs_irele(dff->dff_inodes[i]);
+			dff->dff_inodes[i] = NULL;
+		}
+	}
+}
+
+/* Attach inodes to this freezer. */
+int
+xfs_defer_freezer_iget(
+	struct xfs_defer_freezer	*dff,
+	struct xfs_trans		*tp)
+{
+	unsigned int			i;
+	int				error;
+
+	for (i = 0; i < XFS_DEFER_FREEZER_INODES; i++) {
+		if (dff->dff_ino[i] == NULLFSINO)
+			continue;
+		error = xfs_iget(tp->t_mountp, tp, dff->dff_ino[i], 0, 0,
+				&dff->dff_inodes[i]);
+		if (error) {
+			xfs_defer_freezer_irele(dff);
+			return error;
+		}
+	}
+	if (dff->dff_inodes[1]) {
+		xfs_lock_two_inodes(dff->dff_inodes[0], XFS_ILOCK_EXCL,
+				    dff->dff_inodes[1], XFS_ILOCK_EXCL);
+		xfs_trans_ijoin(tp, dff->dff_inodes[0], 0);
+		xfs_trans_ijoin(tp, dff->dff_inodes[1], 0);
+	} else if (dff->dff_inodes[0]) {
+		xfs_ilock(dff->dff_inodes[0], XFS_ILOCK_EXCL);
+		xfs_trans_ijoin(tp, dff->dff_inodes[0], 0);
+	}
+
+	return 0;
 }
