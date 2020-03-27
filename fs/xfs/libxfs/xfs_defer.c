@@ -552,3 +552,103 @@ xfs_defer_move(
 
 	xfs_defer_reset(stp);
 }
+
+/*
+ * Freeze a chain of deferred ops that are attached to a transaction.  The
+ * entire deferred ops state is transferred to the freezer, and each dfops
+ * item will be prepared for freezing.
+ */
+int
+xfs_defer_freeze(
+	struct xfs_trans		*tp,
+	struct xfs_defer_freezer	**dffp)
+{
+	struct xfs_defer_freezer	*dff;
+	struct xfs_defer_pending	*dfp;
+	int				error;
+
+	*dffp = NULL;
+	if (list_empty(&tp->t_dfops))
+		return 0;
+
+	dff = kmem_zalloc(sizeof(*dff), KM_NOFS);
+	if (!dff)
+		return -ENOMEM;
+
+	INIT_LIST_HEAD(&dff->dff_list);
+	INIT_LIST_HEAD(&dff->dff_dfops);
+
+	/* Freeze all of the dfops items attached to the transaction. */
+	list_for_each_entry(dfp, &tp->t_dfops, dfp_list) {
+		const struct xfs_defer_op_type *ops;
+		struct list_head	*li;
+
+		ops = defer_op_types[dfp->dfp_type];
+		if (!ops->freeze_item)
+			continue;
+
+		list_for_each(li, &dfp->dfp_work) {
+			error = ops->freeze_item(dff, li);
+			if (error)
+				break;
+		}
+		if (error)
+			break;
+	}
+	if (error) {
+		kmem_free(dff);
+		return error;
+	}
+
+	/* Move all the dfops items to the freezer. */
+	list_splice_init(&tp->t_dfops, &dff->dff_dfops);
+	dff->dff_tpflags = tp->t_flags & XFS_TRANS_LOWMODE;
+	xfs_defer_reset(tp);
+
+	*dffp = dff;
+	return 0;
+}
+
+/* Thaw a chain of deferred ops that are attached to a transaction. */
+int
+xfs_defer_thaw(
+	struct xfs_defer_freezer	*dff,
+	struct xfs_trans		*tp)
+{
+	struct xfs_defer_pending	*dfp;
+	int				error;
+
+	ASSERT(tp->t_flags & XFS_TRANS_PERM_LOG_RES);
+
+	/* Thaw each of the items. */
+	list_for_each_entry(dfp, &dff->dff_dfops, dfp_list) {
+		const struct xfs_defer_op_type *ops;
+		struct list_head	*li;
+
+		ops = defer_op_types[dfp->dfp_type];
+		if (!ops->thaw_item)
+			continue;
+
+		list_for_each(li, &dfp->dfp_work) {
+			error = ops->thaw_item(dff, li);
+			if (error)
+				return error;
+		}
+	}
+
+	/* Add the dfops items to the transaction. */
+	list_splice_init(&dff->dff_dfops, &tp->t_dfops);
+	tp->t_flags |= dff->dff_tpflags;
+
+	return 0;
+}
+
+/* Release a deferred op freezer and all resources associated with it. */
+void
+xfs_defer_freeezer_finish(
+	struct xfs_mount		*mp,
+	struct xfs_defer_freezer	*dff)
+{
+	xfs_defer_cancel_list(mp, &dff->dff_dfops);
+	kmem_free(dff);
+}

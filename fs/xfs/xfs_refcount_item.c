@@ -447,7 +447,8 @@ const struct xfs_defer_op_type xfs_refcount_update_defer_type = {
  */
 STATIC int
 xfs_cui_recover(
-	struct xfs_trans		*parent_tp,
+	struct xfs_mount		*mp,
+	struct xfs_defer_freezer	**dffp,
 	struct xfs_cui_log_item		*cuip)
 {
 	int				i;
@@ -464,7 +465,6 @@ xfs_cui_recover(
 	xfs_extlen_t			new_len;
 	struct xfs_bmbt_irec		irec;
 	bool				requeue_only = false;
-	struct xfs_mount		*mp = parent_tp->t_mountp;
 
 	ASSERT(!test_bit(XFS_CUI_RECOVERED, &cuip->cui_flags));
 
@@ -519,12 +519,7 @@ xfs_cui_recover(
 			mp->m_refc_maxlevels * 2, 0, XFS_TRANS_RESERVE, &tp);
 	if (error)
 		return error;
-	/*
-	 * Recovery stashes all deferred ops during intent processing and
-	 * finishes them on completion. Transfer current dfops state to this
-	 * transaction and transfer the result back before we return.
-	 */
-	xfs_defer_move(tp, parent_tp);
+
 	cudp = xfs_trans_get_cud(tp, cuip);
 
 	for (i = 0; i < cuip->cui_format.cui_nextents; i++) {
@@ -582,13 +577,10 @@ xfs_cui_recover(
 
 	xfs_refcount_finish_one_cleanup(tp, rcur, error);
 	set_bit(XFS_CUI_RECOVERED, &cuip->cui_flags);
-	xfs_defer_move(parent_tp, tp);
-	error = xfs_trans_commit(tp);
-	return error;
+	return xlog_recover_trans_commit(tp, dffp);
 
 abort_error:
 	xfs_refcount_finish_one_cleanup(tp, rcur, error);
-	xfs_defer_move(parent_tp, tp);
 	xfs_trans_cancel(tp);
 	return error;
 }
@@ -701,7 +693,7 @@ xlog_recover_cud(
 STATIC int
 xlog_recover_process_cui(
 	struct xlog			*log,
-	struct xfs_trans		*parent_tp,
+	struct xfs_defer_freezer	**dffp,
 	struct xfs_log_item		*lip)
 {
 	struct xfs_ail			*ailp = log->l_ailp;
@@ -715,7 +707,7 @@ xlog_recover_process_cui(
 		return 0;
 
 	spin_unlock(&ailp->ail_lock);
-	error = xfs_cui_recover(parent_tp, cuip);
+	error = xfs_cui_recover(log->l_mp, dffp, cuip);
 	spin_lock(&ailp->ail_lock);
 
 	return error;
