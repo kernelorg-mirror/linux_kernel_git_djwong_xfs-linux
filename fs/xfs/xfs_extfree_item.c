@@ -737,7 +737,7 @@ xlog_recover_efd(
 STATIC int
 xlog_recover_process_efi(
 	struct xlog			*log,
-	struct xfs_trans		*tp,
+	struct xfs_defer_freezer	**dffp,
 	struct xfs_log_item		*lip)
 {
 	struct xfs_ail			*ailp = log->l_ailp;
@@ -751,7 +751,7 @@ xlog_recover_process_efi(
 		return 0;
 
 	spin_unlock(&ailp->ail_lock);
-	error = xfs_efi_recover(tp->t_mountp, efip);
+	error = xfs_efi_recover(log->l_mp, efip);
 	spin_lock(&ailp->ail_lock);
 
 	return error;

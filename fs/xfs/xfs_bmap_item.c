@@ -433,7 +433,8 @@ const struct xfs_defer_op_type xfs_bmap_update_defer_type = {
  */
 STATIC int
 xfs_bui_recover(
-	struct xfs_trans		*parent_tp,
+	struct xfs_mount		*mp,
+	struct xfs_defer_freezer	**dffp,
 	struct xfs_bui_log_item		*buip)
 {
 	int				error = 0;
@@ -450,7 +451,6 @@ xfs_bui_recover(
 	struct xfs_trans		*tp;
 	struct xfs_inode		*ip = NULL;
 	struct xfs_bmbt_irec		irec;
-	struct xfs_mount		*mp = parent_tp->t_mountp;
 
 	ASSERT(!test_bit(XFS_BUI_RECOVERED, &buip->bui_flags));
 
@@ -499,12 +499,7 @@ xfs_bui_recover(
 			XFS_EXTENTADD_SPACE_RES(mp, XFS_DATA_FORK), 0, 0, &tp);
 	if (error)
 		return error;
-	/*
-	 * Recovery stashes all deferred ops during intent processing and
-	 * finishes them on completion. Transfer current dfops state to this
-	 * transaction and transfer the result back before we return.
-	 */
-	xfs_defer_move(tp, parent_tp);
+
 	budp = xfs_trans_get_bud(tp, buip);
 
 	/* Grab the inode. */
@@ -549,15 +544,13 @@ xfs_bui_recover(
 	}
 
 	set_bit(XFS_BUI_RECOVERED, &buip->bui_flags);
-	xfs_defer_move(parent_tp, tp);
-	error = xfs_trans_commit(tp);
+	error = xlog_recover_trans_commit(tp, dffp);
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	xfs_irele(ip);
 
 	return error;
 
 err_inode:
-	xfs_defer_move(parent_tp, tp);
 	xfs_trans_cancel(tp);
 	if (ip) {
 		xfs_iunlock(ip, XFS_ILOCK_EXCL);
@@ -678,7 +671,7 @@ xlog_recover_bud(
 STATIC int
 xlog_recover_process_bui(
 	struct xlog			*log,
-	struct xfs_trans		*parent_tp,
+	struct xfs_defer_freezer	**dffp,
 	struct xfs_log_item		*lip)
 {
 	struct xfs_ail			*ailp = log->l_ailp;
@@ -692,7 +685,7 @@ xlog_recover_process_bui(
 		return 0;
 
 	spin_unlock(&ailp->ail_lock);
-	error = xfs_bui_recover(parent_tp, buip);
+	error = xfs_bui_recover(log->l_mp, dffp, buip);
 	spin_lock(&ailp->ail_lock);
 
 	return error;
