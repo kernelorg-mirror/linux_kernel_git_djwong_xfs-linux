@@ -78,6 +78,16 @@ struct xfs_defer_freezer {
 	/* Deferred ops state saved from the transaction. */
 	struct list_head	dff_dfops;
 	unsigned int		dff_tpflags;
+
+	/*
+	 * Inodes to hold when we want to finish the deferred work items.
+	 * dfops freezer functions should set dff_ino.  xfs_defer_thaw will
+	 * fill out the dff_inodes array, from which the dfops thaw functions
+	 * can pick up the new inode pointers.
+	 */
+#define XFS_DEFER_FREEZER_INODES	2
+	xfs_ino_t		dff_ino[XFS_DEFER_FREEZER_INODES];
+	struct xfs_inode	*dff_inodes[XFS_DEFER_FREEZER_INODES];
 };
 
 /* Functions to freeze a chain of deferred operations for later. */
@@ -85,5 +95,13 @@ int xfs_defer_freeze(struct xfs_trans *tp, struct xfs_defer_freezer **dffp);
 int xfs_defer_thaw(struct xfs_defer_freezer *dff, struct xfs_trans *tp);
 void xfs_defer_freeezer_finish(struct xfs_mount *mp,
 		struct xfs_defer_freezer *dff);
+int xfs_defer_freezer_ijoin(struct xfs_defer_freezer *dff,
+		struct xfs_inode *ip);
+struct xfs_inode *xfs_defer_freezer_igrab(struct xfs_defer_freezer *dff,
+		xfs_ino_t ino);
+
+/* These functions must be provided by the xfs implementation. */
+void xfs_defer_freezer_irele(struct xfs_defer_freezer *dff);
+int xfs_defer_freezer_iget(struct xfs_defer_freezer *dff, struct xfs_trans *tp);
 
 #endif /* __XFS_DEFER_H__ */

@@ -16,6 +16,7 @@
 #include "xfs_inode.h"
 #include "xfs_inode_item.h"
 #include "xfs_trace.h"
+#include "xfs_icache.h"
 
 /*
  * Deferred Operations in XFS
@@ -565,6 +566,7 @@ xfs_defer_freeze(
 {
 	struct xfs_defer_freezer	*dff;
 	struct xfs_defer_pending	*dfp;
+	unsigned int			i;
 	int				error;
 
 	*dffp = NULL;
@@ -577,6 +579,8 @@ xfs_defer_freeze(
 
 	INIT_LIST_HEAD(&dff->dff_list);
 	INIT_LIST_HEAD(&dff->dff_dfops);
+	for (i = 0; i < XFS_DEFER_FREEZER_INODES; i++)
+		dff->dff_ino[i] = NULLFSINO;
 
 	/* Freeze all of the dfops items attached to the transaction. */
 	list_for_each_entry(dfp, &tp->t_dfops, dfp_list) {
@@ -620,6 +624,11 @@ xfs_defer_thaw(
 
 	ASSERT(tp->t_flags & XFS_TRANS_PERM_LOG_RES);
 
+	/* Grab all the inodes we wanted. */
+	error = xfs_defer_freezer_iget(dff, tp);
+	if (error)
+		return error;
+
 	/* Thaw each of the items. */
 	list_for_each_entry(dfp, &dff->dff_dfops, dfp_list) {
 		const struct xfs_defer_op_type *ops;
@@ -632,7 +641,7 @@ xfs_defer_thaw(
 		list_for_each(li, &dfp->dfp_work) {
 			error = ops->thaw_item(dff, li);
 			if (error)
-				return error;
+				goto out_irele;
 		}
 	}
 
@@ -641,6 +650,9 @@ xfs_defer_thaw(
 	tp->t_flags |= dff->dff_tpflags;
 
 	return 0;
+out_irele:
+	xfs_defer_freezer_irele(dff);
+	return error;
 }
 
 /* Release a deferred op freezer and all resources associated with it. */
@@ -650,5 +662,47 @@ xfs_defer_freeezer_finish(
 	struct xfs_defer_freezer	*dff)
 {
 	xfs_defer_cancel_list(mp, &dff->dff_dfops);
+	xfs_defer_freezer_irele(dff);
 	kmem_free(dff);
+}
+
+/* Attach an inode to this deferred ops freezer. */
+int
+xfs_defer_freezer_ijoin(
+	struct xfs_defer_freezer	*dff,
+	struct xfs_inode		*ip)
+{
+	unsigned int			i;
+
+	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL));
+
+	for (i = 0; i < XFS_DEFER_FREEZER_INODES; i++) {
+		if (dff->dff_ino[i] == NULLFSINO)
+			break;
+		if (dff->dff_ino[i] == ip->i_ino)
+			return 0;
+	}
+
+	if (i == XFS_DEFER_FREEZER_INODES) {
+		ASSERT(0);
+		return -EFSCORRUPTED;
+	}
+
+	dff->dff_ino[i] = ip->i_ino;
+	return 0;
+}
+
+/* Find an incore inode that has been attached to the freezer. */
+struct xfs_inode *
+xfs_defer_freezer_igrab(
+	struct xfs_defer_freezer	*dff,
+	xfs_ino_t			ino)
+{
+	unsigned int			i;
+
+	for (i = 0; i < XFS_DEFER_FREEZER_INODES; i++)
+		if (dff->dff_ino[i] == ino)
+			return dff->dff_inodes[i];
+
+	return NULL;
 }
