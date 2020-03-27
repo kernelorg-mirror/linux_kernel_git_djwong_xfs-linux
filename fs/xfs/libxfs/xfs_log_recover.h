@@ -6,6 +6,8 @@
 #ifndef	__XFS_LOG_RECOVER_H__
 #define __XFS_LOG_RECOVER_H__
 
+struct xfs_defer_freezer;
+
 /*
  * Each log item type (XFS_LI_*) gets its own xlog_recover_item_type to
  * define how recovery should work for that type of log item.
@@ -131,7 +133,7 @@ typedef int (*xlog_recover_intent_fn)(struct xlog *xlog,
 typedef int (*xlog_recover_done_fn)(struct xlog *xlog,
 		struct xlog_recover_item *item);
 typedef int (*xlog_recover_process_intent_fn)(struct xlog *log,
-		struct xfs_trans *tp, struct xfs_log_item *lip);
+		struct xfs_defer_freezer **dffp, struct xfs_log_item *lip);
 typedef void (*xlog_recover_cancel_intent_fn)(struct xfs_log_item *lip);
 
 struct xlog_recover_intent_type {
@@ -174,5 +176,7 @@ void xlog_recover_release_intent(struct xlog *log, unsigned short intent_type,
 		uint64_t intent_id, xlog_recover_release_intent_fn fn);
 void xlog_recover_insert_ail(struct xlog *log, struct xfs_log_item *lip,
 		xfs_lsn_t lsn);
+int xlog_recover_trans_commit(struct xfs_trans *tp,
+		struct xfs_defer_freezer **dffp);
 
 #endif	/* __XFS_LOG_RECOVER_H__ */
