@@ -416,6 +416,45 @@ xfs_bmap_update_cancel_item(
 	kmem_free(bmap);
 }
 
+/* Prepare a deferred bmap item for freezing by detaching the inode. */
+STATIC int
+xfs_bmap_freeze_item(
+	struct xfs_defer_freezer	*freezer,
+	struct list_head		*item)
+{
+	struct xfs_bmap_intent		*bmap;
+	struct xfs_inode		*ip;
+	int				error;
+
+	bmap = container_of(item, struct xfs_bmap_intent, bi_list);
+
+	ip = bmap->bi_owner;
+	error = xfs_defer_freezer_ijoin(freezer, ip);
+	if (error)
+		return error;
+	bmap->bi_owner_ino = ip->i_ino;
+
+	return 0;
+}
+
+/* Thaw a deferred bmap item by reattaching the inode. */
+STATIC int
+xfs_bmap_thaw_item(
+	struct xfs_defer_freezer	*freezer,
+	struct list_head		*item)
+{
+	struct xfs_bmap_intent		*bmap;
+	struct xfs_inode		*ip;
+
+	bmap = container_of(item, struct xfs_bmap_intent, bi_list);
+	ip = xfs_defer_freezer_igrab(freezer, bmap->bi_owner_ino);
+	if (!ip)
+		return -EFSCORRUPTED;
+
+	bmap->bi_owner = ip;
+	return 0;
+}
+
 const struct xfs_defer_op_type xfs_bmap_update_defer_type = {
 	.max_items	= XFS_BUI_MAX_FAST_EXTENTS,
 	.diff_items	= xfs_bmap_update_diff_items,
@@ -425,6 +464,8 @@ const struct xfs_defer_op_type xfs_bmap_update_defer_type = {
 	.create_done	= xfs_bmap_update_create_done,
 	.finish_item	= xfs_bmap_update_finish_item,
 	.cancel_item	= xfs_bmap_update_cancel_item,
+	.freeze_item	= xfs_bmap_freeze_item,
+	.thaw_item	= xfs_bmap_thaw_item,
 };
 
 /*
