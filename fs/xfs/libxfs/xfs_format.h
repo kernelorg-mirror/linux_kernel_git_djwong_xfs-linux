@@ -500,7 +500,10 @@ xfs_sb_has_incompat_feature(
 	return (sbp->sb_features_incompat & feature) != 0;
 }
 
-#define XFS_SB_FEAT_INCOMPAT_LOG_ALL 0
+#define XFS_SB_FEAT_INCOMPAT_LOG_ATOMIC_SWAP (1 << 0)
+#define XFS_SB_FEAT_INCOMPAT_LOG_ALL \
+		(XFS_SB_FEAT_INCOMPAT_LOG_ATOMIC_SWAP)
+
 #define XFS_SB_FEAT_INCOMPAT_LOG_UNKNOWN	~XFS_SB_FEAT_INCOMPAT_LOG_ALL
 static inline bool
 xfs_sb_has_incompat_log_feature(
@@ -612,6 +615,12 @@ static inline bool xfs_sb_version_hasrtrmapbt(struct xfs_sb *sbp)
 {
 	return xfs_sb_version_hasmetadir(sbp) && sbp->sb_rblocks > 0 &&
 	       xfs_sb_version_hasrmapbt(sbp);
+}
+
+static inline bool xfs_sb_version_hasatomicswap(struct xfs_sb *sbp)
+{
+	return XFS_SB_VERSION_NUM(sbp) == XFS_SB_VERSION_5 &&
+		(sbp->sb_features_log_incompat & XFS_SB_FEAT_INCOMPAT_LOG_ATOMIC_SWAP);
 }
 
 /*
