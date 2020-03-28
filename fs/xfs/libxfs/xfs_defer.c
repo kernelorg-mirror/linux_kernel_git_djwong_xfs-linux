@@ -69,10 +69,10 @@
  *   - For each work item attached to the log intent item,
  *     * Perform the described action.
  *     * Attach the work item to the log done item.
- *     * If the result of doing the work was -EAGAIN, ->finish work
- *       wants a new transaction.  See the "Requesting a Fresh
- *       Transaction while Finishing Deferred Work" section below for
- *       details.
+ *     * If the result of doing the work was -EAGAIN or -EMULTIHOP,
+ *       ->finish work wants a new transaction.  See the "Requesting a
+ *       Fresh Transaction while Finishing Deferred Work" section below
+ *       for details.
  *
  * The key here is that we must log an intent item for all pending
  * work items every time we roll the transaction, and that we must log
@@ -107,6 +107,13 @@
  * transaction and picks up processing where it left off.  It is
  * required that ->finish_item must be careful to leave enough
  * transaction reservation to fit the new log intent item.
+ *
+ * If ->finish_item returns -EMULTIHOP, defer_finish will log the new
+ * intent item with the remaining work items but it will move the
+ * xfs_defer_pending item to a separate queue.  The separate queue
+ * will be put back into the pending list at the very end of processing
+ * after all other pending items (including ones that were created as
+ * part of finishing other items) have been processed.
  *
  * This is an example of remapping the extent (E, E+B) into file X at
  * offset A and dealing with the extent (C, C+B) already being mapped
@@ -365,12 +372,14 @@ xfs_defer_finish_noroll(
 	int				error = 0;
 	const struct xfs_defer_op_type	*ops;
 	LIST_HEAD(dop_pending);
+	LIST_HEAD(dop_endofline);
 
 	ASSERT((*tp)->t_flags & XFS_TRANS_PERM_LOG_RES);
 
 	trace_xfs_defer_finish(*tp, _RET_IP_);
 
 	/* Until we run out of pending work to finish... */
+again:
 	while (!list_empty(&dop_pending) || !list_empty(&(*tp)->t_dfops)) {
 		/* log intents and pull in intake items */
 		xfs_defer_create_intents(*tp);
@@ -398,7 +407,7 @@ xfs_defer_finish_noroll(
 			dfp->dfp_count--;
 			error = ops->finish_item(*tp, li, dfp->dfp_done,
 					&state);
-			if (error == -EAGAIN) {
+			if (error == -EAGAIN || error == -EMULTIHOP) {
 				/*
 				 * Caller wants a fresh transaction;
 				 * put the work item back on the list
@@ -418,7 +427,7 @@ xfs_defer_finish_noroll(
 				goto out;
 			}
 		}
-		if (error == -EAGAIN) {
+		if (error == -EAGAIN || error == -EMULTIHOP) {
 			/*
 			 * Caller wants a fresh transaction, so log a
 			 * new log intent item to replace the old one
@@ -431,6 +440,8 @@ xfs_defer_finish_noroll(
 			dfp->dfp_done = NULL;
 			list_for_each(li, &dfp->dfp_work)
 				ops->log_item(*tp, dfp->dfp_intent, li);
+			if (error == -EMULTIHOP)
+				list_move_tail(&dfp->dfp_list, &dop_endofline);
 		} else {
 			/* Done with the dfp, free it. */
 			list_del(&dfp->dfp_list);
@@ -441,8 +452,14 @@ xfs_defer_finish_noroll(
 			ops->finish_cleanup(*tp, state, error);
 	}
 
+	if (!list_empty(&dop_endofline)) {
+		list_splice_tail_init(&dop_endofline, &dop_pending);
+		goto again;
+	}
+
 out:
 	if (error) {
+		list_splice_tail_init(&dop_endofline, &dop_pending);
 		xfs_defer_trans_abort(*tp, &dop_pending);
 		xfs_force_shutdown((*tp)->t_mountp, SHUTDOWN_CORRUPT_INCORE);
 		trace_xfs_defer_finish_error(*tp, error);
