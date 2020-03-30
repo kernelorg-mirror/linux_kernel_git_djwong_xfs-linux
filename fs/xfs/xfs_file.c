@@ -24,6 +24,7 @@
 #include "xfs_pnfs.h"
 #include "xfs_iomap.h"
 #include "xfs_reflink.h"
+#include "xfs_swaprange.h"
 
 #include <linux/falloc.h>
 #include <linux/backing-dev.h>
@@ -1066,6 +1067,44 @@ out_unlock:
 }
 
 STATIC int
+xfs_file_swap_range(
+	struct file		*file1,
+	struct file		*file2,
+	struct file_swap_range	*fsr)
+{
+	struct xfs_inode	*ip1 = XFS_I(file_inode(file1));
+	struct xfs_inode	*ip2 = XFS_I(file_inode(file2));
+	struct xfs_mount	*mp = ip1->i_mount;
+	int			ret;
+
+	if (XFS_FORCED_SHUTDOWN(mp))
+		return -EIO;
+
+	/* Lock both files against IO */
+	ret = xfs_ilock_two_io(ip1, ip2);
+	if (ret)
+		return ret;
+
+	/* Prepare and then swap file data. */
+	ret = xfs_swap_range_prep(file1, file2, fsr);
+	if (ret)
+		goto out_unlock;
+
+	trace_xfs_file_swap_range(ip1, fsr->file1_offset, fsr->length, ip2,
+			fsr->file2_offset);
+
+	ret = xfs_swap_range(ip1, ip2, fsr);
+	if (ret)
+		goto out_unlock;
+
+out_unlock:
+	xfs_iunlock_two_io(ip1, ip2);
+	if (ret)
+		trace_xfs_file_swap_range_error(ip2, ret, _RET_IP_);
+	return ret;
+}
+
+STATIC int
 xfs_file_open(
 	struct inode	*inode,
 	struct file	*file)
@@ -1307,6 +1346,7 @@ const struct file_operations xfs_file_operations = {
 	.fallocate	= xfs_file_fallocate,
 	.fadvise	= xfs_file_fadvise,
 	.remap_file_range = xfs_file_remap_range,
+	.swap_file_range = xfs_file_swap_range,
 };
 
 const struct file_operations xfs_dir_file_operations = {
