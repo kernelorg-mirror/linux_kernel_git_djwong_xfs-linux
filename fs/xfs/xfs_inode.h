@@ -509,4 +509,7 @@ void xfs_inode_inactivation_cleanup(struct xfs_inode *ip);
 
 void xfs_end_io(struct work_struct *work);
 
+int xfs_ilock_two_io(struct xfs_inode *ip1, struct xfs_inode *ip2);
+void xfs_iunlock_two_io(struct xfs_inode *ip1, struct xfs_inode *ip2);
+
 #endif	/* __XFS_INODE_H__ */
