@@ -342,3 +342,52 @@ xfs_swapext_atomic(
 	xfs_swapext_reflink_finish(*tpp, ip1, ip2, state);
 	return 0;
 }
+
+/*
+ * Swap a range of extents from one inode to another, non-atomically.
+ *
+ * Use deferred bmap log items swap a range of extents from one inode with
+ * another.  Overall extent swap progress is /not/ tracked through the log,
+ * which means that while log recovery can finish remapping a single extent,
+ * it cannot finish the entire operation.
+ */
+int
+xfs_swapext_deferred_bmap(
+	struct xfs_trans		**tpp,
+	struct xfs_inode		*ip1,
+	struct xfs_inode		*ip2,
+	int				whichfork,
+	xfs_fileoff_t			startoff1,
+	xfs_fileoff_t			startoff2,
+	xfs_filblks_t			blockcount)
+{
+	struct xfs_swapext_intent	sxi = {
+		.si_ip1			= ip1,
+		.si_ip2			= ip2,
+		.si_whichfork		= whichfork,
+		.si_startoff1		= startoff1,
+		.si_startoff2		= startoff2,
+		.si_blockcount		= blockcount,
+	};
+	unsigned int			state;
+	int				error;
+
+	ASSERT(xfs_isilocked(ip1, XFS_ILOCK_EXCL));
+	ASSERT(xfs_isilocked(ip2, XFS_ILOCK_EXCL));
+	ASSERT(whichfork != XFS_COW_FORK);
+
+	state = xfs_swapext_reflink_prep(ip1, ip2, whichfork, startoff1,
+			startoff2, blockcount);
+
+	while (sxi.si_blockcount > 0) {
+		error = xfs_swapext_finish_one(*tpp, &sxi);
+		if (error)
+			return error;
+		error = xfs_defer_finish(tpp);
+		if (error)
+			return error;
+	}
+
+	xfs_swapext_reflink_finish(*tpp, ip1, ip2, state);
+	return 0;
+}
