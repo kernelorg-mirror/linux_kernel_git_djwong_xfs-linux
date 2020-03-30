@@ -68,6 +68,10 @@ int	xfs_free_eofblocks(struct xfs_inode *ip);
 
 int	xfs_swap_extents(struct xfs_inode *ip, struct xfs_inode *tip,
 			 struct xfs_swapext *sx);
+int	xfs_swap_range_prep(struct file *file1, struct file *file2,
+			    struct file_swap_range *fsr);
+int	xfs_swap_range(struct xfs_inode *ip1, struct xfs_inode *ip2,
+		       const struct file_swap_range *fsr);
 
 xfs_daddr_t xfs_fsb_to_db(struct xfs_inode *ip, xfs_fsblock_t fsb);
 
