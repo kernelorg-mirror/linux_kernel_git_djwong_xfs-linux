@@ -276,6 +276,35 @@ static long ioctl_file_clone_range(struct file *file,
 				args.src_length, args.dest_offset);
 }
 
+static long ioctl_file_swap_range(struct file *file2,
+				  struct file_swap_range __user *argp)
+{
+	struct file_swap_range args;
+	struct fd file1;
+	int ret;
+
+	if (copy_from_user(&args, argp, sizeof(args)))
+		return -EFAULT;
+
+	file1 = fdget(args.file1_fd);
+	if (!file1.file)
+		return -EBADF;
+
+	ret = -EXDEV;
+	if (file1.file->f_path.mnt != file2->f_path.mnt)
+		goto fdput;
+
+	ret = vfs_swap_file_range(file1.file, file2, &args);
+	if (ret)
+		goto fdput;
+
+	if (copy_to_user(argp, &args, sizeof(args)))
+		ret = -EFAULT;
+fdput:
+	fdput(file1);
+	return ret;
+}
+
 #ifdef CONFIG_BLOCK
 
 static inline sector_t logical_to_blk(struct inode *inode, loff_t offset)
@@ -737,6 +766,9 @@ static int do_vfs_ioctl(struct file *filp, unsigned int fd,
 
 	case FIDEDUPERANGE:
 		return ioctl_file_dedupe_range(filp, argp);
+
+	case FISWAPRANGE:
+		return ioctl_file_swap_range(filp, argp);
 
 	case FIONREAD:
 		if (!S_ISREG(inode->i_mode))
