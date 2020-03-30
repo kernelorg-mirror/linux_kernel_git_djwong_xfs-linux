@@ -54,4 +54,9 @@ int xfs_swapext_atomic(struct xfs_trans **tpp, struct xfs_inode *ip1,
 		xfs_fileoff_t startoff2, xfs_filblks_t blockcount,
 		unsigned int flags);
 
+int xfs_swapext_deferred_bmap(struct xfs_trans **tpp, struct xfs_inode *ip1,
+		struct xfs_inode *ip2, int whichfork, xfs_fileoff_t startoff1,
+		xfs_fileoff_t startoff2, xfs_filblks_t blockcount,
+		unsigned int flags);
+
 #endif /* __XFS_SWAPEXT_H_ */
