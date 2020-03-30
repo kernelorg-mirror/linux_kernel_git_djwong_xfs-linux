@@ -93,6 +93,61 @@ struct file_dedupe_range {
 	struct file_dedupe_range_info info[0];
 };
 
+/*
+ * Swap part of file1 with part of the file that this ioctl that is being
+ * called against (which we'll call file2), possibly with conditions to ensure
+ * that file2 hasn't been modified.
+ */
+struct file_swap_range {
+	__s64		file1_fd;
+	__s64		file1_offset;	/* file1 offset, bytes */
+	__s64		file2_offset;	/* file2 offset, bytes */
+	__s64		length;		/* bytes to swap */
+
+	__u64		flags;		/* see FILE_SWAP_RANGE_* below */
+
+	/* file2 metadata for optional freshness checks */
+	__s64		file2_ino;	/* inode number */
+	__s64		file2_mtime;	/* modification time */
+	__s64		file2_ctime;	/* change time */
+	__s32		file2_mtime_nsec; /* mod time, nsec */
+	__s32		file2_ctime_nsec; /* change time, nsec */
+
+	__u64		pad[6];		/* must be zeroes */
+};
+
+/*
+ * Atomic swap operations are required.  The filesystem must ensure that the
+ * operation can be restarted after a crash.  Returns -EOPNOTSUPP if not
+ * supported.
+ */
+#define FILE_SWAP_RANGE_ATOMIC		(1 << 0)
+
+/*
+ * Check that file2's inode number, mtime, and ctime against the values
+ * provided, and return -EBUSY if there isn't an exact match.
+ */
+#define FILE_SWAP_RANGE_FILE2_FRESH	(1 << 1)
+
+/*
+ * Check that the file1's length is equal to file1_offset + length, and that
+ * file2's length is equal to file2_offset + length.  Returns -EDOM if there
+ * isn't an exact match.
+ */
+#define FILE_SWAP_RANGE_FULL_FILES	(1 << 2)
+
+/*
+ * Swap file data all the way to the ends of both files, and then swap the file
+ * sizes.  This flag can be used to replace a file's contents with a different
+ * amount of data.  length will be ignored.
+ */
+#define FILE_SWAP_RANGE_TO_EOF		(1 << 3)
+
+#define FILE_SWAP_RANGE_ALL_FLAGS	(FILE_SWAP_RANGE_ATOMIC | \
+					 FILE_SWAP_RANGE_FILE2_FRESH | \
+					 FILE_SWAP_RANGE_FULL_FILES | \
+					 FILE_SWAP_RANGE_TO_EOF)
+
 /* And dynamically-tunable limits and defaults: */
 struct files_stat_struct {
 	unsigned long nr_files;		/* read only */
@@ -198,6 +253,7 @@ struct fsxattr {
 #define FICLONE		_IOW(0x94, 9, int)
 #define FICLONERANGE	_IOW(0x94, 13, struct file_clone_range)
 #define FIDEDUPERANGE	_IOWR(0x94, 54, struct file_dedupe_range)
+#define FISWAPRANGE	_IOWR('X', 129, struct file_swap_range)
 
 #define FSLABEL_MAX 256	/* Max chars for the interface; each fs may differ */
 
