@@ -1862,6 +1862,8 @@ struct file_operations {
 	loff_t (*remap_file_range)(struct file *file_in, loff_t pos_in,
 				   struct file *file_out, loff_t pos_out,
 				   loff_t len, unsigned int remap_flags);
+	int (*swap_file_range)(struct file *file_in, struct file *file_out,
+			       struct file_swap_range *fsr);
 	int (*fadvise)(struct file *, loff_t, loff_t, int);
 } __randomize_layout;
 
@@ -1931,6 +1933,8 @@ extern int generic_remap_file_range_prep(struct file *file_in, loff_t pos_in,
 					 struct file *file_out, loff_t pos_out,
 					 loff_t *count,
 					 unsigned int remap_flags);
+extern int generic_swap_file_range_prep(struct file *file1, struct file *file2,
+					struct file_swap_range *fsr);
 extern loff_t do_clone_file_range(struct file *file_in, loff_t pos_in,
 				  struct file *file_out, loff_t pos_out,
 				  loff_t len, unsigned int remap_flags);
@@ -1942,7 +1946,13 @@ extern int vfs_dedupe_file_range(struct file *file,
 extern loff_t vfs_dedupe_file_range_one(struct file *src_file, loff_t src_pos,
 					struct file *dst_file, loff_t dst_pos,
 					loff_t len, unsigned int remap_flags);
-
+extern int do_swap_file_range(struct file *file1, struct file *file2,
+			      struct file_swap_range *fsr);
+extern int vfs_swap_file_range(struct file *file1, struct file *file2,
+			       struct file_swap_range *fsr);
+extern int generic_swap_file_range_check_fresh(struct inode *inode1,
+					struct inode *inode2,
+					const struct file_swap_range *fsr);
 
 struct super_operations {
    	struct inode *(*alloc_inode)(struct super_block *sb);
@@ -3120,6 +3130,9 @@ extern ssize_t generic_write_checks(struct kiocb *, struct iov_iter *);
 extern int generic_remap_checks(struct file *file_in, loff_t pos_in,
 				struct file *file_out, loff_t pos_out,
 				loff_t *count, unsigned int remap_flags);
+extern int generic_swap_file_range_checks(struct file *file1,
+					  struct file *file2,
+					  const struct file_swap_range *fsr);
 extern int generic_file_rw_checks(struct file *file_in, struct file *file_out);
 extern int generic_copy_file_checks(struct file *file_in, loff_t pos_in,
 				    struct file *file_out, loff_t pos_out,
