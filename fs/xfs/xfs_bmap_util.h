@@ -66,8 +66,6 @@ int	xfs_insert_file_space(struct xfs_inode *, xfs_off_t offset,
 bool	xfs_can_free_eofblocks(struct xfs_inode *ip, bool force);
 int	xfs_free_eofblocks(struct xfs_inode *ip);
 
-int	xfs_swap_extents(struct xfs_inode *ip, struct xfs_inode *tip,
-			 struct xfs_swapext *sx);
 int	xfs_swap_range_prep(struct file *file1, struct file *file2,
 			    struct file_swap_range *fsr);
 int	xfs_swap_range(struct xfs_inode *ip1, struct xfs_inode *ip2,
