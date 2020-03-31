@@ -18,6 +18,8 @@
 #include "xfs_quota.h"
 #include "xfs_swapext.h"
 #include "xfs_trace.h"
+#include "xfs_errortag.h"
+#include "xfs_error.h"
 
 /* Information to help us reset reflink flag / CoW fork state after a swap. */
 
@@ -294,6 +296,9 @@ xfs_swapext_finish_one(
 		sxi->si_blockcount -= irec1.br_blockcount;
 		break;
 	}
+
+	if (XFS_TEST_ERROR(false, tp->t_mountp, XFS_ERRTAG_SWAPEXT_FINISH_ONE))
+		return -EIO;
 
 	return 0;
 }
