@@ -1404,9 +1404,13 @@ xfs_swap_extent_forks(
 	xfs_filblks_t		taforkblks = 0;
 	xfs_extnum_t		junk;
 	uint64_t		tmp;
+	unsigned int		state;
 	int			src_log_flags = XFS_ILOG_CORE;
 	int			target_log_flags = XFS_ILOG_CORE;
 	int			error;
+
+	state = xfs_swapext_reflink_prep(ip, tip, XFS_DATA_FORK, 0, 0,
+			XFS_B_TO_FSB(ip->i_mount, i_size_read(VFS_I(ip))));
 
 	/*
 	 * Count the number of extended attribute blocks
@@ -1490,35 +1494,7 @@ xfs_swap_extent_forks(
 		break;
 	}
 
-	/* Do we have to swap reflink flags? */
-	if ((ip->i_d.di_flags2 & XFS_DIFLAG2_REFLINK) ^
-	    (tip->i_d.di_flags2 & XFS_DIFLAG2_REFLINK)) {
-		uint64_t	f;
-
-		f = ip->i_d.di_flags2 & XFS_DIFLAG2_REFLINK;
-		ip->i_d.di_flags2 &= ~XFS_DIFLAG2_REFLINK;
-		ip->i_d.di_flags2 |= tip->i_d.di_flags2 & XFS_DIFLAG2_REFLINK;
-		tip->i_d.di_flags2 &= ~XFS_DIFLAG2_REFLINK;
-		tip->i_d.di_flags2 |= f & XFS_DIFLAG2_REFLINK;
-	}
-
-	/* Swap the cow forks. */
-	if (xfs_sb_version_hasreflink(&ip->i_mount->m_sb)) {
-		ASSERT(ip->i_cformat == XFS_DINODE_FMT_EXTENTS);
-		ASSERT(tip->i_cformat == XFS_DINODE_FMT_EXTENTS);
-
-		swap(ip->i_cnextents, tip->i_cnextents);
-		swap(ip->i_cowfp, tip->i_cowfp);
-
-		if (ip->i_cowfp && ip->i_cowfp->if_bytes)
-			xfs_inode_set_cowblocks_tag(ip);
-		else
-			xfs_inode_clear_cowblocks_tag(ip);
-		if (tip->i_cowfp && tip->i_cowfp->if_bytes)
-			xfs_inode_set_cowblocks_tag(tip);
-		else
-			xfs_inode_clear_cowblocks_tag(tip);
-	}
+	xfs_swapext_reflink_finish(*tpp, ip, tip, state);
 
 	xfs_trans_log_inode(*tpp, ip,  src_log_flags);
 	xfs_trans_log_inode(*tpp, tip, target_log_flags);
