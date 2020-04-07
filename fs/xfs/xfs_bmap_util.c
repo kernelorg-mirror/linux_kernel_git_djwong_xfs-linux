@@ -1729,9 +1729,14 @@ xfs_swap_range(
 
 	/* Perform the file range swap... */
 	if (xfs_sb_version_hasatomicswap(&mp->m_sb)) {
+		unsigned int	sxflags = 0;
+
+		if (fsr->flags & FILE_SWAP_RANGE_TO_EOF)
+			sxflags |= XFS_SWAPEXT_SET_SIZES;
+
 		/* ...by using the atomic swap, since it's available. */
 		error = xfs_swapext_atomic(&tp, ip1, ip2, XFS_DATA_FORK,
-				startoff1, startoff2, blockcount);
+				startoff1, startoff2, blockcount, sxflags);
 	} else if (!(fsr->flags & FILE_SWAP_RANGE_ATOMIC) &&
 		   (xfs_sb_version_hasreflink(&mp->m_sb) ||
 		    xfs_sb_version_hasrmapbt(&mp->m_sb))) {
@@ -1743,6 +1748,7 @@ xfs_swap_range(
 		error = xfs_swapext_deferred_bmap(&tp, ip1, ip2, XFS_DATA_FORK,
 				startoff1, startoff2, blockcount);
 	} else if (!(fsr->flags & FILE_SWAP_RANGE_ATOMIC) &&
+		   !(fsr->flags & FILE_SWAP_RANGE_TO_EOF) &&
 		   fsr->file1_offset == 0 && fsr->file2_offset == 0 &&
 		   fsr->length == ip1->i_d.di_size &&
 		   fsr->length == ip2->i_d.di_size) {
@@ -1764,6 +1770,20 @@ xfs_swap_range(
 	}
 	if (error)
 		goto out_trans_cancel;
+
+	/*
+	 * If the caller wanted us to swap two complete files of unequal
+	 * length, swap the incore sizes now.  This should be safe because we
+	 * flushed both files' page caches and moved all the post-eof extents,
+	 * so there should not be anything to zero.
+	 */
+	if (fsr->flags & FILE_SWAP_RANGE_TO_EOF) {
+		loff_t	temp;
+
+		temp = i_size_read(VFS_I(ip2));
+		i_size_write(VFS_I(ip2), i_size_read(VFS_I(ip1)));
+		i_size_write(VFS_I(ip1), temp);
+	}
 
 	/*
 	 * If this is a synchronous mount, make sure that the

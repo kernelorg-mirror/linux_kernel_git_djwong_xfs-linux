@@ -312,9 +312,13 @@ xfs_swapext_log_item(
 	se->se_startoff1 = sxi->si_startoff1;
 	se->se_startoff2 = sxi->si_startoff2;
 	se->se_blockcount = sxi->si_blockcount;
+	se->se_isize1 = sxi->si_isize1;
+	se->se_isize2 = sxi->si_isize2;
 	se->se_flags = 0;
 	if (sxi->si_whichfork == XFS_ATTR_FORK)
 		se->se_flags |= XFS_SWAP_EXTENT_ATTR_FORK;
+	if (sxi->si_isize1 >= 0 && sxi->si_isize2 >= 0)
+		se->se_flags |= XFS_SWAP_EXTENT_SET_SIZES;
 }
 
 /* Get an SXD so we can process all the deferred swapext updates. */
@@ -468,7 +472,9 @@ xfs_sxi_recover(
 	    ilip->sxi_format.__pad != 0 ||
 	    !xfs_verify_ino(mp, se->se_inode1) ||
 	    !xfs_verify_ino(mp, se->se_inode2) ||
-	    (se->se_flags & ~XFS_SWAP_EXTENT_FLAGS)) {
+	    (se->se_flags & ~XFS_SWAP_EXTENT_FLAGS) ||
+	    (!(se->se_flags & XFS_SWAP_EXTENT_SET_SIZES) &&
+	     (se->se_isize1 >= 0 || se->se_isize2 >= 0))) {
 		/*
 		 * This will pull the SXI from the AIL and
 		 * free the memory associated with it.
@@ -498,7 +504,10 @@ xfs_sxi_recover(
 	xfs_trans_ijoin(tp, sxi.si_ip1, 0);
 	xfs_trans_ijoin(tp, sxi.si_ip2, 0);
 
-	/* Set IRECOVERY so that an unlinked inode won't be deleted yet. */
+	/*
+	 * Set IRECOVERY to prevent trimming of post-eof extents and freeing of
+	 * unlinked inodes until we're totally done processing files.
+	 */
 	if (VFS_I(sxi.si_ip1)->i_nlink == 0)
 		xfs_iflags_set(sxi.si_ip1, XFS_IRECOVERY);
 	if (VFS_I(sxi.si_ip2)->i_nlink == 0)
@@ -513,6 +522,8 @@ xfs_sxi_recover(
 	sxi.si_startoff1 = se->se_startoff1;
 	sxi.si_startoff2 = se->se_startoff2;
 	sxi.si_blockcount = se->se_blockcount;
+	sxi.si_isize1 = se->se_isize1;
+	sxi.si_isize2 = se->se_isize2;
 	error = xfs_trans_log_finish_swapext_update(tp, dlip, &sxi);
 	if (error)
 		goto out_fail;

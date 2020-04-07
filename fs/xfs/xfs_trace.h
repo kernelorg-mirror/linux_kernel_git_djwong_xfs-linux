@@ -3852,6 +3852,8 @@ TRACE_EVENT(xfs_swapext_defer,
 		__field(xfs_filblks_t, blockcount)
 		__field(xfs_fsize_t, isize1)
 		__field(xfs_fsize_t, isize2)
+		__field(xfs_fsize_t, new_isize1)
+		__field(xfs_fsize_t, new_isize2)
 	),
 	TP_fast_assign(
 		__entry->dev = mp->m_super->s_dev;
@@ -3867,15 +3869,18 @@ TRACE_EVENT(xfs_swapext_defer,
 		} else {
 			__entry->isize1 = __entry->isize2 = 0;
 		}
+		__entry->new_isize1 = sxi->si_isize1;
+		__entry->new_isize2 = sxi->si_isize2;
 	),
-	TP_printk("dev %d:%d ino1 0x%llx isize1 %lld ino2 0x%llx isize2 %lld %sfork startoff1 %lld startoff2 %lld blockcount %lld",
+	TP_printk("dev %d:%d ino1 0x%llx isize1 %lld ino2 0x%llx isize2 %lld %sfork startoff1 %lld startoff2 %lld blockcount %lld newisize1 %lld newisize2 %lld",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ino1, __entry->isize1,
 		  __entry->ino2, __entry->isize2,
 		  __entry->whichfork == XFS_DATA_FORK ? "data" : "attr",
 		  __entry->startoff1,
 		  __entry->startoff2,
-		  __entry->blockcount)
+		  __entry->blockcount,
+		  __entry->new_isize1, __entry->new_isize2)
 
 );
 

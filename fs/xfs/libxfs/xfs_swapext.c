@@ -170,6 +170,33 @@ xfs_swapext_reschedule(
 	xfs_swapext_schedule(tp, new_sxi);
 }
 
+/*
+ * Adjust the on-disk inode size upwards if needed so that we never map extents
+ * into the file past EOF.  This is crucial so that log recovery won't get
+ * confused by the sudden appearance of post-eof extents.
+ */
+STATIC void
+xfs_swapext_update_size(
+	struct xfs_trans	*tp,
+	struct xfs_inode	*ip,
+	struct xfs_bmbt_irec	*imap,
+	xfs_fsize_t		new_isize)
+{
+	struct xfs_mount	*mp = tp->t_mountp;
+	xfs_fsize_t		len;
+
+	len = XFS_FSB_TO_B(mp, imap->br_startoff + imap->br_blockcount);
+	if (new_isize >= 0)
+		len = min(len, new_isize);
+
+	if (len <= ip->i_d.di_size)
+		return;
+
+	//trace_xfs_reflink_update_inode_size(ip, newlen);
+	ip->i_d.di_size = len;
+	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
+}
+
 /* Finish one extent swap, possibly log more. */
 int
 xfs_swapext_finish_one(
@@ -285,6 +312,14 @@ xfs_swapext_finish_one(
 		xfs_bmap_map_extent(tp, sxi->si_ip2, sxi->si_whichfork,
 				&irec1);
 
+		/* Make sure we're not mapping extents past EOF. */
+		if (sxi->si_whichfork == XFS_DATA_FORK) {
+			xfs_swapext_update_size(tp, sxi->si_ip1, &irec2,
+					sxi->si_isize1);
+			xfs_swapext_update_size(tp, sxi->si_ip2, &irec1,
+					sxi->si_isize2);
+		}
+
 		/*
 		 * Advance our cursor and exit.   The caller (either defer ops
 		 * or log recovery) will log the SXD item, and if *blockcount
@@ -295,6 +330,18 @@ xfs_swapext_finish_one(
 		sxi->si_startoff2 += irec1.br_blockcount;
 		sxi->si_blockcount -= irec1.br_blockcount;
 		break;
+	}
+
+	/*
+	 * If we've reached the end of the remap operation and the caller
+	 * wanted us to exchange the sizes, do that now.
+	 */
+	if (sxi->si_blockcount == 0 && sxi->si_whichfork == XFS_DATA_FORK &&
+	    sxi->si_isize1 >= 0 && sxi->si_isize2 >= 0) {
+		sxi->si_ip1->i_d.di_size = sxi->si_isize1;
+		sxi->si_ip2->i_d.di_size = sxi->si_isize2;
+		xfs_trans_log_inode(tp, sxi->si_ip1, XFS_ILOG_CORE);
+		xfs_trans_log_inode(tp, sxi->si_ip2, XFS_ILOG_CORE);
 	}
 
 	if (XFS_TEST_ERROR(false, tp->t_mountp, XFS_ERRTAG_SWAPEXT_FINISH_ONE))
@@ -317,7 +364,8 @@ xfs_swapext_atomic(
 	int				whichfork,
 	xfs_fileoff_t			startoff1,
 	xfs_fileoff_t			startoff2,
-	xfs_filblks_t			blockcount)
+	xfs_filblks_t			blockcount,
+	unsigned int			flags)
 {
 	struct xfs_swapext_intent	*sxi;
 	unsigned int			state;
@@ -326,6 +374,7 @@ xfs_swapext_atomic(
 	ASSERT(xfs_isilocked(ip1, XFS_ILOCK_EXCL));
 	ASSERT(xfs_isilocked(ip2, XFS_ILOCK_EXCL));
 	ASSERT(whichfork != XFS_COW_FORK);
+	ASSERT(whichfork == XFS_DATA_FORK || !(flags & XFS_SWAPEXT_SET_SIZES));
 
 	state = xfs_swapext_reflink_prep(ip1, ip2, whichfork, startoff1,
 			startoff2, blockcount);
@@ -338,6 +387,12 @@ xfs_swapext_atomic(
 	sxi->si_startoff1 = startoff1;
 	sxi->si_startoff2 = startoff2;
 	sxi->si_blockcount = blockcount;
+	if (whichfork == XFS_DATA_FORK && (flags & XFS_SWAPEXT_SET_SIZES)) {
+		sxi->si_isize1 = ip2->i_d.di_size;
+		sxi->si_isize2 = ip1->i_d.di_size;
+	} else {
+		sxi->si_isize1 = sxi->si_isize2 = -1;
+	}
 	xfs_swapext_schedule(*tpp, sxi);
 
 	error = xfs_defer_finish(tpp);
@@ -373,6 +428,8 @@ xfs_swapext_deferred_bmap(
 		.si_startoff1		= startoff1,
 		.si_startoff2		= startoff2,
 		.si_blockcount		= blockcount,
+		.si_isize1		= -1,
+		.si_isize2		= -1,
 	};
 	unsigned int			state;
 	int				error;

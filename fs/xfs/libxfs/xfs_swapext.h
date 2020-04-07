@@ -29,6 +29,10 @@ struct xfs_swapext_intent {
 	xfs_fileoff_t		si_startoff2;
 	xfs_filblks_t		si_blockcount;
 	int			si_whichfork;
+
+	/* Set these file sizes after the operation, unless negative. */
+	xfs_fsize_t		si_isize1;
+	xfs_fsize_t		si_isize2;
 };
 
 unsigned int xfs_swapext_reflink_prep(struct xfs_inode *ip1,
@@ -42,9 +46,11 @@ void xfs_swapext_reschedule(struct xfs_trans *tpp,
 int xfs_swapext_finish_one(struct xfs_trans *tp,
 		struct xfs_swapext_intent *sxi_state);
 
+#define XFS_SWAPEXT_SET_SIZES	(1U << 0)
 int xfs_swapext_atomic(struct xfs_trans **tpp, struct xfs_inode *ip1,
 		struct xfs_inode *ip2, int whichfork, xfs_fileoff_t startoff1,
-		xfs_fileoff_t startoff2, xfs_filblks_t blockcount);
+		xfs_fileoff_t startoff2, xfs_filblks_t blockcount,
+		unsigned int flags);
 
 int xfs_swapext_deferred_bmap(struct xfs_trans **tpp, struct xfs_inode *ip1,
 		struct xfs_inode *ip2, int whichfork, xfs_fileoff_t startoff1,
