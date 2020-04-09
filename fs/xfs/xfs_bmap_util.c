@@ -2063,9 +2063,6 @@ xfs_swap_range(
 	unsigned int		sxflags = 0;
 	int			error;
 
-	if (!xfs_sb_version_hasatomicswap(&mp->m_sb))
-		return -EOPNOTSUPP;
-
 	startoff1 = XFS_B_TO_FSBT(mp, fsr->file1_offset);
 	startoff2 = XFS_B_TO_FSBT(mp, fsr->file2_offset);
 
@@ -2135,12 +2132,45 @@ xfs_swap_range(
 	if (error)
 		goto out_trans_cancel;
 
-	/* Perform the file range swap. */
 	if (fsr->flags & FILE_SWAP_RANGE_TO_EOF)
 		sxflags |= XFS_SWAPEXT_SET_SIZES;
 
-	error = xfs_swapext_atomic(&tp, ip1, ip2, XFS_DATA_FORK, startoff1,
-			startoff2, blockcount, sxflags);
+	/* Perform the file range swap... */
+	if (xfs_sb_version_hasatomicswap(&mp->m_sb)) {
+		/* ...by using the atomic swap, since it's available. */
+		error = xfs_swapext_atomic(&tp, ip1, ip2, XFS_DATA_FORK,
+				startoff1, startoff2, blockcount, sxflags);
+	} else if ((fsr->flags & FILE_SWAP_RANGE_NONATOMIC) &&
+		   (xfs_sb_version_hasreflink(&mp->m_sb) ||
+		    xfs_sb_version_hasrmapbt(&mp->m_sb))) {
+		/*
+		 * ...by using deferred bmap operations, which are only
+		 * supported if userspace is ok with a non-atomic swap
+		 * (e.g. xfs_fsr) and the log supports deferred bmap.
+		 */
+		error = xfs_swapext_deferred_bmap(&tp, ip1, ip2, XFS_DATA_FORK,
+				startoff1, startoff2, blockcount, sxflags);
+	} else if ((fsr->flags & FILE_SWAP_RANGE_NONATOMIC) &&
+		   !(fsr->flags & FILE_SWAP_RANGE_TO_EOF) &&
+		   fsr->file1_offset == 0 && fsr->file2_offset == 0 &&
+		   fsr->length == ip1->i_d.di_size &&
+		   fsr->length == ip2->i_d.di_size) {
+		/*
+		 * ...by using the old bmap owner change code, if we're doing
+		 * a full file swap and we're ok with non-atomic mode.
+		 */
+		error = xfs_swap_extents_check_format(ip2, ip1);
+		if (error) {
+			xfs_notice(mp,
+		"%s: inode 0x%llx format is incompatible for exchanging.",
+					__func__, ip2->i_ino);
+			goto out_trans_cancel;
+		}
+		error = xfs_swap_extent_forks(&tp, ip2, ip1);
+	} else {
+		/* ...or not at all, because we cannot do it. */
+		error = -EOPNOTSUPP;
+	}
 	if (error)
 		goto out_trans_cancel;
 
