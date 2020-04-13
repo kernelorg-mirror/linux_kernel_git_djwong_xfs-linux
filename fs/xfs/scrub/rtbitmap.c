@@ -21,6 +21,7 @@
 #include "scrub/common.h"
 #include "scrub/btree.h"
 #include "scrub/xfile.h"
+#include "scrub/repair.h"
 
 /* Set us up with the realtime metadata locked. */
 int
@@ -30,6 +31,10 @@ xchk_setup_rtbitmap(
 {
 	unsigned long long	resblks = 0;
 	int			error;
+
+	error = xrep_setup_tempfile(sc, S_IFREG);
+	if (error)
+		return error;
 
 	/*
 	 * If we're doing a repair, we reserve 2x the bitmap blocks: once for
