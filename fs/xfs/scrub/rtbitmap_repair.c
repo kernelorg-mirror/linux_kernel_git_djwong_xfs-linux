@@ -18,6 +18,7 @@
 #include "xfs_bmap.h"
 #include "xfs_rmap.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_swapext.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -207,9 +208,13 @@ xrep_rtbitmap(
 	struct xrep_rtbmp	rb = {
 		.sc		= sc,
 	};
+	struct xfs_swapext_req	req = { .flags = 0 };
 	int			error;
 
-	/* We require the realtime rmapbt to rebuild anything. */
+	/*
+	 * We require the realtime rmapbt (and atomic file updates) to rebuild
+	 * anything.
+	 */
 	if (!xfs_sb_version_hasrtrmapbt(&sc->mp->m_sb))
 		return -EOPNOTSUPP;
 
@@ -223,13 +228,32 @@ xrep_rtbitmap(
 	if (error)
 		return error;
 
+	/*
+	 * Trylock the temporary file.  We had better be the only ones holding
+	 * onto this inode...
+	 */
+	if (!xfs_ilock_nowait(sc->tempip, XFS_ILOCK_EXCL))
+		return -EAGAIN;
+	sc->temp_ilock_flags = XFS_ILOCK_EXCL;
+
 	/* Make sure we have space allocated for the entire bitmap file. */
 	xfs_trans_ijoin(sc->tp, sc->ip, 0);
+	xfs_trans_ijoin(sc->tp, sc->tempip, 0);
 	error = xrep_fallocate(sc, 0, sc->mp->m_sb.sb_rbmblocks);
 	if (error)
 		return error;
 
 	/* Copy the bitmap file that we generated. */
-	return xrep_set_file_contents(sc, &xfs_rtbuf_ops, XFS_BLFT_RTBITMAP_BUF,
+	error = xrep_set_file_contents(sc, &xfs_rtbuf_ops,
+			XFS_BLFT_RTBITMAP_BUF,
 			XFS_FSB_TO_B(sc->mp, sc->mp->m_sb.sb_rbmblocks));
+	if (error)
+		return error;
+
+	/* Now swap the extents. */
+	req.ip1 = sc->tempip;
+	req.ip2 = sc->ip;
+	req.whichfork = XFS_DATA_FORK;
+	req.blockcount = sc->mp->m_sb.sb_rbmblocks;
+	return xfs_swapext_atomic(&sc->tp, &req);
 }

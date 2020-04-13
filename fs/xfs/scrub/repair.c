@@ -166,9 +166,21 @@ int
 xrep_roll_trans(
 	struct xfs_scrub	*sc)
 {
+	int			error;
+
 	if (!sc->ip)
 		return xrep_roll_ag_trans(sc);
-	return xfs_trans_roll_inode(&sc->tp, sc->ip);
+
+	/*
+	 * Roll the transaction with the inode we're fixing and the temp inode,
+	 * so that neither can pin the log.
+	 */
+	if (sc->tempip)
+		xfs_trans_log_inode(sc->tp, sc->tempip, XFS_ILOG_CORE);
+	error = xfs_trans_roll_inode(&sc->tp, sc->ip);
+	if (sc->tempip)
+		xfs_trans_ijoin(sc->tp, sc->tempip, 0);
+	return error;
 }
 
 /*
@@ -1636,9 +1648,9 @@ out_release_inode:
 }
 
 /*
- * Make sure that the given range of the data fork of the metadata file being
- * checked is mapped to written blocks.  The caller must ensure that the inode
- * is joined to the transaction.
+ * Make sure that the given range of the data fork of the temporary file is
+ * mapped to written blocks.  The caller must ensure that both inodes are
+ * joined to the transaction.
  */
 int
 xrep_fallocate(
@@ -1651,9 +1663,8 @@ xrep_fallocate(
 	int			nmaps;
 	int			error = 0;
 
-	error = xrep_ino_dqattach(sc);
-	if (error)
-		return error;
+	ASSERT(sc->tempip != NULL);
+	ASSERT(!XFS_NOT_DQATTACHED(sc->mp, sc->tempip));
 
 	while (off < len) {
 		/*
@@ -1661,7 +1672,7 @@ xrep_fallocate(
 		 * in ok shape.
 		 */
 		nmaps = 1;
-		error = xfs_bmapi_read(sc->ip, off, end - off, &map, &nmaps,
+		error = xfs_bmapi_read(sc->tempip, off, end - off, &map, &nmaps,
 				XFS_DATA_FORK);
 		if (error)
 			break;
@@ -1683,7 +1694,7 @@ xrep_fallocate(
 		 * allocated to it.
 		 */
 		nmaps = 1;
-		error = xfs_bmapi_write(sc->tp, sc->ip, off, end - off,
+		error = xfs_bmapi_write(sc->tp, sc->tempip, off, end - off,
 				XFS_BMAPI_CONVERT | XFS_BMAPI_ZERO, 0, &map,
 				&nmaps);
 		if (error)
@@ -1699,9 +1710,9 @@ xrep_fallocate(
 }
 
 /*
- * Write a number of bytes from the xfile into the metadata file being
- * examined.  The copybuf must be large enough to hold one filesystem block's
- * worth of data.  The caller must join the inode to the transaction.
+ * Write a number of bytes from the xfile into the temp file.  The copybuf must
+ * be large enough to hold one filesystem block's worth of data.  The caller
+ * must join both inodes to the transaction.
  */
 int
 xrep_set_file_contents(
@@ -1720,7 +1731,7 @@ xrep_set_file_contents(
 	int			nmaps;
 	int			error = 0;
 
-	ASSERT(S_ISREG(VFS_I(sc->ip)->i_mode));
+	ASSERT(S_ISREG(VFS_I(sc->tempip)->i_mode));
 
 	for (; pos < isize; pos += mp->m_sb.sb_blocksize, off++) {
 		loff_t		ppos = pos;
@@ -1728,7 +1739,7 @@ xrep_set_file_contents(
 
 		/* Read block mapping for this file block. */
 		nmaps = 1;
-		error = xfs_bmapi_read(sc->ip, off, 1, &map, &nmaps, 0);
+		error = xfs_bmapi_read(sc->tempip, off, 1, &map, &nmaps, 0);
 		if (error)
 			goto out;
 		if (nmaps == 0 || !xfs_bmap_is_real_extent(&map)) {
@@ -1788,9 +1799,9 @@ xrep_set_file_contents(
 	}
 
 	/* Set the new inode size, if needed. */
-	if (sc->ip->i_d.di_size != isize) {
-		sc->ip->i_d.di_size = isize;
-		xfs_trans_log_inode(sc->tp, sc->ip, XFS_ILOG_CORE);
+	if (sc->tempip->i_d.di_size != isize) {
+		sc->tempip->i_d.di_size = isize;
+		xfs_trans_log_inode(sc->tp, sc->tempip, XFS_ILOG_CORE);
 		return xrep_roll_trans(sc);
 	}
 
