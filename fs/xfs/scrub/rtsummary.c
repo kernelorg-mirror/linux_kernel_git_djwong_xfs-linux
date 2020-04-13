@@ -20,6 +20,7 @@
 #include "scrub/common.h"
 #include "scrub/trace.h"
 #include "scrub/xfile.h"
+#include "scrub/repair.h"
 
 /*
  * Realtime Summary
@@ -61,6 +62,10 @@ xchk_setup_rtsummary(
 	struct xfs_mount	*mp = sc->mp;
 	unsigned long long	resblks;
 	int			error;
+
+	error = xrep_setup_tempfile(sc, S_IFREG);
+	if (error)
+		return error;
 
 	/*
 	 * If we're doing a repair, we reserve 2x the summary blocks: once for

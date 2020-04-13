@@ -18,6 +18,7 @@
 #include "xfs_bmap.h"
 #include "xfs_rmap.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_swapext.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -207,7 +208,29 @@ xrep_rtbitmap_get_buf(
 	xfs_fileoff_t		off,
 	struct xfs_buf		**bpp)
 {
-	return xfs_rtbuf_get(sc->mp, sc->tp, off, 0, bpp);
+	struct xfs_bmbt_irec	map;
+	struct xfs_buf		*bp;
+	struct xfs_mount	*mp = sc->mp;
+	int			nmap = 1;
+	int			error;
+
+	error = xfs_bmapi_read(sc->tempip, off, 1, &map, &nmap,
+			XFS_DATA_FORK);
+	if (error)
+		return error;
+
+	if (nmap == 0 || !xfs_bmap_is_real_extent(&map))
+		return -EFSCORRUPTED;
+
+	error = xfs_trans_read_buf(mp, sc->tp, mp->m_ddev_targp,
+			XFS_FSB_TO_DADDR(mp, map.br_startblock),
+			mp->m_bsize, 0, &bp, &xfs_rtbuf_ops);
+	if (error)
+		return error;
+
+	xfs_trans_buf_set_type(sc->tp, bp, XFS_BLFT_RTBITMAP_BUF);
+	*bpp = bp;
+	return 0;
 }
 
 /* Repair the realtime bitmap. */
@@ -218,10 +241,14 @@ xrep_rtbitmap(
 	struct xrep_rtbmp	rb = {
 		.sc		= sc,
 	};
+	struct xfs_swapext_req	req = { .flags = 0 };
 	xfs_fileoff_t		bmp_bytes;
 	int			error;
 
-	/* We require the realtime rmapbt to rebuild anything. */
+	/*
+	 * We require the realtime rmapbt (and atomic file updates) to rebuild
+	 * anything.
+	 */
 	if (!xfs_sb_version_hasrtrmapbt(&sc->mp->m_sb))
 		return -EOPNOTSUPP;
 
@@ -240,8 +267,17 @@ xrep_rtbitmap(
 	if (error)
 		goto out;
 
+	/*
+	 * Trylock the temporary file.  We had better be the only ones holding
+	 * onto this inode...
+	 */
+	if (!xfs_ilock_nowait(sc->tempip, XFS_ILOCK_EXCL))
+		return -EAGAIN;
+	sc->temp_ilock_flags = XFS_ILOCK_EXCL;
+
 	/* Make sure we have space allocated for the entire bitmap file. */
 	xfs_trans_ijoin(sc->tp, sc->ip, 0);
+	xfs_trans_ijoin(sc->tp, sc->tempip, 0);
 	error = xrep_fallocate(sc, 0, sc->mp->m_sb.sb_rbmblocks);
 	if (error)
 		goto out;
@@ -249,6 +285,15 @@ xrep_rtbitmap(
 	/* Copy the bitmap file that we generated. */
 	error = xrep_set_file_contents(sc, xrep_rtbitmap_get_buf, rb.bmpfile,
 			bmp_bytes);
+	if (error)
+		goto out;
+
+	/* Now swap the extents. */
+	req.ip1 = sc->tempip;
+	req.ip2 = sc->ip;
+	req.whichfork = XFS_DATA_FORK;
+	req.blockcount = sc->mp->m_sb.sb_rbmblocks;
+	error = xfs_swapext_atomic(&sc->tp, &req);
 out:
 	fput(rb.bmpfile);
 	return error;
