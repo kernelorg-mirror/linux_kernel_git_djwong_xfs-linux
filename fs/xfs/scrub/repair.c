@@ -1636,13 +1636,13 @@ xrep_fallocate(
 	xfs_filblks_t		len)
 {
 	struct xfs_bmbt_irec	map;
+	struct xfs_inode	*ip = sc->tempip;
 	xfs_fileoff_t		end = off + len;
 	int			nmaps;
 	int			error = 0;
 
-	error = xrep_ino_dqattach(sc);
-	if (error)
-		return error;
+	ASSERT(sc->tempip != NULL);
+	ASSERT(!XFS_NOT_DQATTACHED(sc->mp, ip));
 
 	while (off < len) {
 		/*
@@ -1650,7 +1650,7 @@ xrep_fallocate(
 		 * in ok shape.
 		 */
 		nmaps = 1;
-		error = xfs_bmapi_read(sc->ip, off, end - off, &map, &nmaps,
+		error = xfs_bmapi_read(ip, off, end - off, &map, &nmaps,
 				XFS_DATA_FORK);
 		if (error)
 			break;
@@ -1672,15 +1672,21 @@ xrep_fallocate(
 		 * allocated to it.
 		 */
 		nmaps = 1;
-		error = xfs_bmapi_write(sc->tp, sc->ip, off, end - off,
+		error = xfs_bmapi_write(sc->tp, ip, off, end - off,
 				XFS_BMAPI_CONVERT | XFS_BMAPI_ZERO, 0, &map,
 				&nmaps);
 		if (error)
 			break;
 
-		error = xfs_trans_roll_inode(&sc->tp, sc->ip);
+		/*
+		 * Roll the transaction with the inode we're fixing and the
+		 * temp inode, so that neither can pin the log.
+		 */
+		xfs_trans_log_inode(sc->tp, sc->ip, XFS_ILOG_CORE);
+		error = xfs_trans_roll_inode(&sc->tp, ip);
 		if (error)
 			break;
+		xfs_trans_ijoin(sc->tp, sc->ip, 0);
 		off += map.br_startblock;
 	}
 
@@ -1701,6 +1707,7 @@ xrep_set_file_contents(
 {
 	struct list_head	buffers_list;
 	struct xfs_mount	*mp = sc->mp;
+	struct xfs_inode	*ip = sc->tempip;
 	struct xfs_buf		*bp;
 	xfs_rtblock_t		off = 0;
 	loff_t			pos = 0;
@@ -1744,12 +1751,19 @@ xrep_set_file_contents(
 	}
 
 	/* Set the new inode size, if needed. */
-	if (sc->ip->i_d.di_size != isize) {
-		sc->ip->i_d.di_size = isize;
-		xfs_trans_log_inode(sc->tp, sc->ip, XFS_ILOG_CORE);
+	if (ip->i_d.di_size != isize) {
+		ip->i_d.di_size = isize;
+		xfs_trans_log_inode(sc->tp, ip, XFS_ILOG_CORE);
 	}
 
-	return xfs_trans_roll_inode(&sc->tp, sc->ip);
+	/*
+	 * Roll transaction, being careful to keep the tempfile and the
+	 * metadata inode joined.
+	 */
+	xfs_trans_log_inode(sc->tp, sc->ip, XFS_ILOG_CORE);
+	error = xfs_trans_roll_inode(&sc->tp, ip);
+	xfs_trans_ijoin(sc->tp, sc->ip, 0);
+	return error;
 out:
 	xfs_buf_delwri_cancel(&buffers_list);
 	return error;

@@ -16,6 +16,7 @@
 #include "xfs_inode.h"
 #include "xfs_bit.h"
 #include "xfs_bmap.h"
+#include "xfs_swapext.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -28,7 +29,29 @@ xrep_rtsum_get_buf(
 	xfs_fileoff_t		off,
 	struct xfs_buf		**bpp)
 {
-	return xfs_rtbuf_get(sc->mp, sc->tp, off, 1, bpp);
+	struct xfs_bmbt_irec	map;
+	struct xfs_buf		*bp;
+	struct xfs_mount	*mp = sc->mp;
+	int			nmap = 1;
+	int			error;
+
+	error = xfs_bmapi_read(sc->tempip, off, 1, &map, &nmap,
+			XFS_DATA_FORK);
+	if (error)
+		return error;
+
+	if (nmap == 0 || !xfs_bmap_is_real_extent(&map))
+		return -EFSCORRUPTED;
+
+	error = xfs_trans_read_buf(mp, sc->tp, mp->m_ddev_targp,
+			XFS_FSB_TO_DADDR(mp, map.br_startblock),
+			mp->m_bsize, 0, &bp, &xfs_rtbuf_ops);
+	if (error)
+		return error;
+
+	xfs_trans_buf_set_type(sc->tp, bp, XFS_BLFT_RTSUMMARY_BUF);
+	*bpp = bp;
+	return 0;
 }
 
 /* Repair the realtime summary. */
@@ -38,18 +61,37 @@ xrep_rtsummary(
 {
 	int			error;
 
+	/* We require atomic file swap to be able to fix rt summaries. */
+	if (!xfs_sb_version_hasatomicswap(&sc->mp->m_sb))
+		return -EOPNOTSUPP;
+
 	/* Make sure any problems with the fork are fixed. */
 	error = xrep_metadata_inode_forks(sc);
 	if (error)
 		return error;
 
+	/*
+	 * Trylock the temporary file.  We had better be the only ones holding
+	 * onto this inode...
+	 */
+	if (!xfs_ilock_nowait(sc->tempip, XFS_ILOCK_EXCL))
+		return -EAGAIN;
+	sc->temp_ilock_flags = XFS_ILOCK_EXCL;
+
 	/* Make sure we have space allocated for the entire summary file. */
 	xfs_trans_ijoin(sc->tp, sc->ip, 0);
+	xfs_trans_ijoin(sc->tp, sc->tempip, 0);
 	error = xrep_fallocate(sc, 0, XFS_B_TO_FSB(sc->mp, sc->mp->m_rsumsize));
 	if (error)
 		return error;
 
 	/* Copy the rtsummary file that we generated. */
-	return xrep_set_file_contents(sc, xrep_rtsum_get_buf, sc->xfile,
+	error = xrep_set_file_contents(sc, xrep_rtsum_get_buf, sc->xfile,
 			sc->mp->m_rsumsize);
+	if (error)
+		return error;
+
+	/* Now swap the extents. */
+	return xfs_swapext_atomic(&sc->tp, sc->ip, sc->tempip, XFS_DATA_FORK,
+			0, 0, XFS_B_TO_FSB(sc->mp, sc->mp->m_rsumsize), 0);
 }
