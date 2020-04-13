@@ -1386,6 +1386,7 @@ xfs_swap_extent_forks(
 	xfs_filblks_t		aforkblks = 0;
 	xfs_filblks_t		taforkblks = 0;
 	xfs_extnum_t		junk;
+	int64_t			temp_blks;
 	uint64_t		tmp;
 	unsigned int		state;
 	int			src_log_flags = XFS_ILOG_CORE;
@@ -1431,6 +1432,15 @@ xfs_swap_extent_forks(
 	 * Swap the data forks of the inodes
 	 */
 	swap(ip->i_df, tip->i_df);
+
+	/* Update quota accounting. */
+	temp_blks = tip->i_d.di_nblocks - taforkblks + aforkblks;
+	xfs_trans_mod_dquot_byino(*tpp, ip, XFS_TRANS_DQ_BCOUNT,
+			temp_blks - ip->i_d.di_nblocks);
+
+	temp_blks = ip->i_d.di_nblocks + taforkblks - aforkblks;
+	xfs_trans_mod_dquot_byino(*tpp, tip, XFS_TRANS_DQ_BCOUNT,
+			temp_blks - tip->i_d.di_nblocks);
 
 	/*
 	 * Fix the on-disk inode values
