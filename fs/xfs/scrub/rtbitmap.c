@@ -20,6 +20,7 @@
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/btree.h"
+#include "scrub/repair.h"
 
 /* Set us up with the realtime metadata locked. */
 int
@@ -28,6 +29,17 @@ xchk_setup_rt(
 	struct xfs_inode	*ip)
 {
 	int			error;
+
+#ifdef CONFIG_XFS_ONLINE_REPAIR
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		if (!xfs_sb_version_hasatomicswap(&sc->mp->m_sb))
+			return -EOPNOTSUPP;
+
+		error = xrep_create_tempfile(sc, S_IFREG);
+		if (error)
+			return error;
+	}
+#endif
 
 	error = xchk_setup_fs(sc, ip);
 	if (error)

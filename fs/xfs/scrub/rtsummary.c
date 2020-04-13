@@ -20,6 +20,7 @@
 #include "scrub/common.h"
 #include "scrub/trace.h"
 #include "scrub/xfile.h"
+#include "scrub/repair.h"
 
 /*
  * Realtime Summary
@@ -60,6 +61,17 @@ xchk_setup_rtsummary(
 {
 	struct xfs_mount	*mp = sc->mp;
 	int			error;
+
+#ifdef CONFIG_XFS_ONLINE_REPAIR
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		if (!xfs_sb_version_hasatomicswap(&sc->mp->m_sb))
+			return -EOPNOTSUPP;
+
+		error = xrep_create_tempfile(sc, S_IFREG);
+		if (error)
+			return error;
+	}
+#endif
 
 	error = xchk_setup_fs(sc, ip);
 	if (error)
