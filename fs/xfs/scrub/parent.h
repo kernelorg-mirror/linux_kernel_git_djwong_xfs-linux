@@ -14,5 +14,6 @@ typedef int (*xrep_parents_iter_fn)(struct xfs_inode *dp, struct xfs_name *name,
 int xrep_scan_for_parents(struct xfs_scrub *sc, xfs_ino_t target_ino,
 		xrep_parents_iter_fn fn, void *data);
 bool xrep_parent_acceptable(struct xfs_scrub *sc, xfs_ino_t ino);
+xfs_ino_t xrep_parent_check_dcache(struct xfs_inode *dp);
 
 #endif /* __XFS_SCRUB_PARENT_H__ */
