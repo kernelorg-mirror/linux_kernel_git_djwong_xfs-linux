@@ -19,6 +19,7 @@
 #include "scrub/common.h"
 #include "scrub/dabtree.h"
 #include "scrub/attr.h"
+#include "scrub/repair.h"
 
 /*
  * Allocate enough memory to hold an attr value and attr block bitmaps,
@@ -79,6 +80,17 @@ xchk_setup_xattr(
 	struct xfs_inode	*ip)
 {
 	int			error;
+
+#ifdef CONFIG_XFS_ONLINE_REPAIR
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		if (!xfs_sb_version_hasatomicswap(&sc->mp->m_sb))
+			return -EOPNOTSUPP;
+
+		error = xrep_create_tempfile(sc, S_IFREG);
+		if (error)
+			return error;
+	}
+#endif
 
 	/*
 	 * We failed to get memory while checking attrs, so this time try to
