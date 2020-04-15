@@ -24,6 +24,8 @@
 #include "xfs_attr_sf.h"
 #include "xfs_attr_remote.h"
 #include "xfs_bmap.h"
+#include "xfs_bmap_util.h"
+#include "xfs_swapext.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
@@ -445,14 +447,15 @@ xrep_attr_walk_blind(
 				len--;
 			}
 
+			/*
+			 * If we didn't find an incore buffer, reset len to 1
+			 * so that we can make forward progress.
+			 */
+			len = 1;
+
 			if (flags & XREP_ATTR_WALK_INCORE)
 				continue;
 
-			/*
-			 * If we didn't find a buffer, read 1 block from disk.
-			 * We don't attach any buffer ops.
-			 */
-			len = 1;
 			error = xfs_buf_read(mp->m_ddev_targp, daddr,
 					XFS_FSB_TO_BB(mp, len),
 					XBF_TRYLOCK, &bp, NULL);
@@ -585,27 +588,30 @@ xrep_xattr_stale_block(
  */
 int
 xrep_xattr_reset_fork(
-	struct xfs_scrub	*sc)
+	struct xfs_scrub	*sc,
+	struct xfs_inode	*ip)
 {
 	int			error;
 
-	if (sc->ip->i_d.di_aformat == XFS_DINODE_FMT_LOCAL)
+	ASSERT(ip == sc->ip || ip == sc->tempip);
+
+	if (ip->i_d.di_aformat == XFS_DINODE_FMT_LOCAL)
 		goto zap;
 
 	/* Invalidate each attr block in the attr fork. */
-	error = xrep_attr_walk_blind(sc->ip, XREP_ATTR_WALK_INCORE,
+	error = xrep_attr_walk_blind(ip, XREP_ATTR_WALK_INCORE,
 			xrep_xattr_stale_block, NULL);
 	if (error)
 		return error;
 
 	/* Now free all the blocks. */
-	error = xfs_bunmapi_range(&sc->tp, sc->ip, XFS_ATTR_FORK, 0,
+	error = xfs_bunmapi_range(&sc->tp, ip, XFS_ATTR_FORK, 0,
 			XFS_MAX_FILEOFF, XFS_BMAPI_NODISCARD);
 	if (error)
 		return error;
 
 zap:
-	xrep_xattr_fork_remove(sc, sc->ip);
+	xrep_xattr_fork_remove(sc, ip);
 	return xrep_roll_trans(sc);
 }
 
@@ -718,10 +724,10 @@ xrep_xattr_insert_rec(
 
 	name[key->namelen] = 0;
 
-	trace_xrep_xattr_insert_rec(rx->sc->ip, key->flags, name, key->namelen,
-			key->valuelen);
+	trace_xrep_xattr_insert_rec(rx->sc->tempip, key->flags, name,
+			key->namelen, key->valuelen);
 
-	args.dp = rx->sc->ip;
+	args.dp = rx->sc->tempip;
 	args.attr_filter = key->flags;
 	args.name = name;
 	args.namelen = key->namelen;
@@ -731,19 +737,408 @@ xrep_xattr_insert_rec(
 }
 
 /*
- * Insert all the attributes that we collected.
+ * Prepare both inodes' attribute forks for extent swapping.  Promote the
+ * tempfile from short format to leaf format, and if the file being repaired
+ * has a short format attr fork, turn it into an empty extent list.
+ */
+STATIC int
+xrep_xattr_swap_prep(
+	struct xfs_scrub	*sc,
+	bool			temp_local,
+	bool			ip_local)
+{
+	int			error;
+
+	/*
+	 * If the tempfile's attributes are in shortform format, convert that
+	 * to a single leaf extent so that we can use the atomic extent swap.
+	 */
+	if (temp_local) {
+		struct xfs_buf		*leaf_bp = NULL;
+		struct xfs_da_args	args = {
+			.dp		= sc->tempip,
+			.geo		= sc->mp->m_attr_geo,
+			.whichfork	= XFS_ATTR_FORK,
+			.trans		= sc->tp,
+			.total		= 1,
+		};
+
+		error = xfs_attr_shortform_to_leaf(&args, &leaf_bp);
+		if (error)
+			return error;
+
+		/*
+		 * Roll the deferred log items to get us back to a clean
+		 * transaction.  Hold on to the leaf buffer across this roll
+		 * so that the AIL cannot grab our half-baked block.
+		 */
+		xfs_trans_bhold(sc->tp, leaf_bp);
+		error = xfs_defer_finish(&sc->tp);
+		xfs_trans_bhold_release(sc->tp, leaf_bp);
+	}
+
+	/*
+	 * If the file being repaired had a shortform attribute fork, convert
+	 * that to an empty extent list in preparation for the atomic extent
+	 * swap.
+	 */
+	if (ip_local) {
+		struct xfs_ifork	*ifp;
+
+		sc->ip->i_d.di_aformat = XFS_DINODE_FMT_EXTENTS;
+		sc->ip->i_d.di_anextents = 0;
+
+		ifp = XFS_IFORK_PTR(sc->ip, XFS_ATTR_FORK);
+		xfs_ifork_reset(ifp);
+		ifp->if_bytes = 0;
+		ifp->if_u1.if_root = NULL;
+		ifp->if_height = 0;
+		ifp->if_flags |= XFS_IFEXTENTS;
+
+		xfs_trans_log_inode(sc->tp, sc->ip,
+				XFS_ILOG_CORE | XFS_ILOG_ADATA);
+	}
+
+	return 0;
+}
+
+/* State we need to track while rewriting attr block owners. */
+struct xrep_xattr_swap_owner {
+	struct xfs_attr_list_context	ctx;
+	struct xbitmap			rmt_blocks;
+	struct xfs_scrub		*sc;
+};
+
+/*
+ * Change the owner field of a remote attribute value block to match the file
+ * that's being repaired.  In-core buffers for these values span a single
+ * extent and are never logged, so we must be careful to mask off the
+ * corresponding range so that the leaf/node pass will skip these parts of the
+ * attr fork mappings.
+ */
+static void
+xrep_xattr_swap_rmt_owner(
+	struct xfs_attr_list_context	*context,
+	int				flags,
+	unsigned char			*name,
+	int				namelen,
+	int				valuelen)
+{
+	struct xfs_da_args		args = {
+		.op_flags		= XFS_DA_OP_NOTIME,
+		.attr_filter		= flags & XFS_ATTR_NSP_ONDISK_MASK,
+		.geo			= context->dp->i_mount->m_attr_geo,
+		.whichfork		= XFS_ATTR_FORK,
+		.dp			= context->dp,
+		.name			= name,
+		.namelen		= namelen,
+		.hashval		= xfs_da_hashname(name, namelen),
+		.trans			= context->tp,
+		.value			= NULL,
+		.valuelen		= 0,
+	};
+	LIST_HEAD(buffer_list);
+	struct xfs_bmbt_irec		map;
+	struct xrep_xattr_swap_owner	*xso;
+	struct xfs_mount		*mp = context->dp->i_mount;
+	struct xfs_attr3_rmt_hdr	*rmt;
+	struct xfs_buf			*bp;
+	void				*p;
+	xfs_daddr_t			dblkno;
+	int				dblkcnt;
+	int				nmap;
+	int				error;
+
+	xso = container_of(context, struct xrep_xattr_swap_owner, ctx);
+
+	if (flags & (XFS_ATTR_LOCAL | XFS_ATTR_INCOMPLETE))
+		return;
+
+	error = xfs_attr_get_ilocked(&args);
+	if (error)
+		goto fail;
+
+	/*
+	 * Mark this region of the attr fork so that the leaf/node scan will
+	 * skip this part.
+	 */
+	error = xbitmap_set(&xso->rmt_blocks, args.rmtblkno, args.rmtblkcnt);
+	if (error)
+		goto fail;
+
+	while (args.rmtblkcnt > 0) {
+		nmap = 1;
+		error = xfs_bmapi_read(args.dp, args.rmtblkno, args.rmtblkcnt,
+				&map, &nmap, XFS_BMAPI_ATTRFORK);
+		if (error || nmap != 1)
+			goto fail;
+
+		if (!xfs_bmap_is_real_extent(&map))
+			goto fail;
+
+		dblkno = XFS_FSB_TO_DADDR(mp, map.br_startblock);
+		dblkcnt = XFS_FSB_TO_BB(mp, map.br_blockcount);
+		error = xfs_buf_read(mp->m_ddev_targp, dblkno, dblkcnt, 0, &bp,
+				&xfs_attr3_rmt_buf_ops);
+		if (error)
+			goto fail;
+
+		/*
+		 * Each rmt block within the buffer gets its own header, so
+		 * update the owner for each header.
+		 */
+		for (p = bp->b_addr;
+		     p < bp->b_addr + BBTOB(bp->b_length);
+		     p += mp->m_attr_geo->blksize) {
+			rmt = p;
+			rmt->rm_owner = cpu_to_be64(xso->sc->ip->i_ino);
+		}
+
+		xfs_buf_delwri_queue(bp, &buffer_list);
+		xfs_buf_relse(bp);
+
+		/* roll attribute extent map forwards */
+		args.rmtblkno += map.br_blockcount;
+		args.rmtblkcnt -= map.br_blockcount;
+	}
+
+	/* Write the entire remote value to disk. */
+	error = xfs_buf_delwri_submit(&buffer_list);
+	if (error)
+		goto fail;
+
+	return;
+fail:
+	xfs_buf_delwri_cancel(&buffer_list);
+	context->seen_enough = 1;
+}
+
+/*
+ * Change the owner field of every block in the attribute fork to match the
+ * file being repaired.  First we fix the remote value blocks (which have
+ * particular incore geometries) and then change the rest one block at a time.
+ */
+STATIC int
+xrep_xattr_swap_leaf_owner(
+	struct xrep_xattr_swap_owner	*xso)
+{
+	struct xfs_bmbt_irec		map;
+	struct xfs_da_geometry		*geo = xso->sc->mp->m_attr_geo;
+	struct xfs_scrub		*sc = xso->sc;
+	struct xfs_da3_blkinfo		*info;
+	struct xfs_buf			*bp;
+	xfs_fileoff_t			offset = 0;
+	xfs_fileoff_t			end = -1U;
+	xfs_dablk_t			dabno;
+	int				nmap;
+	int				error;
+
+	for (offset = 0;
+	     offset < end;
+	     offset = map.br_startoff + map.br_blockcount) {
+		nmap = 1;
+		error = xfs_bmapi_read(sc->tempip, offset, end - offset,
+				&map, &nmap, XFS_BMAPI_ATTRFORK);
+		if (error)
+			return error;
+		if (nmap != 1)
+			return -EFSCORRUPTED;
+		if (!xfs_bmap_is_real_extent(&map)) {
+			continue;
+		}
+
+		if (xbitmap_test(&xso->rmt_blocks, map.br_startoff,
+				 &map.br_blockcount)) {
+			continue;
+		}
+
+		for (dabno = round_up(map.br_startoff, geo->fsbcount);
+		     dabno < map.br_startoff + map.br_blockcount;
+		     dabno += geo->fsbcount) {
+			error = xfs_da_read_buf(sc->tp, sc->tempip,
+					dabno, 0, &bp, XFS_ATTR_FORK, NULL);
+			if (error)
+				return error;
+			if (!bp)
+				return -EFSCORRUPTED;
+
+			info = bp->b_addr;
+			info->owner = cpu_to_be64(sc->ip->i_ino);
+
+			/* If nobody set a buffer type or ops, set them now. */
+			if (bp->b_ops == NULL) {
+				switch (info->hdr.magic) {
+				case cpu_to_be16(XFS_ATTR3_LEAF_MAGIC):
+					bp->b_ops = &xfs_attr3_leaf_buf_ops;
+					break;
+				case cpu_to_be16(XFS_DA3_NODE_MAGIC):
+					bp->b_ops = &xfs_da3_node_buf_ops;
+					break;
+				default:
+					xfs_trans_brelse(sc->tp, bp);
+					return -EFSCORRUPTED;
+				}
+				xfs_buf_set_ref(bp, XFS_ATTR_BTREE_REF);
+			}
+
+			xfs_trans_ordered_buf(sc->tp, bp);
+			xfs_trans_brelse(sc->tp, bp);
+		}
+	}
+
+	return 0;
+}
+/*
+ * Walk the temporary file's xattr blocks, setting the owner field of each
+ * block to the new owner.  We use ordered and delwri buffers to flush
+ * everything out to disk ahead of comitting the atomic extent swap.  Rewriting
+ * the attr blocks like this is apparently safe because attr inactivation isn't
+ * picky about owner field enforcement(!)
+ */
+STATIC int
+xrep_xattr_swap_owner(
+	struct xfs_scrub		*sc)
+{
+	struct xrep_xattr_swap_owner	xso = {
+		.ctx.dp			= sc->tempip,
+		.ctx.resynch		= 1,
+		.ctx.put_listent	= xrep_xattr_swap_rmt_owner,
+		.ctx.allow_incomplete	= false,
+		.ctx.seen_enough	= 0,
+		.ctx.tp			= sc->tp,
+		.sc			= sc,
+	};
+	int				error;
+
+	xbitmap_init(&xso.rmt_blocks);
+
+	/* First pass -- change the owners of the remote blocks. */
+	error = xfs_attr_list_ilocked(&xso.ctx);
+	if (error)
+		goto out;
+	if (xso.ctx.seen_enough) {
+		error = -EFSCORRUPTED;
+		goto out;
+	}
+
+	/* Second pass -- change each attr leaf/node buffer. */
+	error = xrep_xattr_swap_leaf_owner(&xso);
+out:
+	xbitmap_destroy(&xso.rmt_blocks);
+	return error;
+}
+
+/*
+ * If both files' attribute structure are in short format, we can copy
+ * the short format data from the tempfile to the repaired file if it'll
+ * fit.
+ */
+STATIC void
+xrep_xattr_swap_local(
+	struct xfs_scrub	*sc,
+	int			newsize,
+	int			forkoff)
+{
+	struct xfs_ifork	*ifp1, *ifp2;
+
+	ifp1 = XFS_IFORK_PTR(sc->tempip, XFS_ATTR_FORK);
+	ifp2 = XFS_IFORK_PTR(sc->ip, XFS_ATTR_FORK);
+	sc->ip->i_d.di_forkoff = forkoff;
+
+	xfs_idata_realloc(sc->ip, ifp1->if_bytes - ifp2->if_bytes,
+			XFS_ATTR_FORK);
+
+	memcpy(ifp2->if_u1.if_data, ifp1->if_u1.if_data, newsize);
+	xfs_trans_log_inode(sc->tp, sc->ip, XFS_ILOG_CORE | XFS_ILOG_ADATA);
+}
+
+/* Swap the temporary file's attribute fork with the one being repaired. */
+STATIC int
+xrep_xattr_swap(
+	struct xrep_xattr	*rx)
+{
+	struct xfs_swapext_req	req;
+	struct xfs_swapext_res	res;
+	struct xfs_scrub	*sc = rx->sc;
+	bool			ip_local, temp_local;
+	int			error;
+
+	error = xrep_swapext_prep(rx->sc, XFS_ATTR_FORK, &req, &res);
+	if (error)
+		return error;
+
+	error = xchk_trans_alloc(sc, res.resblks);
+	if (error)
+		return error;
+
+	/*
+	 * Lock and join the inodes to the tansaction so that transaction commit
+	 * or cancel will unlock the inodes from this point onwards.
+	 */
+	xfs_lock_two_inodes(sc->ip, XFS_ILOCK_EXCL,
+			    sc->tempip, XFS_ILOCK_EXCL);
+	sc->temp_ilock_flags |= XFS_ILOCK_EXCL;
+	sc->ilock_flags |= XFS_ILOCK_EXCL;
+	xfs_trans_ijoin(sc->tp, sc->ip, 0);
+	xfs_trans_ijoin(sc->tp, sc->tempip, 0);
+
+	ip_local = XFS_IFORK_FORMAT(sc->ip, XFS_ATTR_FORK) ==
+				XFS_DINODE_FMT_LOCAL;
+	temp_local = XFS_IFORK_FORMAT(sc->tempip, XFS_ATTR_FORK) ==
+				XFS_DINODE_FMT_LOCAL;
+
+	/*
+	 * If the both files have a local format attr fork and the rebuilt
+	 * xattr data would fit in the repaired file's attr fork, just copy
+	 * the contents from the tempfile and declare ourselves done.
+	 */
+	if (ip_local && temp_local) {
+		int	forkoff;
+		int	newsize;
+
+		newsize = XFS_ATTR_SF_TOTSIZE(sc->tempip);
+		forkoff = xfs_attr_shortform_bytesfit(sc->ip, newsize);
+		if (forkoff > 0) {
+			xrep_xattr_swap_local(sc, newsize, forkoff);
+			return 0;
+		}
+	}
+
+	/* Otherwise, make sure both attr forks are in block-mapping mode. */
+	error = xrep_xattr_swap_prep(sc, temp_local, ip_local);
+	if (error)
+		return error;
+
+	/* Rewrite the owner field of all attr blocks in the temporary file. */
+	error = xrep_xattr_swap_owner(sc);
+	if (error)
+		return error;
+
+	return xfs_swapext_atomic(&sc->tp, &req);
+}
+
+/*
+ * Insert into the tempfile all the attributes that we collected.
  *
  * Commit the repair transaction and drop the ilock because the attribute
  * setting code needs to be able to allocate special transactions and take the
- * ilock on its own.  Some day we'll have deferred attribute setting, at which
- * point we'll be able to use that to replace the attributes atomically and
- * safely.
+ * ilock on its own.  The attributes are added to the temporary file (which can
+ * be disposed of easily on failure).  If we finish rebuilding all of the
+ * salvageable attrs, we can then use atomic extent swapping to commit the
+ * new attr index to the file.
  */
 STATIC int
 xrep_xattr_rebuild_tree(
 	struct xrep_xattr	*rx)
 {
+	uint64_t		nr_attrs = xfbma_length(rx->xattr_records);
 	int			error;
+
+	/* Nothing to salvage?  Zap the attr fork and finish. */
+	if (nr_attrs == 0) {
+		xfs_trans_ijoin(rx->sc->tp, rx->sc->ip, 0);
+		return xrep_xattr_reset_fork(rx->sc, rx->sc->ip);
+	}
 
 	/*
 	 * Commit the repair transaction and drop the ILOCK so that we can
@@ -772,8 +1167,25 @@ xrep_xattr_rebuild_tree(
 	if (error)
 		return error;
 
-	/* Re-add every attr to the file. */
-	return xfbma_iter_del(rx->xattr_records, xrep_xattr_insert_rec, rx);
+	/* Add every attr to the tempfile. */
+	error = xfbma_iter_del(rx->xattr_records, xrep_xattr_insert_rec, rx);
+	if (error)
+		return error;
+
+	/*
+	 * Swap the tempfile's attr fork with the file being repaired.  This
+	 * recreates the transaction and re-takes the ILOCK in the scrub
+	 * context.
+	 */
+	error = xrep_xattr_swap(rx);
+	if (error)
+		return error;
+
+	/*
+	 * Now wipe out the attr fork of the temp file so that regular inode
+	 * inactivation won't trip over the corrupt attr fork.
+	 */
+	return xrep_xattr_reset_fork(rx->sc, rx->sc->tempip);
 }
 
 /*
@@ -808,17 +1220,6 @@ xrep_xattr(
 
 	/* Collect extended attributes by parsing raw blocks. */
 	error = xrep_xattr_find_attributes(&rx);
-	if (error)
-		goto out;
-
-	/*
-	 * Invalidate and truncate all attribute fork extents.  This is the
-	 * point at which we are no longer able to bail out gracefully.
-	 * We commit the transaction here because xfs_attr_set allocates its
-	 * own transactions.
-	 */
-	xfs_trans_ijoin(sc->tp, sc->ip, 0);
-	error = xrep_xattr_reset_fork(sc);
 	if (error)
 		goto out;
 
