@@ -22,6 +22,8 @@ static inline int xrep_notsupported(struct xfs_scrub *sc)
 
 enum xfs_blft;
 struct xbitmap;
+struct xfs_swapext_req;
+struct xfs_swapext_res;
 
 int xrep_attempt(struct xfs_inode *ip, struct xfs_scrub *sc);
 void xrep_failure(struct xfs_mount *mp);
@@ -44,6 +46,8 @@ typedef int (*xrep_setfile_getbuf_fn)(struct xfs_scrub *sc,
 int xrep_set_file_contents(struct xfs_scrub *sc,
 		const struct xfs_buf_ops *ops, enum xfs_blft type,
 		xfs_fileoff_t isize);
+int xrep_swapext_prep(struct xfs_scrub *sc, int whichfork,
+		struct xfs_swapext_req *req, struct xfs_swapext_res *res);
 
 int xrep_fix_freelist(struct xfs_scrub *sc, int alloc_flags);
 int xrep_reap_extents(struct xfs_scrub *sc, struct xbitmap *exlist,
@@ -66,7 +70,7 @@ int xrep_find_ag_btree_roots(struct xfs_scrub *sc, struct xfs_buf *agf_bp,
 void xrep_force_quotacheck(struct xfs_scrub *sc, uint dqtype);
 int xrep_ino_dqattach(struct xfs_scrub *sc);
 int xrep_reset_perag_resv(struct xfs_scrub *sc);
-int xrep_xattr_reset_fork(struct xfs_scrub *sc);
+int xrep_xattr_reset_fork(struct xfs_scrub *sc, struct xfs_inode *ip);
 int xrep_metadata_inode_forks(struct xfs_scrub *sc);
 int xrep_rmapbt_setup(struct xfs_scrub *sc, struct xfs_inode *ip);
 
