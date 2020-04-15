@@ -1583,7 +1583,7 @@ xfs_bmap_count_range_blocks(
  * extent swap operation.  XXX right now we assume you're swapping all extents;
  * this is the worst case estimation.
  */
-static inline unsigned int
+unsigned int
 xfs_swap_range_calc_resblks(
 	struct xfs_inode	*ip1,
 	struct xfs_inode	*ip2,
