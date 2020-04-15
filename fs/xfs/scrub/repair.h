@@ -40,6 +40,12 @@ typedef int (*xrep_setfile_getbuf_fn)(struct xfs_scrub *sc,
 int xrep_set_file_contents(struct xfs_scrub *sc, xrep_setfile_getbuf_fn getbuf,
 		struct file *srcfile, xfs_fileoff_t isize);
 
+struct xfs_swapext_req;
+struct xfs_swapext_res;
+
+int xrep_swapext_prep(struct xfs_scrub *sc, int whichfork,
+		struct xfs_swapext_req *req, struct xfs_swapext_res *res);
+
 struct xbitmap;
 
 int xrep_fix_freelist(struct xfs_scrub *sc, int alloc_flags);
