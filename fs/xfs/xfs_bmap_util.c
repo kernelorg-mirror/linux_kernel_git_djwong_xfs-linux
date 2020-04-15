@@ -1597,7 +1597,7 @@ xfs_bmap_count_range_blocks(
  * Compute the number of blocks we need to reserve to handle a log-assisted
  * extent swap operation.
  */
-static inline unsigned int
+unsigned int
 xfs_swap_range_calc_resblks(
 	struct xfs_inode	*ip1,
 	struct xfs_inode	*ip2,
