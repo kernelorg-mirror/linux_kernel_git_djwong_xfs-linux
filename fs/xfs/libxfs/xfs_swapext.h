@@ -49,6 +49,7 @@ int xfs_swapext_finish_one(struct xfs_trans *tp,
 		struct xfs_swapext_intent *sxi_state);
 
 #define XFS_SWAPEXT_SET_SIZES		(1U << 0)
+#define XFS_SWAPEXT_TO_SHORTFORM2	(1U << 1)
 int xfs_swapext_atomic(struct xfs_trans **tpp, struct xfs_inode *ip1,
 		struct xfs_inode *ip2, int whichfork, xfs_fileoff_t startoff1,
 		xfs_fileoff_t startoff2, xfs_filblks_t blockcount,

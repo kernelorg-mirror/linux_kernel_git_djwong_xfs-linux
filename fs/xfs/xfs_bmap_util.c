@@ -1550,7 +1550,7 @@ xfs_swap_range_prep(
  * Compute the number of blocks we need to reserve to handle a log-assisted
  * extent swap operation.
  */
-static inline unsigned int
+unsigned int
 xfs_swap_range_calc_resblks(
 	struct xfs_inode	*ip1,
 	struct xfs_inode	*ip2,

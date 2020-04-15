@@ -3843,7 +3843,8 @@ DEFINE_NAMESPACE_EVENT(xfs_imeta_dir_zap);
 
 #define XFS_SWAPEXT_FLAGS \
 	{ XFS_SWAP_EXTENT_ATTR_FORK,		"ATTRFORK" }, \
-	{ XFS_SWAP_EXTENT_SET_SIZES,		"SETSIZES" }
+	{ XFS_SWAP_EXTENT_SET_SIZES,		"SETSIZES" }, \
+	{ XFS_SWAP_EXTENT_TO_SHORTFORM2,	"TO_SHORTFORM2" }
 
 TRACE_EVENT(xfs_swapext_defer,
 	TP_PROTO(struct xfs_mount *mp, const struct xfs_swapext_intent *sxi),
