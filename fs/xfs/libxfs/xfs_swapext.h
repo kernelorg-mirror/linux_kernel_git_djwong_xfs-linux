@@ -37,6 +37,8 @@ struct xfs_swapext_intent {
 
 /* Set the sizes of both files after the operation. */
 #define XFS_SWAPEXT_SET_SIZES		(1U << 0)
+/* Try to convert inode2's fork to local format, if possible. */
+#define XFS_SWAPEXT_INO2_SHORTFORM	(1U << 1)
 
 /* Parameters for a swapext request. */
 struct xfs_swapext_req {

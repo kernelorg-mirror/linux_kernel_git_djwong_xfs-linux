@@ -34,6 +34,8 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_trans_space.h"
 #include "xfs_dir2.h"
+#include "xfs_swapext.h"
+#include "xfs_swaprange.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -1775,4 +1777,32 @@ xrep_set_file_contents(
 out:
 	xfs_buf_delwri_cancel(&buffers_list);
 	return error;
+}
+
+/*
+ * Fill out the swapext request and resource estimation structures in
+ * preparation for swapping the contents of a metadata file that we've rebuilt
+ * in the temp file.
+ */
+int
+xrep_swapext_prep(
+	struct xfs_scrub	*sc,
+	int			whichfork,
+	struct xfs_swapext_req	*req,
+	struct xfs_swapext_res	*res)
+{
+	ASSERT(whichfork != XFS_COW_FORK);
+
+	req->ip1 = sc->tempip;
+	req->ip2 = sc->ip;
+	req->startoff1 = 0;
+	req->startoff2 = 0;
+	req->whichfork = whichfork;
+	req->blockcount = XFS_MAX_FILEOFF;
+	req->flags = 0;
+
+	if (whichfork == XFS_ATTR_FORK || S_ISDIR(VFS_I(sc->ip)->i_mode))
+		req->flags |= XFS_SWAPEXT_INO2_SHORTFORM;
+
+	return xfs_swap_range_estimate(req, res);
 }
