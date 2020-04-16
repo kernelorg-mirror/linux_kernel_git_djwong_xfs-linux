@@ -23,6 +23,7 @@
 #include "xfs_da_format.h"
 #include "xfs_da_btree.h"
 #include "xfs_attr_leaf.h"
+#include "xfs_dir2_priv.h"
 
 /* Information to help us reset reflink flag / CoW fork state after a swap. */
 
@@ -233,6 +234,37 @@ xfs_swapext_attr_to_shortform2(
 	return xfs_attr3_leaf_to_shortform(bp, &args, forkoff);
 }
 
+/* Convert inode2's block dir fork back to shortform, if possible.. */
+STATIC int
+xfs_swapext_dir_to_shortform2(
+	struct xfs_trans		*tp,
+	struct xfs_swapext_intent	*sxi)
+{
+	struct xfs_da_args	args = {
+		.dp		= sxi->sxi_ip2,
+		.geo		= tp->t_mountp->m_dir_geo,
+		.whichfork	= XFS_DATA_FORK,
+		.trans		= tp,
+	};
+	struct xfs_dir2_sf_hdr	sfh;
+	struct xfs_buf		*bp;
+	int			size;
+	int			error;
+
+	if (!xfs_bmap_one_block(sxi->sxi_ip2, XFS_DATA_FORK))
+		return 0;
+
+	error = xfs_dir3_block_read(tp, sxi->sxi_ip2, &bp);
+	if (error)
+		return error;
+
+	size = xfs_dir2_block_sfsize(sxi->sxi_ip2, bp->b_addr, &sfh);
+	if (size > XFS_IFORK_DSIZE(sxi->sxi_ip2))
+		return 0;
+
+	return xfs_dir2_block_to_sf(&args, bp, size, &sfh);
+}
+
 #define XFS_SWAP_EXTENT_POST_PROCESSING (XFS_SWAP_EXTENT_TO_SHORTFORM2)
 
 /* Do we have more work to do to finish this operation? */
@@ -265,6 +297,8 @@ xfs_swapext_finish_one(
 		if (sxi->sxi_flags & XFS_SWAP_EXTENT_TO_SHORTFORM2) {
 			if (sxi->sxi_flags & XFS_SWAP_EXTENT_ATTR_FORK)
 				error = xfs_swapext_attr_to_shortform2(tp, sxi);
+			else if (S_ISDIR(VFS_I(sxi->sxi_ip2)->i_mode))
+				error = xfs_swapext_dir_to_shortform2(tp, sxi);
 			sxi->sxi_flags &= ~XFS_SWAP_EXTENT_TO_SHORTFORM2;
 			return error;
 		}
