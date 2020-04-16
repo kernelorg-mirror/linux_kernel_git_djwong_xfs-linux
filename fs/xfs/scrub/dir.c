@@ -18,6 +18,7 @@
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/dabtree.h"
+#include "scrub/repair.h"
 
 /* Set us up to scrub directories. */
 int
@@ -27,6 +28,17 @@ xchk_setup_directory(
 {
 	unsigned int		sz;
 	int			error;
+
+#ifdef CONFIG_XFS_ONLINE_REPAIR
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		if (!xfs_sb_version_hasatomicswap(&sc->mp->m_sb))
+			return -EOPNOTSUPP;
+
+		error = xrep_create_tempfile(sc, S_IFDIR);
+		if (error)
+			return error;
+	}
+#endif
 
 	if (sc->flags & XCHK_TRY_HARDER) {
 		error = xchk_fs_freeze(sc);
