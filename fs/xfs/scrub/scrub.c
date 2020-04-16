@@ -194,6 +194,12 @@ xchk_teardown(
 		kmem_free(sc->buf);
 		sc->buf = NULL;
 	}
+	if (sc->tempip) {
+		if (sc->temp_ilock_flags)
+			xfs_iunlock(sc->tempip, sc->temp_ilock_flags);
+		xfs_irele(sc->tempip);
+		sc->tempip = NULL;
+	}
 	return error;
 }
 

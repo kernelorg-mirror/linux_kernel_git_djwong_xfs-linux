@@ -72,6 +72,9 @@ struct xfs_scrub {
 	struct file			*xfile;
 	uint				ilock_flags;
 
+	struct xfs_inode		*tempip;
+	uint				temp_ilock_flags;
+
 	/* See the XCHK/XREP state flags below. */
 	unsigned int			flags;
 
