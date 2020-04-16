@@ -25,6 +25,8 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_trans_space.h"
 #include "xfs_iwalk.h"
+#include "xfs_swapext.h"
+#include "xfs_bmap_util.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
@@ -78,6 +80,9 @@ struct xrep_dir {
 	 * found a good candidate.
 	 */
 	xfs_ino_t		parent_ino;
+
+	/* nlink value of the corrected directory. */
+	xfs_nlink_t		new_nlink;
 };
 
 /*
@@ -504,27 +509,26 @@ xrep_dir_reset_fork(
 	struct xfs_da_args	*args = sc->buf;
 	int			error;
 
-	ifp = XFS_IFORK_PTR(sc->ip, XFS_DATA_FORK);
+	ifp = XFS_IFORK_PTR(sc->tempip, XFS_DATA_FORK);
 
 	/* Unmap all the directory buffers. */
-	if (xfs_ifork_has_extents(sc->ip, XFS_DATA_FORK)) {
-		error = xrep_dir_reset_nonlocal(sc, sc->ip);
+	if (xfs_ifork_has_extents(sc->tempip, XFS_DATA_FORK)) {
+		error = xrep_dir_reset_nonlocal(sc, sc->tempip);
 		if (error)
 			return error;
 	}
 
-	trace_xrep_dir_reset_fork(sc->ip, parent_ino);
+	trace_xrep_dir_reset_fork(sc->tempip, parent_ino);
 
 	/* Reset the data fork to an empty data fork. */
 	xfs_ifork_reset(ifp);
 	ifp->if_flags = XFS_IFINLINE;
 	ifp->if_bytes = 0;
-	sc->ip->i_d.di_size = 0;
+	sc->tempip->i_d.di_size = 0;
 
 	/* Reinitialize the short form directory. */
-	set_nlink(VFS_I(sc->ip), 2);
 	args->geo = sc->mp->m_dir_geo;
-	args->dp = sc->ip;
+	args->dp = sc->tempip;
 	args->trans = sc->tp;
 	error = xfs_dir2_sf_create(args, parent_ino);
 	if (error)
@@ -609,10 +613,10 @@ xrep_dir_insert_rec(
 	if (error)
 		return error;
 
-	trace_xrep_dir_insert_rec(rd->sc->ip, namebuf, key->namelen, key->ino,
-			key->ftype);
+	trace_xrep_dir_insert_rec(rd->sc->tempip, namebuf, key->namelen,
+			key->ino, key->ftype);
 
-	error = xfs_qm_dqattach(rd->sc->ip);
+	error = xfs_qm_dqattach(rd->sc->tempip);
 	if (error)
 		return error;
 
@@ -625,23 +629,375 @@ xrep_dir_insert_rec(
 	if (error)
 		return error;
 
-	xfs_ilock(rd->sc->ip, XFS_ILOCK_EXCL);
-	xfs_trans_ijoin(tp, rd->sc->ip, XFS_ILOCK_EXCL);
+	xfs_ilock(rd->sc->tempip, XFS_ILOCK_EXCL);
+	xfs_trans_ijoin(tp, rd->sc->tempip, XFS_ILOCK_EXCL);
 
 	name.len = key->namelen;
 	name.type = key->ftype;
-	error = xfs_dir_createname(tp, rd->sc->ip, &name, key->ino, resblks);
+	error = xfs_dir_createname(tp, rd->sc->tempip, &name, key->ino,
+			resblks);
 	if (error)
 		goto err;
 
 	if (name.type == XFS_DIR3_FT_DIR)
-		inc_nlink(VFS_I(rd->sc->ip));
-	xfs_trans_log_inode(tp, rd->sc->ip, XFS_ILOG_CORE);
+		rd->new_nlink++;
+	xfs_trans_log_inode(tp, rd->sc->tempip, XFS_ILOG_CORE);
 	return xfs_trans_commit(tp);
 
 err:
 	xfs_trans_cancel(tp);
 	return error;
+}
+
+/*
+ * Prepare both inodes' directory forks for extent swapping.  Promote the
+ * tempfile from short format to leaf format, and if the file being repaired
+ * has a short format attr fork, turn it into an empty extent list.
+ */
+STATIC int
+xrep_dir_swap_prep(
+	struct xfs_scrub	*sc,
+	bool			temp_local,
+	bool			ip_local)
+{
+	int			error;
+
+	/*
+	 * If the tempfile's attributes are in shortform format, convert that
+	 * to a single leaf extent so that we can use the atomic extent swap.
+	 */
+	if (temp_local) {
+		struct xfs_da_args	args = {
+			.dp		= sc->tempip,
+			.geo		= sc->mp->m_dir_geo,
+			.whichfork	= XFS_DATA_FORK,
+			.trans		= sc->tp,
+			.total		= 1,
+		};
+
+		error = xfs_dir2_sf_to_block(&args);
+		if (error)
+			return error;
+
+		error = xfs_defer_finish(&sc->tp);
+		if (error)
+			return error;
+	}
+
+	/*
+	 * If the file being repaired had a shortform attribute fork, convert
+	 * that to an empty extent list in preparation for the atomic extent
+	 * swap.
+	 */
+	if (ip_local) {
+		struct xfs_ifork	*ifp;
+
+		sc->ip->i_d.di_format = XFS_DINODE_FMT_EXTENTS;
+		sc->ip->i_d.di_nextents = 0;
+
+		ifp = XFS_IFORK_PTR(sc->ip, XFS_DATA_FORK);
+		xfs_ifork_reset(ifp);
+		ifp->if_bytes = 0;
+		ifp->if_u1.if_root = NULL;
+		ifp->if_height = 0;
+		ifp->if_flags |= XFS_IFEXTENTS;
+
+		xfs_trans_log_inode(sc->tp, sc->ip,
+				XFS_ILOG_CORE | XFS_ILOG_DDATA);
+	}
+
+	return 0;
+}
+
+/*
+ * Set the owner for this directory block to the directory being repaired.
+ * Return the magic number that we found, or the usual negative error.
+ */
+STATIC int
+xrep_dir_reset_owner(
+	struct xfs_scrub		*sc,
+	xfs_dablk_t			dabno,
+	struct xfs_buf			*bp,
+	unsigned int			*magic)
+{
+	struct xfs_da_geometry		*geo = sc->mp->m_dir_geo;
+	struct xfs_dir3_data_hdr	*data3 = bp->b_addr;
+	struct xfs_da3_blkinfo		*info3 = bp->b_addr;
+	struct xfs_dir3_free_hdr	*free3 = bp->b_addr;
+	struct xfs_dir2_data_entry	*dep;
+
+	/* Directory data blocks. */
+	if (dabno < geo->leafblk) {
+		*magic = be32_to_cpu(data3->hdr.magic);
+		if (*magic != XFS_DIR3_BLOCK_MAGIC &&
+		    *magic != XFS_DIR3_DATA_MAGIC)
+			return -EFSCORRUPTED;
+
+		/*
+		 * If this is a block format directory, it's possible that the
+		 * block was created as part of converting the temp directory
+		 * from short format to block format in order to use the atomic
+		 * extent swap.  In that case, the '.' entry will be set to
+		 * the temp dir, so find the dot entry and reset it.
+		 */
+		if (*magic == XFS_DIR3_BLOCK_MAGIC) {
+			dep = bp->b_addr + geo->data_entry_offset;
+			if (dep->namelen != 1 || dep->name[0] != '.')
+				return -EFSCORRUPTED;
+
+			dep->inumber = cpu_to_be64(sc->ip->i_ino);
+		}
+
+		data3->hdr.owner = cpu_to_be64(sc->ip->i_ino);
+		return 0;
+	}
+
+	/* Directory leaf and da node blocks. */
+	if (dabno < geo->freeblk) {
+		*magic = be16_to_cpu(info3->hdr.magic);
+		switch (*magic) {
+		case XFS_DA3_NODE_MAGIC:
+		case XFS_DIR3_LEAF1_MAGIC:
+		case XFS_DIR3_LEAFN_MAGIC:
+			break;
+		default:
+			return -EFSCORRUPTED;
+		}
+
+		info3->owner = cpu_to_be64(sc->ip->i_ino);
+		return 0;
+	}
+
+	/* Directory free blocks. */
+	*magic = be32_to_cpu(free3->hdr.magic);
+	if (*magic != XFS_DIR3_FREE_MAGIC)
+		return -EFSCORRUPTED;
+
+	free3->hdr.owner = cpu_to_be64(sc->ip->i_ino);
+	return 0;
+}
+
+/*
+ * If the buffer didn't have buffer ops set, we need to set them now that we've
+ * dirtied the directory block.
+ */
+STATIC void
+xrep_dir_set_verifier(
+	unsigned int		magic,
+	struct xfs_buf		*bp)
+{
+	switch (magic) {
+	case XFS_DIR3_BLOCK_MAGIC:
+		bp->b_ops = &xfs_dir3_block_buf_ops;
+		break;
+	case XFS_DIR3_DATA_MAGIC:
+		bp->b_ops = &xfs_dir3_data_buf_ops;
+		break;
+	case XFS_DA3_NODE_MAGIC:
+		bp->b_ops = &xfs_da3_node_buf_ops;
+		break;
+	case XFS_DIR3_LEAF1_MAGIC:
+		bp->b_ops = &xfs_dir3_leaf1_buf_ops;
+		break;
+	case XFS_DIR3_LEAFN_MAGIC:
+		bp->b_ops = &xfs_dir3_leafn_buf_ops;
+		break;
+	case XFS_DIR3_FREE_MAGIC:
+		bp->b_ops = &xfs_dir3_free_buf_ops;
+		break;
+	}
+
+	xfs_buf_set_ref(bp, XFS_DIR_BTREE_REF);
+}
+
+/*
+ * Change the owner field of every block in the data fork to match the
+ * directory being repaired.
+ */
+STATIC int
+xrep_dir_swap_owner(
+	struct xfs_scrub		*sc)
+{
+	struct xfs_bmbt_irec		map;
+	struct xfs_da_geometry		*geo = sc->mp->m_dir_geo;
+	struct xfs_buf			*bp;
+	xfs_fileoff_t			offset = 0;
+	xfs_fileoff_t			end = XFS_MAX_FILEOFF;
+	xfs_dablk_t			dabno;
+	int				nmap;
+	int				error;
+
+	for (offset = 0;
+	     offset < end;
+	     offset = map.br_startoff + map.br_blockcount) {
+		nmap = 1;
+		error = xfs_bmapi_read(sc->tempip, offset, end - offset,
+				&map, &nmap, 0);
+		if (error)
+			return error;
+		if (nmap != 1)
+			return -EFSCORRUPTED;
+		if (!xfs_bmap_is_real_extent(&map))
+			continue;
+
+
+		for (dabno = round_up(map.br_startoff, geo->fsbcount);
+		     dabno < map.br_startoff + map.br_blockcount;
+		     dabno += geo->fsbcount) {
+			unsigned int	magic;
+
+			error = xfs_da_read_buf(sc->tp, sc->tempip,
+					dabno, 0, &bp, XFS_DATA_FORK, NULL);
+			if (error)
+				return error;
+			if (!bp)
+				return -EFSCORRUPTED;
+
+			error = xrep_dir_reset_owner(sc, dabno, bp, &magic);
+			if (error) {
+				xfs_trans_brelse(sc->tp, bp);
+				return error;
+			}
+
+			if (bp->b_ops == NULL)
+				xrep_dir_set_verifier(magic, bp);
+
+			xfs_trans_ordered_buf(sc->tp, bp);
+			xfs_trans_brelse(sc->tp, bp);
+		}
+	}
+
+	return 0;
+}
+
+/*
+ * If both files' directory structure are in short format, we can copy
+ * the short format data from the tempfile to the repaired file if it'll
+ * fit.
+ */
+STATIC void
+xrep_dir_swap_local(
+	struct xfs_scrub	*sc,
+	int			newsize)
+{
+	struct xfs_ifork	*ifp1, *ifp2;
+
+	ifp1 = XFS_IFORK_PTR(sc->tempip, XFS_DATA_FORK);
+	ifp2 = XFS_IFORK_PTR(sc->ip, XFS_DATA_FORK);
+
+	xfs_idata_realloc(sc->ip, ifp2->if_bytes - ifp1->if_bytes,
+			XFS_DATA_FORK);
+
+	memcpy(ifp2->if_u1.if_data, ifp1->if_u1.if_data, newsize);
+	xfs_trans_log_inode(sc->tp, sc->ip, XFS_ILOG_CORE | XFS_ILOG_DDATA);
+}
+
+struct xfs_name xfs_name_dot = { (unsigned char *)".", 1, XFS_DIR3_FT_DIR };
+
+/* Swap the temporary directory's data fork with the one being repaired. */
+STATIC int
+xrep_dir_swap(
+	struct xrep_dir		*rd)
+{
+	struct xfs_swapext_req	req;
+	struct xfs_swapext_res	res;
+	struct xfs_scrub	*sc = rd->sc;
+	bool			ip_local, temp_local;
+	int			error;
+
+	error = xrep_swapext_prep(sc, XFS_DATA_FORK, &req, &res);
+	if (error)
+		return error;
+
+	error = xchk_trans_alloc(sc, res.resblks);
+	if (error)
+		return error;
+
+	/*
+	 * Lock and join the inodes to the tansaction so that transaction commit
+	 * or cancel will unlock the inodes from this point onwards.
+	 */
+	xfs_lock_two_inodes(sc->ip, XFS_ILOCK_EXCL,
+			    sc->tempip, XFS_ILOCK_EXCL);
+	sc->temp_ilock_flags |= XFS_ILOCK_EXCL;
+	sc->ilock_flags |= XFS_ILOCK_EXCL;
+	xfs_trans_ijoin(sc->tp, sc->ip, 0);
+	xfs_trans_ijoin(sc->tp, sc->tempip, 0);
+
+	/*
+	 * Reset the temporary directory's '.' entry to point to the directory
+	 * we're repairing.  Note: shortform directories lack the dot entry.
+	 *
+	 * It's possible that this replacement could also expand a sf tempdir
+	 * into block format.
+	 */
+	if (XFS_IFORK_FORMAT(sc->tempip, XFS_DATA_FORK) !=
+			XFS_DINODE_FMT_LOCAL) {
+		error = xfs_dir_replace(sc->tp, sc->tempip, &xfs_name_dot,
+				sc->ip->i_ino, res.resblks);
+		if (error)
+			return error;
+	}
+
+	/*
+	 * Reset the temporary directory's '..' entry to point to the parent
+	 * that we found.  The temporary directory was created with the root
+	 * directory as the parent, so we can skip this if repairing a
+	 * subdirectory of the root.
+	 *
+	 * It's also possible that this replacement could also expand a sf
+	 * tempdir into block format.
+	 */
+	if (rd->parent_ino != sc->mp->m_rootip->i_ino) {
+		error = xfs_dir_replace(sc->tp, rd->sc->tempip,
+				&xfs_name_dotdot, rd->parent_ino, res.resblks);
+		if (error)
+			return error;
+	}
+
+	/* XXX: do we need to roll the transaction here? */
+
+	/*
+	 * Changing the dot and dotdot entries could have changed the shape of
+	 * the directory, so we recompute these.
+	 */
+	ip_local = XFS_IFORK_FORMAT(sc->ip, XFS_DATA_FORK) ==
+				XFS_DINODE_FMT_LOCAL;
+	temp_local = XFS_IFORK_FORMAT(sc->tempip, XFS_DATA_FORK) ==
+				XFS_DINODE_FMT_LOCAL;
+
+	/*
+	 * If the both files have a local format data fork and the rebuilt
+	 * directory data would fit in the repaired file's data fork, copy
+	 * the contents from the tempfile and declare ourselves done.
+	 */
+	if (ip_local && temp_local) {
+		if (sc->tempip->i_d.di_size <= XFS_IFORK_DSIZE(sc->ip)) {
+			xrep_dir_swap_local(sc, sc->tempip->i_d.di_size);
+			set_nlink(VFS_I(sc->ip), rd->new_nlink);
+			return 0;
+		}
+	}
+
+	/* Otherwise, make sure both data forks are in block-mapping mode. */
+	error = xrep_dir_swap_prep(sc, temp_local, ip_local);
+	if (error)
+		return error;
+
+	/* Rewrite the owner field of all attr blocks in the temporary file. */
+	error = xrep_dir_swap_owner(sc);
+	if (error)
+		return error;
+
+	/*
+	 * Set nlink of the directory under repair to the number of
+	 * subdirectories that will be in the new directory data.  Do this in
+	 * the same transaction sequence that (atomically) commits the new
+	 * data.
+	 */
+	set_nlink(VFS_I(sc->ip), rd->new_nlink);
+
+	return xfs_swapext_atomic(&sc->tp, &req);
 }
 
 /*
@@ -668,6 +1024,10 @@ xrep_dir_rebuild_tree(
 	if (error)
 		return error;
 
+	/*
+	 * Drop the ILOCK so that we don't pin the tail of the log.  We still
+	 * hold the IOLOCK (aka i_rwsem) which will prevent directory access.
+	 */
 	xfs_iunlock(rd->sc->ip, XFS_ILOCK_EXCL);
 	rd->sc->ilock_flags &= ~XFS_ILOCK_EXCL;
 
@@ -679,8 +1039,25 @@ xrep_dir_rebuild_tree(
 	if (error)
 		return error;
 
-	/* Re-add every entry to the directory. */
-	return xfbma_iter_del(rd->dir_entries, xrep_dir_insert_rec, rd);
+	/* Re-add every entry to the temporary directory. */
+	error = xfbma_iter_del(rd->dir_entries, xrep_dir_insert_rec, rd);
+	if (error)
+		return error;
+
+	/*
+	 * Swap the tempdir's data fork with the file being repaired.  This
+	 * recreates the transaction and re-takes the ILOCK in the scrub
+	 * context.
+	 */
+	error = xrep_dir_swap(rd);
+	if (error)
+		return error;
+
+	/*
+	 * Now reset the data fork of the temp directory to an empty shortform
+	 * directory because inactivation does nothing for directories.
+	 */
+	return xrep_dir_reset_fork(rd->sc, rd->sc->mp->m_rootip->i_ino);
 }
 
 /*
@@ -820,6 +1197,7 @@ xrep_dir(
 	struct xrep_dir		rd = {
 		.sc		= sc,
 		.parent_ino	= NULLFSINO,
+		.new_nlink	= 2,
 	};
 	int			error;
 
@@ -856,17 +1234,6 @@ xrep_dir(
 	xfs_iunlock(sc->ip, XFS_ILOCK_EXCL);
 	error = xrep_dir_validate_parent(&rd);
 	xfs_ilock(sc->ip, XFS_ILOCK_EXCL);
-	if (error)
-		goto out;
-
-	/*
-	 * Invalidate and truncate all data fork extents.  This is the point at
-	 * which we are no longer able to bail out gracefully.  We commit the
-	 * transaction here because the rebuilding step allocates its own
-	 * transactions.
-	 */
-	xfs_trans_ijoin(sc->tp, sc->ip, 0);
-	error = xrep_dir_reset_fork(sc, rd.parent_ino);
 	if (error)
 		goto out;
 
