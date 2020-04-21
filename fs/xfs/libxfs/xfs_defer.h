@@ -80,7 +80,7 @@ struct xfs_defer_freezer {
 
 /* Functions to freeze a chain of deferred operations for later. */
 int xfs_defer_freeze(struct xfs_trans *tp, struct xfs_defer_freezer **dffp);
-int xfs_defer_thaw(struct xfs_defer_freezer *dff, struct xfs_trans *tp);
+void xfs_defer_thaw(struct xfs_defer_freezer *dff, struct xfs_trans *tp);
 void xfs_defer_freeezer_finish(struct xfs_mount *mp,
 		struct xfs_defer_freezer *dff);
 

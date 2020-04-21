@@ -577,8 +577,8 @@ xfs_defer_freeze(
 	return 0;
 }
 
-/* Thaw a chain of deferred ops that are attached to a transaction. */
-int
+/* Thaw a chain of frozen deferred ops by attaching them to the transaction. */
+void
 xfs_defer_thaw(
 	struct xfs_defer_freezer	*dff,
 	struct xfs_trans		*tp)
@@ -588,8 +588,6 @@ xfs_defer_thaw(
 	/* Add the dfops items to the transaction. */
 	list_splice_init(&dff->dff_dfops, &tp->t_dfops);
 	tp->t_flags |= dff->dff_tpflags;
-
-	return 0;
 }
 
 /* Release a deferred op freezer and all resources associated with it. */
