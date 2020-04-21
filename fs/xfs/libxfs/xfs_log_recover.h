@@ -124,4 +124,8 @@ bool xlog_is_buffer_cancelled(struct xlog *log, xfs_daddr_t blkno, uint len);
 bool xlog_put_buffer_cancelled(struct xlog *log, xfs_daddr_t blkno, uint len);
 void xlog_recover_iodone(struct xfs_buf *bp);
 
+typedef bool (*xlog_item_match_fn)(struct xfs_log_item *item, uint64_t id);
+void xlog_recover_release_intent(struct xlog *log, unsigned short intent_type,
+		uint64_t intent_id, xlog_item_match_fn fn);
+
 #endif	/* __XFS_LOG_RECOVER_H__ */
