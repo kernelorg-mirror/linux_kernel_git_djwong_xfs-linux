@@ -7,6 +7,45 @@
 #define __XFS_LOG_RECOVER_H__
 
 /*
+ * Each log item type (XFS_LI_*) gets its own xlog_recover_item_type to
+ * define how recovery should work for that type of log item.
+ */
+struct xlog_recover_item;
+
+/* Sorting hat for log items as they're read in. */
+enum xlog_recover_reorder {
+	XLOG_REORDER_BUFFER_LIST,
+	XLOG_REORDER_ITEM_LIST,
+	XLOG_REORDER_INODE_BUFFER_LIST,
+	XLOG_REORDER_CANCEL_LIST,
+};
+
+struct xlog_recover_item_type {
+	/*
+	 * Help sort recovered log items into the order required to replay them
+	 * correctly.  Log item types that always use XLOG_REORDER_ITEM_LIST do
+	 * not have to supply a function here.  See the comment preceding
+	 * xlog_recover_reorder_trans for more details about what the return
+	 * values mean.
+	 */
+	enum xlog_recover_reorder (*reorder_fn)(struct xlog_recover_item *item);
+};
+
+extern const struct xlog_recover_item_type xlog_icreate_item_type;
+extern const struct xlog_recover_item_type xlog_buf_item_type;
+extern const struct xlog_recover_item_type xlog_inode_item_type;
+extern const struct xlog_recover_item_type xlog_dquot_item_type;
+extern const struct xlog_recover_item_type xlog_quotaoff_item_type;
+extern const struct xlog_recover_item_type xlog_bmap_intent_item_type;
+extern const struct xlog_recover_item_type xlog_bmap_done_item_type;
+extern const struct xlog_recover_item_type xlog_extfree_intent_item_type;
+extern const struct xlog_recover_item_type xlog_extfree_done_item_type;
+extern const struct xlog_recover_item_type xlog_rmap_intent_item_type;
+extern const struct xlog_recover_item_type xlog_rmap_done_item_type;
+extern const struct xlog_recover_item_type xlog_refcount_intent_item_type;
+extern const struct xlog_recover_item_type xlog_refcount_done_item_type;
+
+/*
  * Macros, structures, prototypes for internal log manager use.
  */
 
@@ -24,10 +63,10 @@
  */
 typedef struct xlog_recover_item {
 	struct list_head	ri_list;
-	int			ri_type;
 	int			ri_cnt;	/* count of regions found */
 	int			ri_total;	/* total regions */
 	xfs_log_iovec_t		*ri_buf;	/* ptr to regions buffer */
+	const struct xlog_recover_item_type *ri_type;
 } xlog_recover_item_t;
 
 struct xlog_recover {

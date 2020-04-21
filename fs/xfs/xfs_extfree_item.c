@@ -22,6 +22,7 @@
 #include "xfs_bmap.h"
 #include "xfs_trace.h"
 #include "xfs_error.h"
+#include "xfs_log_recover.h"
 
 kmem_zone_t	*xfs_efi_zone;
 kmem_zone_t	*xfs_efd_zone;
@@ -652,3 +653,9 @@ abort_error:
 	xfs_trans_cancel(tp);
 	return error;
 }
+
+const struct xlog_recover_item_type xlog_extfree_intent_item_type = {
+};
+
+const struct xlog_recover_item_type xlog_extfree_done_item_type = {
+};

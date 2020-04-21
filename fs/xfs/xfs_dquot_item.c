@@ -17,6 +17,8 @@
 #include "xfs_trans_priv.h"
 #include "xfs_qm.h"
 #include "xfs_log.h"
+#include "xfs_log_priv.h"
+#include "xfs_log_recover.h"
 
 static inline struct xfs_dq_logitem *DQUOT_ITEM(struct xfs_log_item *lip)
 {
@@ -383,3 +385,9 @@ xfs_qm_qoff_logitem_init(
 	qf->qql_flags = flags;
 	return qf;
 }
+
+const struct xlog_recover_item_type xlog_dquot_item_type = {
+};
+
+const struct xlog_recover_item_type xlog_quotaoff_item_type = {
+};

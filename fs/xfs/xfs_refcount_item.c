@@ -18,6 +18,7 @@
 #include "xfs_log.h"
 #include "xfs_refcount.h"
 #include "xfs_error.h"
+#include "xfs_log_recover.h"
 
 kmem_zone_t	*xfs_cui_zone;
 kmem_zone_t	*xfs_cud_zone;
@@ -590,3 +591,9 @@ abort_error:
 	xfs_trans_cancel(tp);
 	return error;
 }
+
+const struct xlog_recover_item_type xlog_refcount_intent_item_type = {
+};
+
+const struct xlog_recover_item_type xlog_refcount_done_item_type = {
+};

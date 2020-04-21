@@ -1786,6 +1786,57 @@ xlog_clear_stale_blocks(
  ******************************************************************************
  */
 
+static int
+xlog_set_item_type(
+	struct xlog_recover_item		*item)
+{
+	switch (ITEM_TYPE(item)) {
+	case XFS_LI_ICREATE:
+		item->ri_type = &xlog_icreate_item_type;
+		return 0;
+	case XFS_LI_BUF:
+		item->ri_type = &xlog_buf_item_type;
+		return 0;
+	case XFS_LI_EFI:
+		item->ri_type = &xlog_extfree_intent_item_type;
+		return 0;
+	case XFS_LI_EFD:
+		item->ri_type = &xlog_extfree_done_item_type;
+		return 0;
+	case XFS_LI_RUI:
+		item->ri_type = &xlog_rmap_intent_item_type;
+		return 0;
+	case XFS_LI_RUD:
+		item->ri_type = &xlog_rmap_done_item_type;
+		return 0;
+	case XFS_LI_CUI:
+		item->ri_type = &xlog_refcount_intent_item_type;
+		return 0;
+	case XFS_LI_CUD:
+		item->ri_type = &xlog_refcount_done_item_type;
+		return 0;
+	case XFS_LI_BUI:
+		item->ri_type = &xlog_bmap_intent_item_type;
+		return 0;
+	case XFS_LI_BUD:
+		item->ri_type = &xlog_bmap_done_item_type;
+		return 0;
+	case XFS_LI_INODE:
+		item->ri_type = &xlog_inode_item_type;
+		return 0;
+#ifdef CONFIG_XFS_QUOTA
+	case XFS_LI_DQUOT:
+		item->ri_type = &xlog_dquot_item_type;
+		return 0;
+	case XFS_LI_QUOTAOFF:
+		item->ri_type = &xlog_quotaoff_item_type;
+		return 0;
+#endif /* CONFIG_XFS_QUOTA */
+	default:
+		return -EFSCORRUPTED;
+	}
+}
+
 /*
  * Sort the log items in the transaction.
  *
@@ -1851,41 +1902,10 @@ xlog_recover_reorder_trans(
 
 	list_splice_init(&trans->r_itemq, &sort_list);
 	list_for_each_entry_safe(item, n, &sort_list, ri_list) {
-		xfs_buf_log_format_t	*buf_f = item->ri_buf[0].i_addr;
+		enum xlog_recover_reorder	fate = XLOG_REORDER_ITEM_LIST;
 
-		switch (ITEM_TYPE(item)) {
-		case XFS_LI_ICREATE:
-			list_move_tail(&item->ri_list, &buffer_list);
-			break;
-		case XFS_LI_BUF:
-			if (buf_f->blf_flags & XFS_BLF_CANCEL) {
-				trace_xfs_log_recover_item_reorder_head(log,
-							trans, item, pass);
-				list_move(&item->ri_list, &cancel_list);
-				break;
-			}
-			if (buf_f->blf_flags & XFS_BLF_INODE_BUF) {
-				list_move(&item->ri_list, &inode_buffer_list);
-				break;
-			}
-			list_move_tail(&item->ri_list, &buffer_list);
-			break;
-		case XFS_LI_INODE:
-		case XFS_LI_DQUOT:
-		case XFS_LI_QUOTAOFF:
-		case XFS_LI_EFD:
-		case XFS_LI_EFI:
-		case XFS_LI_RUI:
-		case XFS_LI_RUD:
-		case XFS_LI_CUI:
-		case XFS_LI_CUD:
-		case XFS_LI_BUI:
-		case XFS_LI_BUD:
-			trace_xfs_log_recover_item_reorder_tail(log,
-							trans, item, pass);
-			list_move_tail(&item->ri_list, &item_list);
-			break;
-		default:
+		error = xlog_set_item_type(item);
+		if (error) {
 			xfs_warn(log->l_mp,
 				"%s: unrecognized type of log operation (%d)",
 				__func__, ITEM_TYPE(item));
@@ -1896,11 +1916,32 @@ xlog_recover_reorder_trans(
 			 */
 			if (!list_empty(&sort_list))
 				list_splice_init(&sort_list, &trans->r_itemq);
-			error = -EIO;
-			goto out;
+			break;
+		}
+
+		if (item->ri_type->reorder_fn)
+			fate = item->ri_type->reorder_fn(item);
+
+		switch (fate) {
+		case XLOG_REORDER_BUFFER_LIST:
+			list_move_tail(&item->ri_list, &buffer_list);
+			break;
+		case XLOG_REORDER_CANCEL_LIST:
+			trace_xfs_log_recover_item_reorder_head(log,
+					trans, item, pass);
+			list_move(&item->ri_list, &cancel_list);
+			break;
+		case XLOG_REORDER_INODE_BUFFER_LIST:
+			list_move(&item->ri_list, &inode_buffer_list);
+			break;
+		case XLOG_REORDER_ITEM_LIST:
+			trace_xfs_log_recover_item_reorder_tail(log,
+							trans, item, pass);
+			list_move_tail(&item->ri_list, &item_list);
+			break;
 		}
 	}
-out:
+
 	ASSERT(list_empty(&sort_list));
 	if (!list_empty(&buffer_list))
 		list_splice(&buffer_list, &trans->r_itemq);
