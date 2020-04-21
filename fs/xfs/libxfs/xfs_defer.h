@@ -8,6 +8,7 @@
 
 struct xfs_btree_cur;
 struct xfs_defer_op_type;
+struct xfs_defer_freezer;
 
 /*
  * Header for deferred operation list.
@@ -62,5 +63,25 @@ extern const struct xfs_defer_op_type xfs_refcount_update_defer_type;
 extern const struct xfs_defer_op_type xfs_rmap_update_defer_type;
 extern const struct xfs_defer_op_type xfs_extent_free_defer_type;
 extern const struct xfs_defer_op_type xfs_agfl_free_defer_type;
+
+/*
+ * Deferred operation freezer.  This structure enables a dfops user to detach
+ * the chain of deferred operations from a transaction so that they can be
+ * run later.
+ */
+struct xfs_defer_freezer {
+	/* List of other freezer heads. */
+	struct list_head	dff_list;
+
+	/* Deferred ops state saved from the transaction. */
+	struct list_head	dff_dfops;
+	unsigned int		dff_tpflags;
+};
+
+/* Functions to freeze a chain of deferred operations for later. */
+int xfs_defer_freeze(struct xfs_trans *tp, struct xfs_defer_freezer **dffp);
+int xfs_defer_thaw(struct xfs_defer_freezer *dff, struct xfs_trans *tp);
+void xfs_defer_freeezer_finish(struct xfs_mount *mp,
+		struct xfs_defer_freezer *dff);
 
 #endif /* __XFS_DEFER_H__ */

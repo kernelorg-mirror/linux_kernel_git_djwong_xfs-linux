@@ -544,3 +544,60 @@ xfs_defer_move(
 
 	xfs_defer_reset(stp);
 }
+
+/*
+ * Freeze a chain of deferred ops that are attached to a transaction.  The
+ * entire deferred ops state is transferred to the freezer, and each dfops
+ * item will be prepared for freezing.
+ */
+int
+xfs_defer_freeze(
+	struct xfs_trans		*tp,
+	struct xfs_defer_freezer	**dffp)
+{
+	struct xfs_defer_freezer	*dff;
+
+	*dffp = NULL;
+	if (list_empty(&tp->t_dfops))
+		return 0;
+
+	dff = kmem_zalloc(sizeof(*dff), KM_NOFS);
+	if (!dff)
+		return -ENOMEM;
+
+	INIT_LIST_HEAD(&dff->dff_list);
+	INIT_LIST_HEAD(&dff->dff_dfops);
+
+	/* Move all the dfops items to the freezer. */
+	list_splice_init(&tp->t_dfops, &dff->dff_dfops);
+	dff->dff_tpflags = tp->t_flags & XFS_TRANS_LOWMODE;
+	xfs_defer_reset(tp);
+
+	*dffp = dff;
+	return 0;
+}
+
+/* Thaw a chain of deferred ops that are attached to a transaction. */
+int
+xfs_defer_thaw(
+	struct xfs_defer_freezer	*dff,
+	struct xfs_trans		*tp)
+{
+	ASSERT(tp->t_flags & XFS_TRANS_PERM_LOG_RES);
+
+	/* Add the dfops items to the transaction. */
+	list_splice_init(&dff->dff_dfops, &tp->t_dfops);
+	tp->t_flags |= dff->dff_tpflags;
+
+	return 0;
+}
+
+/* Release a deferred op freezer and all resources associated with it. */
+void
+xfs_defer_freeezer_finish(
+	struct xfs_mount		*mp,
+	struct xfs_defer_freezer	*dff)
+{
+	xfs_defer_cancel_list(mp, &dff->dff_dfops);
+	kmem_free(dff);
+}
