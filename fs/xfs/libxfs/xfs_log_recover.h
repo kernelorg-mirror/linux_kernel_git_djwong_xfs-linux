@@ -29,6 +29,9 @@ struct xlog_recover_item_type {
 	 * values mean.
 	 */
 	enum xlog_recover_reorder (*reorder_fn)(struct xlog_recover_item *item);
+
+	/* Start readahead for pass2, if provided. */
+	void (*ra_pass2_fn)(struct xlog *log, struct xlog_recover_item *item);
 };
 
 extern const struct xlog_recover_item_type xlog_icreate_item_type;
@@ -89,5 +92,8 @@ struct xlog_recover {
 #define	XLOG_RECOVER_CRCPASS	0
 #define	XLOG_RECOVER_PASS1	1
 #define	XLOG_RECOVER_PASS2	2
+
+void xlog_buf_readahead(struct xlog *log, xfs_daddr_t blkno, uint len,
+		const struct xfs_buf_ops *ops);
 
 #endif	/* __XFS_LOG_RECOVER_H__ */
