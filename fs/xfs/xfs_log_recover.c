@@ -1792,6 +1792,26 @@ xlog_recover_release_intent(
 	spin_unlock(&ailp->ail_lock);
 }
 
+/*
+ * Freeze any deferred ops and commit the transaction.  This is the last step
+ * needed to finish a log intent item that we recovered from the log.
+ */
+int
+xlog_recover_trans_commit(
+	struct xfs_trans		*tp,
+	struct xfs_defer_capture	**dfcp)
+{
+	int				error;
+
+	error = xfs_defer_capture(tp, dfcp);
+	if (error) {
+		xfs_trans_cancel(tp);
+		return error;
+	}
+
+	return xfs_trans_commit(tp);
+}
+
 /******************************************************************************
  *
  *		Log recover routines
@@ -2471,35 +2491,54 @@ xlog_recover_process_data(
 /* Take all the collected deferred ops and finish them in order. */
 static int
 xlog_finish_defer_ops(
-	struct xfs_trans	*parent_tp)
+	struct xfs_mount	*mp,
+	struct list_head	*dfops_freezers)
 {
-	struct xfs_mount	*mp = parent_tp->t_mountp;
+	struct xfs_defer_capture *dfc, *next;
 	struct xfs_trans	*tp;
 	int64_t			freeblks;
-	uint			resblks;
-	int			error;
+	uint64_t		resblks;
+	int			error = 0;
 
-	/*
-	 * We're finishing the defer_ops that accumulated as a result of
-	 * recovering unfinished intent items during log recovery.  We
-	 * reserve an itruncate transaction because it is the largest
-	 * permanent transaction type.  Since we're the only user of the fs
-	 * right now, take 93% (15/16) of the available free blocks.  Use
-	 * weird math to avoid a 64-bit division.
-	 */
-	freeblks = percpu_counter_sum(&mp->m_fdblocks);
-	if (freeblks <= 0)
-		return -ENOSPC;
-	resblks = min_t(int64_t, UINT_MAX, freeblks);
-	resblks = (resblks * 15) >> 4;
-	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_itruncate, resblks,
-			0, XFS_TRANS_RESERVE, &tp);
-	if (error)
-		return error;
-	/* transfer all collected dfops to this transaction */
-	xfs_defer_move(tp, parent_tp);
+	list_for_each_entry_safe(dfc, next, dfops_freezers, dfc_list) {
+		/*
+		 * We're finishing the defer_ops that accumulated as a result
+		 * of recovering unfinished intent items during log recovery.
+		 * We reserve an itruncate transaction because it is the
+		 * largest permanent transaction type.  Since we're the only
+		 * user of the fs right now, take 93% (15/16) of the available
+		 * free blocks.  Use weird math to avoid a 64-bit division.
+		 */
+		freeblks = percpu_counter_sum(&mp->m_fdblocks);
+		if (freeblks <= 0) {
+			error = -ENOSPC;
+			break;
+		}
 
-	return xfs_trans_commit(tp);
+		resblks = min_t(uint64_t, UINT_MAX, freeblks);
+		resblks = (resblks * 15) >> 4;
+		error = xfs_trans_alloc(mp, &M_RES(mp)->tr_itruncate, resblks,
+				0, XFS_TRANS_RESERVE, &tp);
+		if (error)
+			break;
+
+		/* transfer all collected dfops to this transaction */
+		list_del_init(&dfc->dfc_list);
+		xfs_defer_continue(dfc, tp);
+
+		error = xfs_trans_commit(tp);
+		xfs_defer_capture_free(mp, dfc);
+		if (error)
+			break;
+	}
+
+	/* Kill any remaining freezers. */
+	list_for_each_entry_safe(dfc, next, dfops_freezers, dfc_list) {
+		list_del_init(&dfc->dfc_list);
+		xfs_defer_capture_free(mp, dfc);
+	}
+
+	return error;
 }
 
 /* Is this log item a deferred action intent? */
@@ -2529,27 +2568,15 @@ STATIC int
 xlog_recover_process_intents(
 	struct xlog		*log)
 {
-	struct xfs_trans	*parent_tp;
+	LIST_HEAD(dfops_freezers);
 	struct xfs_ail_cursor	cur;
+	struct xfs_defer_capture *freezer = NULL;
 	struct xfs_log_item	*lip;
 	struct xfs_ail		*ailp;
 	int			error;
 #if defined(DEBUG) || defined(XFS_WARN)
 	xfs_lsn_t		last_lsn;
 #endif
-
-	/*
-	 * The intent recovery handlers commit transactions to complete recovery
-	 * for individual intents, but any new deferred operations that are
-	 * queued during that process are held off until the very end. The
-	 * purpose of this transaction is to serve as a container for deferred
-	 * operations. Each intent recovery handler must transfer dfops here
-	 * before its local transaction commits, and we'll finish the entire
-	 * list below.
-	 */
-	error = xfs_trans_alloc_empty(log->l_mp, &parent_tp);
-	if (error)
-		return error;
 
 	ailp = log->l_ailp;
 	spin_lock(&ailp->ail_lock);
@@ -2579,27 +2606,31 @@ xlog_recover_process_intents(
 
 		/*
 		 * NOTE: If your intent processing routine can create more
-		 * deferred ops, you /must/ attach them to the transaction in
+		 * deferred ops, you /must/ attach them to the freezer in
 		 * this routine or else those subsequent intents will get
 		 * replayed in the wrong order!
 		 */
 		if (!test_and_set_bit(XFS_LI_RECOVERED, &lip->li_flags)) {
 			spin_unlock(&ailp->ail_lock);
-			error = lip->li_ops->iop_recover(lip, parent_tp);
+			error = lip->li_ops->iop_recover(lip, &freezer);
 			spin_lock(&ailp->ail_lock);
 		}
 		if (error)
 			goto out;
+		if (freezer) {
+			list_add_tail(&freezer->dfc_list, &dfops_freezers);
+			freezer = NULL;
+		}
+
 		lip = xfs_trans_ail_cursor_next(ailp, &cur);
 	}
 out:
 	xfs_trans_ail_cursor_done(&cur);
 	spin_unlock(&ailp->ail_lock);
-	if (!error)
-		error = xlog_finish_defer_ops(parent_tp);
-	xfs_trans_cancel(parent_tp);
+	if (error)
+		return error;
 
-	return error;
+	return xlog_finish_defer_ops(log->l_mp, &dfops_freezers);
 }
 
 /*
