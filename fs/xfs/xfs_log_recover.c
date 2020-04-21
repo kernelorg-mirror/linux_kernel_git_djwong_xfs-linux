@@ -1975,7 +1975,7 @@ xlog_find_buffer_cancelled(
 	return NULL;
 }
 
-static bool
+bool
 xlog_add_buffer_cancelled(
 	struct xlog		*log,
 	xfs_daddr_t		blkno,
@@ -2054,32 +2054,6 @@ xlog_buf_readahead(
 {
 	if (!xlog_is_buffer_cancelled(log, blkno, len))
 		xfs_buf_readahead(log->l_mp->m_ddev_targp, blkno, len, ops);
-}
-
-/*
- * Build up the table of buf cancel records so that we don't replay cancelled
- * data in the second pass.
- */
-static int
-xlog_recover_buffer_pass1(
-	struct xlog			*log,
-	struct xlog_recover_item	*item)
-{
-	struct xfs_buf_log_format	*bf = item->ri_buf[0].i_addr;
-
-	if (!xfs_buf_log_check_iovec(&item->ri_buf[0])) {
-		xfs_err(log->l_mp, "bad buffer log item size (%d)",
-				item->ri_buf[0].i_len);
-		return -EFSCORRUPTED;
-	}
-
-	if (!(bf->blf_flags & XFS_BLF_CANCEL))
-		trace_xfs_log_recover_buf_not_cancel(log, bf);
-	else if (xlog_add_buffer_cancelled(log, bf->blf_blkno, bf->blf_len))
-		trace_xfs_log_recover_buf_cancel_add(log, bf);
-	else
-		trace_xfs_log_recover_buf_cancel_ref_inc(log, bf);
-	return 0;
 }
 
 /*
@@ -3220,33 +3194,6 @@ error:
 }
 
 /*
- * Recover QUOTAOFF records. We simply make a note of it in the xlog
- * structure, so that we know not to do any dquot item or dquot buffer recovery,
- * of that type.
- */
-STATIC int
-xlog_recover_quotaoff_pass1(
-	struct xlog			*log,
-	struct xlog_recover_item	*item)
-{
-	xfs_qoff_logformat_t	*qoff_f = item->ri_buf[0].i_addr;
-	ASSERT(qoff_f);
-
-	/*
-	 * The logitem format's flag tells us if this was user quotaoff,
-	 * group/project quotaoff or both.
-	 */
-	if (qoff_f->qf_flags & XFS_UQUOTA_ACCT)
-		log->l_quotaoffs_flag |= XFS_DQ_USER;
-	if (qoff_f->qf_flags & XFS_PQUOTA_ACCT)
-		log->l_quotaoffs_flag |= XFS_DQ_PROJ;
-	if (qoff_f->qf_flags & XFS_GQUOTA_ACCT)
-		log->l_quotaoffs_flag |= XFS_DQ_GROUP;
-
-	return 0;
-}
-
-/*
  * Recover a dquot record
  */
 STATIC int
@@ -3920,30 +3867,15 @@ xlog_recover_commit_pass1(
 {
 	trace_xfs_log_recover_item_recover(log, trans, item, XLOG_RECOVER_PASS1);
 
-	switch (ITEM_TYPE(item)) {
-	case XFS_LI_BUF:
-		return xlog_recover_buffer_pass1(log, item);
-	case XFS_LI_QUOTAOFF:
-		return xlog_recover_quotaoff_pass1(log, item);
-	case XFS_LI_INODE:
-	case XFS_LI_EFI:
-	case XFS_LI_EFD:
-	case XFS_LI_DQUOT:
-	case XFS_LI_ICREATE:
-	case XFS_LI_RUI:
-	case XFS_LI_RUD:
-	case XFS_LI_CUI:
-	case XFS_LI_CUD:
-	case XFS_LI_BUI:
-	case XFS_LI_BUD:
-		/* nothing to do in pass 1 */
-		return 0;
-	default:
+	if (!item->ri_type) {
 		xfs_warn(log->l_mp, "%s: invalid item type (%d)",
 			__func__, ITEM_TYPE(item));
 		ASSERT(0);
 		return -EFSCORRUPTED;
 	}
+	if (!item->ri_type->commit_pass1_fn)
+		return 0;
+	return item->ri_type->commit_pass1_fn(log, item);
 }
 
 STATIC int
