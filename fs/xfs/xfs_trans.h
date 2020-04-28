@@ -77,6 +77,7 @@ struct xfs_item_ops {
 	void (*iop_release)(struct xfs_log_item *);
 	xfs_lsn_t (*iop_committed)(struct xfs_log_item *, xfs_lsn_t);
 	void (*iop_error)(struct xfs_log_item *, xfs_buf_t *);
+	int (*iop_recover)(struct xfs_log_item *lip, struct xfs_trans *tp);
 };
 
 /*
@@ -84,6 +85,9 @@ struct xfs_item_ops {
  * intents that never need to be written back in place.
  */
 #define XFS_ITEM_RELEASE_WHEN_COMMITTED	(1 << 0)
+
+/* This log item type is an intent log item. */
+#define XFS_ITEM_TYPE_IS_INTENT		(1 << 1)
 
 void	xfs_log_item_init(struct xfs_mount *mp, struct xfs_log_item *item,
 			  int type, const struct xfs_item_ops *ops);
