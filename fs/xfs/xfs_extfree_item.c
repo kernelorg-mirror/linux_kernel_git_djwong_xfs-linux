@@ -28,7 +28,7 @@
 kmem_zone_t	*xfs_efi_zone;
 kmem_zone_t	*xfs_efd_zone;
 
-STATIC int xfs_efi_recover(struct xfs_mount *mp, struct xfs_efi_log_item *efip);
+STATIC int xfs_efi_item_recover(struct xfs_log_item *lip, struct xfs_trans *tp);
 
 static inline struct xfs_efi_log_item *EFI_ITEM(struct xfs_log_item *lip)
 {
@@ -141,30 +141,6 @@ xfs_efi_item_release(
 	struct xfs_log_item	*lip)
 {
 	xfs_efi_release(EFI_ITEM(lip));
-}
-
-/* Recover the EFI if necessary. */
-STATIC int
-xfs_efi_item_recover(
-	struct xfs_log_item		*lip,
-	struct xfs_trans		*tp)
-{
-	struct xfs_ail			*ailp = lip->li_ailp;
-	struct xfs_efi_log_item		*efip;
-	int				error;
-
-	/*
-	 * Skip EFIs that we've already processed.
-	 */
-	efip = container_of(lip, struct xfs_efi_log_item, efi_item);
-	if (test_bit(XFS_LI_RECOVERED, &efip->efi_item.li_flags))
-		return 0;
-
-	spin_unlock(&ailp->ail_lock);
-	error = xfs_efi_recover(tp->t_mountp, efip);
-	spin_lock(&ailp->ail_lock);
-
-	return error;
 }
 
 static const struct xfs_item_ops xfs_efi_item_ops = {
@@ -623,16 +599,18 @@ const struct xfs_defer_op_type xfs_agfl_free_defer_type = {
  * the log.  We need to free the extents that it describes.
  */
 STATIC int
-xfs_efi_recover(
-	struct xfs_mount	*mp,
-	struct xfs_efi_log_item	*efip)
+xfs_efi_item_recover(
+	struct xfs_log_item		*lip,
+	struct xfs_trans		*parent_tp)
 {
-	struct xfs_efd_log_item	*efdp;
-	struct xfs_trans	*tp;
-	int			i;
-	int			error = 0;
-	xfs_extent_t		*extp;
-	xfs_fsblock_t		startblock_fsb;
+	struct xfs_efi_log_item		*efip = EFI_ITEM(lip);
+	struct xfs_mount		*mp = parent_tp->t_mountp;
+	struct xfs_efd_log_item		*efdp;
+	struct xfs_trans		*tp;
+	struct xfs_extent		*extp;
+	xfs_fsblock_t			startblock_fsb;
+	int				i;
+	int				error = 0;
 
 	ASSERT(!test_bit(XFS_LI_RECOVERED, &efip->efi_item.li_flags));
 
