@@ -12,6 +12,7 @@
 #include "xfs_sb.h"
 #include "xfs_mount.h"
 #include "xfs_inode.h"
+#include "xfs_defer.h"
 #include "xfs_trans.h"
 #include "xfs_trans_priv.h"
 #include "xfs_inode_item.h"
@@ -1846,4 +1847,22 @@ xfs_start_block_reaping(
 {
 	xfs_queue_eofblocks(mp);
 	xfs_queue_cowblocks(mp);
+}
+
+/* Release all the inode resources attached to this freezer. */
+void
+xfs_defer_freezer_irele(
+	struct xfs_defer_freezer	*dff)
+{
+	unsigned int			i;
+
+	for (i = 0; i < XFS_DEFER_FREEZER_INODES; i++) {
+		if (!dff->dff_inodes[i])
+			break;
+
+		if (dff->dff_ilocks[i])
+			xfs_iunlock(dff->dff_inodes[i], dff->dff_ilocks[i]);
+		xfs_irele(dff->dff_inodes[i]);
+		dff->dff_inodes[i] = NULL;
+	}
 }

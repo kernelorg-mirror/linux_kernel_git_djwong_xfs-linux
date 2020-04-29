@@ -530,12 +530,13 @@ xfs_bui_item_recover(
 	}
 
 	error = xlog_recover_trans_commit(tp, dffp);
-	xfs_iunlock(ip, XFS_ILOCK_EXCL);
-	xfs_irele(ip);
-	return error;
+	if (error)
+		goto err_rele;
+	return xfs_defer_freezer_ijoin(*dffp, ip);
 
 err_inode:
 	xfs_trans_cancel(tp);
+err_rele:
 	if (ip) {
 		xfs_iunlock(ip, XFS_ILOCK_EXCL);
 		xfs_irele(ip);
