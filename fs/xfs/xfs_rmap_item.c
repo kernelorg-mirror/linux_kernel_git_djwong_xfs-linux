@@ -139,7 +139,7 @@ xfs_rui_item_recover(
 	/*
 	 * Skip RUIs that we've already processed.
 	 */
-	if (test_bit(XFS_RUI_RECOVERED, &ruip->rui_flags))
+	if (test_bit(XFS_LI_RECOVERED, &ruip->rui_item.li_flags))
 		return 0;
 
 	spin_unlock(&ailp->ail_lock);
@@ -533,7 +533,7 @@ xfs_rui_recover(
 	struct xfs_trans		*tp;
 	struct xfs_btree_cur		*rcur = NULL;
 
-	ASSERT(!test_bit(XFS_RUI_RECOVERED, &ruip->rui_flags));
+	ASSERT(!test_bit(XFS_LI_RECOVERED, &ruip->rui_item.li_flags));
 
 	/*
 	 * First check the validity of the extents described by the
@@ -568,7 +568,7 @@ xfs_rui_recover(
 			 * This will pull the RUI from the AIL and
 			 * free the memory associated with it.
 			 */
-			set_bit(XFS_RUI_RECOVERED, &ruip->rui_flags);
+			set_bit(XFS_LI_RECOVERED, &ruip->rui_item.li_flags);
 			xfs_rui_release(ruip);
 			return -EFSCORRUPTED;
 		}
@@ -626,7 +626,7 @@ xfs_rui_recover(
 	}
 
 	xfs_rmap_finish_one_cleanup(tp, rcur, error);
-	set_bit(XFS_RUI_RECOVERED, &ruip->rui_flags);
+	set_bit(XFS_LI_RECOVERED, &ruip->rui_item.li_flags);
 	error = xfs_trans_commit(tp);
 	return error;
 
