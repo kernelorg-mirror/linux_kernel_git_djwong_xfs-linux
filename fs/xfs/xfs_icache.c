@@ -12,6 +12,7 @@
 #include "xfs_sb.h"
 #include "xfs_mount.h"
 #include "xfs_inode.h"
+#include "xfs_defer.h"
 #include "xfs_trans.h"
 #include "xfs_trans_priv.h"
 #include "xfs_inode_item.h"
@@ -1846,4 +1847,22 @@ xfs_start_block_reaping(
 {
 	xfs_queue_eofblocks(mp);
 	xfs_queue_cowblocks(mp);
+}
+
+/* Release all the inode resources attached to this dfops capture device. */
+void
+xfs_defer_capture_irele(
+	struct xfs_defer_capture	*dfc)
+{
+	unsigned int			i;
+
+	for (i = 0; i < XFS_DEFER_CAPTURE_INODES; i++) {
+		if (!dfc->dfc_inodes[i])
+			break;
+
+		if (dfc->dfc_ilocks[i])
+			xfs_iunlock(dfc->dfc_inodes[i], dfc->dfc_ilocks[i]);
+		xfs_irele(dfc->dfc_inodes[i]);
+		dfc->dfc_inodes[i] = NULL;
+	}
 }
