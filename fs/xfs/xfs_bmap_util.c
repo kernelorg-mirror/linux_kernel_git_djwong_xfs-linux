@@ -1358,6 +1358,8 @@ xfs_swap_extent_rmap(
 
 		/* Unmap the old blocks in the source file. */
 		while (tirec.br_blockcount) {
+			int64_t		ip_delta = 0, tip_delta = 0;
+
 			ASSERT(tp->t_firstblock == NULLFSBLOCK);
 			trace_xfs_swap_extent_rmap_remap_piece(tip, &tirec);
 
@@ -1387,6 +1389,23 @@ xfs_swap_extent_rmap(
 					tirec.br_blockcount,
 					irec.br_blockcount);
 			trace_xfs_swap_extent_rmap_remap_piece(tip, &uirec);
+
+			/* Update quota accounting. */
+			if (xfs_bmap_is_mapped_extent(&irec)) {
+				tip_delta += irec.br_blockcount;
+				ip_delta -= irec.br_blockcount;
+			}
+			if (xfs_bmap_is_mapped_extent(&uirec)) {
+				tip_delta -= uirec.br_blockcount;
+				ip_delta += uirec.br_blockcount;
+			}
+
+			if (tip_delta)
+				xfs_trans_mod_dquot_byino(tp, tip,
+						XFS_TRANS_DQ_BCOUNT, tip_delta);
+			if (ip_delta)
+				xfs_trans_mod_dquot_byino(tp, ip,
+						XFS_TRANS_DQ_BCOUNT, ip_delta);
 
 			/* Remove the mapping from the donor file. */
 			xfs_bmap_unmap_extent(tp, tip, &uirec);
@@ -1435,6 +1454,7 @@ xfs_swap_extent_forks(
 {
 	xfs_filblks_t		aforkblks = 0;
 	xfs_filblks_t		taforkblks = 0;
+	int64_t			temp_blks;
 	xfs_extnum_t		junk;
 	uint64_t		tmp;
 	int			error;
@@ -1475,6 +1495,15 @@ xfs_swap_extent_forks(
 	 * Swap the data forks of the inodes
 	 */
 	swap(ip->i_df, tip->i_df);
+
+	/* Update quota accounting. */
+	temp_blks = tip->i_d.di_nblocks - taforkblks + aforkblks;
+	xfs_trans_mod_dquot_byino(tp, ip, XFS_TRANS_DQ_BCOUNT,
+			temp_blks - ip->i_d.di_nblocks);
+
+	temp_blks = ip->i_d.di_nblocks + taforkblks - aforkblks;
+	xfs_trans_mod_dquot_byino(tp, tip, XFS_TRANS_DQ_BCOUNT,
+			temp_blks - tip->i_d.di_nblocks);
 
 	/*
 	 * Fix the on-disk inode values
@@ -1564,6 +1593,93 @@ xfs_swap_change_owner(
 	} while (true);
 
 	return error;
+}
+
+/*
+ * Obtain a quota reservation to make sure we don't hit EDQUOT.  We can skip
+ * this if quota enforcement is disabled or if both inodes' dquots are the
+ * same.
+ */
+STATIC int
+xfs_swap_extents_prep_quota(
+	struct xfs_trans	*tp,
+	struct xfs_inode	*ip,
+	struct xfs_inode	*tip)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	xfs_filblks_t		aforkblks = 0;
+	xfs_filblks_t		taforkblks = 0;
+	xfs_filblks_t		ip_mapped, tip_mapped;
+	xfs_extnum_t		junk;
+	int			error;
+
+	/*
+	 * Don't bother with a quota reservation if we're not enforcing them
+	 * or the two inodes have the same dquots.
+	 */
+	if (!(mp->m_qflags & XFS_ALL_QUOTA_ENFD) ||
+	    (ip->i_udquot == tip->i_udquot &&
+	     ip->i_gdquot == tip->i_gdquot &&
+	     ip->i_pdquot == tip->i_pdquot))
+		return 0;
+
+	/*
+	 * Count the number of extended attribute blocks
+	 */
+	if ( ((XFS_IFORK_Q(ip) != 0) && (ip->i_d.di_anextents > 0)) &&
+	     (ip->i_d.di_aformat != XFS_DINODE_FMT_LOCAL)) {
+		error = xfs_bmap_count_blocks(tp, ip, XFS_ATTR_FORK, &junk,
+				&aforkblks);
+		if (error)
+			return error;
+	}
+	if ( ((XFS_IFORK_Q(tip) != 0) && (tip->i_d.di_anextents > 0)) &&
+	     (tip->i_d.di_aformat != XFS_DINODE_FMT_LOCAL)) {
+		error = xfs_bmap_count_blocks(tp, tip, XFS_ATTR_FORK, &junk,
+				&taforkblks);
+		if (error)
+			return error;
+	}
+
+	/* Figure out how many blocks we'll move out of each file. */
+	ip_mapped = ip->i_d.di_nblocks - aforkblks;
+	tip_mapped = tip->i_d.di_nblocks - taforkblks;
+
+	/*
+	 * For each file, compute the net gain in the number of blocks that
+	 * will be mapped into that file and reserve that much quota.  The
+	 * quota counts must be able to absorb at least that much space.
+	 */
+	if (tip_mapped > ip_mapped) {
+		error = xfs_trans_reserve_quota_nblks(tp, ip,
+				tip_mapped - ip_mapped, 0,
+				XFS_QMOPT_RES_REGBLKS);
+		if (error)
+			return error;
+	}
+
+	if (ip_mapped > tip_mapped) {
+		error = xfs_trans_reserve_quota_nblks(tp, tip,
+				ip_mapped - tip_mapped, 0,
+				XFS_QMOPT_RES_REGBLKS);
+		if (error)
+			return error;
+	}
+
+	/*
+	 * For each file, forcibly reserve the gross gain in mapped blocks so
+	 * that we don't trip over any quota block reservation assertions.
+	 * We must reserve the gross gain because the quota code subtracts from
+	 * bcount the number of blocks that we unmap; it does not add that
+	 * quantity back to the quota block reservation.
+	 */
+	error = xfs_trans_reserve_quota_nblks(tp, ip, ip_mapped, 0,
+			XFS_QMOPT_FORCE_RES | XFS_QMOPT_RES_REGBLKS);
+	if (error)
+		return error;
+
+	return xfs_trans_reserve_quota_nblks(tp, tip, tip_mapped, 0,
+			XFS_QMOPT_FORCE_RES | XFS_QMOPT_RES_REGBLKS);
 }
 
 int
@@ -1701,6 +1817,15 @@ xfs_swap_extents(
 		error = -EBUSY;
 		goto out_trans_cancel;
 	}
+
+	/*
+	 * Reserve ourselves some quota if any of them are in enforcing mode.
+	 * In theory we only need enough to satisfy the change in the number
+	 * of blocks between the two ranges being remapped.
+	 */
+	error = xfs_swap_extents_prep_quota(tp, ip, tip);
+	if (error)
+		goto out_trans_cancel;
 
 	/*
 	 * Note the trickiness in setting the log flags - we set the owner log
