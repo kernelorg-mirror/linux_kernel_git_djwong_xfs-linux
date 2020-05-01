@@ -144,52 +144,61 @@ xlog_recover_process_one_iunlink(
  * scheduled on this CPU to ensure other scheduled work can run without undue
  * latency.
  */
+STATIC void
+xlog_recover_process_ag_iunlinked(
+	struct xfs_mount	*mp,
+	xfs_agnumber_t		agno)
+{
+	struct xfs_agi		*agi;
+	struct xfs_buf		*agibp;
+	xfs_agino_t		agino;
+	int			bucket;
+	int			error;
+
+	/*
+	 * Find the agi for this ag.
+	 */
+	error = xfs_read_agi(mp, NULL, agno, &agibp);
+	if (error) {
+		/*
+		 * AGI is b0rked. Don't process it.
+		 *
+		 * We should probably mark the filesystem as corrupt
+		 * after we've recovered all the ag's we can....
+		 */
+		return;
+	}
+
+	/*
+	 * Unlock the buffer so that it can be acquired in the normal
+	 * course of the transaction to truncate and free each inode.
+	 * Because we are not racing with anyone else here for the AGI
+	 * buffer, we don't even need to hold it locked to read the
+	 * initial unlinked bucket entries out of the buffer. We keep
+	 * buffer reference though, so that it stays pinned in memory
+	 * while we need the buffer.
+	 */
+	agi = agibp->b_addr;
+	xfs_buf_unlock(agibp);
+
+	for (bucket = 0; bucket < XFS_AGI_UNLINKED_BUCKETS; bucket++) {
+		agino = be32_to_cpu(agi->agi_unlinked[bucket]);
+		while (agino != NULLAGINO) {
+			agino = xlog_recover_process_one_iunlink(mp,
+						agno, agino, bucket);
+			cond_resched();
+		}
+	}
+	xfs_buf_rele(agibp);
+}
+
 void
 xlog_recover_process_unlinked(
 	struct xlog		*log)
 {
 	struct xfs_mount	*mp = log->l_mp;
-	struct xfs_agi		*agi;
-	struct xfs_buf		*agibp;
 	xfs_agnumber_t		agno;
-	xfs_agino_t		agino;
-	int			bucket;
-	int			error;
 
-	for (agno = 0; agno < mp->m_sb.sb_agcount; agno++) {
-		/*
-		 * Find the agi for this ag.
-		 */
-		error = xfs_read_agi(mp, NULL, agno, &agibp);
-		if (error) {
-			/*
-			 * AGI is b0rked. Don't process it.
-			 *
-			 * We should probably mark the filesystem as corrupt
-			 * after we've recovered all the ag's we can....
-			 */
-			continue;
-		}
-		/*
-		 * Unlock the buffer so that it can be acquired in the normal
-		 * course of the transaction to truncate and free each inode.
-		 * Because we are not racing with anyone else here for the AGI
-		 * buffer, we don't even need to hold it locked to read the
-		 * initial unlinked bucket entries out of the buffer. We keep
-		 * buffer reference though, so that it stays pinned in memory
-		 * while we need the buffer.
-		 */
-		agi = agibp->b_addr;
-		xfs_buf_unlock(agibp);
-
-		for (bucket = 0; bucket < XFS_AGI_UNLINKED_BUCKETS; bucket++) {
-			agino = be32_to_cpu(agi->agi_unlinked[bucket]);
-			while (agino != NULLAGINO) {
-				agino = xlog_recover_process_one_iunlink(mp,
-							agno, agino, bucket);
-				cond_resched();
-			}
-		}
-		xfs_buf_rele(agibp);
-	}
+	for (agno = 0; agno < mp->m_sb.sb_agcount; agno++)
+		xlog_recover_process_ag_iunlinked(mp, agno);
 }
