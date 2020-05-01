@@ -2553,46 +2553,6 @@ xlog_recover_process_data(
 	return 0;
 }
 
-/* Recover the EFI if necessary. */
-STATIC int
-xlog_recover_process_efi(
-	struct xfs_mount		*mp,
-	struct xfs_ail			*ailp,
-	struct xfs_log_item		*lip)
-{
-	struct xfs_efi_log_item		*efip;
-	int				error;
-
-	/*
-	 * Skip EFIs that we've already processed.
-	 */
-	efip = container_of(lip, struct xfs_efi_log_item, efi_item);
-	if (test_bit(XFS_EFI_RECOVERED, &efip->efi_flags))
-		return 0;
-
-	spin_unlock(&ailp->ail_lock);
-	error = xfs_efi_recover(mp, efip);
-	spin_lock(&ailp->ail_lock);
-
-	return error;
-}
-
-/* Release the EFI since we're cancelling everything. */
-STATIC void
-xlog_recover_cancel_efi(
-	struct xfs_mount		*mp,
-	struct xfs_ail			*ailp,
-	struct xfs_log_item		*lip)
-{
-	struct xfs_efi_log_item		*efip;
-
-	efip = container_of(lip, struct xfs_efi_log_item, efi_item);
-
-	spin_unlock(&ailp->ail_lock);
-	xfs_efi_release(efip);
-	spin_lock(&ailp->ail_lock);
-}
-
 /* Recover the RUI if necessary. */
 STATIC int
 xlog_recover_process_rui(
@@ -2837,7 +2797,7 @@ xlog_recover_process_intents(
 		 */
 		switch (lip->li_type) {
 		case XFS_LI_EFI:
-			error = xlog_recover_process_efi(log->l_mp, ailp, lip);
+			error = lip->li_ops->iop_recover(lip, parent_tp);
 			break;
 		case XFS_LI_RUI:
 			error = xlog_recover_process_rui(log->l_mp, ailp, lip);
@@ -2893,7 +2853,9 @@ xlog_recover_cancel_intents(
 
 		switch (lip->li_type) {
 		case XFS_LI_EFI:
-			xlog_recover_cancel_efi(log->l_mp, ailp, lip);
+			spin_unlock(&ailp->ail_lock);
+			lip->li_ops->iop_release(lip);
+			spin_lock(&ailp->ail_lock);
 			break;
 		case XFS_LI_RUI:
 			xlog_recover_cancel_rui(log->l_mp, ailp, lip);
