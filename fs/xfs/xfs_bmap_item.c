@@ -651,15 +651,7 @@ xlog_recover_bmap_intent_commit_pass2(
 		return error;
 	}
 	atomic_set(&buip->bui_next_extent, bui_formatp->bui_nextents);
-
-	spin_lock(&log->l_ailp->ail_lock);
-	/*
-	 * The RUI has two references. One for the RUD and one for RUI to ensure
-	 * it makes it into the AIL. Insert the RUI into the AIL directly and
-	 * drop the RUI reference. Note that xfs_trans_ail_update() drops the
-	 * AIL lock.
-	 */
-	xfs_trans_ail_update(log->l_ailp, &buip->bui_item, lsn);
+	xlog_recover_insert_ail(log, &buip->bui_item, lsn);
 	xfs_bui_release(buip);
 	return 0;
 }
