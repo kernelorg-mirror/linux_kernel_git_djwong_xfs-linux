@@ -3386,7 +3386,12 @@ xlog_recover_finish(
 		 */
 		xfs_log_force(log->l_mp, XFS_LOG_SYNC);
 
-		xlog_recover_process_unlinked(log);
+		error = xlog_recover_process_unlinked(log);
+		if (error) {
+			xfs_alert(log->l_mp,
+					"Failed to recover unlinked metadata");
+			return error;
+		}
 
 		xlog_recover_check_summary(log);
 

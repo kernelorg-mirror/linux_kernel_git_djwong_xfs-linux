@@ -144,7 +144,7 @@ xlog_recover_process_one_iunlink(
  * scheduled on this CPU to ensure other scheduled work can run without undue
  * latency.
  */
-STATIC void
+STATIC int
 xlog_recover_process_ag_iunlinked(
 	struct xfs_mount	*mp,
 	xfs_agnumber_t		agno)
@@ -166,7 +166,7 @@ xlog_recover_process_ag_iunlinked(
 		 * We should probably mark the filesystem as corrupt
 		 * after we've recovered all the ag's we can....
 		 */
-		return;
+		return error;
 	}
 
 	/*
@@ -190,15 +190,24 @@ xlog_recover_process_ag_iunlinked(
 		}
 	}
 	xfs_buf_rele(agibp);
+
+	return 0;
 }
 
-void
+int
 xlog_recover_process_unlinked(
 	struct xlog		*log)
 {
 	struct xfs_mount	*mp = log->l_mp;
 	xfs_agnumber_t		agno;
+	int			error = 0;
+	int			err2;
 
-	for (agno = 0; agno < mp->m_sb.sb_agcount; agno++)
-		xlog_recover_process_ag_iunlinked(mp, agno);
+	for (agno = 0; agno < mp->m_sb.sb_agcount; agno++) {
+		err2 = xlog_recover_process_ag_iunlinked(mp, agno);
+		if (!error && err2)
+			error = err2;
+	}
+
+	return error;
 }

@@ -727,6 +727,8 @@ xfs_log_mount_finish(
 		xfs_log_work_queue(mp);
 	mp->m_super->s_flags &= ~SB_ACTIVE;
 	evict_inodes(mp->m_super);
+	if (error)
+		return error;
 
 	/*
 	 * Drain the buffer LRU after log recovery. This is required for v4
@@ -737,7 +739,7 @@ xfs_log_mount_finish(
 	 * Don't push in the error case because the AIL may have pending intents
 	 * that aren't removed until recovery is cancelled.
 	 */
-	if (!error && recovered) {
+	if (recovered) {
 		xfs_log_force(mp, XFS_LOG_SYNC);
 		xfs_ail_push_all_sync(mp->m_ail);
 	}
