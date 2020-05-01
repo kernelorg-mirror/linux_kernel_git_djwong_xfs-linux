@@ -195,7 +195,7 @@ xlog_recover_process_iunlinked(
 	return 0;
 }
 
-void
+int
 xlog_recover_process_unlinked(
 	struct xlog		*log)
 {
@@ -208,4 +208,6 @@ xlog_recover_process_unlinked(
 		if (error)
 			break;
 	}
+
+	return error;
 }

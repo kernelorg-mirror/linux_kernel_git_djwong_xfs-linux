@@ -124,6 +124,6 @@ bool xlog_add_buffer_cancelled(struct xlog *log, xfs_daddr_t blkno, uint len);
 bool xlog_is_buffer_cancelled(struct xlog *log, xfs_daddr_t blkno, uint len);
 bool xlog_put_buffer_cancelled(struct xlog *log, xfs_daddr_t blkno, uint len);
 void xlog_recover_iodone(struct xfs_buf *bp);
-void xlog_recover_process_unlinked(struct xlog *log);
+int xlog_recover_process_unlinked(struct xlog *log);
 
 #endif	/* __XFS_LOG_RECOVER_H__ */
