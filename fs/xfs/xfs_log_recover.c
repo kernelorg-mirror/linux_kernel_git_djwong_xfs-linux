@@ -2717,7 +2717,7 @@ xlog_recover_process_intents(
 		 * this routine or else those subsequent intents will get
 		 * replayed in the wrong order!
 		 */
-		if (!test_bit(XFS_LI_RECOVERED, &lip->li_flags)) {
+		if (!test_and_set_bit(XFS_LI_RECOVERED, &lip->li_flags)) {
 			spin_unlock(&ailp->ail_lock);
 			error = lip->li_ops->iop_recover(lip, parent_tp);
 			spin_lock(&ailp->ail_lock);
