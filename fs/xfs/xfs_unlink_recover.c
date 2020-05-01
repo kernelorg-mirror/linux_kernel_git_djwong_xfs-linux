@@ -21,6 +21,7 @@
 #include "xfs_trans_priv.h"
 #include "xfs_ialloc.h"
 #include "xfs_icache.h"
+#include "xfs_pwork.h"
 
 /*
  * This routine performs a transaction to null out a bad inode pointer
@@ -195,19 +196,54 @@ xlog_recover_process_iunlinked(
 	return 0;
 }
 
+struct xlog_recover_unlinked {
+	struct xfs_pwork	pwork;
+	xfs_agnumber_t		agno;
+};
+
+static int
+xlog_recover_process_unlinked_ag(
+	struct xfs_mount		*mp,
+	struct xfs_pwork		*pwork)
+{
+	struct xlog_recover_unlinked	*ru;
+	int				error = 0;
+
+	ru = container_of(pwork, struct xlog_recover_unlinked, pwork);
+	if (xfs_pwork_want_abort(pwork))
+		goto out;
+
+	error = xlog_recover_process_iunlinked(mp, ru->agno);
+out:
+	kmem_free(ru);
+	return error;
+}
+
 int
 xlog_recover_process_unlinked(
 	struct xlog		*log)
 {
 	struct xfs_mount	*mp = log->l_mp;
+	struct xfs_pwork_ctl	pctl;
+	struct xlog_recover_unlinked *ru;
+	unsigned int		nr_threads;
 	xfs_agnumber_t		agno;
 	int			error;
 
+	nr_threads = xfs_pwork_guess_datadev_parallelism(mp);
+	error = xfs_pwork_init(mp, &pctl, xlog_recover_process_unlinked_ag,
+			"xlog_recover", nr_threads);
+	if (error)
+		return error;
+
 	for (agno = 0; agno < mp->m_sb.sb_agcount; agno++) {
-		error = xlog_recover_process_iunlinked(mp, agno);
-		if (error)
+		if (xfs_pwork_ctl_want_abort(&pctl))
 			break;
+
+		ru = kmem_zalloc(sizeof(struct xlog_recover_unlinked), 0);
+		ru->agno = agno;
+		xfs_pwork_queue(&pctl, &ru->pwork);
 	}
 
-	return error;
+	return xfs_pwork_destroy(&pctl);
 }
