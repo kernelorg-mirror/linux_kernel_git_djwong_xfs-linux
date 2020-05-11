@@ -205,16 +205,18 @@ xfs_qm_adjust_dqtimers(
  */
 STATIC void
 xfs_qm_init_dquot_blk(
-	xfs_trans_t	*tp,
-	xfs_mount_t	*mp,
-	xfs_dqid_t	id,
-	uint		type,
-	xfs_buf_t	*bp)
+	struct xfs_trans	*tp,
+	struct xfs_mount	*mp,
+	xfs_dqid_t		id,
+	uint			type,
+	struct xfs_buf		*bp)
 {
 	struct xfs_quotainfo	*q = mp->m_quotainfo;
-	xfs_dqblk_t	*d;
-	xfs_dqid_t	curid;
-	int		i;
+	struct xfs_dqblk	*d;
+	xfs_dqid_t		curid;
+	unsigned int		qflag;
+	unsigned int		blftype;
+	int			i;
 
 	ASSERT(tp);
 	ASSERT(xfs_buf_islocked(bp));
@@ -238,11 +240,45 @@ xfs_qm_init_dquot_blk(
 		}
 	}
 
-	xfs_trans_dquot_buf(tp, bp,
-			    (type & XFS_DQ_USER ? XFS_BLF_UDQUOT_BUF :
-			    ((type & XFS_DQ_PROJ) ? XFS_BLF_PDQUOT_BUF :
-			     XFS_BLF_GDQUOT_BUF)));
-	xfs_trans_log_buf(tp, bp, 0, BBTOB(q->qi_dqchunklen) - 1);
+	if (type & XFS_DQ_USER) {
+		qflag = XFS_UQUOTA_CHKD;
+		blftype = XFS_BLF_UDQUOT_BUF;
+	} else if (type & XFS_DQ_PROJ) {
+		qflag = XFS_PQUOTA_CHKD;
+		blftype = XFS_BLF_PDQUOT_BUF;
+	} else {
+		qflag = XFS_GQUOTA_CHKD;
+		blftype = XFS_BLF_GDQUOT_BUF;
+	}
+
+	xfs_trans_dquot_buf(tp, bp, blftype);
+
+	/*
+	 * When quotacheck runs, we use delayed writes to update all the dquots
+	 * on disk in an efficient manner instead of logging the individual
+	 * dquot changes as they are made.
+	 *
+	 * Hence if we log the buffer that we allocate here, then crash
+	 * post-quotacheck while the logged initialisation is still in the
+	 * active region of the log, we can lose the information quotacheck
+	 * wrote directly to the buffer. That is, log recovery will replay the
+	 * dquot buffer initialisation over the top of whatever information
+	 * quotacheck had written to the buffer.
+	 *
+	 * To avoid this problem, dquot allocation during quotacheck needs to
+	 * avoid logging the initialised buffer, but we still need to have
+	 * writeback of the buffer pin the tail of the log so that it is
+	 * initialised on disk before we remove the allocation transaction from
+	 * the active region of the log. Marking the buffer as ordered instead
+	 * of logging it provides this behaviour.
+	 *
+	 * If we crash before quotacheck completes, a subsequent quotacheck run
+	 * will re-allocate and re-initialize the dquot records as needed.
+	 */
+	if (!(mp->m_qflags & qflag))
+		xfs_trans_ordered_buf(tp, bp);
+	else
+		xfs_trans_log_buf(tp, bp, 0, BBTOB(q->qi_dqchunklen) - 1);
 }
 
 /*
