@@ -2488,6 +2488,44 @@ xlog_recover_process_data(
 	return 0;
 }
 
+/*
+ * Estimate a block reservation for a log recovery transaction.  Since we run
+ * separate transactions for each chain of deferred ops that get created as a
+ * result of recovering unfinished log intent items, we must be careful not to
+ * reserve so many blocks that block allocations fail because we can't satisfy
+ * the minleft requirements (e.g. for bmbt blocks).
+ */
+static int
+xlog_estimate_recovery_resblks(
+	struct xfs_mount	*mp,
+	unsigned int		*resblks)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+	unsigned int		free = 0;
+	int			error;
+
+	/* Don't use more than 7/8th of the free space in the least full AG. */
+	for (agno = 0; agno < mp->m_sb.sb_agcount; agno++) {
+		unsigned int	ag_free;
+
+		error = xfs_alloc_pagf_init(mp, NULL, agno, 0);
+		if (error)
+			return error;
+		pag = xfs_perag_get(mp, agno);
+		ag_free = pag->pagf_freeblks + pag->pagf_flcount;
+		free = max(free, (ag_free * 7) / 8);
+		xfs_perag_put(pag);
+	}
+
+	/* Don't try to reserve more than half the usable AG blocks. */
+	*resblks = min(free, xfs_alloc_ag_max_usable(mp) / 2);
+	if (*resblks == 0)
+		return -ENOSPC;
+
+	return 0;
+}
+
 /* Take all the collected deferred ops and finish them in order. */
 static int
 xlog_finish_defer_ops(
@@ -2496,27 +2534,24 @@ xlog_finish_defer_ops(
 {
 	struct xfs_defer_capture *dfc, *next;
 	struct xfs_trans	*tp;
-	int64_t			freeblks;
 	uint64_t		resblks;
+	unsigned int		max_resblks;
 	int			error = 0;
 
+	error = xlog_estimate_recovery_resblks(mp, &max_resblks);
+	if (error)
+		goto out;
+
 	list_for_each_entry_safe(dfc, next, dfops_freezers, dfc_list) {
+		resblks = min_t(uint64_t, percpu_counter_sum(&mp->m_fdblocks),
+				max_resblks);
+
 		/*
 		 * We're finishing the defer_ops that accumulated as a result
 		 * of recovering unfinished intent items during log recovery.
 		 * We reserve an itruncate transaction because it is the
-		 * largest permanent transaction type.  Since we're the only
-		 * user of the fs right now, take 93% (15/16) of the available
-		 * free blocks.  Use weird math to avoid a 64-bit division.
+		 * largest permanent transaction type.
 		 */
-		freeblks = percpu_counter_sum(&mp->m_fdblocks);
-		if (freeblks <= 0) {
-			error = -ENOSPC;
-			break;
-		}
-
-		resblks = min_t(uint64_t, UINT_MAX, freeblks);
-		resblks = (resblks * 15) >> 4;
 		error = xfs_trans_alloc(mp, &M_RES(mp)->tr_itruncate, resblks,
 				0, XFS_TRANS_RESERVE, &tp);
 		if (error)
@@ -2532,6 +2567,7 @@ xlog_finish_defer_ops(
 			break;
 	}
 
+out:
 	/* Kill any remaining freezers. */
 	list_for_each_entry_safe(dfc, next, dfops_freezers, dfc_list) {
 		list_del_init(&dfc->dfc_list);
