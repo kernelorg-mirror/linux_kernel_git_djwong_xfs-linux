@@ -12,6 +12,7 @@
 #include "xfs_sb.h"
 #include "xfs_mount.h"
 #include "xfs_inode.h"
+#include "xfs_defer.h"
 #include "xfs_trans.h"
 #include "xfs_trans_priv.h"
 #include "xfs_inode_item.h"
@@ -2429,4 +2430,50 @@ xfs_inactive_force_poll(
 				   xfs_inactive_pending(mp) == false, HZ)) {
 		touch_softlockup_watchdog();
 	}
+}
+
+/* Re-acquire the inode locks and attach them to the transaction. */
+void
+xfs_defer_continue_inodes(
+	struct xfs_defer_capture	*dfc,
+	struct xfs_trans		*tp)
+{
+	int				i;
+	int				error;
+
+	for (i = 0; i < XFS_DEFER_CAPTURE_INODES && dfc->dfc_inodes[i]; i++) {
+		error = xfs_qm_dqattach(dfc->dfc_inodes[i]);
+		if (error)
+			tp->t_mountp->m_qflags &= ~XFS_ALL_QUOTA_CHKD;
+	}
+
+	dfc->dfc_ilockflags = XFS_ILOCK_EXCL;
+	if (dfc->dfc_inodes[1]) {
+		xfs_lock_two_inodes(dfc->dfc_inodes[0], dfc->dfc_ilockflags,
+				    dfc->dfc_inodes[1], dfc->dfc_ilockflags);
+		xfs_trans_ijoin(tp, dfc->dfc_inodes[0], 0);
+		xfs_trans_ijoin(tp, dfc->dfc_inodes[1], 0);
+	} else if (dfc->dfc_inodes[0]) {
+		xfs_ilock(dfc->dfc_inodes[0], dfc->dfc_ilockflags);
+		xfs_trans_ijoin(tp, dfc->dfc_inodes[0], 0);
+	}
+}
+
+/* Release all the inode resources attached to this dfops capture device. */
+void
+xfs_defer_capture_irele(
+	struct xfs_defer_capture	*dfc)
+{
+	unsigned int			i;
+
+	for (i = 0; i < XFS_DEFER_CAPTURE_INODES; i++) {
+		if (!dfc->dfc_inodes[i])
+			break;
+
+		if (dfc->dfc_ilockflags)
+			xfs_iunlock(dfc->dfc_inodes[i], dfc->dfc_ilockflags);
+		xfs_irele(dfc->dfc_inodes[i]);
+		dfc->dfc_inodes[i] = NULL;
+	}
+	dfc->dfc_ilockflags = 0;
 }
