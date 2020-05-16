@@ -77,6 +77,11 @@ struct xfs_defer_capture {
 	struct list_head	dfc_dfops;
 	unsigned int		dfc_tpflags;
 	unsigned int		dfc_blkres;
+
+	/* Inodes to hold when we want to finish the deferred work items. */
+	unsigned int		dfc_ilockflags;
+#define XFS_DEFER_CAPTURE_INODES	2
+	struct xfs_inode	*dfc_inodes[XFS_DEFER_CAPTURE_INODES];
 };
 
 /*
@@ -87,5 +92,12 @@ int xfs_defer_capture(struct xfs_trans *tp, struct xfs_defer_capture **dfcp);
 void xfs_defer_continue(struct xfs_defer_capture *dfc, struct xfs_trans *tp);
 void xfs_defer_capture_free(struct xfs_mount *mp,
 		struct xfs_defer_capture *dfc);
+int xfs_defer_capture_inode(struct xfs_defer_capture *dfc,
+		struct xfs_inode *ip);
+
+/* These functions must be provided by the xfs implementation. */
+void xfs_defer_continue_inodes(struct xfs_defer_capture *dfc,
+		struct xfs_trans *tp);
+void xfs_defer_capture_irele(struct xfs_defer_capture *dfc);
 
 #endif /* __XFS_DEFER_H__ */

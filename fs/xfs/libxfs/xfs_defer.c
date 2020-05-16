@@ -16,6 +16,7 @@
 #include "xfs_inode.h"
 #include "xfs_inode_item.h"
 #include "xfs_trace.h"
+#include "xfs_icache.h"
 
 /*
  * Deferred Operations in XFS
@@ -595,6 +596,8 @@ xfs_defer_continue(
 	ASSERT(tp->t_flags & XFS_TRANS_PERM_LOG_RES);
 	ASSERT(!(tp->t_flags & XFS_TRANS_DIRTY));
 
+	xfs_defer_continue_inodes(dfc, tp);
+
 	/* Move captured dfops chain and state to the transaction. */
 	list_splice_init(&dfc->dfc_dfops, &tp->t_dfops);
 	tp->t_flags |= dfc->dfc_tpflags;
@@ -610,5 +613,41 @@ xfs_defer_capture_free(
 	struct xfs_defer_capture	*dfc)
 {
 	xfs_defer_cancel_list(mp, &dfc->dfc_dfops);
+	xfs_defer_capture_irele(dfc);
 	kmem_free(dfc);
+}
+
+/*
+ * Capture an inode along with the deferred ops freezer.  Callers must hold
+ * ILOCK_EXCL, which will be dropped and reacquired when we're ready to
+ * continue replaying the deferred ops.
+ */
+int
+xfs_defer_capture_inode(
+	struct xfs_defer_capture	*dfc,
+	struct xfs_inode		*ip)
+{
+	unsigned int			i;
+
+	for (i = 0; i < XFS_DEFER_CAPTURE_INODES; i++) {
+		if (dfc->dfc_inodes[i] == ip)
+			return 0;
+		if (dfc->dfc_inodes[i] == NULL)
+			break;
+	}
+
+	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL));
+
+	if (i == XFS_DEFER_CAPTURE_INODES) {
+		ASSERT(0);
+		return -EFSCORRUPTED;
+	}
+
+	/*
+	 * Attach this inode to the freezer and drop its ILOCK because we
+	 * assume the caller will need to allocate a transaction.
+	 */
+	dfc->dfc_inodes[i] = ip;
+	xfs_iunlock(ip, XFS_ILOCK_EXCL);
+	return 0;
 }
