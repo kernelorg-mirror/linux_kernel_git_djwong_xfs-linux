@@ -124,16 +124,17 @@ xfs_trans_dup_dqinfo(
  */
 void
 xfs_trans_mod_dquot_byino(
-	xfs_trans_t	*tp,
-	xfs_inode_t	*ip,
-	uint		field,
-	int64_t		delta)
+	struct xfs_trans	*tp,
+	struct xfs_inode	*ip,
+	uint			field,
+	int64_t			delta)
 {
-	xfs_mount_t	*mp = tp->t_mountp;
+	struct xfs_mount	*mp = tp->t_mountp;
 
 	if (!XFS_IS_QUOTA_RUNNING(mp) ||
 	    !XFS_IS_QUOTA_ON(mp) ||
-	    xfs_is_quota_inode(&mp->m_sb, ip->i_ino))
+	    xfs_is_quota_inode(&mp->m_sb, ip->i_ino) ||
+	    delta == 0)
 		return;
 
 	if (tp->t_dqinfo == NULL)
