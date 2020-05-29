@@ -47,7 +47,15 @@ xchk_setup_inode_bmap(
 	    sc->sm->sm_type == XFS_SCRUB_TYPE_BMBTD) {
 		inode_dio_wait(VFS_I(sc->ip));
 		error = filemap_write_and_wait(VFS_I(sc->ip)->i_mapping);
-		if (error)
+		if (error == -ENOSPC || error == -EIO) {
+			/*
+			 * If writeback hits EIO or ENOSPC, reflect it back
+			 * into the address space mapping so that a writer
+			 * program calling fsync to look for errors will still
+			 * capture the error.
+			 */
+			mapping_set_error(VFS_I(sc->ip)->i_mapping, error);
+		} else if (error)
 			goto out;
 	}
 
