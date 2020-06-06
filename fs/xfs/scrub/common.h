@@ -52,6 +52,8 @@ void xchk_block_set_corrupt(struct xfs_scrub *sc,
 void xchk_ino_set_corrupt(struct xfs_scrub *sc, xfs_ino_t ino);
 void xchk_fblock_set_corrupt(struct xfs_scrub *sc, int whichfork,
 		xfs_fileoff_t offset);
+void xchk_qcheck_set_corrupt(struct xfs_scrub *sc, unsigned int dqtype,
+		xfs_dqid_t id);
 
 void xchk_block_xref_set_corrupt(struct xfs_scrub *sc,
 		struct xfs_buf *bp);
@@ -112,9 +114,15 @@ xchk_setup_rtsummary(struct xfs_scrub *sc, struct xfs_inode *ip)
 #endif
 #ifdef CONFIG_XFS_QUOTA
 int xchk_setup_quota(struct xfs_scrub *sc, struct xfs_inode *ip);
+int xchk_setup_quotacheck(struct xfs_scrub *sc, struct xfs_inode *ip);
 #else
 static inline int
 xchk_setup_quota(struct xfs_scrub *sc, struct xfs_inode *ip)
+{
+	return -ENOENT;
+}
+static inline int
+xchk_setup_quotacheck(struct xfs_scrub *sc, struct xfs_inode *ip)
 {
 	return -ENOENT;
 }
