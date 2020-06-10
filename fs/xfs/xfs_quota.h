@@ -73,9 +73,17 @@ struct xfs_dqtrx {
 	int64_t		qt_icount_delta;  /* dquot inode count changes */
 };
 
+/* Parameters for xfs_trans_apply_dquot_deltas hook. */
+struct xfs_trans_apply_dquot_deltas_params {
+	struct xfs_trans	*tp;
+	struct xfs_dquot	*dqp;
+};
+
 #ifdef CONFIG_XFS_QUOTA
 extern void xfs_trans_dup_dqinfo(struct xfs_trans *, struct xfs_trans *);
 extern void xfs_trans_free_dqinfo(struct xfs_trans *);
+extern void xfs_trans_mod_ino_dquot(struct xfs_trans *tp, struct xfs_inode *ip,
+		struct xfs_dquot *dqp, uint field, int64_t delta);
 extern void xfs_trans_mod_dquot_byino(struct xfs_trans *, struct xfs_inode *,
 		uint, int64_t);
 extern void xfs_trans_apply_dquot_deltas(struct xfs_trans *);
@@ -118,6 +126,7 @@ xfs_qm_vop_dqalloc(struct xfs_inode *ip, kuid_t kuid, kgid_t kgid,
 	*pdqp = NULL;
 	return 0;
 }
+#define xfs_trans_mod_ino_dquot(tp, ip, dqp, field, delta)
 #define xfs_trans_dup_dqinfo(tp, tp2)
 #define xfs_trans_free_dqinfo(tp)
 #define xfs_trans_mod_dquot_byino(tp, ip, fields, delta)
