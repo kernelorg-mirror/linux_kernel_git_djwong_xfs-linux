@@ -58,6 +58,11 @@ struct xfs_dquot {
 	uint16_t		q_iwarns;
 	uint16_t		q_rtbwarns;
 
+	/* Quota timers. */
+	time64_t		q_btimer;
+	time64_t		q_itimer;
+	time64_t		q_rtbtimer;
+
 	struct xfs_disk_dquot	q_core;
 	struct xfs_dq_logitem	q_logitem;
 	/* total regular nblks used+reserved */
