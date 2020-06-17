@@ -48,6 +48,11 @@ struct xfs_dquot {
 	xfs_qcnt_t		q_rtb_hardlimit;
 	xfs_qcnt_t		q_rtb_softlimit;
 
+	/* Resource usage counters. */
+	xfs_qcnt_t		q_bcount;
+	xfs_qcnt_t		q_icount;
+	xfs_qcnt_t		q_rtbcount;
+
 	struct xfs_disk_dquot	q_core;
 	struct xfs_dq_logitem	q_logitem;
 	/* total regular nblks used+reserved */
