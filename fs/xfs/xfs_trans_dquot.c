@@ -591,7 +591,7 @@ xfs_trans_dqresv(
 		softlimit = dqp->q_blk_softlimit;
 		if (!softlimit)
 			softlimit = defq->bsoftlimit;
-		timer = be32_to_cpu(dqp->q_core.d_btimer);
+		timer = dqp->q_btimer;
 		warns = dqp->q_bwarns;
 		warnlimit = defq->bwarnlimit;
 		resbcountp = &dqp->q_res_bcount;
@@ -603,7 +603,7 @@ xfs_trans_dqresv(
 		softlimit = dqp->q_rtb_softlimit;
 		if (!softlimit)
 			softlimit = defq->rtbsoftlimit;
-		timer = be32_to_cpu(dqp->q_core.d_rtbtimer);
+		timer = dqp->q_rtbtimer;
 		warns = dqp->q_rtbwarns;
 		warnlimit = defq->rtbwarnlimit;
 		resbcountp = &dqp->q_res_rtbcount;
@@ -638,7 +638,7 @@ xfs_trans_dqresv(
 		}
 		if (ninos > 0) {
 			total_count = dqp->q_icount + ninos;
-			timer = be32_to_cpu(dqp->q_core.d_itimer);
+			timer = dqp->q_itimer;
 			warns = dqp->q_iwarns;
 			warnlimit = defq->iwarnlimit;
 			hardlimit = dqp->q_ino_hardlimit;

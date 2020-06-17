@@ -447,7 +447,6 @@ xfs_qm_scall_setqlim(
 	struct qc_dqblk		*newlim)
 {
 	struct xfs_quotainfo	*q = mp->m_quotainfo;
-	struct xfs_disk_dquot	*ddq;
 	struct xfs_dquot	*dqp;
 	struct xfs_trans	*tp;
 	struct xfs_def_quota	*defq;
@@ -488,7 +487,6 @@ xfs_qm_scall_setqlim(
 
 	xfs_dqlock(dqp);
 	xfs_trans_dqjoin(tp, dqp);
-	ddq = &dqp->q_core;
 
 	/*
 	 * Make sure that hardlimits are >= soft limits before changing.
@@ -573,11 +571,11 @@ xfs_qm_scall_setqlim(
 	 * the soft limit.
 	 */
 	if (newlim->d_fieldmask & QC_SPC_TIMER)
-		ddq->d_btimer = cpu_to_be32(newlim->d_spc_timer);
+		dqp->q_btimer = newlim->d_spc_timer;
 	if (newlim->d_fieldmask & QC_INO_TIMER)
-		ddq->d_itimer = cpu_to_be32(newlim->d_ino_timer);
+		dqp->q_itimer = newlim->d_ino_timer;
 	if (newlim->d_fieldmask & QC_RT_SPC_TIMER)
-		ddq->d_rtbtimer = cpu_to_be32(newlim->d_rt_spc_timer);
+		dqp->q_rtbtimer = newlim->d_rt_spc_timer;
 
 	if (id == 0) {
 		if (newlim->d_fieldmask & QC_SPC_TIMER)
@@ -625,14 +623,14 @@ xfs_qm_scall_getquota_fill_qc(
 	dst->d_ino_softlimit = dqp->q_ino_softlimit;
 	dst->d_space = XFS_FSB_TO_B(mp, dqp->q_res_bcount);
 	dst->d_ino_count = dqp->q_res_icount;
-	dst->d_spc_timer = be32_to_cpu(dqp->q_core.d_btimer);
-	dst->d_ino_timer = be32_to_cpu(dqp->q_core.d_itimer);
+	dst->d_spc_timer = dqp->q_btimer;
+	dst->d_ino_timer = dqp->q_itimer;
 	dst->d_ino_warns = dqp->q_iwarns;
 	dst->d_spc_warns = dqp->q_bwarns;
 	dst->d_rt_spc_hardlimit = XFS_FSB_TO_B(mp, dqp->q_rtb_hardlimit);
 	dst->d_rt_spc_softlimit = XFS_FSB_TO_B(mp, dqp->q_rtb_softlimit);
 	dst->d_rt_space = XFS_FSB_TO_B(mp, dqp->q_res_rtbcount);
-	dst->d_rt_spc_timer = be32_to_cpu(dqp->q_core.d_rtbtimer);
+	dst->d_rt_spc_timer = dqp->q_rtbtimer;
 	dst->d_rt_spc_warns = dqp->q_rtbwarns;
 
 	/*
