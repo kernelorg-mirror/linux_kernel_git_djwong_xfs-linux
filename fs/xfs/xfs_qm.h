@@ -26,9 +26,9 @@ extern struct kmem_zone	*xfs_qm_dqtrxzone;
 	!dqp->q_rtb_softlimit && \
 	!dqp->q_ino_hardlimit && \
 	!dqp->q_ino_softlimit && \
-	!dqp->q_core.d_bcount && \
-	!dqp->q_core.d_rtbcount && \
-	!dqp->q_core.d_icount)
+	!dqp->q_bcount && \
+	!dqp->q_rtbcount && \
+	!dqp->q_icount)
 
 /*
  * This defines the unit of allocation of dquots.

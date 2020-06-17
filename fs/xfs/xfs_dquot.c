@@ -133,9 +133,9 @@ xfs_qm_adjust_dqtimers(
 
 	if (!d->d_btimer) {
 		if ((dq->q_blk_softlimit &&
-		     (be64_to_cpu(d->d_bcount) > dq->q_blk_softlimit)) ||
+		     (dq->q_bcount > dq->q_blk_softlimit)) ||
 		    (dq->q_blk_hardlimit &&
-		     (be64_to_cpu(d->d_bcount) > dq->q_blk_hardlimit))) {
+		     (dq->q_bcount > dq->q_blk_hardlimit))) {
 			d->d_btimer = cpu_to_be32(ktime_get_real_seconds() +
 					defq->btimelimit);
 		} else {
@@ -143,18 +143,18 @@ xfs_qm_adjust_dqtimers(
 		}
 	} else {
 		if ((!dq->q_blk_softlimit ||
-		     (be64_to_cpu(d->d_bcount) <= dq->q_blk_softlimit)) &&
+		     (dq->q_bcount <= dq->q_blk_softlimit)) &&
 		    (!dq->q_blk_hardlimit ||
-		    (be64_to_cpu(d->d_bcount) <= dq->q_blk_hardlimit))) {
+		    (dq->q_bcount <= dq->q_blk_hardlimit))) {
 			d->d_btimer = 0;
 		}
 	}
 
 	if (!d->d_itimer) {
 		if ((dq->q_ino_softlimit &&
-		     (be64_to_cpu(d->d_icount) > dq->q_ino_softlimit)) ||
+		     (dq->q_icount > dq->q_ino_softlimit)) ||
 		    (dq->q_ino_hardlimit &&
-		     (be64_to_cpu(d->d_icount) > dq->q_ino_hardlimit))) {
+		     (dq->q_icount > dq->q_ino_hardlimit))) {
 			d->d_itimer = cpu_to_be32(ktime_get_real_seconds() +
 					defq->itimelimit);
 		} else {
@@ -162,18 +162,18 @@ xfs_qm_adjust_dqtimers(
 		}
 	} else {
 		if ((!dq->q_ino_softlimit ||
-		     (be64_to_cpu(d->d_icount) <= dq->q_ino_softlimit))  &&
+		     (dq->q_icount <= dq->q_ino_softlimit))  &&
 		    (!dq->q_ino_hardlimit ||
-		     (be64_to_cpu(d->d_icount) <= dq->q_ino_hardlimit))) {
+		     (dq->q_icount <= dq->q_ino_hardlimit))) {
 			d->d_itimer = 0;
 		}
 	}
 
 	if (!d->d_rtbtimer) {
 		if ((dq->q_rtb_softlimit &&
-		     (be64_to_cpu(d->d_rtbcount) > dq->q_rtb_softlimit)) ||
+		     (dq->q_rtbcount > dq->q_rtb_softlimit)) ||
 		    (dq->q_rtb_hardlimit &&
-		     (be64_to_cpu(d->d_rtbcount) > dq->q_rtb_hardlimit))) {
+		     (dq->q_rtbcount > dq->q_rtb_hardlimit))) {
 			d->d_rtbtimer = cpu_to_be32(ktime_get_real_seconds() +
 					defq->rtbtimelimit);
 		} else {
@@ -181,9 +181,9 @@ xfs_qm_adjust_dqtimers(
 		}
 	} else {
 		if ((!dq->q_rtb_softlimit ||
-		     (be64_to_cpu(d->d_rtbcount) <= dq->q_rtb_softlimit)) &&
+		     (dq->q_rtbcount <= dq->q_rtb_softlimit)) &&
 		    (!dq->q_rtb_hardlimit ||
-		     (be64_to_cpu(d->d_rtbcount) <= dq->q_rtb_hardlimit))) {
+		     (dq->q_rtbcount <= dq->q_rtb_hardlimit))) {
 			d->d_rtbtimer = 0;
 		}
 	}
@@ -538,13 +538,17 @@ xfs_dquot_from_disk(
 	dqp->q_rtb_hardlimit = be64_to_cpu(ddqp->d_rtb_hardlimit);
 	dqp->q_rtb_softlimit = be64_to_cpu(ddqp->d_rtb_softlimit);
 
+	dqp->q_bcount = be64_to_cpu(ddqp->d_bcount);
+	dqp->q_icount = be64_to_cpu(ddqp->d_icount);
+	dqp->q_rtbcount = be64_to_cpu(ddqp->d_rtbcount);
+
 	/*
 	 * Reservation counters are defined as reservation plus current usage
 	 * to avoid having to add every time.
 	 */
-	dqp->q_res_bcount = be64_to_cpu(ddqp->d_bcount);
-	dqp->q_res_icount = be64_to_cpu(ddqp->d_icount);
-	dqp->q_res_rtbcount = be64_to_cpu(ddqp->d_rtbcount);
+	dqp->q_res_bcount = dqp->q_bcount;
+	dqp->q_res_icount = dqp->q_icount;
+	dqp->q_res_rtbcount = dqp->q_rtbcount;
 
 	/* initialize the dquot speculative prealloc thresholds */
 	xfs_dquot_set_prealloc_limits(dqp);
@@ -565,6 +569,10 @@ xfs_dquot_to_disk(
 	ddqp->d_ino_softlimit = cpu_to_be64(dqp->q_ino_softlimit);
 	ddqp->d_rtb_hardlimit = cpu_to_be64(dqp->q_rtb_hardlimit);
 	ddqp->d_rtb_softlimit = cpu_to_be64(dqp->q_rtb_softlimit);
+
+	ddqp->d_bcount = cpu_to_be64(dqp->q_bcount);
+	ddqp->d_icount = cpu_to_be64(dqp->q_icount);
+	ddqp->d_rtbcount = cpu_to_be64(dqp->q_rtbcount);
 }
 
 /* Allocate and initialize the dquot buffer for this in-core dquot. */
@@ -1127,18 +1135,15 @@ xfs_qm_dqflush_check(
 	if (dqp->q_id == 0)
 		return NULL;
 
-	if (dqp->q_blk_softlimit &&
-	    be64_to_cpu(ddq->d_bcount) > dqp->q_blk_softlimit &&
+	if (dqp->q_blk_softlimit && dqp->q_bcount > dqp->q_blk_softlimit &&
 	    !ddq->d_btimer)
 		return __this_address;
 
-	if (dqp->q_ino_softlimit &&
-	    be64_to_cpu(ddq->d_icount) > dqp->q_ino_softlimit &&
+	if (dqp->q_ino_softlimit && dqp->q_icount > dqp->q_ino_softlimit &&
 	    !ddq->d_itimer)
 		return __this_address;
 
-	if (dqp->q_rtb_softlimit &&
-	    be64_to_cpu(ddq->d_rtbcount) > dqp->q_rtb_softlimit &&
+	if (dqp->q_rtb_softlimit && dqp->q_rtbcount > dqp->q_rtb_softlimit &&
 	    !ddq->d_rtbtimer)
 		return __this_address;
 

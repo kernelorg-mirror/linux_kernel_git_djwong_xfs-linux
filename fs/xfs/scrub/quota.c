@@ -82,9 +82,6 @@ xchk_quota_item(
 	struct xfs_disk_dquot	*d = &dq->q_core;
 	struct xfs_quotainfo	*qi = mp->m_quotainfo;
 	xfs_fileoff_t		offset;
-	unsigned long long	bcount;
-	unsigned long long	icount;
-	unsigned long long	rcount;
 	xfs_ino_t		fs_icount;
 	int			error = 0;
 
@@ -128,9 +125,6 @@ xchk_quota_item(
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, offset);
 
 	/* Check the resource counts. */
-	bcount = be64_to_cpu(d->d_bcount);
-	icount = be64_to_cpu(d->d_icount);
-	rcount = be64_to_cpu(d->d_rtbcount);
 	fs_icount = percpu_counter_sum(&mp->m_icount);
 
 	/*
@@ -139,15 +133,15 @@ xchk_quota_item(
 	 * if there are no quota limits.
 	 */
 	if (xfs_sb_version_hasreflink(&mp->m_sb)) {
-		if (mp->m_sb.sb_dblocks < bcount)
+		if (mp->m_sb.sb_dblocks < dq->q_bcount)
 			xchk_fblock_set_warning(sc, XFS_DATA_FORK,
 					offset);
 	} else {
-		if (mp->m_sb.sb_dblocks < bcount)
+		if (mp->m_sb.sb_dblocks < dq->q_bcount)
 			xchk_fblock_set_corrupt(sc, XFS_DATA_FORK,
 					offset);
 	}
-	if (icount > fs_icount || rcount > mp->m_sb.sb_rblocks)
+	if (dq->q_icount > fs_icount || dq->q_rtbcount > mp->m_sb.sb_rblocks)
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, offset);
 
 	/*
@@ -159,15 +153,15 @@ xchk_quota_item(
 		goto out;
 
 	if (dq->q_blk_hardlimit != 0 &&
-	    bcount > dq->q_blk_hardlimit)
+	    dq->q_bcount > dq->q_blk_hardlimit)
 		xchk_fblock_set_warning(sc, XFS_DATA_FORK, offset);
 
 	if (dq->q_ino_hardlimit != 0 &&
-	    icount > dq->q_ino_hardlimit)
+	    dq->q_icount > dq->q_ino_hardlimit)
 		xchk_fblock_set_warning(sc, XFS_DATA_FORK, offset);
 
 	if (dq->q_rtb_hardlimit != 0 &&
-	    rcount > dq->q_rtb_hardlimit)
+	    dq->q_rtbcount > dq->q_rtb_hardlimit)
 		xchk_fblock_set_warning(sc, XFS_DATA_FORK, offset);
 
 out:

@@ -310,7 +310,6 @@ xfs_trans_apply_dquot_deltas(
 	int			i, j;
 	struct xfs_dquot	*dqp;
 	struct xfs_dqtrx	*qtrx, *qa;
-	struct xfs_disk_dquot	*d;
 	int64_t			totalbdelta;
 	int64_t			totalrtbdelta;
 
@@ -342,7 +341,6 @@ xfs_trans_apply_dquot_deltas(
 			/*
 			 * adjust the actual number of blocks used
 			 */
-			d = &dqp->q_core;
 
 			/*
 			 * The issue here is - sometimes we don't make a blkquota
@@ -363,25 +361,22 @@ xfs_trans_apply_dquot_deltas(
 				qtrx->qt_delrtb_delta;
 #ifdef DEBUG
 			if (totalbdelta < 0)
-				ASSERT(be64_to_cpu(d->d_bcount) >=
-				       -totalbdelta);
+				ASSERT(dqp->q_bcount >= -totalbdelta);
 
 			if (totalrtbdelta < 0)
-				ASSERT(be64_to_cpu(d->d_rtbcount) >=
-				       -totalrtbdelta);
+				ASSERT(dqp->q_rtbcount >= -totalrtbdelta);
 
 			if (qtrx->qt_icount_delta < 0)
-				ASSERT(be64_to_cpu(d->d_icount) >=
-				       -qtrx->qt_icount_delta);
+				ASSERT(dqp->q_icount >= -qtrx->qt_icount_delta);
 #endif
 			if (totalbdelta)
-				be64_add_cpu(&d->d_bcount, (xfs_qcnt_t)totalbdelta);
+				dqp->q_bcount += totalbdelta;
 
 			if (qtrx->qt_icount_delta)
-				be64_add_cpu(&d->d_icount, (xfs_qcnt_t)qtrx->qt_icount_delta);
+				dqp->q_icount += qtrx->qt_icount_delta;
 
 			if (totalrtbdelta)
-				be64_add_cpu(&d->d_rtbcount, (xfs_qcnt_t)totalrtbdelta);
+				dqp->q_rtbcount += totalrtbdelta;
 
 			/*
 			 * Get any default limits in use.
@@ -468,12 +463,9 @@ xfs_trans_apply_dquot_deltas(
 					    (xfs_qcnt_t)qtrx->qt_icount_delta;
 			}
 
-			ASSERT(dqp->q_res_bcount >=
-				be64_to_cpu(dqp->q_core.d_bcount));
-			ASSERT(dqp->q_res_icount >=
-				be64_to_cpu(dqp->q_core.d_icount));
-			ASSERT(dqp->q_res_rtbcount >=
-				be64_to_cpu(dqp->q_core.d_rtbcount));
+			ASSERT(dqp->q_res_bcount >= dqp->q_bcount);
+			ASSERT(dqp->q_res_icount >= dqp->q_icount);
+			ASSERT(dqp->q_res_rtbcount >= dqp->q_rtbcount);
 		}
 	}
 }
@@ -646,7 +638,7 @@ xfs_trans_dqresv(
 			}
 		}
 		if (ninos > 0) {
-			total_count = be64_to_cpu(dqp->q_core.d_icount) + ninos;
+			total_count = dqp->q_icount + ninos;
 			timer = be32_to_cpu(dqp->q_core.d_itimer);
 			warns = be16_to_cpu(dqp->q_core.d_iwarns);
 			warnlimit = defq->iwarnlimit;
@@ -676,7 +668,7 @@ xfs_trans_dqresv(
 
 	/*
 	 * Change the reservation, but not the actual usage.
-	 * Note that q_res_bcount = q_core.d_bcount + resv
+	 * Note that q_res_bcount = q_bcount + resv
 	 */
 	(*resbcountp) += (xfs_qcnt_t)nblks;
 	if (ninos != 0)
@@ -701,9 +693,9 @@ xfs_trans_dqresv(
 					    XFS_TRANS_DQ_RES_INOS,
 					    ninos);
 	}
-	ASSERT(dqp->q_res_bcount >= be64_to_cpu(dqp->q_core.d_bcount));
-	ASSERT(dqp->q_res_rtbcount >= be64_to_cpu(dqp->q_core.d_rtbcount));
-	ASSERT(dqp->q_res_icount >= be64_to_cpu(dqp->q_core.d_icount));
+	ASSERT(dqp->q_res_bcount >= dqp->q_bcount);
+	ASSERT(dqp->q_res_rtbcount >= dqp->q_rtbcount);
+	ASSERT(dqp->q_res_icount >= dqp->q_icount);
 
 	xfs_dqunlock(dqp);
 	return 0;
