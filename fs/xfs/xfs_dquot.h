@@ -31,12 +31,13 @@ enum {
  * The incore dquot structure
  */
 struct xfs_dquot {
-	uint			dq_flags;
 	struct list_head	q_lru;
 	struct xfs_mount	*q_mount;
+	xfs_dqid_t		q_id;
+	uint			dq_flags;
 	uint			q_nrefs;
-	xfs_daddr_t		q_blkno;
 	int			q_bufoffset;
+	xfs_daddr_t		q_blkno;
 	xfs_fileoff_t		q_fileoffset;
 
 	struct xfs_disk_dquot	q_core;
