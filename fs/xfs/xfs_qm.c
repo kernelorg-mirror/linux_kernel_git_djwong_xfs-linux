@@ -615,12 +615,12 @@ xfs_qm_init_timelimits(
 		defq->itimelimit = be32_to_cpu(ddqp->d_itimer);
 	if (ddqp->d_rtbtimer)
 		defq->rtbtimelimit = be32_to_cpu(ddqp->d_rtbtimer);
-	if (ddqp->d_bwarns)
-		defq->bwarnlimit = be16_to_cpu(ddqp->d_bwarns);
-	if (ddqp->d_iwarns)
-		defq->iwarnlimit = be16_to_cpu(ddqp->d_iwarns);
-	if (ddqp->d_rtbwarns)
-		defq->rtbwarnlimit = be16_to_cpu(ddqp->d_rtbwarns);
+	if (dqp->q_bwarns)
+		defq->bwarnlimit = dqp->q_bwarns;
+	if (dqp->q_iwarns)
+		defq->iwarnlimit = dqp->q_iwarns;
+	if (dqp->q_rtbwarns)
+		defq->rtbwarnlimit = dqp->q_rtbwarns;
 
 	xfs_qm_dqdestroy(dqp);
 }

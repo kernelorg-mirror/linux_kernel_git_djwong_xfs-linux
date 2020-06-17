@@ -53,6 +53,11 @@ struct xfs_dquot {
 	xfs_qcnt_t		q_icount;
 	xfs_qcnt_t		q_rtbcount;
 
+	/* Warning counters. */
+	uint16_t		q_bwarns;
+	uint16_t		q_iwarns;
+	uint16_t		q_rtbwarns;
+
 	struct xfs_disk_dquot	q_core;
 	struct xfs_dq_logitem	q_logitem;
 	/* total regular nblks used+reserved */
