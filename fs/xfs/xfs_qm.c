@@ -549,26 +549,24 @@ xfs_qm_set_defquota(
 {
 	struct xfs_dquot	*dqp;
 	struct xfs_def_quota	*defq;
-	struct xfs_disk_dquot	*ddqp;
 	int			error;
 
 	error = xfs_qm_dqget_uncached(mp, 0, type, &dqp);
 	if (error)
 		return;
 
-	ddqp = &dqp->q_core;
 	defq = xfs_get_defquota(qinf, xfs_dquot_type(dqp));
 
 	/*
 	 * Timers and warnings have been already set, let's just set the
 	 * default limits for this quota type
 	 */
-	defq->bhardlimit = be64_to_cpu(ddqp->d_blk_hardlimit);
-	defq->bsoftlimit = be64_to_cpu(ddqp->d_blk_softlimit);
-	defq->ihardlimit = be64_to_cpu(ddqp->d_ino_hardlimit);
-	defq->isoftlimit = be64_to_cpu(ddqp->d_ino_softlimit);
-	defq->rtbhardlimit = be64_to_cpu(ddqp->d_rtb_hardlimit);
-	defq->rtbsoftlimit = be64_to_cpu(ddqp->d_rtb_softlimit);
+	defq->bhardlimit = dqp->q_blk_hardlimit;
+	defq->bsoftlimit = dqp->q_blk_softlimit;
+	defq->ihardlimit = dqp->q_ino_hardlimit;
+	defq->isoftlimit = dqp->q_ino_softlimit;
+	defq->rtbhardlimit = dqp->q_rtb_hardlimit;
+	defq->rtbsoftlimit = dqp->q_rtb_softlimit;
 	xfs_qm_dqdestroy(dqp);
 }
 

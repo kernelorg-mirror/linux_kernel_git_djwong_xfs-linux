@@ -40,6 +40,14 @@ struct xfs_dquot {
 	xfs_daddr_t		q_blkno;
 	xfs_fileoff_t		q_fileoffset;
 
+	/* Absolute and preferred limits on blocks and inodes. */
+	xfs_qcnt_t		q_blk_hardlimit;
+	xfs_qcnt_t		q_blk_softlimit;
+	xfs_qcnt_t		q_ino_hardlimit;
+	xfs_qcnt_t		q_ino_softlimit;
+	xfs_qcnt_t		q_rtb_hardlimit;
+	xfs_qcnt_t		q_rtb_softlimit;
+
 	struct xfs_disk_dquot	q_core;
 	struct xfs_dq_logitem	q_logitem;
 	/* total regular nblks used+reserved */
@@ -138,7 +146,7 @@ static inline bool xfs_dquot_lowsp(struct xfs_dquot *dqp)
 {
 	int64_t freesp;
 
-	freesp = be64_to_cpu(dqp->q_core.d_blk_hardlimit) - dqp->q_res_bcount;
+	freesp = dqp->q_blk_hardlimit - dqp->q_res_bcount;
 	if (freesp < dqp->q_low_space[XFS_QLOWSP_1_PCNT])
 		return true;
 
