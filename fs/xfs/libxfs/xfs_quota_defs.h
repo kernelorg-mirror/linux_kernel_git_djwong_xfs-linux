@@ -29,6 +29,8 @@ typedef uint16_t	xfs_qwarncnt_t;
 
 #define XFS_DQ_ALLTYPES		(XFS_DQ_USER|XFS_DQ_PROJ|XFS_DQ_GROUP)
 
+#define XFS_DQ_ONDISK		(XFS_DQ_ALLTYPES)
+
 #define XFS_DQ_FLAGS \
 	{ XFS_DQ_USER,		"USER" }, \
 	{ XFS_DQ_PROJ,		"PROJ" }, \
