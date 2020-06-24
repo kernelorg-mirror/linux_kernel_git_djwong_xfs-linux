@@ -1043,7 +1043,11 @@ xfs_reflink_remap_extent(
 	 * Compute quota reservation if we think the quota block counter for
 	 * this file could increase.
 	 *
-	 * We start by reserving enough blocks to handle a bmbt split.
+	 * Adding a written extent to the extent map can cause a bmbt split,
+	 * and removing a mapped extent from the extent can cause a bmbt split.
+	 * The two operations cannot both cause a split since they operate on
+	 * the same index in the bmap btree, so we only need a reservation for
+	 * one bmbt split if either thing is happening.
 	 *
 	 * If we are mapping a written extent into the file, we need to have
 	 * enough quota block count reservation to handle the blocks in that
@@ -1056,8 +1060,9 @@ xfs_reflink_remap_extent(
 	 * before we started.  That should have removed all the delalloc
 	 * reservations, but we code defensively.
 	 */
-	qdelta = 0;
-	qres = XFS_EXTENTADD_SPACE_RES(mp, XFS_DATA_FORK);
+	qres = qdelta = 0;
+	if (smap_mapped || dmap_written)
+		qres = XFS_EXTENTADD_SPACE_RES(mp, XFS_DATA_FORK);
 	if (dmap_written)
 		qres += dmap->br_blockcount;
 	if (qres > 0) {
