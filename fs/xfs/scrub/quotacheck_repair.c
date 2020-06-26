@@ -175,7 +175,7 @@ xqcheck_commit_dqtype(
 
 /* Figure out quota CHKD flags for the running quota types. */
 static inline unsigned int
-xqcheck_chkd_flags(
+xqcheck_chkd_type(
 	struct xfs_mount	*mp)
 {
 	unsigned int		ret = 0;
@@ -195,7 +195,7 @@ xrep_quotacheck(
 	struct xfs_scrub	*sc)
 {
 	struct xqcheck		*xqc = sc->buf;
-	unsigned int		qflags = xqcheck_chkd_flags(sc->mp);
+	unsigned int		qflags = xqcheck_chkd_type(sc->mp);
 	int			error;
 
 	/*

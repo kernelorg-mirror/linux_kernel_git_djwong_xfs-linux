@@ -73,6 +73,13 @@ xfs_dquot_verify(
 	    ddq_type != XFS_DDQTYPE_GROUP)
 		return __this_address;
 
+	if ((ddq->d_type & XFS_DDQTYPE_BIGTIME) &&
+	    !xfs_sb_version_hasbigtime(&mp->m_sb))
+		return __this_address;
+
+	if ((ddq->d_type & XFS_DDQTYPE_BIGTIME) && !ddq->d_id)
+		return __this_address;
+
 	if (id != -1 && id != be32_to_cpu(ddq->d_id))
 		return __this_address;
 
@@ -293,3 +300,56 @@ const struct xfs_buf_ops xfs_dquot_buf_ra_ops = {
 	.verify_read = xfs_dquot_buf_readahead_verify,
 	.verify_write = xfs_dquot_buf_write_verify,
 };
+
+/* Convert an on-disk timer value into an incore timer value. */
+void
+xfs_dquot_from_disk_timestamp(
+	struct xfs_disk_dquot	*ddq,
+	time64_t		*timer,
+	__be32			dtimer)
+{
+	/* Zero always means zero, regardless of encoding. */
+	if (!dtimer) {
+		*timer = 0;
+		return;
+	}
+
+	if (ddq->d_type & XFS_DDQTYPE_BIGTIME) {
+		uint64_t	t;
+
+		t = be32_to_cpu(dtimer);
+		*timer = t << XFS_DQ_BIGTIME_SHIFT;
+		return;
+	}
+
+	*timer = be32_to_cpu(dtimer);
+}
+
+/* Convert an incore timer value into an on-disk timer value. */
+void
+xfs_dquot_to_disk_timestamp(
+	struct xfs_dquot	*dqp,
+	__be32			*dtimer,
+	time64_t		timer)
+{
+	/* Zero always means zero, regardless of encoding. */
+	if (!timer) {
+		*dtimer = cpu_to_be32(0);
+		return;
+	}
+
+	if (dqp->q_flags & XFS_DQFLAG_BIGTIME) {
+		uint64_t	t = timer;
+
+		/*
+		 * Round the end of the grace period up to the nearest bigtime
+		 * interval that we support, to give users the most time to fix
+		 * the problems.
+		 */
+		t = roundup_64(t, 1U << XFS_DQ_BIGTIME_SHIFT);
+		*dtimer = cpu_to_be32(t >> XFS_DQ_BIGTIME_SHIFT);
+		return;
+	}
+
+	*dtimer = cpu_to_be32(timer);
+}

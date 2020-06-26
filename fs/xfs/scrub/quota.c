@@ -100,6 +100,14 @@ xchk_quota_item(
 	sqi->last_id = dq->q_id;
 
 	/*
+	 * If the bigtime feature is enabled, all non-root incore dquots should
+	 * have the bigtime dquot flag set.
+	 */
+	if (xfs_sb_version_hasbigtime(&mp->m_sb) && dq->q_id &&
+	    !(dq->q_flags & XFS_DQFLAG_BIGTIME))
+		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, offset);
+
+	/*
 	 * Warn if the hard limits are larger than the fs.
 	 * Administrators can do this, though in production this seems
 	 * suspect, which is why we flag it for review.
