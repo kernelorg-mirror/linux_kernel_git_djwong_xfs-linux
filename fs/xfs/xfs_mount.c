@@ -1408,3 +1408,46 @@ clamp:
 	/* Don't return an estimate larger than the CPU count. */
 	return min(num_online_cpus(), threads);
 }
+
+/* Initialize a hook. */
+void
+xfs_hook_init(
+	struct xfs_hook_chain	*chain)
+{
+	srcu_init_notifier_head(&chain->head);
+}
+
+/* Make it so a function gets called whenever we hit a certain hook point. */
+int
+xfs_hook_add(
+	struct xfs_hook_chain	*chain,
+	struct notifier_block	*hook,
+	notifier_fn_t		fn)
+{
+	hook->notifier_call = fn;
+	return srcu_notifier_chain_register(&chain->head, hook);
+}
+
+/* Remove a previously installed hook. */
+void
+xfs_hook_del(
+	struct xfs_hook_chain	*chain,
+	struct notifier_block	*hook)
+{
+	if (!hook->notifier_call)
+		return;
+
+	srcu_notifier_chain_unregister(&chain->head, hook);
+	rcu_barrier();
+	hook->notifier_call = NULL;
+}
+
+/* Call a hook. */
+int
+xfs_hook_call(
+	struct xfs_hook_chain	*chain,
+	unsigned long		val,
+	void			*priv)
+{
+	return srcu_notifier_call_chain(&chain->head, val, priv);
+}
