@@ -28,6 +28,9 @@
 
 #include <linux/iversion.h>
 
+STATIC int xfs_inode_free_eofblocks(struct xfs_inode *ip, void *args);
+STATIC int xfs_inode_free_cowblocks(struct xfs_inode *ip, void *args);
+
 /*
  * flags for incore inode iterator
  */
@@ -1004,6 +1007,21 @@ xfs_queue_eofblocks(
 	rcu_read_unlock();
 }
 
+/* Scan all incore inodes for block preallocations that we can remove. */
+static inline int
+xfs_blockgc_scan(
+	struct xfs_mount	*mp,
+	struct xfs_eofblocks	*eofb)
+{
+	int			error;
+
+	error = xfs_icache_free_eofblocks(mp, eofb);
+	if (error && error != -EAGAIN)
+		return error;
+
+	return xfs_icache_free_cowblocks(mp, eofb);
+}
+
 void
 xfs_eofblocks_worker(
 	struct work_struct *work)
@@ -1631,9 +1649,25 @@ xfs_inode_free_quota_blocks(
 
 	trace_xfs_inode_free_quota_blocks(ip->i_mount, &eofb, _RET_IP_);
 
-	xfs_icache_free_eofblocks(ip->i_mount, &eofb);
-	xfs_icache_free_cowblocks(ip->i_mount, &eofb);
-	return true;
+	return xfs_blockgc_scan(ip->i_mount, &eofb) == 0;
+}
+
+/*
+ * Try to free space in the filesystem by purging eofblocks and cowblocks.
+ */
+int
+xfs_inode_free_blocks(
+	struct xfs_mount	*mp,
+	bool			sync)
+{
+	struct xfs_eofblocks	eofb = {0};
+
+	if (sync)
+		eofb.eof_flags |= XFS_EOF_FLAGS_SYNC;
+
+	trace_xfs_inode_free_blocks(mp, &eofb, _RET_IP_);
+
+	return xfs_blockgc_scan(mp, &eofb);
 }
 
 static inline unsigned long
