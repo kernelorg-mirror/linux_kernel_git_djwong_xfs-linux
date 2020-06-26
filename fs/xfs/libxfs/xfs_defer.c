@@ -563,14 +563,59 @@ xfs_defer_move(
  *
  * Create and log intent items for all the work that we're capturing so that we
  * can be assured that the items will get replayed if the system goes down
- * before log recovery gets a chance to finish the work it put off.  Then we
- * move the chain from stp to dtp.
+ * before log recovery gets a chance to finish the work it put off.  The entire
+ * deferred ops state is transferred to the capture structure and the
+ * transaction is committed.
+ *
+ * Note that the capture state is passed up to the caller and must be freed
+ * even if the transaction commit returns error.
  */
-void
+int
 xfs_defer_capture(
-	struct xfs_trans	*dtp,
-	struct xfs_trans	*stp)
+	struct xfs_trans		*tp,
+	struct xfs_defer_capture	**dfcp)
 {
-	xfs_defer_create_intents(stp);
-	xfs_defer_move(dtp, stp);
+	struct xfs_defer_capture	*dfc = NULL;
+
+	if (!list_empty(&tp->t_dfops)) {
+		dfc = kmem_zalloc(sizeof(*dfc), KM_NOFS);
+
+		xfs_defer_create_intents(tp);
+
+		INIT_LIST_HEAD(&dfc->dfc_list);
+		INIT_LIST_HEAD(&dfc->dfc_dfops);
+
+		/* Move the dfops chain and transaction state to the freezer. */
+		list_splice_init(&tp->t_dfops, &dfc->dfc_dfops);
+		dfc->dfc_tpflags = tp->t_flags & XFS_TRANS_LOWMODE;
+		xfs_defer_reset(tp);
+	}
+
+	*dfcp = dfc;
+	return xfs_trans_commit(tp);
+}
+
+/* Attach a chain of captured deferred ops to a new transaction. */
+void
+xfs_defer_continue(
+	struct xfs_defer_capture	*dfc,
+	struct xfs_trans		*tp)
+{
+	ASSERT(tp->t_flags & XFS_TRANS_PERM_LOG_RES);
+	ASSERT(!(tp->t_flags & XFS_TRANS_DIRTY));
+
+	/* Move captured dfops chain and state to the transaction. */
+	list_splice_init(&dfc->dfc_dfops, &tp->t_dfops);
+	tp->t_flags |= dfc->dfc_tpflags;
+	dfc->dfc_tpflags = 0;
+}
+
+/* Release all resources that we used to capture deferred ops. */
+void
+xfs_defer_capture_free(
+	struct xfs_mount		*mp,
+	struct xfs_defer_capture	*dfc)
+{
+	xfs_defer_cancel_list(mp, &dfc->dfc_dfops);
+	kmem_free(dfc);
 }
