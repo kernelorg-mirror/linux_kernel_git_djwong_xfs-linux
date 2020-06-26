@@ -490,11 +490,9 @@ xfs_setqlim_timer(
 	s64			timer)
 {
 	if (dres) {
-		/* Set the length of the default grace period. */
-		res->timer = timer;
-		dres->timelimit = timer;
+		xfs_dquot_set_grace_period(&res->timer, timer);
+		dres->timelimit = res->timer;
 	} else {
-		/* Set the grace period expiration on a quota. */
 		xfs_dquot_set_timeout(&res->timer, timer);
 	}
 }
