@@ -110,9 +110,15 @@ xfs_dquot_set_grace_period(
 /* Set the expiration time of a quota's grace period. */
 void
 xfs_dquot_set_timeout(
+	struct xfs_dquot	*dqp,
 	time64_t		*timer,
 	time64_t		value)
 {
+	if (dqp->dq_flags & XFS_DQ_BIGTIME) {
+		*timer = clamp_t(time64_t, value, XFS_DQ_BIGTIMEOUT_MIN,
+						  XFS_DQ_BIGTIMEOUT_MAX);
+		return;
+	}
 	*timer = clamp_t(time64_t, value, XFS_DQ_TIMEOUT_MIN,
 					  XFS_DQ_TIMEOUT_MAX);
 }
@@ -123,6 +129,7 @@ xfs_dquot_set_timeout(
  */
 static inline void
 xfs_qm_adjust_res_timer(
+	struct xfs_dquot	*dqp,
 	struct xfs_dquot_res	*res,
 	struct xfs_def_qres	*dres)
 {
@@ -138,7 +145,7 @@ xfs_qm_adjust_res_timer(
 	       (res->hardlimit && eff_count > res->hardlimit);
 
 	if (over && res->timer == 0)
-		xfs_dquot_set_timeout(&res->timer,
+		xfs_dquot_set_timeout(dqp, &res->timer,
 				ktime_get_real_seconds() + dres->timelimit);
 	else if (!over && res->timer != 0)
 		res->timer = 0;
@@ -170,9 +177,9 @@ xfs_qm_adjust_dqtimers(
 	ASSERT(dq->q_id);
 	defq = xfs_get_defquota(qi, xfs_dquot_type(dq));
 
-	xfs_qm_adjust_res_timer(&dq->q_blk, &defq->dfq_blk);
-	xfs_qm_adjust_res_timer(&dq->q_ino, &defq->dfq_ino);
-	xfs_qm_adjust_res_timer(&dq->q_rtb, &defq->dfq_rtb);
+	xfs_qm_adjust_res_timer(dq, &dq->q_blk, &defq->dfq_blk);
+	xfs_qm_adjust_res_timer(dq, &dq->q_ino, &defq->dfq_ino);
+	xfs_qm_adjust_res_timer(dq, &dq->q_rtb, &defq->dfq_rtb);
 }
 
 /*
@@ -208,6 +215,8 @@ xfs_qm_init_dquot_blk(
 		d->dd_diskdq.d_version = XFS_DQUOT_VERSION;
 		d->dd_diskdq.d_id = cpu_to_be32(curid);
 		d->dd_diskdq.d_flags = type;
+		if (curid > 0 && xfs_sb_version_hasbigtime(&mp->m_sb))
+			d->dd_diskdq.d_flags |= XFS_DQ_BIGTIME;
 		if (xfs_sb_version_hascrc(&mp->m_sb)) {
 			uuid_copy(&d->dd_uuid, &mp->m_sb.sb_meta_uuid);
 			xfs_update_cksum((char *)d, sizeof(struct xfs_dqblk),
@@ -518,6 +527,8 @@ xfs_dquot_from_disk(
 	}
 
 	/* copy everything from disk dquot to the incore dquot */
+	dqp->dq_flags &= ~XFS_DQ_ONDISK;
+	dqp->dq_flags |= (ddqp->d_flags & XFS_DQ_ONDISK);
 	dqp->q_blk.hardlimit = be64_to_cpu(ddqp->d_blk_hardlimit);
 	dqp->q_blk.softlimit = be64_to_cpu(ddqp->d_blk_softlimit);
 	dqp->q_ino.hardlimit = be64_to_cpu(ddqp->d_ino_hardlimit);
@@ -533,9 +544,17 @@ xfs_dquot_from_disk(
 	dqp->q_ino.warnings = be16_to_cpu(ddqp->d_iwarns);
 	dqp->q_rtb.warnings = be16_to_cpu(ddqp->d_rtbwarns);
 
-	dqp->q_blk.timer = be32_to_cpu(ddqp->d_btimer);
-	dqp->q_ino.timer = be32_to_cpu(ddqp->d_itimer);
-	dqp->q_rtb.timer = be32_to_cpu(ddqp->d_rtbtimer);
+	xfs_dquot_from_disk_timestamp(ddqp, &dqp->q_blk.timer, ddqp->d_btimer);
+	xfs_dquot_from_disk_timestamp(ddqp, &dqp->q_ino.timer, ddqp->d_itimer);
+	xfs_dquot_from_disk_timestamp(ddqp, &dqp->q_rtb.timer, ddqp->d_rtbtimer);
+
+	/*
+	 * Set the bigtime flag on the incore dquot so that the next dquot
+	 * update will write quota timer expiration timestamps to disk in the
+	 * new format.
+	 */
+	if (dqp->q_id != 0 && xfs_sb_version_hasbigtime(&dqp->q_mount->m_sb))
+		dqp->dq_flags |= XFS_DQ_BIGTIME;
 
 	/*
 	 * Reservation counters are defined as reservation plus current usage
@@ -578,9 +597,9 @@ xfs_dquot_to_disk(
 	ddqp->d_iwarns = cpu_to_be16(dqp->q_ino.warnings);
 	ddqp->d_rtbwarns = cpu_to_be16(dqp->q_rtb.warnings);
 
-	ddqp->d_btimer = cpu_to_be32(dqp->q_blk.timer);
-	ddqp->d_itimer = cpu_to_be32(dqp->q_ino.timer);
-	ddqp->d_rtbtimer = cpu_to_be32(dqp->q_rtb.timer);
+	xfs_dquot_to_disk_timestamp(dqp, &ddqp->d_btimer, dqp->q_blk.timer);
+	xfs_dquot_to_disk_timestamp(dqp, &ddqp->d_itimer, dqp->q_ino.timer);
+	xfs_dquot_to_disk_timestamp(dqp, &ddqp->d_rtbtimer, dqp->q_rtb.timer);
 }
 
 /* Allocate and initialize the dquot buffer for this in-core dquot. */
@@ -1151,6 +1170,15 @@ xfs_qm_dqflush_check(
 
 	if (dqp->q_rtb.softlimit && dqp->q_rtb.count > dqp->q_rtb.softlimit &&
 	    !dqp->q_rtb.timer)
+		return __this_address;
+
+	/*
+	 * Except for the root dquot (whose timer values are the default grace
+	 * period expirations) we should never write non-bigtime quota timers
+	 * to a bigtime fs.
+	 */
+	if (dqp->q_id != 0 && xfs_sb_version_hasbigtime(&dqp->q_mount->m_sb) &&
+	    !(dqp->dq_flags & XFS_DQ_BIGTIME))
 		return __this_address;
 
 	return NULL;

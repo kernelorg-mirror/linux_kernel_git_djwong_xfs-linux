@@ -221,6 +221,7 @@ int xfs_qm_dqiterate(struct xfs_mount *mp, uint dqtype,
 		xfs_qm_dqiterate_fn iter_fn, void *priv);
 
 void xfs_dquot_set_grace_period(time64_t *timer, time64_t limit);
-void xfs_dquot_set_timeout(time64_t *timer, time64_t limit);
+void xfs_dquot_set_timeout(struct xfs_dquot *dqp, time64_t *timer,
+		time64_t limit);
 
 #endif /* __XFS_DQUOT_H__ */
