@@ -6,6 +6,8 @@
 #ifndef	__XFS_LOG_RECOVER_H__
 #define __XFS_LOG_RECOVER_H__
 
+struct xfs_defer_capture;
+
 /*
  * Each log item type (XFS_LI_*) gets its own xlog_recover_item_ops to
  * define how recovery should work for that type of log item.
@@ -125,5 +127,7 @@ void xlog_recover_iodone(struct xfs_buf *bp);
 
 void xlog_recover_release_intent(struct xlog *log, unsigned short intent_type,
 		uint64_t intent_id);
+int xlog_recover_trans_commit(struct xfs_trans *tp,
+		struct xfs_defer_capture **dfcp);
 
 #endif	/* __XFS_LOG_RECOVER_H__ */
