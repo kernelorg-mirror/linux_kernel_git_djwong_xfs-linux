@@ -121,6 +121,16 @@ xfs_qm_adjust_dqlimits(
 		xfs_dquot_set_prealloc_limits(dq);
 }
 
+/* Set the expiration time of a quota's grace period. */
+void
+xfs_dquot_set_timeout(
+	time64_t		*timer,
+	time64_t		value)
+{
+	*timer = clamp_t(time64_t, value, XFS_DQ_TIMEOUT_MIN,
+					  XFS_DQ_TIMEOUT_MAX);
+}
+
 /*
  * Determine if this quota counter is over either limit and set the quota
  * timers as appropriate.
@@ -137,7 +147,8 @@ xfs_qm_adjust_res_timer(
 	if ((res->softlimit && eff_count > res->softlimit) ||
 	    (res->hardlimit && eff_count > res->hardlimit)) {
 		if (res->timer == 0)
-			res->timer = ktime_get_real_seconds() + qlim->time;
+			xfs_dquot_set_timeout(&res->timer,
+					ktime_get_real_seconds() + qlim->time);
 	} else {
 		if (res->timer == 0)
 			res->warnings = 0;

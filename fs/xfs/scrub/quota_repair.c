@@ -130,9 +130,13 @@ xrep_quota_fix_timer(
 {
 	uint64_t		soft = be64_to_cpu(softlimit);
 	uint64_t		count = be64_to_cpu(countnow);
+	time64_t		new_timer;
 
-	if (soft && count > soft && *timer == 0)
-		*timer = cpu_to_be32(ktime_get_real_seconds() + timelimit);
+	if (soft && count > soft && *timer == 0) {
+		xfs_dquot_set_timeout(&new_timer,
+				ktime_get_real_seconds() + timelimit);
+		*timer = cpu_to_be32(new_timer);
+	}
 }
 
 /* Fix anything the verifiers complain about. */
