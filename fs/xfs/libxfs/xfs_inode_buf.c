@@ -173,7 +173,7 @@ xfs_imap_to_bp(
 				   &xfs_inode_buf_ops);
 	if (xfs_metadata_is_sick(error))
 		xfs_agno_mark_sick(mp, xfs_daddr_to_agno(mp, imap->im_blkno),
-				XFS_SICK_AG_INOBT);
+				XFS_SICK_AG_INODES);
 	if (error) {
 		ASSERT(error != -EAGAIN || (buf_flags & XBF_TRYLOCK));
 		return error;
