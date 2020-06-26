@@ -12,6 +12,7 @@
 #include "xfs_sb.h"
 #include "xfs_mount.h"
 #include "xfs_inode.h"
+#include "xfs_defer.h"
 #include "xfs_trans.h"
 #include "xfs_trans_priv.h"
 #include "xfs_inode_item.h"
@@ -1691,4 +1692,44 @@ xfs_start_block_reaping(
 {
 	xfs_queue_eofblocks(mp);
 	xfs_queue_cowblocks(mp);
+}
+
+/*
+ * Prepare the inodes to participate in further log intent item recovery.
+ * For now, that means attaching dquots and locking them, since libxfs doesn't
+ * know how to do that.
+ */
+void
+xfs_defer_continue_inodes(
+	struct xfs_defer_capture	*dfc,
+	struct xfs_trans		*tp)
+{
+	int				i;
+	int				error;
+
+	for (i = 0; i < XFS_DEFER_OPS_NR_INODES && dfc->dfc_inodes[i]; i++) {
+		error = xfs_qm_dqattach(dfc->dfc_inodes[i]);
+		if (error)
+			tp->t_mountp->m_qflags &= ~XFS_ALL_QUOTA_CHKD;
+	}
+
+	if (dfc->dfc_inodes[1])
+		xfs_lock_two_inodes(dfc->dfc_inodes[0], XFS_ILOCK_EXCL,
+				    dfc->dfc_inodes[1], XFS_ILOCK_EXCL);
+	else if (dfc->dfc_inodes[0])
+		xfs_ilock(dfc->dfc_inodes[0], XFS_ILOCK_EXCL);
+	dfc->dfc_ilocked = true;
+}
+
+/* Release all the inodes attached to this dfops capture device. */
+void
+xfs_defer_capture_irele(
+	struct xfs_defer_capture	*dfc)
+{
+	unsigned int			i;
+
+	for (i = 0; i < XFS_DEFER_OPS_NR_INODES && dfc->dfc_inodes[i]; i++) {
+		xfs_irele(dfc->dfc_inodes[i]);
+		dfc->dfc_inodes[i] = NULL;
+	}
 }
