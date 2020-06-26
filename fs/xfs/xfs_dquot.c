@@ -121,6 +121,15 @@ xfs_qm_adjust_dqlimits(
 		xfs_dquot_set_prealloc_limits(dq);
 }
 
+/* Set the length of the default grace period. */
+void
+xfs_dquot_set_grace_period(
+	time64_t		*timer,
+	time64_t		value)
+{
+	*timer = clamp_t(time64_t, value, XFS_DQ_GRACE_MIN, XFS_DQ_GRACE_MAX);
+}
+
 /* Set the expiration time of a quota's grace period. */
 void
 xfs_dquot_set_timeout(
