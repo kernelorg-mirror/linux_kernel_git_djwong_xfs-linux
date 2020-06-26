@@ -1691,6 +1691,10 @@ xfs_fc_fill_super(
 		xfs_warn(mp,
  "EXPERIMENTAL inode btree counters feature in use. Use at your own risk!");
 
+	if (xfs_sb_version_hasatomicswap(&mp->m_sb))
+		xfs_warn(mp,
+ "EXPERIMENTAL atomic file range swap feature in use. Use at your own risk!");
+
 	error = xfs_mountfs(mp);
 	if (error)
 		goto out_filestream_unmount;
