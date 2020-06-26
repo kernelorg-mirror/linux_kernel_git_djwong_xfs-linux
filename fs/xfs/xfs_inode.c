@@ -3860,6 +3860,8 @@ flush_out:
 
 	ASSERT(!list_empty(&bp->b_li_list));
 	ASSERT(bp->b_iodone != NULL);
+	if (error)
+		xfs_inode_mark_sick(ip, XFS_SICK_INO_CORE);
 	return error;
 }
 
