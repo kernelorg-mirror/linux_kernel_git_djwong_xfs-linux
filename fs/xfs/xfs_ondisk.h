@@ -25,6 +25,9 @@ xfs_check_limits(void)
 	/* make sure timestamp limits are correct */
 	XFS_CHECK_VALUE(XFS_INO_TIME_MIN,			-2147483648LL);
 	XFS_CHECK_VALUE(XFS_INO_TIME_MAX,			2147483647LL);
+	XFS_CHECK_VALUE(XFS_INO_BIGTIME_EPOCH,			2147483648LL);
+	XFS_CHECK_VALUE(XFS_INO_BIGTIME_MIN,			-2147483648LL);
+	XFS_CHECK_VALUE(XFS_INO_BIGTIME_MAX,			16299260425LL);
 	XFS_CHECK_VALUE(XFS_DQ_TIMEOUT_MIN,			1LL);
 	XFS_CHECK_VALUE(XFS_DQ_TIMEOUT_MAX,			4294967295LL);
 	XFS_CHECK_VALUE(XFS_DQ_GRACE_MIN,			0LL);
@@ -58,6 +61,9 @@ xfs_check_ondisk_structs(void)
 	XFS_CHECK_STRUCT_SIZE(struct xfs_rmap_key,		20);
 	XFS_CHECK_STRUCT_SIZE(struct xfs_rmap_rec,		24);
 	XFS_CHECK_STRUCT_SIZE(union xfs_timestamp,		8);
+	XFS_CHECK_OFFSET(union xfs_timestamp, t_bigtime,	0);
+	XFS_CHECK_OFFSET(union xfs_timestamp, t_sec,		0);
+	XFS_CHECK_OFFSET(union xfs_timestamp, t_nsec,		4);
 	XFS_CHECK_STRUCT_SIZE(xfs_alloc_key_t,			8);
 	XFS_CHECK_STRUCT_SIZE(xfs_alloc_ptr_t,			4);
 	XFS_CHECK_STRUCT_SIZE(xfs_alloc_rec_t,			8);

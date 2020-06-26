@@ -298,9 +298,16 @@ xfs_inode_item_format_attr_fork(
 /* Write a log_dinode timestamp into an ondisk inode timestamp. */
 static inline void
 xfs_log_dinode_to_disk_ts(
+	struct xfs_log_dinode		*from,
 	union xfs_timestamp		*ts,
 	const union xfs_ictimestamp	*its)
 {
+	if (from->di_version >= 3 &&
+	    (from->di_flags2 & XFS_DIFLAG2_BIGTIME)) {
+		ts->t_bigtime = cpu_to_be64(its->t_bigtime);
+		return;
+	}
+
 	ts->t_sec = cpu_to_be32(its->t_sec);
 	ts->t_nsec = cpu_to_be32(its->t_nsec);
 }
@@ -322,9 +329,9 @@ xfs_log_dinode_to_disk(
 	to->di_projid_hi = cpu_to_be16(from->di_projid_hi);
 	memcpy(to->di_pad, from->di_pad, sizeof(to->di_pad));
 
-	xfs_log_dinode_to_disk_ts(&to->di_atime, &from->di_atime);
-	xfs_log_dinode_to_disk_ts(&to->di_mtime, &from->di_mtime);
-	xfs_log_dinode_to_disk_ts(&to->di_ctime, &from->di_ctime);
+	xfs_log_dinode_to_disk_ts(from, &to->di_atime, &from->di_atime);
+	xfs_log_dinode_to_disk_ts(from, &to->di_mtime, &from->di_mtime);
+	xfs_log_dinode_to_disk_ts(from, &to->di_ctime, &from->di_ctime);
 
 	to->di_size = cpu_to_be64(from->di_size);
 	to->di_nblocks = cpu_to_be64(from->di_nblocks);
@@ -340,7 +347,7 @@ xfs_log_dinode_to_disk(
 
 	if (from->di_version == 3) {
 		to->di_changecount = cpu_to_be64(from->di_changecount);
-		xfs_log_dinode_to_disk_ts(&to->di_crtime, &from->di_crtime);
+		xfs_log_dinode_to_disk_ts(from, &to->di_crtime, &from->di_crtime);
 		to->di_flags2 = cpu_to_be64(from->di_flags2);
 		to->di_cowextsize = cpu_to_be32(from->di_cowextsize);
 		to->di_ino = cpu_to_be64(from->di_ino);
@@ -356,9 +363,19 @@ xfs_log_dinode_to_disk(
 /* Write an incore inode timestamp into a log_dinode timestamp. */
 static inline void
 xfs_inode_to_log_dinode_ts(
+	struct xfs_icdinode		*from,
 	union xfs_ictimestamp		*its,
 	const struct timespec64		*ts)
 {
+	if (from->di_flags2 & XFS_DIFLAG2_BIGTIME) {
+		uint64_t		t;
+
+		t = (uint64_t)(ts->tv_sec + XFS_INO_BIGTIME_EPOCH);
+		t *= NSEC_PER_SEC;
+		its->t_bigtime = t + ts->tv_nsec;
+		return;
+	}
+
 	its->t_sec = ts->tv_sec;
 	its->t_nsec = ts->tv_nsec;
 }
@@ -381,9 +398,9 @@ xfs_inode_to_log_dinode(
 
 	memset(to->di_pad, 0, sizeof(to->di_pad));
 	memset(to->di_pad3, 0, sizeof(to->di_pad3));
-	xfs_inode_to_log_dinode_ts(&to->di_atime, &inode->i_atime);
-	xfs_inode_to_log_dinode_ts(&to->di_mtime, &inode->i_mtime);
-	xfs_inode_to_log_dinode_ts(&to->di_ctime, &inode->i_ctime);
+	xfs_inode_to_log_dinode_ts(from, &to->di_atime, &inode->i_atime);
+	xfs_inode_to_log_dinode_ts(from, &to->di_mtime, &inode->i_mtime);
+	xfs_inode_to_log_dinode_ts(from, &to->di_ctime, &inode->i_ctime);
 	to->di_nlink = inode->i_nlink;
 	to->di_gen = inode->i_generation;
 	to->di_mode = inode->i_mode;
@@ -405,7 +422,7 @@ xfs_inode_to_log_dinode(
 	if (xfs_sb_version_has_v3inode(&ip->i_mount->m_sb)) {
 		to->di_version = 3;
 		to->di_changecount = inode_peek_iversion(inode);
-		xfs_inode_to_log_dinode_ts(&to->di_crtime, &from->di_crtime);
+		xfs_inode_to_log_dinode_ts(from, &to->di_crtime, &from->di_crtime);
 		to->di_flags2 = from->di_flags2;
 		to->di_cowextsize = from->di_cowextsize;
 		to->di_ino = ip->i_ino;
