@@ -499,7 +499,8 @@ xfs_init_mount_workqueues(
 		goto out;
 
 	mp->m_unwritten_workqueue = alloc_workqueue("xfs-conv/%s",
-			WQ_MEM_RECLAIM|WQ_FREEZABLE, 0, mp->m_super->s_id);
+			WQ_MEM_RECLAIM | WQ_FREEZABLE | WQ_SYSFS,
+			0, mp->m_super->s_id);
 	if (!mp->m_unwritten_workqueue)
 		goto out_destroy_buf;
 
@@ -515,8 +516,8 @@ xfs_init_mount_workqueues(
 		goto out_destroy_cil;
 
 	mp->m_blockgc_workqueue = alloc_workqueue("xfs-blockgc/%s",
-			WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_FREEZABLE, 0,
-			mp->m_super->s_id);
+			WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_FREEZABLE | WQ_SYSFS,
+			0, mp->m_super->s_id);
 	if (!mp->m_blockgc_workqueue)
 		goto out_destroy_reclaim;
 
@@ -526,8 +527,8 @@ xfs_init_mount_workqueues(
 		goto out_destroy_eofb;
 
 	mp->m_inactive_workqueue = alloc_workqueue("xfs-inactive/%s",
-			WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_FREEZABLE, 0,
-			mp->m_super->s_id);
+			WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_FREEZABLE | WQ_SYSFS,
+			0, mp->m_super->s_id);
 	if (!mp->m_inactive_workqueue)
 		goto out_destroy_sync;
 
