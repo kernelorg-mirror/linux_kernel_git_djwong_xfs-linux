@@ -510,6 +510,9 @@ xfs_bui_item_recover(
 
 	/* Commit transaction, which frees tp. */
 	error = xlog_recover_trans_commit(tp, dfcp);
+	if (error || count == 0)
+		goto err_unlock;
+	error = xfs_defer_capture_inode(*dfcp, ip);
 	if (error)
 		goto err_unlock;
 	return 0;
