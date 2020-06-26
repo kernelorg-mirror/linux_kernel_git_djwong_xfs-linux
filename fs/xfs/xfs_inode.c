@@ -36,6 +36,8 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_reflink.h"
 #include "xfs_health.h"
+#include "xfs_dquot_item.h"
+#include "xfs_dquot.h"
 
 kmem_zone_t *xfs_inode_zone;
 
@@ -1873,7 +1875,7 @@ xfs_inode_iadjust(
 	ASSERT(direction != 0);
 
 	if (VFS_I(ip)->i_nlink != 0)
-		return;
+		goto out;
 
 	inodes = 1;
 	iblocks = max_t(int64_t, 0, ip->i_d.di_nblocks + ip->i_delayed_blks);
@@ -1893,6 +1895,13 @@ xfs_inode_iadjust(
 		percpu_counter_add(&mp->m_dinactive, dblocks);
 	if (rblocks)
 		percpu_counter_add(&mp->m_rinactive, rblocks);
+
+out:
+	/*
+	 * Always tell the quota system that we're inactivating this inode so
+	 * that it will retain incore quota reservations and the like.
+	 */
+	xfs_qm_iadjust(ip, direction, inodes, dblocks, rblocks);
 }
 
 /*

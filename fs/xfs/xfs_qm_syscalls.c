@@ -649,15 +649,15 @@ xfs_qm_scall_getquota_fill_qc(
 	dst->d_spc_softlimit = XFS_FSB_TO_B(mp, dqp->q_blk.softlimit);
 	dst->d_ino_hardlimit = dqp->q_ino.hardlimit;
 	dst->d_ino_softlimit = dqp->q_ino.softlimit;
-	dst->d_space = XFS_FSB_TO_B(mp, dqp->q_blk.reserved);
-	dst->d_ino_count = dqp->q_ino.reserved;
+	dst->d_space = XFS_FSB_TO_B(mp, dqp->q_blk.reserved - dqp->q_blk.inactive);
+	dst->d_ino_count = dqp->q_ino.reserved - dqp->q_ino.inactive;
 	dst->d_spc_timer = dqp->q_blk.timer;
 	dst->d_ino_timer = dqp->q_ino.timer;
 	dst->d_ino_warns = dqp->q_ino.warnings;
 	dst->d_spc_warns = dqp->q_blk.warnings;
 	dst->d_rt_spc_hardlimit = XFS_FSB_TO_B(mp, dqp->q_rtb.hardlimit);
 	dst->d_rt_spc_softlimit = XFS_FSB_TO_B(mp, dqp->q_rtb.softlimit);
-	dst->d_rt_space = XFS_FSB_TO_B(mp, dqp->q_rtb.reserved);
+	dst->d_rt_space = XFS_FSB_TO_B(mp, dqp->q_rtb.reserved - dqp->q_rtb.inactive);
 	dst->d_rt_spc_timer = dqp->q_rtb.timer;
 	dst->d_rt_spc_warns = dqp->q_rtb.warnings;
 
