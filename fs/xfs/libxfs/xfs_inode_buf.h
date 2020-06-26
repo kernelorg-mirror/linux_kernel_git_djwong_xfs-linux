@@ -64,9 +64,9 @@ xfs_failaddr_t xfs_inode_validate_cowextsize(struct xfs_mount *mp,
 		uint32_t cowextsize, uint16_t mode, uint16_t flags,
 		uint64_t flags2);
 
-void xfs_inode_from_disk_timestamp(struct timespec64 *tv,
-		const union xfs_timestamp *ts);
-void xfs_inode_to_disk_timestamp(union xfs_timestamp *ts,
-		const struct timespec64 *tv);
+void xfs_inode_from_disk_timestamp(struct xfs_dinode *dip,
+		struct timespec64 *tv, const union xfs_timestamp *ts);
+void xfs_inode_to_disk_timestamp(struct xfs_icdinode *from,
+		union xfs_timestamp *ts, const struct timespec64 *tv);
 
 #endif	/* __XFS_INODE_BUF_H__ */
