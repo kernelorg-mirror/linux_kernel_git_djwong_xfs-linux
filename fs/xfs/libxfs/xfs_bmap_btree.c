@@ -511,6 +511,54 @@ xfs_bmbt_recs_inorder(
 		xfs_bmbt_disk_get_startoff(&r2->bmbt);
 }
 
+static size_t
+xfs_bmbt_iroot_size(
+	struct xfs_mount	*mp,
+	unsigned int		nrecs,
+	int			level)
+{
+	/*
+	 * If we're asked for zero records, the fork is being converted to
+	 * extents format and we need to free the incore btree root.
+	 */
+	if (nrecs == 0)
+		return 0;
+
+	return xfs_bmap_broot_space_calc(mp, nrecs);
+}
+
+static void *
+xfs_bmbt_iroot_ptr(
+	struct xfs_mount	*mp,
+	struct xfs_btree_block	*bb,
+	unsigned int		i,
+	unsigned int		sz)
+{
+	return xfs_bmap_broot_ptr_addr(mp, bb, i, sz);
+}
+
+static void *
+xfs_bmbt_iroot_key(
+	struct xfs_mount	*mp,
+	struct xfs_btree_block	*bb,
+	unsigned int		nptr)
+{
+	return xfs_bmbt_key_addr(mp, bb, nptr);
+}
+
+static const struct xfs_ifork_broot_ops xfs_bmbt_iroot_ops = {
+	.rec_len		= sizeof(struct xfs_bmbt_rec),
+	.key_len		= sizeof(struct xfs_bmbt_key),
+	.ptr_len		= sizeof(xfs_fsblock_t),
+
+	.header_len		= xfs_bmbt_block_len,
+	.iroot_maxrecs		= xfs_bmbt_maxrecs,
+	.iroot_size		= xfs_bmbt_iroot_size,
+	.iroot_ptr		= xfs_bmbt_iroot_ptr,
+	.iroot_key		= xfs_bmbt_iroot_key,
+	.droot_size		= xfs_bmap_bmdr_space,
+};
+
 static const struct xfs_btree_ops xfs_bmbt_ops = {
 	.rec_len		= sizeof(xfs_bmbt_rec_t),
 	.key_len		= sizeof(xfs_bmbt_key_t),
@@ -531,6 +579,7 @@ static const struct xfs_btree_ops xfs_bmbt_ops = {
 	.buf_ops		= &xfs_bmbt_buf_ops,
 	.keys_inorder		= xfs_bmbt_keys_inorder,
 	.recs_inorder		= xfs_bmbt_recs_inorder,
+	.iroot_ops		= &xfs_bmbt_iroot_ops,
 };
 
 /*
@@ -659,11 +708,11 @@ xfs_bmbt_commit_staged_btree(
 /*
  * Calculate number of records in a bmap btree block.
  */
-int
+unsigned int
 xfs_bmbt_maxrecs(
 	struct xfs_mount	*mp,
-	int			blocklen,
-	int			leaf)
+	unsigned int		blocklen,
+	bool			leaf)
 {
 	blocklen -= xfs_bmbt_block_len(mp);
 
@@ -750,8 +799,7 @@ xfs_bmbt_create_broot(
 	 * Make space in the inode incore. This needs to be undone if we fail
 	 * to expand the root.
 	 */
-	xfs_iroot_realloc(ip, 1, whichfork);
-	ifp->if_flags |= XFS_IFBROOT;
+	xfs_iroot_realloc(ip, whichfork, 1, &xfs_bmbt_iroot_ops, 1);
 
 	/* Fill in the root. */
 	xfs_btree_init_block_int(ip->i_mount, ifp->if_broot,
@@ -765,5 +813,5 @@ xfs_bmbt_uncreate_broot(
 	struct xfs_inode	*ip,
 	int			whichfork)
 {
-	xfs_iroot_realloc(ip, -1, whichfork);
+	xfs_iroot_realloc(ip, whichfork, 1, &xfs_bmbt_iroot_ops, -1);
 }

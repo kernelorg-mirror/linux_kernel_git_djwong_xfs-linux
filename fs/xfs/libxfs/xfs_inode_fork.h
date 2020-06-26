@@ -89,7 +89,6 @@ void		xfs_iflush_fork(struct xfs_inode *, struct xfs_dinode *,
 void		xfs_idestroy_fork(struct xfs_ifork *ifp);
 void		xfs_idata_realloc(struct xfs_inode *ip, int64_t byte_diff,
 				int whichfork);
-void		xfs_iroot_realloc(struct xfs_inode *, int, int);
 int		xfs_iread_extents(struct xfs_trans *, struct xfs_inode *, int);
 int		xfs_iextents_copy(struct xfs_inode *, struct xfs_bmbt_rec *,
 				  int);
@@ -175,5 +174,38 @@ extern void xfs_ifork_init_cow(struct xfs_inode *ip);
 
 int xfs_ifork_verify_local_data(struct xfs_inode *ip);
 int xfs_ifork_verify_local_attr(struct xfs_inode *ip);
+
+struct xfs_ifork_broot_ops {
+	/* Size of the header block, records, keys, and pointers. */
+	size_t		rec_len;
+	size_t		key_len;
+	size_t		ptr_len;
+
+	/* Calculate the size of the incore btree block header. */
+	size_t (*header_len)(struct xfs_mount *mp);
+
+	/* Calculate the number of records/keys in the incore btree block. */
+	unsigned int (*iroot_maxrecs)(struct xfs_mount *mp,
+				      unsigned int blocksize, bool leaf);
+
+	/* Calculate the space required for the incore btree root block. */
+	size_t (*iroot_size)(struct xfs_mount *mp,
+				   unsigned int nrecs, int level);
+
+	/* Address of a pointer inside the incore btree root block. */
+	void *(*iroot_ptr)(struct xfs_mount *mp, struct xfs_btree_block *bb,
+			   unsigned int nptr, unsigned int blocksize);
+
+	/* Address of a key inside the incore btree root block. */
+	void *(*iroot_key)(struct xfs_mount *mp, struct xfs_btree_block *bb,
+			   unsigned int nptr);
+
+	/* Calculate the space required for the ondisk btree root block. */
+	size_t (*droot_size)(struct xfs_btree_block *bb);
+};
+
+void xfs_iroot_realloc(struct xfs_inode *ip, int whichfork,
+		unsigned int level, const struct xfs_ifork_broot_ops *ops,
+		int rec_diff);
 
 #endif	/* __XFS_INODE_FORK_H__ */

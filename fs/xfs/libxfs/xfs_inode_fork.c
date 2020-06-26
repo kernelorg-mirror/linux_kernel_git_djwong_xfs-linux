@@ -345,32 +345,31 @@ xfs_iformat_attr_fork(
  * if we are adding records, one will be allocated.  The caller must also
  * not request that the number of records go below zero, although
  * it can go to zero.
- *
- * ip -- the inode whose if_broot area is changing
- * ext_diff -- the change in the number of records, positive or negative,
- *	 requested for the if_broot array.
  */
 void
 xfs_iroot_realloc(
-	xfs_inode_t		*ip,
-	int			rec_diff,
-	int			whichfork)
+	struct xfs_inode		*ip,
+	int				whichfork,
+	unsigned int			level,
+	const struct xfs_ifork_broot_ops *ops,
+	int				rec_diff)
 {
-	struct xfs_mount	*mp = ip->i_mount;
-	int			cur_max;
-	struct xfs_ifork	*ifp;
-	struct xfs_btree_block	*new_broot;
-	int			new_max;
-	size_t			new_size;
-	char			*np;
-	char			*op;
+	struct xfs_mount		*mp = ip->i_mount;
+	struct xfs_ifork		*ifp;
+	struct xfs_btree_block		*new_broot;
+	void				*np;
+	void				*op;
+	int				cur_max;
+	int				new_max;
+	size_t				new_size;
+
+	ASSERT(level > 0);
 
 	/*
 	 * Handle the degenerate case quietly.
 	 */
-	if (rec_diff == 0) {
+	if (rec_diff == 0)
 		return;
-	}
 
 	ifp = XFS_IFORK_PTR(ip, whichfork);
 	if (rec_diff > 0) {
@@ -379,9 +378,10 @@ xfs_iroot_realloc(
 		 * allocate it now and get out.
 		 */
 		if (ifp->if_broot_bytes == 0) {
-			new_size = xfs_bmap_broot_space_calc(mp, rec_diff);
+			new_size = ops->iroot_size(mp, rec_diff, level);
 			ifp->if_broot = kmem_alloc(new_size, KM_NOFS);
 			ifp->if_broot_bytes = (int)new_size;
+			ifp->if_flags |= XFS_IFBROOT;
 			return;
 		}
 
@@ -391,20 +391,18 @@ xfs_iroot_realloc(
 		 * location.  The records don't change location because
 		 * they are kept butted up against the btree block header.
 		 */
-		cur_max = xfs_bmbt_maxrecs(mp, ifp->if_broot_bytes, 0);
+		ASSERT(be16_to_cpu(ifp->if_broot->bb_level) == level);
+		cur_max = ops->iroot_maxrecs(mp, ifp->if_broot_bytes,
+				level == 0);
 		new_max = cur_max + rec_diff;
-		new_size = xfs_bmap_broot_space_calc(mp, new_max);
-		ifp->if_broot = kmem_realloc(ifp->if_broot, new_size,
-				KM_NOFS);
-		op = (char *)xfs_bmap_broot_ptr_addr(mp, ifp->if_broot, 1,
-						     ifp->if_broot_bytes);
-		np = (char *)xfs_bmap_broot_ptr_addr(mp, ifp->if_broot, 1,
-						     (int)new_size);
-		ifp->if_broot_bytes = (int)new_size;
-		ASSERT(xfs_bmap_bmdr_space(ifp->if_broot) <=
-			XFS_IFORK_SIZE(ip, whichfork));
-		memmove(np, op, cur_max * (uint)sizeof(xfs_fsblock_t));
-		return;
+		new_size = ops->iroot_size(mp, new_max, level);
+
+		ifp->if_broot = kmem_realloc(ifp->if_broot, new_size, KM_NOFS);
+		op = ops->iroot_ptr(mp, ifp->if_broot, 1, ifp->if_broot_bytes);
+		np = ops->iroot_ptr(mp, ifp->if_broot, 1, new_size);
+		memmove(np, op, cur_max * ops->ptr_len);
+
+		goto out;
 	}
 
 	/*
@@ -413,54 +411,44 @@ xfs_iroot_realloc(
 	 * records, just get rid of the root and clear the status bit.
 	 */
 	ASSERT((ifp->if_broot != NULL) && (ifp->if_broot_bytes > 0));
-	cur_max = xfs_bmbt_maxrecs(mp, ifp->if_broot_bytes, 0);
+	level = be16_to_cpu(ifp->if_broot->bb_level);
+	cur_max = ops->iroot_maxrecs(mp, ifp->if_broot_bytes, level == 0);
 	new_max = cur_max + rec_diff;
 	ASSERT(new_max >= 0);
-	if (new_max > 0)
-		new_size = xfs_bmap_broot_space_calc(mp, new_max);
-	else
-		new_size = 0;
+
+	new_size = ops->iroot_size(mp, new_max, level);
 	if (new_size > 0) {
 		new_broot = kmem_alloc(new_size, KM_NOFS);
 		/*
 		 * First copy over the btree block header.
 		 */
-		memcpy(new_broot, ifp->if_broot,
-			xfs_bmbt_block_len(ip->i_mount));
+		memcpy(new_broot, ifp->if_broot, ops->header_len(mp));
 	} else {
 		new_broot = NULL;
 		ifp->if_flags &= ~XFS_IFBROOT;
 	}
 
-	/*
-	 * Only copy the keys and pointers if there are any.
-	 */
+	/* Only copy the keys and pointers if there are any. */
 	if (new_max > 0) {
-		/*
-		 * First copy the keys.
-		 */
-		op = (char *)xfs_bmbt_key_addr(mp, ifp->if_broot, 1);
-		np = (char *)xfs_bmbt_key_addr(mp, new_broot, 1);
-		memcpy(np, op, new_max * (uint)sizeof(xfs_bmbt_key_t));
+		/* First copy the keys. */
+		op = ops->iroot_key(mp, ifp->if_broot, 1);
+		np = ops->iroot_key(mp, new_broot, 1);
+		memcpy(np, op, new_max * ops->key_len);
 
-		/*
-		 * Then copy the pointers.
-		 */
-		op = (char *)xfs_bmap_broot_ptr_addr(mp, ifp->if_broot, 1,
-						     ifp->if_broot_bytes);
-		np = (char *)xfs_bmap_broot_ptr_addr(mp, new_broot, 1,
-						     (int)new_size);
-		memcpy(np, op, new_max * (uint)sizeof(xfs_fsblock_t));
+		/* Then copy the pointers. */
+		op = ops->iroot_ptr(mp, ifp->if_broot, 1, ifp->if_broot_bytes);
+		np = ops->iroot_ptr(mp, new_broot, 1, new_size);
+		memcpy(np, op, new_max * ops->ptr_len);
 	}
+
 	kmem_free(ifp->if_broot);
 	ifp->if_broot = new_broot;
+out:
 	ifp->if_broot_bytes = (int)new_size;
 	if (ifp->if_broot)
-		ASSERT(xfs_bmap_bmdr_space(ifp->if_broot) <=
-			XFS_IFORK_SIZE(ip, whichfork));
-	return;
+		ASSERT(ops->droot_size(ifp->if_broot) <=
+				XFS_IFORK_SIZE(ip, whichfork));
 }
-
 
 /*
  * This is called when the amount of space needed for if_data
