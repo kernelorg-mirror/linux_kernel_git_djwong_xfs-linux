@@ -1791,23 +1791,43 @@ xlog_recover_release_intent(
 	spin_unlock(&ailp->ail_lock);
 }
 
+static inline void
+xlog_recover_irele(
+	struct xfs_inode	*ip)
+{
+	xfs_iunlock(ip, XFS_ILOCK_EXCL);
+	xfs_irele(ip);
+}
+
 /*
  * Capture any deferred ops and commit the transaction.  This is the last step
  * needed to finish a log intent item that we recovered from the log, and will
- * take care of releasing all the relevant resources.
+ * take care of releasing all the relevant resources.  If we captured deferred
+ * ops, the inodes are attached to it and must not be touched.  If not, we have
+ * to unlock and free them ourselves.
  */
 int
-xlog_recover_trans_commit(
+xlog_recover_trans_commit_inodes(
 	struct xfs_trans		*tp,
-	struct list_head		*capture_list)
+	struct list_head		*capture_list,
+	struct xfs_inode		*ip1,
+	struct xfs_inode		*ip2)
 {
 	struct xfs_mount		*mp = tp->t_mountp;
-	struct xfs_defer_capture	*dfc = xfs_defer_capture(tp);
+	struct xfs_defer_capture	*dfc = xfs_defer_capture(tp, ip1, ip2);
 	int				error;
 
 	/* If we don't capture anything, commit tp and exit. */
-	if (!dfc)
-		return xfs_trans_commit(tp);
+	if (!dfc) {
+		error = xfs_trans_commit(tp);
+
+		/* We still own the inodes, so unlock and release them. */
+		if (ip2 && ip2 != ip1)
+			xlog_recover_irele(ip2);
+		if (ip1)
+			xlog_recover_irele(ip1);
+		return error;
+	}
 
 	/*
 	 * Commit the transaction.  If that fails, clean up the defer ops and
@@ -1818,6 +1838,9 @@ xlog_recover_trans_commit(
 		xfs_defer_capture_free(mp, dfc);
 		return error;
 	}
+
+	/* Unlock the captured inodes so that we can move on with recovery. */
+	xfs_defer_capture_iunlock(dfc);
 
 	list_add_tail(&dfc->dfc_list, capture_list);
 	return 0;

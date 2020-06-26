@@ -125,7 +125,14 @@ void xlog_recover_iodone(struct xfs_buf *bp);
 
 void xlog_recover_release_intent(struct xlog *log, unsigned short intent_type,
 		uint64_t intent_id);
-int xlog_recover_trans_commit(struct xfs_trans *tp,
-		struct list_head *capture_list);
+int xlog_recover_trans_commit_inodes(struct xfs_trans *tp,
+		struct list_head *capture_list, struct xfs_inode *ip1,
+		struct xfs_inode *ip2);
+
+static inline int
+xlog_recover_trans_commit(struct xfs_trans *tp, struct list_head *capture_list)
+{
+	return xlog_recover_trans_commit_inodes(tp, capture_list, NULL, NULL);
+}
 
 #endif	/* __XFS_LOG_RECOVER_H__ */
