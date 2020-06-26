@@ -108,10 +108,6 @@ xchk_quota_item(
 
 	sqi->last_id = id;
 
-	/* Did we get the dquot type we wanted? */
-	if (dqtype != (d->d_flags & XFS_DQ_ALLTYPES))
-		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, offset);
-
 	if (d->d_pad0 != cpu_to_be32(0) || d->d_pad != cpu_to_be16(0))
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, offset);
 
