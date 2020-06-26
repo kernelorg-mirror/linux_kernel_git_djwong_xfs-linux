@@ -298,8 +298,8 @@ xfs_inode_item_format_attr_fork(
 /* Write a log_dinode timestamp into an ondisk inode timestamp. */
 static inline void
 xfs_log_dinode_to_disk_ts(
-	struct xfs_timestamp		*ts,
-	const struct xfs_ictimestamp	*its)
+	union xfs_timestamp		*ts,
+	const union xfs_ictimestamp	*its)
 {
 	ts->t_sec = cpu_to_be32(its->t_sec);
 	ts->t_nsec = cpu_to_be32(its->t_nsec);
@@ -356,7 +356,7 @@ xfs_log_dinode_to_disk(
 /* Write an incore inode timestamp into a log_dinode timestamp. */
 static inline void
 xfs_inode_to_log_dinode_ts(
-	struct xfs_ictimestamp		*its,
+	union xfs_ictimestamp		*its,
 	const struct timespec64		*ts)
 {
 	its->t_sec = ts->tv_sec;
