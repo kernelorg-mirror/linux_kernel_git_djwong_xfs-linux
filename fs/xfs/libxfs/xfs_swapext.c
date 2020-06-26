@@ -22,6 +22,9 @@
 #include "xfs_trans_space.h"
 #include "xfs_errortag.h"
 #include "xfs_error.h"
+#include "xfs_da_format.h"
+#include "xfs_da_btree.h"
+#include "xfs_attr_leaf.h"
 
 /* Information to help us reset reflink flag / CoW fork state after a swap. */
 
@@ -196,12 +199,45 @@ xfs_swapext_update_size(
 	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
 }
 
+/* Convert inode2's leaf attr fork back to shortform, if possible.. */
+STATIC int
+xfs_swapext_attr_to_shortform2(
+	struct xfs_trans		*tp,
+	struct xfs_swapext_intent	*sxi)
+{
+	struct xfs_da_args	args = {
+		.dp		= sxi->sxi_ip2,
+		.geo		= tp->t_mountp->m_attr_geo,
+		.whichfork	= XFS_ATTR_FORK,
+		.trans		= tp,
+	};
+	struct xfs_buf		*bp;
+	int			forkoff;
+	int			error;
+
+	if (!xfs_bmap_one_block(sxi->sxi_ip2, XFS_ATTR_FORK))
+		return 0;
+
+	error = xfs_attr3_leaf_read(tp, sxi->sxi_ip2, 0, &bp);
+	if (error)
+		return error;
+
+	forkoff = xfs_attr_shortform_allfit(bp, sxi->sxi_ip2);
+	if (forkoff == 0)
+		return 0;
+
+	return xfs_attr3_leaf_to_shortform(bp, &args, forkoff);
+}
+
+#define XFS_SWAP_EXTENT_POST_PROCESSING (XFS_SWAP_EXTENT_INO2_SHORTFORM)
+
 /* Do we have more work to do to finish this operation? */
 bool
 xfs_swapext_has_more_work(
 	struct xfs_swapext_intent	*sxi)
 {
-	return sxi->sxi_blockcount > 0;
+	return sxi->sxi_blockcount > 0 ||
+		(sxi->sxi_flags & XFS_SWAP_EXTENT_POST_PROCESSING);
 }
 
 /* Finish one extent swap, possibly log more. */
@@ -214,11 +250,22 @@ xfs_swapext_finish_one(
 	int				whichfork;
 	int				nimaps;
 	int				bmap_flags;
-	int				error;
+	int				error = 0;
 
 	whichfork = (sxi->sxi_flags & XFS_SWAP_EXTENT_ATTR_FORK) ?
 			XFS_ATTR_FORK : XFS_DATA_FORK;
 	bmap_flags = xfs_bmapi_aflag(whichfork);
+
+	/* Do any post-processing work that we requires a transaction roll. */
+	if (sxi->sxi_blockcount == 0) {
+		if (sxi->sxi_flags & XFS_SWAP_EXTENT_INO2_SHORTFORM) {
+			if (sxi->sxi_flags & XFS_SWAP_EXTENT_ATTR_FORK)
+				error = xfs_swapext_attr_to_shortform2(tp, sxi);
+			sxi->sxi_flags &= ~XFS_SWAP_EXTENT_INO2_SHORTFORM;
+			return error;
+		}
+		return 0;
+	}
 
 	while (sxi->sxi_blockcount > 0) {
 		int64_t		ip1_delta = 0, ip2_delta = 0;
@@ -365,7 +412,7 @@ xfs_swapext_finish_one(
 }
 
 /* Estimate the bmbt and rmapbt overhead required to exchange extents. */
-static int
+int
 xfs_swapext_estimate_overhead(
 	const struct xfs_swapext_req	*req,
 	struct xfs_swapext_res		*res)
@@ -549,6 +596,8 @@ xfs_swapext_init_intent(
 		sxi->sxi_isize1 = req->ip2->i_d.di_size;
 		sxi->sxi_isize2 = req->ip1->i_d.di_size;
 	}
+	if (req->flags & XFS_SWAPEXT_INO2_SHORTFORM)
+		sxi->sxi_flags |= XFS_SWAP_EXTENT_INO2_SHORTFORM;
 	sxi->sxi_ip1 = req->ip1;
 	sxi->sxi_ip2 = req->ip2;
 	sxi->sxi_startoff1 = req->startoff1;
