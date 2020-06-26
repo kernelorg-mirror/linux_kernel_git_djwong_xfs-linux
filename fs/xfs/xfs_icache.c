@@ -29,6 +29,11 @@
 #include <linux/iversion.h>
 
 /*
+ * flags for incore inode iterator
+ */
+#define XFS_INODE_WALK_INEW_WAIT	0x1	/* wait on new inodes */
+
+/*
  * Allocate and initialise an xfs_inode.
  */
 struct xfs_inode *
@@ -895,8 +900,8 @@ xfs_inode_walk_get_perag(
  * Call the @execute function on all incore inodes matching the radix tree
  * @tag.
  */
-int
-xfs_inode_walk(
+STATIC int
+__xfs_inode_walk(
 	struct xfs_mount	*mp,
 	int			iter_flags,
 	int			(*execute)(struct xfs_inode *ip, void *args),
@@ -920,6 +925,20 @@ xfs_inode_walk(
 		}
 	}
 	return last_error;
+}
+
+/*
+ * Walk all incore inodes in the filesystem.  Knowledge of radix tree tags
+ * is hidden and we always wait for INEW inodes.
+ */
+int
+xfs_inode_walk(
+	struct xfs_mount	*mp,
+	int			(*execute)(struct xfs_inode *ip, void *args),
+	void			*args)
+{
+	return __xfs_inode_walk(mp, XFS_INODE_WALK_INEW_WAIT, execute, args,
+			XFS_ICI_NO_TAG);
 }
 
 /*
@@ -1401,7 +1420,7 @@ xfs_icache_free_eofblocks(
 	struct xfs_mount	*mp,
 	struct xfs_eofblocks	*eofb)
 {
-	return xfs_inode_walk(mp, 0, xfs_inode_free_eofblocks, eofb,
+	return __xfs_inode_walk(mp, 0, xfs_inode_free_eofblocks, eofb,
 			XFS_ICI_EOFBLOCKS_TAG);
 }
 
@@ -1651,7 +1670,7 @@ xfs_icache_free_cowblocks(
 	struct xfs_mount	*mp,
 	struct xfs_eofblocks	*eofb)
 {
-	return xfs_inode_walk(mp, 0, xfs_inode_free_cowblocks, eofb,
+	return __xfs_inode_walk(mp, 0, xfs_inode_free_cowblocks, eofb,
 			XFS_ICI_COWBLOCKS_TAG);
 }
 
