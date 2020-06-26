@@ -1525,6 +1525,11 @@ xrep_setup_tempfile(
 	struct xfs_scrub	*sc,
 	uint16_t		mode)
 {
+	struct xfs_ialloc_args	args = {
+		.pip		= sc->mp->m_rootip,
+		.nlink		= 0,
+		.mode		= mode,
+	};
 	struct xfs_mount	*mp = sc->mp;
 	struct xfs_trans	*tp = NULL;
 	struct xfs_dquot	*udqp = NULL;
@@ -1550,9 +1555,8 @@ xrep_setup_tempfile(
 	 * inode should be completely root owned, but we'll still go through
 	 * the motions to keep the quota accounting accurate.
 	 */
-	error = xfs_qm_vop_dqalloc(sc->mp->m_rootip, current_fsuid(),
-			current_fsgid(), 0,
-			XFS_QMOPT_QUOTALL | XFS_QMOPT_INHERIT,
+	error = xfs_qm_vop_dqalloc(sc->mp->m_rootip, args.uid, args.gid,
+			args.prid, XFS_QMOPT_QUOTALL | XFS_QMOPT_INHERIT,
 			&udqp, &gdqp, &pdqp);
 	if (error)
 		return error;
@@ -1575,8 +1579,7 @@ xrep_setup_tempfile(
 		goto out_trans_cancel;
 
 	/* Allocate inode, set up directory. */
-	error = xfs_dir_ialloc(&tp, sc->mp->m_rootip, mode, 0, 0, 0,
-			&sc->tempip);
+	error = xfs_dir_ialloc(&tp, &args, &sc->tempip);
 	if (error)
 		goto out_trans_cancel;
 
