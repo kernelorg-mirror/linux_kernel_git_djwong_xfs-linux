@@ -3136,6 +3136,83 @@ int generic_remap_checks(struct file *file_in, loff_t pos_in,
 	return 0;
 }
 
+/* Performs necessary checks before doing a range swap. */
+int generic_swap_file_range_checks(struct file *file1, struct file *file2,
+				   const struct file_swap_range *fsr)
+{
+	struct inode *inode1 = file1->f_mapping->host;
+	struct inode *inode2 = file2->f_mapping->host;
+	int64_t test_len;
+	uint64_t blen;
+	loff_t size1, size2;
+	loff_t bs = inode2->i_sb->s_blocksize;
+	int ret;
+
+	if (fsr->length < 0)
+		return -EINVAL;
+
+	/* The start of both ranges must be aligned to an fs block. */
+	if (!IS_ALIGNED(fsr->file1_offset, bs) ||
+	    !IS_ALIGNED(fsr->file2_offset, bs))
+		return -EINVAL;
+
+	/* Ensure offsets don't wrap. */
+	if (fsr->file1_offset + fsr->length < fsr->file1_offset ||
+	    fsr->file2_offset + fsr->length < fsr->file2_offset)
+		return -EINVAL;
+
+	size1 = i_size_read(inode1);
+	size2 = i_size_read(inode2);
+
+	/*
+	 * Swapext require both ranges to be within EOF, unless we're swapping
+	 * to EOF.  generic_swap_range_prep already checked that both
+	 * fsr->file1_offset and fsr->file2_offset are within EOF.
+	 */
+	if (!(fsr->flags & FILE_SWAP_RANGE_TO_EOF) &&
+	    (fsr->file1_offset + fsr->length > size1 ||
+	     fsr->file2_offset + fsr->length > size2))
+		return -EINVAL;
+
+	/*
+	 * Make sure we don't hit any file size limits.  If we hit any size
+	 * limits such that test_length was adjusted, we abort the whole
+	 * operation.
+	 */
+	test_len = fsr->length;
+	ret = generic_write_check_limits(file2, fsr->file2_offset, &test_len);
+	if (ret)
+		return ret;
+	ret = generic_write_check_limits(file1, fsr->file1_offset, &test_len);
+	if (ret)
+		return ret;
+	if (test_len != fsr->length)
+		return -EINVAL;
+
+	/*
+	 * If the user wanted us to swap to the infile's EOF, round up to the
+	 * next block boundary for this check.  Do the same for the outfile.
+	 *
+	 * Otherwise, reject the range length if it's not block aligned.  We
+	 * already confirmed the starting offsets' block alignment.
+	 */
+	if (fsr->file1_offset + fsr->length == size1)
+		blen = ALIGN(size1, bs) - fsr->file1_offset;
+	else if (fsr->file2_offset + fsr->length == size2)
+		blen = ALIGN(size2, bs) - fsr->file2_offset;
+	else if (!IS_ALIGNED(fsr->length, bs))
+		return -EINVAL;
+	else
+		blen = fsr->length;
+
+	/* Don't allow overlapped swapping within the same file. */
+	if (inode1 == inode2 &&
+	    fsr->file2_offset + blen > fsr->file1_offset &&
+	    fsr->file1_offset + blen > fsr->file2_offset)
+		return -EINVAL;
+
+	return 0;
+}
 
 /*
  * Performs common checks before doing a file copy/clone
