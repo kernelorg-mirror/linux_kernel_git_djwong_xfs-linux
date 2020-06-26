@@ -2115,46 +2115,9 @@ xfs_ifree(
 	ASSERT(ip->i_d.di_size == 0 || !S_ISREG(VFS_I(ip)->i_mode));
 	ASSERT(ip->i_d.di_nblocks == 0);
 
-	/*
-	 * Pull the on-disk inode from the AGI unlinked list.
-	 */
-	error = xfs_iunlink_remove(tp, ip);
+	error = xfs_dir_ifree(tp, ip, &xic);
 	if (error)
 		return error;
-
-	error = xfs_difree(tp, ip->i_ino, &xic);
-	if (error)
-		return error;
-
-	/*
-	 * Free any local-format data sitting around before we reset the
-	 * data fork to extents format.  Note that the attr fork data has
-	 * already been freed by xfs_attr_inactive.
-	 */
-	if (ip->i_df.if_format == XFS_DINODE_FMT_LOCAL) {
-		kmem_free(ip->i_df.if_u1.if_data);
-		ip->i_df.if_u1.if_data = NULL;
-		ip->i_df.if_bytes = 0;
-	}
-
-	VFS_I(ip)->i_mode = 0;		/* mark incore inode as free */
-	ip->i_d.di_flags = 0;
-	ip->i_d.di_flags2 = 0;
-	if (xfs_sb_version_hasbigtime(&ip->i_mount->m_sb))
-		ip->i_d.di_flags2 |= XFS_DIFLAG2_BIGTIME;
-	ip->i_d.di_dmevmask = 0;
-	ip->i_d.di_forkoff = 0;		/* mark the attr fork not in use */
-	ip->i_df.if_format = XFS_DINODE_FMT_EXTENTS;
-
-	/* Don't attempt to replay owner changes for a deleted inode */
-	ip->i_itemp->ili_fields &= ~(XFS_ILOG_AOWNER|XFS_ILOG_DOWNER);
-
-	/*
-	 * Bump the generation count so no one will be confused
-	 * by reincarnations of this inode.
-	 */
-	VFS_I(ip)->i_generation++;
-	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
 
 	if (xic.deleted)
 		error = xfs_ifree_cluster(ip, tp, &xic);
