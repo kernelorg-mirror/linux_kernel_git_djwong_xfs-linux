@@ -70,8 +70,8 @@ xfs_pwork_init(
 #endif
 	trace_xfs_pwork_init(mp, nr_threads, current->pid);
 
-	pctl->wq = alloc_workqueue("%s-%d", WQ_FREEZABLE, nr_threads, tag,
-			current->pid);
+	pctl->wq = alloc_workqueue("%s-%d", WQ_UNBOUND | WQ_FREEZABLE | WQ_SYSFS,
+			nr_threads, tag, current->pid);
 	if (!pctl->wq)
 		return -ENOMEM;
 	pctl->work_fn = work_fn;
@@ -123,7 +123,6 @@ unsigned int
 xfs_pwork_guess_threads(
 	struct xfs_mount	*mp)
 {
-	/* pwork queues are not unbounded, so we have to abide WQ_MAX_ACTIVE. */
 	return min_t(unsigned int, xfs_guess_metadata_threads(mp),
-			WQ_MAX_ACTIVE);
+			WQ_UNBOUND_MAX_ACTIVE);
 }
