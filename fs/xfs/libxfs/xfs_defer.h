@@ -76,6 +76,7 @@ struct xfs_defer_capture {
 	/* Deferred ops state saved from the transaction. */
 	struct list_head	dfc_dfops;
 	unsigned int		dfc_tpflags;
+	unsigned int		dfc_blkres;
 };
 
 /*
