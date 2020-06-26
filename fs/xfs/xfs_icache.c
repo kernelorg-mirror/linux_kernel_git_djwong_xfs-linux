@@ -1003,6 +1003,22 @@ xfs_blockgc_worker(
 	xfs_queue_blockgc(mp);
 }
 
+/* Disable post-EOF and CoW block auto-reclamation. */
+void
+xfs_blockgc_stop(
+	struct xfs_mount	*mp)
+{
+	cancel_delayed_work_sync(&mp->m_blockgc_work);
+}
+
+/* Enable post-EOF and CoW block auto-reclamation. */
+void
+xfs_blockgc_start(
+	struct xfs_mount	*mp)
+{
+	xfs_queue_blockgc(mp);
+}
+
 /*
  * Grab the inode for reclaim exclusively.
  *
@@ -1721,22 +1737,6 @@ xfs_inode_clear_cowblocks_tag(
 {
 	trace_xfs_inode_clear_cowblocks_tag(ip);
 	return __xfs_inode_clear_blocks_tag(ip, XFS_ICOWBLOCKS);
-}
-
-/* Disable post-EOF and CoW block auto-reclamation. */
-void
-xfs_stop_block_reaping(
-	struct xfs_mount	*mp)
-{
-	cancel_delayed_work_sync(&mp->m_blockgc_work);
-}
-
-/* Enable post-EOF and CoW block auto-reclamation. */
-void
-xfs_start_block_reaping(
-	struct xfs_mount	*mp)
-{
-	xfs_queue_blockgc(mp);
 }
 
 /*
