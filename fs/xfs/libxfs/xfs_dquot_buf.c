@@ -69,6 +69,13 @@ xfs_dquot_verify(
 	    ddq_type != XFS_DQTYPE_GROUP)
 		return __this_address;
 
+	if ((ddq->d_type & XFS_DQTYPE_BIGTIME) &&
+	    !xfs_sb_version_hasbigtime(&mp->m_sb))
+		return __this_address;
+
+	if ((ddq->d_type & XFS_DQTYPE_BIGTIME) && !ddq->d_id)
+		return __this_address;
+
 	if (id != -1 && id != be32_to_cpu(ddq->d_id))
 		return __this_address;
 
@@ -296,6 +303,20 @@ xfs_dquot_from_disk_timestamp(
 	time64_t		*timer,
 	__be32			dtimer)
 {
+	/* Zero always means zero, regardless of encoding. */
+	if (!dtimer) {
+		*timer = 0;
+		return;
+	}
+
+	if (ddq->d_type & XFS_DQTYPE_BIGTIME) {
+		uint64_t	t;
+
+		t = be32_to_cpu(dtimer);
+		*timer = t << XFS_DQ_BIGTIME_SHIFT;
+		return;
+	}
+
 	*timer = be32_to_cpu(dtimer);
 }
 
@@ -306,5 +327,24 @@ xfs_dquot_to_disk_timestamp(
 	__be32			*dtimer,
 	time64_t		timer)
 {
+	/* Zero always means zero, regardless of encoding. */
+	if (!timer) {
+		*dtimer = cpu_to_be32(0);
+		return;
+	}
+
+	if (dqp->q_type & XFS_DQTYPE_BIGTIME) {
+		uint64_t	t = timer;
+
+		/*
+		 * Round the end of the grace period up to the nearest bigtime
+		 * interval that we support, to give users the most time to fix
+		 * the problems.
+		 */
+		t = roundup_64(t, 1U << XFS_DQ_BIGTIME_SHIFT);
+		*dtimer = cpu_to_be32(t >> XFS_DQ_BIGTIME_SHIFT);
+		return;
+	}
+
 	*dtimer = cpu_to_be32(timer);
 }

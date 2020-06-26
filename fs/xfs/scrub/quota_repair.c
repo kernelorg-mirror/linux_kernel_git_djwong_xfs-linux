@@ -123,6 +123,7 @@ xrep_quota_item(
 /* Fix a quota timer so that we can pass the verifier. */
 STATIC void
 xrep_quota_fix_timer(
+	struct xfs_mount	*mp,
 	__be64			softlimit,
 	__be64			countnow,
 	__be32			*timer,
@@ -133,7 +134,7 @@ xrep_quota_fix_timer(
 	time64_t		new_timer;
 
 	if (soft && count > soft && *timer == 0) {
-		xfs_dquot_set_timeout(&new_timer,
+		xfs_dquot_set_timeout(mp, &new_timer,
 				ktime_get_real_seconds() + timelimit);
 		*timer = cpu_to_be32(new_timer);
 	}
@@ -197,15 +198,15 @@ xrep_quota_block(
 		ddq->d_type = dqtype;
 		ddq->d_id = cpu_to_be32(id + i);
 
-		xrep_quota_fix_timer(ddq->d_blk_softlimit,
+		xrep_quota_fix_timer(sc->mp, ddq->d_blk_softlimit,
 				ddq->d_bcount, &ddq->d_btimer,
 				defq->blk.time);
 
-		xrep_quota_fix_timer(ddq->d_ino_softlimit,
+		xrep_quota_fix_timer(sc->mp, ddq->d_ino_softlimit,
 				ddq->d_icount, &ddq->d_itimer,
 				defq->ino.time);
 
-		xrep_quota_fix_timer(ddq->d_rtb_softlimit,
+		xrep_quota_fix_timer(sc->mp, ddq->d_rtb_softlimit,
 				ddq->d_rtbcount, &ddq->d_rtbtimer,
 				defq->rtb.time);
 
