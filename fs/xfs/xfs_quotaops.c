@@ -37,12 +37,12 @@ xfs_qm_fill_state(
 	tstate->flags |= QCI_SYSFILE;
 	tstate->blocks = ip->i_d.di_nblocks;
 	tstate->nextents = ip->i_df.if_nextents;
-	tstate->spc_timelimit = (u32)defq->btimelimit;
-	tstate->ino_timelimit = (u32)defq->itimelimit;
-	tstate->rt_spc_timelimit = (u32)defq->rtbtimelimit;
-	tstate->spc_warnlimit = defq->bwarnlimit;
-	tstate->ino_warnlimit = defq->iwarnlimit;
-	tstate->rt_spc_warnlimit = defq->rtbwarnlimit;
+	tstate->spc_timelimit = (u32)defq->dfq_blk.timelimit;
+	tstate->ino_timelimit = (u32)defq->dfq_ino.timelimit;
+	tstate->rt_spc_timelimit = (u32)defq->dfq_rtb.timelimit;
+	tstate->spc_warnlimit = defq->dfq_blk.warnlimit;
+	tstate->ino_warnlimit = defq->dfq_ino.warnlimit;
+	tstate->rt_spc_warnlimit = defq->dfq_rtb.warnlimit;
 	if (tempqip)
 		xfs_irele(ip);
 }

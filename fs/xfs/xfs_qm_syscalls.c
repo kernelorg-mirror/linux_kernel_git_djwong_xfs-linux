@@ -502,8 +502,8 @@ xfs_qm_scall_setqlim(
 		dqp->q_blk.softlimit = soft;
 		xfs_dquot_set_prealloc_limits(dqp);
 		if (id == 0) {
-			defq->bhardlimit = hard;
-			defq->bsoftlimit = soft;
+			defq->dfq_blk.hardlimit = hard;
+			defq->dfq_blk.softlimit = soft;
 		}
 	} else {
 		xfs_debug(mp, "blkhard %Ld < blksoft %Ld", hard, soft);
@@ -518,8 +518,8 @@ xfs_qm_scall_setqlim(
 		dqp->q_rtb.hardlimit = hard;
 		dqp->q_rtb.softlimit = soft;
 		if (id == 0) {
-			defq->rtbhardlimit = hard;
-			defq->rtbsoftlimit = soft;
+			defq->dfq_rtb.hardlimit = hard;
+			defq->dfq_rtb.softlimit = soft;
 		}
 	} else {
 		xfs_debug(mp, "rtbhard %Ld < rtbsoft %Ld", hard, soft);
@@ -535,8 +535,8 @@ xfs_qm_scall_setqlim(
 		dqp->q_ino.hardlimit = hard;
 		dqp->q_ino.softlimit = soft;
 		if (id == 0) {
-			defq->ihardlimit = hard;
-			defq->isoftlimit = soft;
+			defq->dfq_ino.hardlimit = hard;
+			defq->dfq_ino.softlimit = soft;
 		}
 	} else {
 		xfs_debug(mp, "ihard %Ld < isoft %Ld", hard, soft);
@@ -554,11 +554,11 @@ xfs_qm_scall_setqlim(
 
 	if (id == 0) {
 		if (newlim->d_fieldmask & QC_SPC_WARNS)
-			defq->bwarnlimit = newlim->d_spc_warns;
+			defq->dfq_blk.warnlimit = newlim->d_spc_warns;
 		if (newlim->d_fieldmask & QC_INO_WARNS)
-			defq->iwarnlimit = newlim->d_ino_warns;
+			defq->dfq_ino.warnlimit = newlim->d_ino_warns;
 		if (newlim->d_fieldmask & QC_RT_SPC_WARNS)
-			defq->rtbwarnlimit = newlim->d_rt_spc_warns;
+			defq->dfq_rtb.warnlimit = newlim->d_rt_spc_warns;
 	}
 
 	/*
@@ -579,11 +579,11 @@ xfs_qm_scall_setqlim(
 
 	if (id == 0) {
 		if (newlim->d_fieldmask & QC_SPC_TIMER)
-			defq->btimelimit = newlim->d_spc_timer;
+			defq->dfq_blk.timelimit = newlim->d_spc_timer;
 		if (newlim->d_fieldmask & QC_INO_TIMER)
-			defq->itimelimit = newlim->d_ino_timer;
+			defq->dfq_ino.timelimit = newlim->d_ino_timer;
 		if (newlim->d_fieldmask & QC_RT_SPC_TIMER)
-			defq->rtbtimelimit = newlim->d_rt_spc_timer;
+			defq->dfq_rtb.timelimit = newlim->d_rt_spc_timer;
 	}
 
 	if (id != 0) {

@@ -562,12 +562,12 @@ xfs_qm_set_defquota(
 	 * Timers and warnings have been already set, let's just set the
 	 * default limits for this quota type
 	 */
-	defq->bhardlimit = dqp->q_blk.hardlimit;
-	defq->bsoftlimit = dqp->q_blk.softlimit;
-	defq->ihardlimit = dqp->q_ino.hardlimit;
-	defq->isoftlimit = dqp->q_ino.softlimit;
-	defq->rtbhardlimit = dqp->q_rtb.hardlimit;
-	defq->rtbsoftlimit = dqp->q_rtb.softlimit;
+	defq->dfq_blk.hardlimit = dqp->q_blk.hardlimit;
+	defq->dfq_blk.softlimit = dqp->q_blk.softlimit;
+	defq->dfq_ino.hardlimit = dqp->q_ino.hardlimit;
+	defq->dfq_ino.softlimit = dqp->q_ino.softlimit;
+	defq->dfq_rtb.hardlimit = dqp->q_rtb.hardlimit;
+	defq->dfq_rtb.softlimit = dqp->q_rtb.softlimit;
 	xfs_qm_dqdestroy(dqp);
 }
 
@@ -584,12 +584,12 @@ xfs_qm_init_timelimits(
 
 	defq = xfs_get_defquota(qinf, type);
 
-	defq->btimelimit = XFS_QM_BTIMELIMIT;
-	defq->itimelimit = XFS_QM_ITIMELIMIT;
-	defq->rtbtimelimit = XFS_QM_RTBTIMELIMIT;
-	defq->bwarnlimit = XFS_QM_BWARNLIMIT;
-	defq->iwarnlimit = XFS_QM_IWARNLIMIT;
-	defq->rtbwarnlimit = XFS_QM_RTBWARNLIMIT;
+	defq->dfq_blk.timelimit = XFS_QM_BTIMELIMIT;
+	defq->dfq_ino.timelimit = XFS_QM_ITIMELIMIT;
+	defq->dfq_rtb.timelimit = XFS_QM_RTBTIMELIMIT;
+	defq->dfq_blk.warnlimit = XFS_QM_BWARNLIMIT;
+	defq->dfq_ino.warnlimit = XFS_QM_IWARNLIMIT;
+	defq->dfq_rtb.warnlimit = XFS_QM_RTBWARNLIMIT;
 
 	/*
 	 * We try to get the limits from the superuser's limits fields.
@@ -608,17 +608,17 @@ xfs_qm_init_timelimits(
 	 * more writing. If it is zero, a default is used.
 	 */
 	if (dqp->q_blk.timer)
-		defq->btimelimit = dqp->q_blk.timer;
+		defq->dfq_blk.timelimit = dqp->q_blk.timer;
 	if (dqp->q_ino.timer)
-		defq->itimelimit = dqp->q_ino.timer;
+		defq->dfq_ino.timelimit = dqp->q_ino.timer;
 	if (dqp->q_rtb.timer)
-		defq->rtbtimelimit = dqp->q_rtb.timer;
+		defq->dfq_rtb.timelimit = dqp->q_rtb.timer;
 	if (dqp->q_blk.warnings)
-		defq->bwarnlimit = dqp->q_blk.warnings;
+		defq->dfq_blk.warnlimit = dqp->q_blk.warnings;
 	if (dqp->q_ino.warnings)
-		defq->iwarnlimit = dqp->q_ino.warnings;
+		defq->dfq_ino.warnlimit = dqp->q_ino.warnings;
 	if (dqp->q_rtb.warnings)
-		defq->rtbwarnlimit = dqp->q_rtb.warnings;
+		defq->dfq_rtb.warnlimit = dqp->q_rtb.warnings;
 
 	xfs_qm_dqdestroy(dqp);
 }
