@@ -2600,18 +2600,25 @@ __xfs_rmap_add(
 	enum xfs_rmap_intent_type	type,
 	uint64_t			owner,
 	int				whichfork,
-	struct xfs_bmbt_irec		*bmap)
+	struct xfs_bmbt_irec		*bmap,
+	bool				realtime)
 {
 	struct xfs_rmap_intent		*ri;
 
-	trace_xfs_rmap_defer(tp->t_mountp,
-			XFS_FSB_TO_AGNO(tp->t_mountp, bmap->br_startblock),
-			type,
-			XFS_FSB_TO_AGBNO(tp->t_mountp, bmap->br_startblock),
-			owner, whichfork,
-			bmap->br_startoff,
-			bmap->br_blockcount,
-			bmap->br_state);
+	if (realtime)
+		trace_xfs_rmap_defer(tp->t_mountp, NULLAGNUMBER, type,
+				bmap->br_startblock, owner, whichfork,
+				bmap->br_startoff, bmap->br_blockcount,
+				bmap->br_state);
+	else
+		trace_xfs_rmap_defer(tp->t_mountp,
+				XFS_FSB_TO_AGNO(tp->t_mountp,
+						bmap->br_startblock),
+				type,
+				XFS_FSB_TO_AGBNO(tp->t_mountp,
+						bmap->br_startblock),
+				owner, whichfork, bmap->br_startoff,
+				bmap->br_blockcount, bmap->br_state);
 
 	ri = kmem_alloc(sizeof(struct xfs_rmap_intent), KM_NOFS);
 	INIT_LIST_HEAD(&ri->ri_list);
@@ -2619,6 +2626,7 @@ __xfs_rmap_add(
 	ri->ri_owner = owner;
 	ri->ri_whichfork = whichfork;
 	ri->ri_bmap = *bmap;
+	ri->ri_realtime = realtime;
 
 	xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_RMAP, &ri->ri_list);
 }
@@ -2632,14 +2640,18 @@ xfs_rmap_map_extent(
 	struct xfs_bmbt_irec	*PREV)
 {
 	enum xfs_rmap_intent_type type = XFS_RMAP_MAP;
+	bool			isrt = false;
 
 	if (!xfs_rmap_update_is_needed(tp->t_mountp, whichfork))
 		return;
 
-	if (whichfork != XFS_ATTR_FORK && xfs_is_reflink_inode(ip))
-		type = XFS_RMAP_MAP_SHARED;
+	if (whichfork != XFS_ATTR_FORK) {
+		if (xfs_is_reflink_inode(ip))
+			type = XFS_RMAP_MAP_SHARED;
+		isrt = XFS_IS_REALTIME_INODE(ip);
+	}
 
-	__xfs_rmap_add(tp, type, ip->i_ino, whichfork, PREV);
+	__xfs_rmap_add(tp, type, ip->i_ino, whichfork, PREV, isrt);
 }
 
 /* Unmap an extent out of a file. */
@@ -2651,14 +2663,18 @@ xfs_rmap_unmap_extent(
 	struct xfs_bmbt_irec	*PREV)
 {
 	enum xfs_rmap_intent_type type = XFS_RMAP_UNMAP;
+	bool			isrt = false;
 
 	if (!xfs_rmap_update_is_needed(tp->t_mountp, whichfork))
 		return;
 
-	if (whichfork != XFS_ATTR_FORK && xfs_is_reflink_inode(ip))
-		type = XFS_RMAP_UNMAP_SHARED;
+	if (whichfork != XFS_ATTR_FORK) {
+		if (xfs_is_reflink_inode(ip))
+			type = XFS_RMAP_UNMAP_SHARED;
+		isrt = XFS_IS_REALTIME_INODE(ip);
+	}
 
-	__xfs_rmap_add(tp, type, ip->i_ino, whichfork, PREV);
+	__xfs_rmap_add(tp, type, ip->i_ino, whichfork, PREV, isrt);
 }
 
 /*
@@ -2676,14 +2692,18 @@ xfs_rmap_convert_extent(
 	struct xfs_bmbt_irec	*PREV)
 {
 	enum xfs_rmap_intent_type type = XFS_RMAP_CONVERT;
+	bool			isrt = false;
 
 	if (!xfs_rmap_update_is_needed(mp, whichfork))
 		return;
 
-	if (whichfork != XFS_ATTR_FORK && xfs_is_reflink_inode(ip))
-		type = XFS_RMAP_CONVERT_SHARED;
+	if (whichfork != XFS_ATTR_FORK) {
+		if (xfs_is_reflink_inode(ip))
+			type = XFS_RMAP_CONVERT_SHARED;
+		isrt = XFS_IS_REALTIME_INODE(ip);
+	}
 
-	__xfs_rmap_add(tp, type, ip->i_ino, whichfork, PREV);
+	__xfs_rmap_add(tp, type, ip->i_ino, whichfork, PREV, isrt);
 }
 
 /* Schedule the creation of an rmap for non-file data. */
@@ -2692,7 +2712,8 @@ xfs_rmap_alloc_extent(
 	struct xfs_trans	*tp,
 	xfs_fsblock_t		fsbno,
 	xfs_filblks_t		len,
-	uint64_t		owner)
+	uint64_t		owner,
+	bool			isrt)
 {
 	struct xfs_bmbt_irec	bmap;
 
@@ -2704,7 +2725,7 @@ xfs_rmap_alloc_extent(
 	bmap.br_startoff = 0;
 	bmap.br_state = XFS_EXT_NORM;
 
-	__xfs_rmap_add(tp, XFS_RMAP_ALLOC, owner, XFS_DATA_FORK, &bmap);
+	__xfs_rmap_add(tp, XFS_RMAP_ALLOC, owner, XFS_DATA_FORK, &bmap, isrt);
 }
 
 /* Schedule the deletion of an rmap for non-file data. */
@@ -2713,7 +2734,8 @@ xfs_rmap_free_extent(
 	struct xfs_trans	*tp,
 	xfs_fsblock_t		fsbno,
 	xfs_filblks_t		len,
-	uint64_t		owner)
+	uint64_t		owner,
+	bool			isrt)
 {
 	struct xfs_bmbt_irec	bmap;
 
@@ -2725,7 +2747,7 @@ xfs_rmap_free_extent(
 	bmap.br_startoff = 0;
 	bmap.br_state = XFS_EXT_NORM;
 
-	__xfs_rmap_add(tp, XFS_RMAP_FREE, owner, XFS_DATA_FORK, &bmap);
+	__xfs_rmap_add(tp, XFS_RMAP_FREE, owner, XFS_DATA_FORK, &bmap, isrt);
 }
 
 /* Compare rmap records.  Returns -1 if a < b, 1 if a > b, and 0 if equal. */
