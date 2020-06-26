@@ -38,6 +38,9 @@ struct xfs_inobt_rec_incore;
 union xfs_btree_ptr;
 struct xfs_dqtrx;
 struct xfs_eofblocks;
+struct xfs_swapext_intent;
+struct xfs_swapext_req;
+struct xfs_swapext_res;
 
 #define XFS_ATTR_FILTER_FLAGS \
 	{ XFS_ATTR_ROOT,	"ROOT" }, \
@@ -3315,6 +3318,9 @@ DEFINE_INODE_IREC_EVENT(xfs_reflink_cancel_cow);
 DEFINE_INODE_IREC_EVENT(xfs_swap_extent_rmap_remap);
 DEFINE_INODE_IREC_EVENT(xfs_swap_extent_rmap_remap_piece);
 DEFINE_INODE_ERROR_EVENT(xfs_swap_extent_rmap_error);
+DEFINE_INODE_IREC_EVENT(xfs_swapext_extent1);
+DEFINE_INODE_IREC_EVENT(xfs_swapext_extent2);
+DEFINE_ITRUNC_EVENT(xfs_swapext_update_inode_size);
 
 /* fsmap traces */
 DECLARE_EVENT_CLASS(xfs_fsmap_class,
@@ -3934,6 +3940,103 @@ DEFINE_EVENT(xfs_eofblocks_class, name,	\
 DEFINE_EOFBLOCKS_EVENT(xfs_ioc_free_eofblocks);
 DEFINE_EOFBLOCKS_EVENT(xfs_inode_free_quota_blocks);
 DEFINE_EOFBLOCKS_EVENT(xfs_inode_free_blocks);
+
+#define XFS_SWAPEXT_STRINGS \
+	{ XFS_SWAPEXT_SET_SIZES,		"SETSIZES" }
+
+TRACE_EVENT(xfs_swapext_estimate,
+	TP_PROTO(const struct xfs_swapext_req *req,
+		 const struct xfs_swapext_res *res),
+	TP_ARGS(req, res),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino1)
+		__field(xfs_ino_t, ino2)
+		__field(xfs_fileoff_t, startoff1)
+		__field(xfs_fileoff_t, startoff2)
+		__field(xfs_filblks_t, blockcount)
+		__field(int, whichfork)
+		__field(unsigned int, flags)
+		__field(xfs_filblks_t, ip1_bcount)
+		__field(xfs_filblks_t, ip2_bcount)
+		__field(xfs_filblks_t, ip1_rtbcount)
+		__field(xfs_filblks_t, ip2_rtbcount)
+		__field(unsigned long long, resblks)
+		__field(unsigned int, nr_exchanges)
+	),
+	TP_fast_assign(
+		__entry->dev = req->ip1->i_mount->m_super->s_dev;
+		__entry->ino1 = req->ip1->i_ino;
+		__entry->ino2 = req->ip2->i_ino;
+		__entry->startoff1 = req->startoff1;
+		__entry->startoff2 = req->startoff2;
+		__entry->blockcount = req->blockcount;
+		__entry->whichfork = req->whichfork;
+		__entry->flags = req->flags;
+		__entry->ip1_bcount = res->ip1_bcount;
+		__entry->ip2_bcount = res->ip2_bcount;
+		__entry->ip1_rtbcount = res->ip1_rtbcount;
+		__entry->ip2_rtbcount = res->ip2_rtbcount;
+		__entry->resblks = res->resblks;
+		__entry->nr_exchanges = res->nr_exchanges;
+	),
+	TP_printk("dev %d:%d ino1 0x%llx startoff1 %llu ino2 0x%llx startoff2 %llu blockcount %llu flags (%s) %sfork bcount1 %llu rtbcount1 %llu bcount2 %llu rtbcount2 %llu resblks %llu nr_exchanges %u",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino1, __entry->startoff1,
+		  __entry->ino2, __entry->startoff2,
+		  __entry->blockcount,
+		  __print_flags(__entry->flags, "|", XFS_SWAPEXT_STRINGS),
+		  __entry->whichfork == XFS_ATTR_FORK ? "attr" : "data",
+		  __entry->ip1_bcount,
+		  __entry->ip1_rtbcount,
+		  __entry->ip2_bcount,
+		  __entry->ip2_rtbcount,
+		  __entry->resblks,
+		  __entry->nr_exchanges)
+);
+
+#define XFS_SWAP_EXTENT_STRINGS \
+	{ XFS_SWAP_EXTENT_ATTR_FORK,		"ATTRFORK" }, \
+	{ XFS_SWAP_EXTENT_SET_SIZES,		"SETSIZES" }
+
+TRACE_EVENT(xfs_swapext_defer,
+	TP_PROTO(struct xfs_mount *mp, const struct xfs_swapext_intent *sxi),
+	TP_ARGS(mp, sxi),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino1)
+		__field(xfs_ino_t, ino2)
+		__field(uint64_t, flags)
+		__field(xfs_fileoff_t, startoff1)
+		__field(xfs_fileoff_t, startoff2)
+		__field(xfs_filblks_t, blockcount)
+		__field(xfs_fsize_t, isize1)
+		__field(xfs_fsize_t, isize2)
+		__field(xfs_fsize_t, new_isize1)
+		__field(xfs_fsize_t, new_isize2)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->ino1 = sxi->sxi_ip1->i_ino;
+		__entry->ino2 = sxi->sxi_ip2->i_ino;
+		__entry->flags = sxi->sxi_flags;
+		__entry->startoff1 = sxi->sxi_startoff1;
+		__entry->startoff2 = sxi->sxi_startoff2;
+		__entry->blockcount = sxi->sxi_blockcount;
+		__entry->isize1 = sxi->sxi_ip1->i_d.di_size;
+		__entry->isize2 = sxi->sxi_ip2->i_d.di_size;
+		__entry->new_isize1 = sxi->sxi_isize1;
+		__entry->new_isize2 = sxi->sxi_isize2;
+	),
+	TP_printk("dev %d:%d ino1 0x%llx startoff1 %llu ino2 0x%llx startoff2 %llu blockcount %llu flags (%s) isize1 %lld newisize1 %lld isize2 %lld newisize2 %lld",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino1, __entry->startoff1,
+		  __entry->ino2, __entry->startoff2,
+		  __entry->blockcount,
+		  __print_flags(__entry->flags, "|", XFS_SWAP_EXTENT_STRINGS),
+		  __entry->isize1, __entry->new_isize1,
+		  __entry->isize2, __entry->new_isize2)
+);
 
 #endif /* _TRACE_XFS_H */
 
