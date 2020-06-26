@@ -2081,6 +2081,92 @@ int generic_remap_file_range_prep(struct file *file_in, loff_t pos_in,
 }
 EXPORT_SYMBOL(generic_remap_file_range_prep);
 
+/*
+ * Check that the two inodes are eligible for range swapping, the ranges make
+ * sense, and then flush all dirty data.  Caller must ensure that the inodes
+ * have been locked against any other modifications.
+ */
+int generic_swap_file_range_prep(struct file *file1, struct file *file2,
+				 struct file_swap_range *fsr)
+{
+	struct inode *inode1 = file_inode(file1);
+	struct inode *inode2 = file_inode(file2);
+	u64 blkmask = i_blocksize(inode1) - 1;
+	bool same_inode = (inode1 == inode2);
+	int ret;
+
+	/* Don't touch certain kinds of inodes */
+	if (IS_IMMUTABLE(inode2))
+		return -EPERM;
+
+	if (IS_SWAPFILE(inode1) || IS_SWAPFILE(inode2))
+		return -ETXTBSY;
+
+	/* Don't reflink dirs, pipes, sockets... */
+	if (S_ISDIR(inode1->i_mode) || S_ISDIR(inode2->i_mode))
+		return -EISDIR;
+	if (!S_ISREG(inode1->i_mode) || !S_ISREG(inode2->i_mode))
+		return -EINVAL;
+
+	/* Ranges cannot start after EOF. */
+	if (fsr->file1_offset > i_size_read(inode1) ||
+	    fsr->file2_offset > i_size_read(inode2))
+		return -EINVAL;
+
+	/*
+	 * If the caller said to swap to EOF, we set the length of the request
+	 * large enough to cover everything to the end of both files.
+	 */
+	if (fsr->flags & FILE_SWAP_RANGE_TO_EOF)
+		fsr->length = max_t(int64_t,
+				    i_size_read(inode1) - fsr->file1_offset,
+				    i_size_read(inode2) - fsr->file2_offset);
+
+	/* Zero length swapext exits immediately. */
+	if (fsr->length == 0)
+		return 0;
+
+	/* Check that we don't violate system file offset limits. */
+	ret = generic_swap_file_range_checks(file1, file2, fsr);
+	if (ret)
+		return ret;
+
+	/*
+	 * Ensure that we don't swap a partial EOF block into the middle of
+	 * another file.
+	 */
+	if (fsr->length & blkmask) {
+		loff_t new_length = fsr->length;
+
+		if (fsr->file2_offset + new_length < i_size_read(inode2))
+			new_length &= ~blkmask;
+
+		if (fsr->file1_offset + new_length < i_size_read(inode1))
+			new_length &= ~blkmask;
+
+		if (new_length != fsr->length)
+			return -EINVAL;
+	}
+
+	/* Wait for the completion of any pending IOs on both files */
+	inode_dio_wait(inode1);
+	if (!same_inode)
+		inode_dio_wait(inode2);
+
+	ret = filemap_write_and_wait_range(inode1->i_mapping, fsr->file1_offset,
+					   fsr->file1_offset + fsr->length - 1);
+	if (ret)
+		return ret;
+
+	ret = filemap_write_and_wait_range(inode2->i_mapping, fsr->file2_offset,
+					   fsr->file2_offset + fsr->length - 1);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+EXPORT_SYMBOL(generic_swap_file_range_prep);
+
 loff_t do_clone_file_range(struct file *file_in, loff_t pos_in,
 			   struct file *file_out, loff_t pos_out,
 			   loff_t len, unsigned int remap_flags)
@@ -2278,3 +2364,105 @@ next_loop:
 	return ret;
 }
 EXPORT_SYMBOL(vfs_dedupe_file_range);
+
+/*
+ * Check that both files' metadata agree with the snapshot that we took for
+ * the range swap request.
+
+ * This should be called after the filesystem has locked /all/ inode metadata
+ * against modification.
+ */
+int generic_swap_file_range_check_fresh(struct inode *inode1,
+					struct inode *inode2,
+					const struct file_swap_range *fsr)
+{
+	/* Check that the offset/length values cover all of both files */
+	if ((fsr->flags & FILE_SWAP_RANGE_FULL_FILES) &&
+	    (fsr->file1_offset != 0 ||
+	     fsr->file2_offset != 0 ||
+	     fsr->length != i_size_read(inode1) ||
+	     fsr->length != i_size_read(inode2)))
+		return -EDOM;
+
+	/* Check that file2 hasn't otherwise been modified. */
+	if ((fsr->flags & FILE_SWAP_RANGE_FILE2_FRESH) &&
+	    (fsr->file2_ino        != inode2->i_ino ||
+	     fsr->file2_ctime      != inode2->i_ctime.tv_sec  ||
+	     fsr->file2_ctime_nsec != inode2->i_ctime.tv_nsec ||
+	     fsr->file2_mtime      != inode2->i_mtime.tv_sec  ||
+	     fsr->file2_mtime_nsec != inode2->i_mtime.tv_nsec))
+		return -EBUSY;
+
+	return 0;
+}
+EXPORT_SYMBOL(generic_swap_file_range_check_fresh);
+
+static inline int swap_range_verify_area(struct file *file, loff_t pos,
+					 struct file_swap_range *fsr)
+{
+	int64_t len = fsr->length;
+
+	if (fsr->flags & FILE_SWAP_RANGE_TO_EOF)
+		len = min_t(int64_t, len, i_size_read(file_inode(file)) - pos);
+	return remap_verify_area(file, pos, len, true);
+}
+
+int do_swap_file_range(struct file *file1, struct file *file2,
+		       struct file_swap_range *fsr)
+{
+	int ret;
+
+	if ((fsr->flags & ~FILE_SWAP_RANGE_ALL_FLAGS) ||
+	    memchr_inv(&fsr->pad, 0, sizeof(fsr->pad)))
+		return -EINVAL;
+
+	if ((fsr->flags & FILE_SWAP_RANGE_FULL_FILES) &&
+	    (fsr->flags & FILE_SWAP_RANGE_TO_EOF))
+		return -EINVAL;
+
+	/*
+	 * FISWAPRANGE ioctl enforces that src and dest files are on the same
+	 * mount. Practically, they only need to be on the same file system.
+	 */
+	if (file_inode(file1)->i_sb != file_inode(file2)->i_sb)
+		return -EXDEV;
+
+	ret = generic_file_rw_checks(file1, file2);
+	if (ret < 0)
+		return ret;
+
+	if (!file1->f_op->swap_file_range)
+		return -EOPNOTSUPP;
+
+	ret = swap_range_verify_area(file1, fsr->file1_offset, fsr);
+	if (ret)
+		return ret;
+
+	ret = swap_range_verify_area(file2, fsr->file2_offset, fsr);
+	if (ret)
+		return ret;
+
+	ret = file2->f_op->swap_file_range(file1, file2, fsr);
+	if (ret)
+		return ret;
+
+	file_modified(file1);
+	file_modified(file2);
+	fsnotify_modify(file1);
+	fsnotify_modify(file2);
+	return ret;
+}
+EXPORT_SYMBOL(do_swap_file_range);
+
+int vfs_swap_file_range(struct file *file1, struct file *file2,
+			struct file_swap_range *fsr)
+{
+	int ret;
+
+	file_start_write(file2);
+	ret = do_swap_file_range(file1, file2, fsr);
+	file_end_write(file2);
+
+	return ret;
+}
+EXPORT_SYMBOL(vfs_swap_file_range);
