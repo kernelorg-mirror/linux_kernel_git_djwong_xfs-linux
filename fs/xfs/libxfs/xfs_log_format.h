@@ -803,8 +803,12 @@ struct xfs_swap_extent {
 /* Set the file sizes when finished. */
 #define XFS_SWAP_EXTENT_SET_SIZES	(1ULL << 1)
 
+/* Try to convert inode2 from block to short format at the end, if possible. */
+#define XFS_SWAP_EXTENT_INO2_SHORTFORM	(1ULL << 2)
+
 #define XFS_SWAP_EXTENT_FLAGS		(XFS_SWAP_EXTENT_ATTR_FORK | \
-					 XFS_SWAP_EXTENT_SET_SIZES)
+					 XFS_SWAP_EXTENT_SET_SIZES | \
+					 XFS_SWAP_EXTENT_INO2_SHORTFORM)
 
 /* This is the structure used to lay out an sxi log item in the log. */
 struct xfs_sxi_log_format {
