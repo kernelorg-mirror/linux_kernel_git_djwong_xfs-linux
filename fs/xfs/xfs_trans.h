@@ -26,6 +26,7 @@ struct xfs_cui_log_item;
 struct xfs_cud_log_item;
 struct xfs_bui_log_item;
 struct xfs_bud_log_item;
+struct xfs_defer_capture;
 
 struct xfs_log_item {
 	struct list_head		li_ail;		/* AIL pointers */
@@ -74,7 +75,8 @@ struct xfs_item_ops {
 	void (*iop_committing)(struct xfs_log_item *, xfs_lsn_t commit_lsn);
 	void (*iop_release)(struct xfs_log_item *);
 	xfs_lsn_t (*iop_committed)(struct xfs_log_item *, xfs_lsn_t);
-	int (*iop_recover)(struct xfs_log_item *lip, struct xfs_trans *tp);
+	int (*iop_recover)(struct xfs_log_item *lip,
+			   struct xfs_defer_capture **dfcp);
 	bool (*iop_match)(struct xfs_log_item *item, uint64_t id);
 };
 
