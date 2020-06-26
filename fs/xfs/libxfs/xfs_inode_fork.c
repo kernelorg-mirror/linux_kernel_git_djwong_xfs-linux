@@ -389,7 +389,7 @@ xfs_iroot_realloc(
 		 * location.  The records don't change location because
 		 * they are kept butted up against the btree block header.
 		 */
-		ASSERT(be16_to_cpu(ifp->if_broot->bb_level) == level);
+		level = be16_to_cpu(ifp->if_broot->bb_level);
 		cur_max = ops->iroot_maxrecs(mp, ifp->if_broot_bytes,
 				level == 0);
 		new_max = cur_max + rec_diff;
