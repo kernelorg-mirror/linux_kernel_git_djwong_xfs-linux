@@ -881,6 +881,10 @@ DECLARE_EVENT_CLASS(xfs_dquot_class,
 		__field(unsigned long long, rtb_softlimit)
 		__field(unsigned long long, ino_hardlimit)
 		__field(unsigned long long, ino_softlimit)
+
+		__field(unsigned long long, ina_bcount)
+		__field(unsigned long long, ina_rtbcount)
+		__field(unsigned long long, ina_icount)
 	),
 	TP_fast_assign(
 		__entry->dev = dqp->q_mount->m_super->s_dev;
@@ -903,9 +907,14 @@ DECLARE_EVENT_CLASS(xfs_dquot_class,
 		__entry->rtb_softlimit = dqp->q_rtb.softlimit;
 		__entry->ino_hardlimit = dqp->q_ino.hardlimit;
 		__entry->ino_softlimit = dqp->q_ino.softlimit;
+
+		__entry->ina_bcount = dqp->q_blk.inactive;
+		__entry->ina_rtbcount = dqp->q_rtb.inactive;
+		__entry->ina_icount = dqp->q_ino.inactive;
 	),
 	TP_printk("dev %d:%d id 0x%x type %s flags %s nrefs %u "
 		  "res_bc 0x%llx res_rtbc 0x%llx res_ic 0x%llx "
+		  "ina_bc 0x%llx ina_rtbc 0x%llx ina_ic 0x%llx "
 		  "bcnt 0x%llx bhardlimit 0x%llx bsoftlimit 0x%llx "
 		  "rtbcnt 0x%llx rtbhardlimit 0x%llx rtbsoftlimit 0x%llx "
 		  "icnt 0x%llx ihardlimit 0x%llx isoftlimit 0x%llx]",
@@ -917,6 +926,9 @@ DECLARE_EVENT_CLASS(xfs_dquot_class,
 		  __entry->res_bcount,
 		  __entry->res_rtbcount,
 		  __entry->res_icount,
+		  __entry->ina_bcount,
+		  __entry->ina_rtbcount,
+		  __entry->ina_icount,
 		  __entry->bcount,
 		  __entry->blk_hardlimit,
 		  __entry->blk_softlimit,
@@ -933,6 +945,7 @@ DEFINE_EVENT(xfs_dquot_class, name, \
 	TP_PROTO(struct xfs_dquot *dqp), \
 	TP_ARGS(dqp))
 DEFINE_DQUOT_EVENT(xfs_dqadjust);
+DEFINE_DQUOT_EVENT(xfs_dqreclaim_inactive);
 DEFINE_DQUOT_EVENT(xfs_dqreclaim_want);
 DEFINE_DQUOT_EVENT(xfs_dqreclaim_dirty);
 DEFINE_DQUOT_EVENT(xfs_dqreclaim_busy);
