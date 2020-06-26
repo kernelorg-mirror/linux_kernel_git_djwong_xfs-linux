@@ -76,4 +76,7 @@ int xfs_swapext_finish_one(struct xfs_trans *tp,
 int xfs_swapext_atomic(struct xfs_trans **tpp,
 		const struct xfs_swapext_req *req);
 
+int xfs_swapext_deferred_bmap(struct xfs_trans **tpp,
+		const struct xfs_swapext_req *req);
+
 #endif /* __XFS_SWAPEXT_H_ */
