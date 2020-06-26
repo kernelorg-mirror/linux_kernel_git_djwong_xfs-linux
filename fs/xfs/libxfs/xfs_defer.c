@@ -16,6 +16,7 @@
 #include "xfs_inode.h"
 #include "xfs_inode_item.h"
 #include "xfs_trace.h"
+#include "xfs_icache.h"
 
 /*
  * Deferred Operations in XFS
@@ -555,6 +556,18 @@ xfs_defer_move(
 	xfs_defer_reset(stp);
 }
 
+/* Unlock the inodes attached to this dfops capture device. */
+static void
+xfs_defer_capture_iunlock(
+	struct xfs_defer_capture	*dfc)
+{
+	unsigned int			i;
+
+	for (i = 0; i < XFS_DEFER_OPS_NR_INODES && dfc->dfc_inodes[i]; i++)
+		xfs_iunlock(dfc->dfc_inodes[i], XFS_ILOCK_EXCL);
+	dfc->dfc_ilocked = false;
+}
+
 /*
  * Prepare a chain of fresh deferred ops work items to be completed later.  Log
  * recovery requires the ability to put off until later the actual finishing
@@ -568,14 +581,21 @@ xfs_defer_move(
  * transaction is committed.
  *
  * Note that the capture state is passed up to the caller and must be freed
- * even if the transaction commit returns error.
+ * even if the transaction commit returns error.  If inodes were passed in and
+ * a state capture structure was returned, the inodes are now owned by the
+ * state capture structure and the caller must not touch the inodes.
+ *
+ * If no structure is returned, the caller still owns the inodes.
  */
 int
 xfs_defer_capture(
 	struct xfs_trans		*tp,
-	struct xfs_defer_capture	**dfcp)
+	struct xfs_defer_capture	**dfcp,
+	struct xfs_inode		*ip1,
+	struct xfs_inode		*ip2)
 {
 	struct xfs_defer_capture	*dfc = NULL;
+	int				error;
 
 	if (!list_empty(&tp->t_dfops)) {
 		dfc = kmem_zalloc(sizeof(*dfc), KM_NOFS);
@@ -594,10 +614,31 @@ xfs_defer_capture(
 		dfc->dfc_tres.tr_logcount = tp->t_log_count;
 		dfc->dfc_tres.tr_logflags = XFS_TRANS_PERM_LOG_RES;
 		xfs_defer_reset(tp);
+
+		/*
+		 * Transfer responsibility for unlocking and releasing the
+		 * inodes to the capture structure.
+		 */
+		if (!ip1)
+			ip1 = ip2;
+		dfc->dfc_ilocked = true;
+		dfc->dfc_inodes[0] = ip1;
+		if (ip2 != ip1)
+			dfc->dfc_inodes[1] = ip2;
 	}
 
 	*dfcp = dfc;
-	return xfs_trans_commit(tp);
+	error = xfs_trans_commit(tp);
+	if (error)
+		return error;
+
+	/*
+	 * Now that we've committed the transaction, it's safe to unlock the
+	 * inodes that were passed in if we've taken over their ownership.
+	 */
+	if (dfc)
+		xfs_defer_capture_iunlock(dfc);
+	return 0;
 }
 
 /* Attach a chain of captured deferred ops to a new transaction. */
@@ -608,6 +649,13 @@ xfs_defer_continue(
 {
 	ASSERT(tp->t_flags & XFS_TRANS_PERM_LOG_RES);
 	ASSERT(!(tp->t_flags & XFS_TRANS_DIRTY));
+
+	/* Lock and join the inodes to the new transaction. */
+	xfs_defer_continue_inodes(dfc, tp);
+	if (dfc->dfc_inodes[0])
+		xfs_trans_ijoin(tp, dfc->dfc_inodes[0], 0);
+	if (dfc->dfc_inodes[1])
+		xfs_trans_ijoin(tp, dfc->dfc_inodes[1], 0);
 
 	/* Move captured dfops chain and state to the transaction. */
 	list_splice_init(&dfc->dfc_dfops, &tp->t_dfops);
@@ -624,5 +672,8 @@ xfs_defer_capture_free(
 	struct xfs_defer_capture	*dfc)
 {
 	xfs_defer_cancel_list(mp, &dfc->dfc_dfops);
+	if (dfc->dfc_ilocked)
+		xfs_defer_capture_iunlock(dfc);
+	xfs_defer_capture_irele(dfc);
 	kmem_free(dfc);
 }

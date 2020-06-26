@@ -11,6 +11,12 @@ struct xfs_defer_op_type;
 struct xfs_defer_capture;
 
 /*
+ * Deferred operation item relogging limits.
+ */
+#define XFS_DEFER_OPS_NR_INODES	2	/* join up to two inodes */
+#define XFS_DEFER_OPS_NR_BUFS	2	/* join up to two buffers */
+
+/*
  * Header for deferred operation list.
  */
 enum xfs_defer_ops_type {
@@ -78,15 +84,28 @@ struct xfs_defer_capture {
 	unsigned int		dfc_tpflags;
 	unsigned int		dfc_blkres;
 	struct xfs_trans_res	dfc_tres;
+
+	/*
+	 * Inodes to hold when we want to finish the deferred work items.
+	 * Always set the first element before setting the second.
+	 */
+	bool			dfc_ilocked;
+	struct xfs_inode	*dfc_inodes[XFS_DEFER_OPS_NR_INODES];
 };
 
 /*
  * Functions to capture a chain of deferred operations and continue them later.
  * This doesn't normally happen except log recovery.
  */
-int xfs_defer_capture(struct xfs_trans *tp, struct xfs_defer_capture **dfcp);
+int xfs_defer_capture(struct xfs_trans *tp, struct xfs_defer_capture **dfcp,
+		struct xfs_inode *ip1, struct xfs_inode *ip2);
 void xfs_defer_continue(struct xfs_defer_capture *dfc, struct xfs_trans *tp);
 void xfs_defer_capture_free(struct xfs_mount *mp,
 		struct xfs_defer_capture *dfc);
+
+/* These functions must be provided by the xfs implementation. */
+void xfs_defer_continue_inodes(struct xfs_defer_capture *dfc,
+		struct xfs_trans *tp);
+void xfs_defer_capture_irele(struct xfs_defer_capture *dfc);
 
 #endif /* __XFS_DEFER_H__ */
