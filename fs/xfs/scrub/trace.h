@@ -1408,6 +1408,41 @@ TRACE_EVENT(xrep_rtbitmap_or,
 		  __entry->word)
 )
 
+DECLARE_EVENT_CLASS(xrep_rtrmap_class,
+	TP_PROTO(struct xfs_mount *mp, xfs_fsblock_t fsbno, xfs_filblks_t len,
+		 uint64_t owner, uint64_t offset, unsigned int flags),
+	TP_ARGS(mp, fsbno, len, owner, offset, flags),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_fsblock_t, fsbno)
+		__field(xfs_filblks_t, len)
+		__field(uint64_t, owner)
+		__field(uint64_t, offset)
+		__field(unsigned int, flags)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->fsbno = fsbno;
+		__entry->len = len;
+		__entry->owner = owner;
+		__entry->offset = offset;
+		__entry->flags = flags;
+	),
+	TP_printk("dev %d:%d fsbno %llu len %llu owner %lld offset %llu flags 0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->fsbno,
+		  __entry->len,
+		  __entry->owner,
+		  __entry->offset,
+		  __entry->flags)
+);
+#define DEFINE_REPAIR_RTRMAP_EVENT(name) \
+DEFINE_EVENT(xrep_rtrmap_class, name, \
+	TP_PROTO(struct xfs_mount *mp, xfs_fsblock_t fsbno, xfs_filblks_t len, \
+		 uint64_t owner, uint64_t offset, unsigned int flags), \
+	TP_ARGS(mp, fsbno, len, owner, offset, flags))
+DEFINE_REPAIR_RTRMAP_EVENT(xrep_rtrmap_found);
+
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
 
 #endif /* _TRACE_XFS_SCRUB_TRACE_H */
