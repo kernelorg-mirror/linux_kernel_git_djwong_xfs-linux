@@ -187,7 +187,7 @@ xfs_imap_to_bp(
 void
 xfs_inode_from_disk_timestamp(
 	struct timespec64		*tv,
-	const struct xfs_timestamp	*ts)
+	const union xfs_timestamp	*ts)
 {
 	tv->tv_sec = (int)be32_to_cpu(ts->t_sec);
 	tv->tv_nsec = (int)be32_to_cpu(ts->t_nsec);
@@ -286,7 +286,7 @@ out_destroy_data_fork:
 
 void
 xfs_inode_to_disk_timestamp(
-	struct xfs_timestamp		*ts,
+	union xfs_timestamp		*ts,
 	const struct timespec64		*tv)
 {
 	ts->t_sec = cpu_to_be32(tv->tv_sec);
