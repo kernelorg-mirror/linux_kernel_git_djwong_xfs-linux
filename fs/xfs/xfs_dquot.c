@@ -130,10 +130,12 @@ xfs_qm_adjust_res_timer(
 	struct xfs_dquot_res	*res,
 	struct xfs_quota_limits	*qlim)
 {
+	xfs_qcnt_t		eff_count = res->count - res->inactive;
+
 	ASSERT(res->hardlimit == 0 || res->softlimit <= res->hardlimit);
 
-	if ((res->softlimit && res->count > res->softlimit) ||
-	    (res->hardlimit && res->count > res->hardlimit)) {
+	if ((res->softlimit && eff_count > res->softlimit) ||
+	    (res->hardlimit && eff_count > res->hardlimit)) {
 		if (res->timer == 0)
 			res->timer = ktime_get_real_seconds() + qlim->time;
 	} else {
@@ -1356,4 +1358,51 @@ xfs_qm_dqiterate(
 	} while (error == 0 && id != 0);
 
 	return error;
+}
+
+/* Update dquot pending-inactivation counters. */
+STATIC void
+xfs_dquot_iadjust(
+	struct xfs_dquot	*dqp,
+	int			direction,
+	int64_t			inodes,
+	int64_t			dblocks,
+	int64_t			rblocks)
+{
+	xfs_dqlock(dqp);
+	dqp->q_ina_total += direction;
+	dqp->q_ino.inactive += inodes;
+	dqp->q_blk.inactive += dblocks;
+	dqp->q_rtb.inactive += rblocks;
+	if (dqp->q_id)
+		xfs_qm_adjust_dqtimers(dqp);
+	xfs_dqunlock(dqp);
+}
+
+/* Update pending-inactivation counters for all dquots attach to inode. */
+void
+xfs_qm_iadjust(
+	struct xfs_inode	*ip,
+	int			direction,
+	int64_t			inodes,
+	int64_t			dblocks,
+	int64_t			rblocks)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+
+	if (!XFS_IS_QUOTA_RUNNING(mp) || !XFS_IS_QUOTA_ON(mp) ||
+	    xfs_is_quota_inode(&mp->m_sb, ip->i_ino))
+		return;
+
+	if (XFS_IS_UQUOTA_ON(mp) && ip->i_udquot)
+		xfs_dquot_iadjust(ip->i_udquot, direction, inodes, dblocks,
+				rblocks);
+
+	if (XFS_IS_GQUOTA_ON(mp) && ip->i_gdquot)
+		xfs_dquot_iadjust(ip->i_gdquot, direction, inodes, dblocks,
+				rblocks);
+
+	if (XFS_IS_PQUOTA_ON(mp) && ip->i_pdquot)
+		xfs_dquot_iadjust(ip->i_pdquot, direction, inodes, dblocks,
+				rblocks);
 }
