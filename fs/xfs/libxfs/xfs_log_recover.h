@@ -127,6 +127,8 @@ void xlog_buf_readahead(struct xlog *log, xfs_daddr_t blkno, uint len,
 bool xlog_is_buffer_cancelled(struct xlog *log, xfs_daddr_t blkno, uint len);
 void xlog_recover_iodone(struct xfs_buf *bp);
 
+int xlog_recover_iget(struct xfs_mount *mp, xfs_ino_t ino,
+		struct xfs_inode **ipp);
 void xlog_recover_release_intent(struct xlog *log, unsigned short intent_type,
 		uint64_t intent_id);
 int xlog_recover_trans_commit_inodes(struct xfs_trans *tp,
@@ -140,6 +142,5 @@ xlog_recover_trans_commit(
 {
 	return xlog_recover_trans_commit_inodes(tp, dfcp, NULL, NULL);
 }
-
 
 #endif	/* __XFS_LOG_RECOVER_H__ */
