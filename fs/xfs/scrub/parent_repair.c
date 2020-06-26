@@ -172,6 +172,37 @@ out_rele:
 	return error;
 }
 
+/* Does the dcache have a parent for this directory? */
+xfs_ino_t
+xrep_parent_check_dcache(
+	struct xfs_inode	*dp)
+{
+	struct inode		*pip = NULL;
+	struct dentry		*dentry, *parent;
+	xfs_ino_t		ret = NULLFSINO;
+
+	ASSERT(S_ISDIR(VFS_I(dp)->i_mode));
+
+	dentry = d_find_alias(VFS_I(dp));
+	if (!dentry)
+		goto out;
+
+	parent = dget_parent(dentry);
+	if (!parent)
+		goto out_dput;
+
+	pip = igrab(d_inode(parent));
+	dput(parent);
+
+	ret = pip->i_ino;
+	xfs_irele(XFS_I(pip));
+
+out_dput:
+	dput(dentry);
+out:
+	return ret;
+}
+
 /* Is this an acceptable parent for the inode we're scrubbing? */
 bool
 xrep_parent_acceptable(
