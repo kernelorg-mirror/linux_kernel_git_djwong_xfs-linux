@@ -171,6 +171,13 @@ typedef struct xfs_mount {
 	 */
 	struct percpu_counter	m_delalloc_blks;
 
+	/* Count of inodes waiting for inactivation. */
+	struct percpu_counter	m_iinactive;
+	/* Count of data device blocks waiting for inactivation. */
+	struct percpu_counter	m_dinactive;
+	/* Coult of realtime device blocks waiting for inactivation. */
+	struct percpu_counter	m_rinactive;
+
 	struct radix_tree_root	m_perag_tree;	/* per-ag accounting info */
 	spinlock_t		m_perag_lock;	/* lock for m_perag_tree */
 	uint64_t		m_resblks;	/* total reserved blocks */
