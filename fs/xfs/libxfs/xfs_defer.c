@@ -588,8 +588,9 @@ xfs_defer_capture(
 		/* Move the dfops chain and transaction state to the freezer. */
 		list_splice_init(&tp->t_dfops, &dfc->dfc_dfops);
 		dfc->dfc_tpflags = tp->t_flags & XFS_TRANS_LOWMODE;
+		dfc->dfc_blkres = tp->t_blk_res - tp->t_blk_res_used;
+		tp->t_blk_res = tp->t_blk_res_used;
 		xfs_defer_reset(tp);
-
 	}
 
 	*dfcp = dfc;
@@ -609,6 +610,8 @@ xfs_defer_continue(
 	list_splice_init(&dfc->dfc_dfops, &tp->t_dfops);
 	tp->t_flags |= dfc->dfc_tpflags;
 	dfc->dfc_tpflags = 0;
+	tp->t_blk_res += dfc->dfc_blkres;
+	dfc->dfc_blkres = 0;
 }
 
 /* Release all resources that we used to capture deferred ops. */
