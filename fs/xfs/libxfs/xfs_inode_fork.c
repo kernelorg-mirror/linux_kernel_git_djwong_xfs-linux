@@ -295,8 +295,10 @@ xfs_iformat_data_fork(
 		case XFS_DINODE_FMT_BTREE:
 			return xfs_iformat_btree(ip, dip, XFS_DATA_FORK);
 		case XFS_DINODE_FMT_RMAP:
-			if (!xfs_sb_version_hasrtrmapbt(&ip->i_mount->m_sb))
+			if (!xfs_sb_version_hasrtrmapbt(&ip->i_mount->m_sb)) {
+				xfs_inode_mark_sick(ip, XFS_SICK_INO_CORE);
 				return -EFSCORRUPTED;
+			}
 			return xfs_iformat_rmap(ip, dip);
 		default:
 			xfs_inode_verifier_error(ip, -EFSCORRUPTED, __func__,
