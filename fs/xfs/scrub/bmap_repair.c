@@ -24,6 +24,7 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_rmap.h"
 #include "xfs_rmap_btree.h"
+#include "xfs_rtrmap_btree.h"
 #include "xfs_refcount.h"
 #include "xfs_quota.h"
 #include "scrub/xfs_scrub.h"
@@ -126,6 +127,14 @@ xrep_bmap_walk_rmap(
 	if (rec->rm_owner != rb->sc->ip->i_ino)
 		return 0;
 
+	/*
+	 * Data extents for realtime files are never stored on the data device.
+	 */
+	if (XFS_IS_REALTIME_INODE(rb->sc->ip) &&
+	    !(rec->rm_flags & XFS_RMAP_ATTR_FORK) &&
+	    !(rec->rm_flags & XFS_RMAP_BMBT_BLOCK))
+		return -EFSCORRUPTED;
+
 	rb->nblocks += rec->rm_blockcount;
 
 	/* If this rmap isn't for the fork we want, we're done. */
@@ -193,6 +202,65 @@ xrep_bmap_scan_ag(
 	return error;
 }
 
+/* Record realtime extents that belong to this inode's fork. */
+STATIC int
+xrep_bmap_walk_rtrmap(
+	struct xfs_btree_cur	*cur,
+	struct xfs_rmap_irec	*rec,
+	void			*priv)
+{
+	struct xrep_bmap	*rb = priv;
+	int			error = 0;
+
+	if (xchk_should_terminate(rb->sc, &error))
+		return error;
+
+	/* Skip extents which are not owned by this inode and fork. */
+	if (rec->rm_owner != rb->sc->ip->i_ino)
+		return 0;
+
+	/* xattr extents are never stored on realtime devices */
+	if (rec->rm_flags & XFS_RMAP_ATTR_FORK)
+		return -EFSCORRUPTED;
+	if (rb->whichfork == XFS_ATTR_FORK)
+		return 0;
+
+	/* bmbt blocks are never stored on realtime devices */
+	if (rec->rm_flags & XFS_RMAP_BMBT_BLOCK)
+		return -EFSCORRUPTED;
+
+	/*
+	 * Data extents for non-realtime files are never stored on the realtime
+	 * device.
+	 */
+	if (!XFS_IS_REALTIME_INODE(rb->sc->ip))
+		return -EFSCORRUPTED;
+
+	rb->nblocks += rec->rm_blockcount;
+
+	return xrep_bmap_from_rmap(rb, rec->rm_offset, rec->rm_startblock,
+			rec->rm_blockcount,
+			rec->rm_flags & XFS_RMAP_UNWRITTEN);
+}
+
+/* Scan the realtime reverse mappings to build the new extent map. */
+STATIC int
+xrep_bmap_scan_rt(
+	struct xrep_bmap	*rb)
+{
+	struct xfs_scrub	*sc = rb->sc;
+	struct xfs_mount	*mp = sc->mp;
+	struct xfs_btree_cur	*cur;
+	int			error;
+
+	xfs_rtlock(NULL, mp, XFS_RTLOCK_RMAP);
+	cur = xfs_rtrmapbt_init_cursor(mp, sc->tp, mp->m_rrmapip);
+	error = xfs_rmap_query_all(cur, xrep_bmap_walk_rtrmap, rb);
+	xfs_btree_del_cursor(cur, error);
+	xfs_rtunlock(mp, XFS_RTLOCK_RMAP);
+	return error;
+}
+
 /*
  * Collect block mappings for this fork of this inode and decide if we have
  * enough space to rebuild.  Caller is responsible for cleaning up the list if
@@ -205,6 +273,12 @@ xrep_bmap_find_mappings(
 	struct xfs_scrub	*sc = rb->sc;
 	xfs_agnumber_t		agno;
 	int			error = 0;
+
+	if (xfs_sb_version_hasrealtime(&sc->mp->m_sb)) {
+		error = xrep_bmap_scan_rt(rb);
+		if (error)
+			return error;
+	}
 
 	/* Iterate the rmaps for extents. */
 	for (agno = 0; agno < sc->mp->m_sb.sb_agcount; agno++) {
@@ -501,10 +575,6 @@ xrep_bmap_check_inputs(
 	/* If we somehow have delalloc extents, forget it. */
 	if (sc->ip->i_delayed_blks)
 		return -EBUSY;
-
-	/* Don't know how to rebuild realtime data forks. */
-	if (XFS_IS_REALTIME_INODE(sc->ip))
-		return -EOPNOTSUPP;
 
 	return 0;
 }
