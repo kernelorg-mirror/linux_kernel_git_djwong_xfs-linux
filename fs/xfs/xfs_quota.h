@@ -119,6 +119,8 @@ extern void xfs_qm_unmount_quotas(struct xfs_mount *);
 
 void		xfs_dquot_done(struct xfs_buf *);
 
+void xfs_qm_iadjust(struct xfs_inode *ip, int direction, int64_t inodes,
+		int64_t dblocks, int64_t rblocks);
 #else
 static inline int
 xfs_qm_vop_dqalloc(struct xfs_inode *ip, kuid_t kuid, kgid_t kgid,
@@ -166,6 +168,7 @@ static inline void xfs_dquot_done(struct xfs_buf *bp)
 	return;
 }
 
+#define xfs_qm_iadjust(ip, dir, inodes, dblocks, rblocks)
 #endif /* CONFIG_XFS_QUOTA */
 
 #if IS_ENABLED(CONFIG_XFS_QUOTA) && IS_ENABLED(CONFIG_XFS_ONLINE_SCRUB)
