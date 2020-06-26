@@ -561,6 +561,16 @@ xfs_dquot_from_disk(
 	return 0;
 }
 
+/* Copy the in-core quota fields into the on-disk buffer. */
+void
+xfs_dquot_to_disk(
+	struct xfs_disk_dquot	*ddqp,
+	struct xfs_dquot	*dqp)
+{
+	memcpy(ddqp, &dqp->q_core, sizeof(struct xfs_disk_dquot));
+	ddqp->d_flags = dqp->dq_flags & XFS_DDQFEAT_TYPE_MASK;
+}
+
 /* Allocate and initialize the dquot buffer for this in-core dquot. */
 static int
 xfs_qm_dqread_alloc(
@@ -1108,6 +1118,19 @@ xfs_qm_dqflush_done(
 	xfs_dqfunlock(dqp);
 }
 
+/* Check incore dquot for errors before we flush. */
+static xfs_failaddr_t
+xfs_qm_dqflush_check(
+	struct xfs_dquot	*dqp)
+{
+	unsigned int		type = dqp->dq_flags & XFS_DQ_ALLTYPES;
+
+	if (type != XFS_DQ_USER && type != XFS_DQ_GROUP && type != XFS_DQ_PROJ)
+		return __this_address;
+
+	return NULL;
+}
+
 /*
  * Write a modified dquot to disk.
  * The dquot must be locked and the flush lock too taken by caller.
@@ -1166,8 +1189,16 @@ xfs_qm_dqflush(
 		goto out_abort;
 	}
 
-	/* This is the only portion of data that needs to persist */
-	memcpy(ddqp, &dqp->q_core, sizeof(struct xfs_disk_dquot));
+	fa = xfs_qm_dqflush_check(dqp);
+	if (fa) {
+		xfs_alert(mp, "corrupt dquot ID 0x%x in memory at %pS",
+				be32_to_cpu(dqp->q_core.d_id), fa);
+		xfs_buf_relse(bp);
+		error = -EFSCORRUPTED;
+		goto out_abort;
+	}
+
+	xfs_dquot_to_disk(ddqp, dqp);
 
 	/*
 	 * Clear the dirty field and remember the flush lsn for later use.
