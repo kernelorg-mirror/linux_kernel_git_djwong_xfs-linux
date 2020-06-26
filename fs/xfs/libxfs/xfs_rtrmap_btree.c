@@ -98,6 +98,41 @@ xfs_rtrmapbt_get_maxrecs(
 	return cur->bc_mp->m_rtrmap_mxr[level != 0];
 }
 
+/*
+ * Calculate number of records in a realtime rmap btree inode root.
+ */
+int
+xfs_rtrmapbt_root_maxrecs(
+	int			blocklen,
+	bool			leaf)
+{
+	blocklen -= sizeof(struct xfs_rtrmap_root);
+
+	if (leaf)
+		return blocklen / sizeof(struct xfs_rtrmap_rec);
+	return blocklen / (2 * sizeof(struct xfs_rtrmap_key) +
+			sizeof(xfs_rtrmap_ptr_t));
+}
+
+/*
+ * Get the maximum records we could store in the on-disk format.
+ *
+ * For non-root nodes this is equivalent to xfs_rtrmapbt_get_maxrecs, but
+ * for the root node this checks the available space in the dinode fork
+ * so that we can resize the in-memory buffer to match it.  After a
+ * resize to the maximum size this function returns the same value
+ * as xfs_rtrmapbt_get_maxrecs for the root node, too.
+ */
+STATIC int
+xfs_rtrmapbt_get_dmaxrecs(
+	struct xfs_btree_cur	*cur,
+	int			level)
+{
+	if (level != cur->bc_nlevels - 1)
+		return cur->bc_mp->m_rtrmap_mxr[level != 0];
+	return xfs_rtrmapbt_root_maxrecs(cur->bc_ino.forksize, level == 0);
+}
+
 STATIC void
 xfs_rtrmapbt_init_key_from_rec(
 	union xfs_btree_key	*key,
@@ -319,6 +354,66 @@ xfs_rtrmapbt_recs_inorder(
 	return 0;
 }
 
+static unsigned int
+xfs_rtrmapbt_iroot_maxrecs(
+	struct xfs_mount	*mp,
+	unsigned int		blocklen,
+	bool			leaf)
+{
+	return xfs_rtrmapbt_maxrecs(blocklen, leaf);
+}
+
+static size_t
+xfs_rtrmapbt_iroot_size(
+	struct xfs_mount	*mp,
+	unsigned int		nrecs,
+	int			level)
+{
+	return xfs_rtrmap_broot_space_calc(nrecs, level);
+}
+
+static void *
+xfs_rtrmapbt_iroot_ptr(
+	struct xfs_mount	*mp,
+	struct xfs_btree_block	*bb,
+	unsigned int		i,
+	unsigned int		sz)
+{
+	return xfs_rtrmap_broot_ptr_addr(bb, i, sz);
+}
+
+static void *
+xfs_rtrmapbt_iroot_key(
+	struct xfs_mount	*mp,
+	struct xfs_btree_block	*bb,
+	unsigned int		nptr)
+{
+	return xfs_rtrmap_key_addr(bb, nptr);
+}
+
+static void *
+xfs_rtrmapbt_iroot_rec(
+	struct xfs_mount	*mp,
+	struct xfs_btree_block	*bb,
+	unsigned int		nptr)
+{
+	return xfs_rtrmap_rec_addr(bb, nptr);
+}
+
+static const struct xfs_ifork_broot_ops xfs_rtrmapbt_iroot_ops = {
+	.header_sz		= XFS_RTRMAP_BLOCK_LEN,
+	.rec_len		= sizeof(struct xfs_rtrmap_rec),
+	.key_len		= 2 * sizeof(struct xfs_rtrmap_key),
+	.ptr_len		= sizeof(xfs_fsblock_t),
+
+	.iroot_maxrecs		= xfs_rtrmapbt_iroot_maxrecs,
+	.iroot_size		= xfs_rtrmapbt_iroot_size,
+	.iroot_ptr		= xfs_rtrmapbt_iroot_ptr,
+	.iroot_key		= xfs_rtrmapbt_iroot_key,
+	.iroot_rec		= xfs_rtrmapbt_iroot_rec,
+	.droot_size		= xfs_rtrmap_root_space,
+};
+
 static const struct xfs_btree_ops xfs_rtrmapbt_ops = {
 	.rec_len		= sizeof(struct xfs_rtrmap_rec),
 	.key_len		= 2 * sizeof(struct xfs_rtrmap_key),
@@ -328,6 +423,7 @@ static const struct xfs_btree_ops xfs_rtrmapbt_ops = {
 	.free_block		= xbtree_free_ino_block,
 	.get_minrecs		= xfs_rtrmapbt_get_minrecs,
 	.get_maxrecs		= xfs_rtrmapbt_get_maxrecs,
+	.get_dmaxrecs		= xfs_rtrmapbt_get_dmaxrecs,
 	.init_key_from_rec	= xfs_rtrmapbt_init_key_from_rec,
 	.init_high_key_from_rec	= xfs_rtrmapbt_init_high_key_from_rec,
 	.init_rec_from_cur	= xfs_rtrmapbt_init_rec_from_cur,
@@ -337,6 +433,7 @@ static const struct xfs_btree_ops xfs_rtrmapbt_ops = {
 	.diff_two_keys		= xfs_rtrmapbt_diff_two_keys,
 	.keys_inorder		= xfs_rtrmapbt_keys_inorder,
 	.recs_inorder		= xfs_rtrmapbt_recs_inorder,
+	.iroot_ops		= &xfs_rtrmapbt_iroot_ops,
 };
 
 /* Initialize a new rt rmap btree cursor. */
@@ -459,4 +556,129 @@ xfs_rtrmapbt_compute_maxlevels(
 {
 	mp->m_rtrmap_maxlevels = xfs_btree_compute_maxlevels(mp->m_rtrmap_mnr,
 			mp->m_sb.sb_rblocks);
+}
+
+/* Convert on-disk form of btree root to in-memory form. */
+STATIC void
+xfs_rtrmapbt_from_disk(
+	struct xfs_inode	*ip,
+	struct xfs_rtrmap_root	*dblock,
+	int			dblocklen,
+	struct xfs_btree_block	*rblock)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	int			dmxr;
+	struct xfs_rtrmap_key	*fkp;
+	__be64			*fpp;
+	struct xfs_rtrmap_key	*tkp;
+	__be64			*tpp;
+	struct xfs_rtrmap_rec	*frp;
+	struct xfs_rtrmap_rec	*trp;
+	int			rblocklen = xfs_rtrmap_broot_space(dblock);
+
+	xfs_btree_init_block_int(mp, rblock, XFS_BUF_DADDR_NULL,
+			 XFS_BTNUM_RTRMAP, 0, 0, ip->i_ino,
+			 XFS_BTREE_LONG_PTRS | XFS_BTREE_CRC_BLOCKS);
+
+	rblock->bb_level = dblock->bb_level;
+	rblock->bb_numrecs = dblock->bb_numrecs;
+
+	if (be16_to_cpu(rblock->bb_level) > 0) {
+		dmxr = xfs_rtrmapbt_root_maxrecs(dblocklen, false);
+		fkp = xfs_rtrmap_root_key_addr(dblock, 1);
+		tkp = xfs_rtrmap_key_addr(rblock, 1);
+		fpp = xfs_rtrmap_root_ptr_addr(dblock, 1, dmxr);
+		tpp = xfs_rtrmap_broot_ptr_addr(rblock, 1, rblocklen);
+		dmxr = be16_to_cpu(dblock->bb_numrecs);
+		memcpy(tkp, fkp, 2 * sizeof(*fkp) * dmxr);
+		memcpy(tpp, fpp, sizeof(*fpp) * dmxr);
+	} else {
+		frp = xfs_rtrmap_root_rec_addr(dblock, 1);
+		trp = xfs_rtrmap_rec_addr(rblock, 1);
+		dmxr = be16_to_cpu(dblock->bb_numrecs);
+		memcpy(trp, frp, sizeof(*frp) * dmxr);
+	}
+}
+
+/* Load a realtime reverse mapping btree root in from disk. */
+int
+xfs_iformat_rtrmap(
+	struct xfs_inode	*ip,
+	struct xfs_dinode	*dip)
+{
+	struct xfs_ifork	*ifp = XFS_IFORK_PTR(ip, XFS_DATA_FORK);
+	struct xfs_rtrmap_root	*dfp = XFS_DFORK_PTR(dip, XFS_DATA_FORK);
+	unsigned int		numrecs, level;
+	int			dsize;
+
+	dsize = XFS_DFORK_SIZE(dip, ip->i_mount, XFS_DATA_FORK);
+	numrecs = be16_to_cpu(dfp->bb_numrecs);
+	level = be16_to_cpu(dfp->bb_level);
+
+	if (xfs_rtrmap_root_space_calc(numrecs, level) > dsize)
+		return -EFSCORRUPTED;
+
+	xfs_iroot_alloc_broot(ifp, xfs_rtrmap_broot_space_calc(numrecs, level));
+	xfs_rtrmapbt_from_disk(ip, dfp, dsize, ifp->if_broot);
+	return 0;
+}
+
+/* Convert in-memory form of btree root to on-disk form. */
+void
+xfs_rtrmapbt_to_disk(
+	struct xfs_mount	*mp,
+	struct xfs_btree_block	*rblock,
+	int			rblocklen,
+	struct xfs_rtrmap_root	*dblock,
+	int			dblocklen)
+{
+	int			dmxr;
+	struct xfs_rtrmap_key	*fkp;
+	__be64			*fpp;
+	struct xfs_rtrmap_key	*tkp;
+	__be64			*tpp;
+	struct xfs_rtrmap_rec	*frp;
+	struct xfs_rtrmap_rec	*trp;
+
+	ASSERT(rblock->bb_magic == cpu_to_be32(XFS_RTRMAP_CRC_MAGIC));
+	ASSERT(uuid_equal(&rblock->bb_u.l.bb_uuid, &mp->m_sb.sb_meta_uuid));
+	ASSERT(rblock->bb_u.l.bb_blkno == cpu_to_be64(XFS_BUF_DADDR_NULL));
+	ASSERT(rblock->bb_u.l.bb_leftsib == cpu_to_be64(NULLFSBLOCK));
+	ASSERT(rblock->bb_u.l.bb_rightsib == cpu_to_be64(NULLFSBLOCK));
+
+	dblock->bb_level = rblock->bb_level;
+	dblock->bb_numrecs = rblock->bb_numrecs;
+
+	if (be16_to_cpu(rblock->bb_level) > 0) {
+		dmxr = xfs_rtrmapbt_root_maxrecs(dblocklen, false);
+		fkp = xfs_rtrmap_key_addr(rblock, 1);
+		tkp = xfs_rtrmap_root_key_addr(dblock, 1);
+		fpp = xfs_rtrmap_broot_ptr_addr(rblock, 1, rblocklen);
+		tpp = xfs_rtrmap_root_ptr_addr(dblock, 1, dmxr);
+		dmxr = be16_to_cpu(rblock->bb_numrecs);
+		memcpy(tkp, fkp, 2 * sizeof(*fkp) * dmxr);
+		memcpy(tpp, fpp, sizeof(*fpp) * dmxr);
+	} else {
+		frp = xfs_rtrmap_rec_addr(rblock, 1);
+		trp = xfs_rtrmap_root_rec_addr(dblock, 1);
+		dmxr = be16_to_cpu(rblock->bb_numrecs);
+		memcpy(trp, frp, sizeof(*frp) * dmxr);
+	}
+}
+
+/* Flush a realtime reverse mapping btree root out to disk. */
+void
+xfs_iflush_rtrmap(
+	struct xfs_inode	*ip,
+	struct xfs_dinode	*dip)
+{
+	struct xfs_ifork	*ifp = XFS_IFORK_PTR(ip, XFS_DATA_FORK);
+	struct xfs_rtrmap_root	*dfp = XFS_DFORK_PTR(dip, XFS_DATA_FORK);
+
+	ASSERT(ifp->if_broot != NULL);
+	ASSERT(ifp->if_broot_bytes > 0);
+	ASSERT(xfs_rtrmap_root_space(ifp->if_broot) <=
+			XFS_IFORK_SIZE(ip, XFS_DATA_FORK));
+	xfs_rtrmapbt_to_disk(ip->i_mount, ifp->if_broot, ifp->if_broot_bytes,
+			dfp, XFS_DFORK_SIZE(dip, ip->i_mount, XFS_DATA_FORK));
 }

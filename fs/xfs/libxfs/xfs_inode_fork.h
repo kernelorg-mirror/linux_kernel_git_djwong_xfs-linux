@@ -177,6 +177,7 @@ int xfs_ifork_verify_local_attr(struct xfs_inode *ip);
 
 struct xfs_ifork_broot_ops {
 	/* Size of the header block, records, keys, and pointers. */
+	size_t		header_sz;
 	size_t		rec_len;
 	size_t		key_len;
 	size_t		ptr_len;
@@ -211,5 +212,6 @@ struct xfs_ifork_broot_ops {
 void xfs_iroot_realloc(struct xfs_inode *ip, int whichfork,
 		unsigned int level, const struct xfs_ifork_broot_ops *ops,
 		int rec_diff);
+void xfs_iroot_alloc_broot(struct xfs_ifork *ifp, int new_size);
 
 #endif	/* __XFS_INODE_FORK_H__ */

@@ -24,6 +24,7 @@
 #include "xfs_dir2_priv.h"
 #include "xfs_attr_leaf.h"
 #include "xfs_health.h"
+#include "xfs_rtrmap_btree.h"
 
 kmem_zone_t *xfs_ifork_zone;
 
@@ -207,8 +208,7 @@ xfs_iformat_btree(
 		return -EFSCORRUPTED;
 	}
 
-	ifp->if_broot_bytes = size;
-	ifp->if_broot = kmem_alloc(size, KM_NOFS);
+	xfs_iroot_alloc_broot(ifp, size);
 	ASSERT(ifp->if_broot != NULL);
 	/*
 	 * Copy and convert from the on-disk structure
@@ -217,8 +217,6 @@ xfs_iformat_btree(
 	xfs_bmdr_to_bmbt(ip, dfp, XFS_DFORK_SIZE(dip, ip->i_mount, whichfork),
 			 ifp->if_broot, size);
 	ifp->if_flags &= ~XFS_IFEXTENTS;
-	ifp->if_flags |= XFS_IFBROOT;
-
 	ifp->if_bytes = 0;
 	ifp->if_u1.if_root = NULL;
 	ifp->if_height = 0;
@@ -265,8 +263,7 @@ xfs_iformat_data_fork(
 		case XFS_DINODE_FMT_RMAP:
 			if (!xfs_sb_version_hasrtrmapbt(&ip->i_mount->m_sb))
 				return -EFSCORRUPTED;
-			ASSERT(0); /* to be implemented later */
-			return -EFSCORRUPTED;
+			return xfs_iformat_rtrmap(ip, dip);
 		default:
 			xfs_inode_verifier_error(ip, -EFSCORRUPTED, __func__,
 					dip, sizeof(*dip), __this_address);
@@ -337,6 +334,17 @@ xfs_iformat_attr_fork(
 	return error;
 }
 
+/* Allocate space for an inode-rooted btree root block. */
+void
+xfs_iroot_alloc_broot(
+	struct xfs_ifork	*ifp,
+	int			new_size)
+{
+	ifp->if_broot = kmem_alloc(new_size, KM_NOFS);
+	ifp->if_broot_bytes = (int)new_size;
+	ifp->if_flags |= XFS_IFBROOT;
+}
+
 /*
  * Reallocate the space for if_broot based on the number of records
  * being added or deleted as indicated in rec_diff.  Move the records
@@ -382,9 +390,7 @@ xfs_iroot_realloc(
 		 */
 		if (ifp->if_broot_bytes == 0) {
 			new_size = ops->iroot_size(mp, rec_diff, level);
-			ifp->if_broot = kmem_alloc(new_size, KM_NOFS);
-			ifp->if_broot_bytes = (int)new_size;
-			ifp->if_flags |= XFS_IFBROOT;
+			xfs_iroot_alloc_broot(ifp, new_size);
 			return;
 		}
 
@@ -425,11 +431,16 @@ xfs_iroot_realloc(
 
 	new_size = ops->iroot_size(mp, new_max, level);
 	if (new_size > 0) {
+		size_t	header_sz = ops->header_sz;
+
+		if (!header_sz)
+			header_sz = ops->header_len(mp);
+
 		new_broot = kmem_alloc(new_size, KM_NOFS);
 		/*
 		 * First copy over the btree block header.
 		 */
-		memcpy(new_broot, ifp->if_broot, ops->header_len(mp));
+		memcpy(new_broot, ifp->if_broot, header_sz);
 	} else {
 		new_broot = NULL;
 		ifp->if_flags &= ~XFS_IFBROOT;
@@ -657,7 +668,9 @@ xfs_iflush_fork(
 		break;
 
 	case XFS_DINODE_FMT_RMAP:
-		ASSERT(0); /* to be implemented later */
+		ASSERT(whichfork == XFS_DATA_FORK);
+		if (iip->ili_fields & brootflag[whichfork])
+			xfs_iflush_rtrmap(ip, dip);
 		break;
 
 	default:

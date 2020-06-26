@@ -20,6 +20,7 @@ struct xfs_btree_cur *xfs_rtrmapbt_stage_cursor(struct xfs_mount *mp,
 		struct xfs_inode *ip, struct xbtree_ifakeroot *ifake);
 void xfs_rtrmapbt_commit_staged_btree(struct xfs_btree_cur *cur,
 		struct xfs_trans *tp);
+int xfs_rtrmapbt_root_maxrecs(int blocklen, bool leaf);
 int xfs_rtrmapbt_maxrecs(int blocklen, bool leaf);
 void xfs_rtrmapbt_compute_maxlevels(struct xfs_mount *mp);
 
@@ -70,5 +71,92 @@ xfs_rtrmap_ptr_addr(
 		 maxrecs * 2 * sizeof(struct xfs_rtrmap_key) +
 		 (index - 1) * sizeof(xfs_rtrmap_ptr_t));
 }
+
+/* Macros for handling the inode root */
+
+static inline struct xfs_rtrmap_rec *
+xfs_rtrmap_root_rec_addr(
+	struct xfs_rtrmap_root	*block,
+	unsigned int		index)
+{
+	return (struct xfs_rtrmap_rec *)
+		((char *)(block + 1) +
+		 (index - 1) * sizeof(struct xfs_rtrmap_rec));
+}
+
+static inline struct xfs_rtrmap_key *
+xfs_rtrmap_root_key_addr(
+	struct xfs_rtrmap_root	*block,
+	unsigned int		index)
+{
+	return (struct xfs_rtrmap_key *)
+		((char *)(block + 1) +
+		 (index - 1) * 2 * sizeof(struct xfs_rtrmap_key));
+}
+
+static inline xfs_rtrmap_ptr_t *
+xfs_rtrmap_root_ptr_addr(
+	struct xfs_rtrmap_root	*block,
+	unsigned int		index,
+	unsigned int		maxrecs)
+{
+	return (xfs_rtrmap_ptr_t *)
+		((char *)(block + 1) +
+		 maxrecs * 2 * sizeof(struct xfs_rtrmap_key) +
+		 (index - 1) * sizeof(xfs_rtrmap_ptr_t));
+}
+
+static inline xfs_rtrmap_ptr_t *
+xfs_rtrmap_broot_ptr_addr(
+	struct xfs_btree_block	*bb,
+	unsigned int		index,
+	unsigned int		block_size)
+{
+	return xfs_rtrmap_ptr_addr(bb, index,
+			xfs_rtrmapbt_maxrecs(block_size, false));
+}
+
+static inline size_t
+xfs_rtrmap_broot_space_calc(
+	unsigned int		nrecs,
+	unsigned int		level)
+{
+	size_t			sz = XFS_RTRMAP_BLOCK_LEN;
+
+	if (level > 0)
+		return sz + nrecs * (2 * sizeof(struct xfs_rtrmap_key) +
+					 sizeof(xfs_rtrmap_ptr_t));
+	return sz + nrecs * sizeof(struct xfs_rtrmap_rec);
+}
+
+static inline size_t
+xfs_rtrmap_broot_space(struct xfs_rtrmap_root *bb)
+{
+	return xfs_rtrmap_broot_space_calc(be16_to_cpu(bb->bb_numrecs),
+			be16_to_cpu(bb->bb_level));
+}
+
+static inline size_t
+xfs_rtrmap_root_space_calc(
+	unsigned int		nrecs,
+	unsigned int		level)
+{
+	size_t			sz = sizeof(struct xfs_rtrmap_root);
+
+	if (level > 0)
+		return sz + nrecs * (2 * sizeof(struct xfs_rtrmap_key) +
+					 sizeof(xfs_rtrmap_ptr_t));
+	return sz + nrecs * sizeof(struct xfs_rtrmap_rec);
+}
+
+static inline size_t
+xfs_rtrmap_root_space(struct xfs_btree_block *bb)
+{
+	return xfs_rtrmap_root_space_calc(be16_to_cpu(bb->bb_numrecs),
+			be16_to_cpu(bb->bb_level));
+}
+
+int xfs_iformat_rtrmap(struct xfs_inode *ip, struct xfs_dinode *dip);
+void xfs_iflush_rtrmap(struct xfs_inode *ip, struct xfs_dinode *dip);
 
 #endif	/* __XFS_RTRMAP_BTREE_H__ */
