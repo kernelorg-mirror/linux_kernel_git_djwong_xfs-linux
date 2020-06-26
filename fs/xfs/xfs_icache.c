@@ -960,19 +960,29 @@ xfs_queue_blockgc(
 	rcu_read_unlock();
 }
 
+/* Scan one incore inode for block preallocations that we can remove. */
+static int
+xfs_blockgc_scan_inode(
+	struct xfs_inode	*ip,
+	void			*args)
+{
+	int			error;
+
+	error = xfs_inode_free_eofblocks(ip, args);
+	if (error && error != -EAGAIN)
+		return error;
+
+	return xfs_inode_free_cowblocks(ip, args);
+}
+
 /* Scan all incore inodes for block preallocations that we can remove. */
 static inline int
 xfs_blockgc_scan(
 	struct xfs_mount	*mp,
 	struct xfs_eofblocks	*eofb)
 {
-	int			error;
-
-	error = xfs_icache_free_eofblocks(mp, eofb);
-	if (error && error != -EAGAIN)
-		return error;
-
-	return xfs_icache_free_cowblocks(mp, eofb);
+	return __xfs_inode_walk(mp, 0, xfs_blockgc_scan_inode, eofb,
+			XFS_ICI_BLOCK_GC_TAG);
 }
 
 /* Background worker that trims preallocated space. */
