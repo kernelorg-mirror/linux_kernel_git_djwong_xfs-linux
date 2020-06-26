@@ -1812,6 +1812,22 @@ xlog_recover_trans_commit(
 	return xfs_trans_commit(tp);
 }
 
+int
+xlog_recover_iget(
+	struct xfs_mount	*mp,
+	xfs_ino_t		ino,
+	struct xfs_inode	**ipp)
+{
+	int			error;
+
+	error = xfs_iget(mp, NULL, ino, 0, 0, ipp);
+	if (error)
+		return error;
+	if (VFS_I(*ipp)->i_nlink == 0)
+		xfs_iflags_set(*ipp, XFS_IRECOVERY);
+	return 0;
+}
+
 /******************************************************************************
  *
  *		Log recover routines
