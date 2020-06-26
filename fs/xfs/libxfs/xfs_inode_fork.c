@@ -24,6 +24,7 @@
 #include "xfs_dir2_priv.h"
 #include "xfs_attr_leaf.h"
 #include "xfs_health.h"
+#include "xfs_rtrmap_btree.h"
 
 kmem_zone_t *xfs_ifork_zone;
 
@@ -225,6 +226,37 @@ xfs_iformat_btree(
 	return 0;
 }
 
+/* The file is a reverse mapping tree. */
+STATIC int
+xfs_iformat_rmap(
+	struct xfs_inode	*ip,
+	struct xfs_dinode	*dip)
+{
+	struct xfs_rtrmap_root	*dfp;
+	struct xfs_ifork	*ifp;
+	/* REFERENCED */
+	int			size;
+	int			whichfork = XFS_DATA_FORK;
+
+	ifp = XFS_IFORK_PTR(ip, whichfork);
+	dfp = (struct xfs_rtrmap_root *)XFS_DFORK_PTR(dip, whichfork);
+	size = XFS_RTRMAP_BROOT_SPACE(dfp);
+
+	ifp->if_broot_bytes = size;
+	ifp->if_broot = kmem_alloc(size, KM_NOFS);
+	ASSERT(ifp->if_broot != NULL);
+	/*
+	 * Copy and convert from the on-disk structure
+	 * to the in-memory structure.
+	 */
+	xfs_rtrmapbt_from_disk(ip, dfp,
+			XFS_DFORK_SIZE(dip, ip->i_mount, whichfork),
+			ifp->if_broot, size);
+	ifp->if_flags = XFS_IFBROOT;
+
+	return 0;
+}
+
 int
 xfs_iformat_data_fork(
 	struct xfs_inode	*ip,
@@ -265,8 +297,7 @@ xfs_iformat_data_fork(
 		case XFS_DINODE_FMT_RMAP:
 			if (!xfs_sb_version_hasrtrmapbt(&ip->i_mount->m_sb))
 				return -EFSCORRUPTED;
-			/* to be implemented later */
-			return 0;
+			return xfs_iformat_rmap(ip, dip);
 		default:
 			xfs_inode_verifier_error(ip, -EFSCORRUPTED, __func__,
 					dip, sizeof(*dip), __this_address);
@@ -529,7 +560,17 @@ xfs_iflush_fork(
 		break;
 
 	case XFS_DINODE_FMT_RMAP:
-		/* to be implemented later */
+		ASSERT(whichfork == XFS_DATA_FORK);
+		if ((iip->ili_fields & brootflag[whichfork]) &&
+		    (ifp->if_broot_bytes > 0)) {
+			ASSERT(ifp->if_broot != NULL);
+			ASSERT(XFS_RTRMAP_ROOT_SPACE(ifp->if_broot) <=
+				XFS_IFORK_SIZE(ip, whichfork));
+			xfs_rtrmapbt_to_disk(mp, ifp->if_broot,
+				ifp->if_broot_bytes,
+				(struct xfs_rtrmap_root *)cp,
+				XFS_DFORK_SIZE(dip, mp, whichfork));
+		}
 		break;
 
 	default:
