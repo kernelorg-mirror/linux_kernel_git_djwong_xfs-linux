@@ -133,9 +133,15 @@ xfs_dquot_set_grace_period(
 /* Set the expiration time of a quota's grace period. */
 void
 xfs_dquot_set_timeout(
+	struct xfs_mount	*mp,
 	time64_t		*timer,
 	time64_t		value)
 {
+	if (xfs_sb_version_hasbigtime(&mp->m_sb)) {
+		*timer = clamp_t(time64_t, value, XFS_DQ_BIGTIMEOUT_MIN,
+						  XFS_DQ_BIGTIMEOUT_MAX);
+		return;
+	}
 	*timer = clamp_t(time64_t, value, XFS_DQ_TIMEOUT_MIN,
 					  XFS_DQ_TIMEOUT_MAX);
 }
@@ -146,6 +152,7 @@ xfs_dquot_set_timeout(
  */
 static inline void
 xfs_qm_adjust_res_timer(
+	struct xfs_dquot	*dqp,
 	struct xfs_dquot_res	*res,
 	struct xfs_quota_limits	*qlim)
 {
@@ -156,7 +163,7 @@ xfs_qm_adjust_res_timer(
 	if ((res->softlimit && eff_count > res->softlimit) ||
 	    (res->hardlimit && eff_count > res->hardlimit)) {
 		if (res->timer == 0)
-			xfs_dquot_set_timeout(&res->timer,
+			xfs_dquot_set_timeout(dqp->q_mount, &res->timer,
 					ktime_get_real_seconds() + qlim->time);
 	} else {
 		if (res->timer == 0)
@@ -190,9 +197,9 @@ xfs_qm_adjust_dqtimers(
 	ASSERT(dq->q_id);
 	defq = xfs_get_defquota(qi, xfs_dquot_type(dq));
 
-	xfs_qm_adjust_res_timer(&dq->q_blk, &defq->blk);
-	xfs_qm_adjust_res_timer(&dq->q_ino, &defq->ino);
-	xfs_qm_adjust_res_timer(&dq->q_rtb, &defq->rtb);
+	xfs_qm_adjust_res_timer(dq, &dq->q_blk, &defq->blk);
+	xfs_qm_adjust_res_timer(dq, &dq->q_ino, &defq->ino);
+	xfs_qm_adjust_res_timer(dq, &dq->q_rtb, &defq->rtb);
 }
 
 /*
@@ -246,6 +253,8 @@ xfs_qm_init_dquot_blk(
 		d->dd_diskdq.d_version = XFS_DQUOT_VERSION;
 		d->dd_diskdq.d_id = cpu_to_be32(curid);
 		d->dd_diskdq.d_type = type;
+		if (curid > 0 && xfs_sb_version_hasbigtime(&mp->m_sb))
+			d->dd_diskdq.d_type |= XFS_DQTYPE_BIGTIME;
 		if (xfs_sb_version_hascrc(&mp->m_sb)) {
 			uuid_copy(&d->dd_uuid, &mp->m_sb.sb_meta_uuid);
 			xfs_update_cksum((char *)d, sizeof(struct xfs_dqblk),
@@ -1191,6 +1200,14 @@ xfs_qm_dqflush_check(
 	if (dqp->q_rtb.softlimit && dqp->q_rtb.count > dqp->q_rtb.softlimit &&
 	    !dqp->q_rtb.timer)
 		return __this_address;
+
+	/* bigtime flag should never be set on root dquots */
+	if (dqp->q_type & XFS_DQTYPE_BIGTIME) {
+		if (!xfs_sb_version_hasbigtime(&dqp->q_mount->m_sb))
+			return __this_address;
+		if (dqp->q_id == 0)
+			return __this_address;
+	}
 
 	return NULL;
 }
