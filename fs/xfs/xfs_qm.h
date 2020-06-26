@@ -65,6 +65,12 @@ struct xfs_quotainfo {
 	struct xfs_def_quota	qi_grp_default;
 	struct xfs_def_quota	qi_prj_default;
 	struct shrinker		qi_shrinker;
+
+#if IS_ENABLED(CONFIG_XFS_ONLINE_SCRUB)
+	/* online quotacheck stuff */
+	struct xfs_hook_chain	qi_mod_dquot_hooks;
+	struct xfs_hook_chain	qi_apply_dquot_deltas_hooks;
+#endif
 };
 
 static inline struct radix_tree_root *
@@ -111,6 +117,15 @@ xfs_dquot_type(struct xfs_dquot *dqp)
 	ASSERT(XFS_QM_ISPDQ(dqp));
 	return XFS_DQ_PROJ;
 }
+
+/* Parameters for xfs_trans_mod_dquot hook. */
+struct xfs_trans_mod_dquot_params {
+	struct xfs_trans	*tp;
+	struct xfs_inode	*ip;
+	struct xfs_dquot	*dqp;
+	uint			field;
+	int64_t			delta;
+};
 
 extern void	xfs_trans_mod_dquot(struct xfs_trans *tp, struct xfs_dquot *dqp,
 				    uint field, int64_t delta);
