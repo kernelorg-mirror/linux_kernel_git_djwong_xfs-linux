@@ -27,6 +27,7 @@
 #include "xfs_trans_priv.h"
 #include "xfs_attr.h"
 #include "xfs_reflink.h"
+#include "xfs_rtrmap_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -594,6 +595,31 @@ xchk_perag_get(
 {
 	if (!sa->pag)
 		sa->pag = xfs_perag_get(mp, sa->agno);
+}
+
+/*
+ * For scrubbing a realtime file, grab all the in-core resources we'll need to
+ * check the realtime metadata.  The caller must hold the ILOCK of realtime
+ * metadata inodes.  We follow the same resource release rules as
+ * xfs_scrub_ag_init.
+ */
+void
+xchk_rt_init(
+	struct xfs_scrub	*sc,
+	struct xchk_ag			*sa)
+{
+	ASSERT(xfs_isilocked(sc->mp->m_rbmip,
+				XFS_ILOCK_EXCL | XFS_ILOCK_SHARED));
+
+	memset(sa, 0, sizeof(*sa));
+	sa->agno = NULLAGNUMBER;
+
+	if (xfs_sb_version_hasrmapbt(&sc->mp->m_sb)) {
+		ASSERT(xfs_isilocked(sc->mp->m_rrmapip,
+				XFS_ILOCK_EXCL | XFS_ILOCK_SHARED));
+		sa->rmap_cur = xfs_rtrmapbt_init_cursor(sc->mp, sc->tp,
+				sc->mp->m_rrmapip);
+	}
 }
 
 /* Per-scrubber setup functions */
