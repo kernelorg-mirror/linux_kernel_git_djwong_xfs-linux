@@ -361,6 +361,28 @@ xfs_defer_cancel_list(
 }
 
 /*
+ * Prevent a log intent item from pinning the tail of the log by logging a
+ * done item to release the intent item; and then log a new intent item.
+ * The caller should provide a fresh transaction and roll it after we're done.
+ */
+static int
+xfs_defer_relog(
+	struct xfs_trans		**tpp,
+	struct list_head		*dfops)
+{
+	struct xfs_defer_pending	*dfp;
+
+	ASSERT((*tpp)->t_flags & XFS_TRANS_PERM_LOG_RES);
+
+	list_for_each_entry(dfp, dfops, dfp_list) {
+		trace_xfs_defer_relog_intent((*tpp)->t_mountp, dfp);
+		dfp->dfp_intent = xfs_trans_item_relog(dfp->dfp_intent, *tpp);
+	}
+
+	return xfs_defer_trans_roll(tpp);
+}
+
+/*
  * Log an intent-done item for the first pending intent, and finish the work
  * items.
  */
@@ -420,6 +442,7 @@ xfs_defer_finish_noroll(
 	struct xfs_trans		**tp)
 {
 	struct xfs_defer_pending	*dfp;
+	unsigned int			nr_rolls = 0;
 	int				error = 0;
 	LIST_HEAD(dop_pending);
 
@@ -444,6 +467,13 @@ xfs_defer_finish_noroll(
 		error = xfs_defer_trans_roll(tp);
 		if (error)
 			goto out_shutdown;
+
+		/* Every few rolls we relog all the intent items. */
+		if (!(++nr_rolls % 7)) {
+			error = xfs_defer_relog(tp, &dop_pending);
+			if (error)
+				goto out_shutdown;
+		}
 
 		dfp = list_first_entry(&dop_pending, struct xfs_defer_pending,
 				       dfp_list);
