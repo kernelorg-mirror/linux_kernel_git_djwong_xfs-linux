@@ -552,3 +552,59 @@ xfs_defer_move(
 
 	xfs_defer_reset(stp);
 }
+
+/*
+ * Capture a chain of deferred ops that are attached to a transaction.  The
+ * entire deferred ops state is transferred to the capture structure.
+ */
+int
+xfs_defer_capture(
+	struct xfs_trans		*tp,
+	struct xfs_defer_capture	**dfcp)
+{
+	struct xfs_defer_capture	*dfc;
+
+	*dfcp = NULL;
+	if (list_empty(&tp->t_dfops))
+		return 0;
+
+	dfc = kmem_zalloc(sizeof(*dfc), KM_NOFS);
+	if (!dfc)
+		return -ENOMEM;
+
+	INIT_LIST_HEAD(&dfc->dfc_list);
+	INIT_LIST_HEAD(&dfc->dfc_dfops);
+
+	/* Move the dfops chain and transaction state to the freezer. */
+	list_splice_init(&tp->t_dfops, &dfc->dfc_dfops);
+	dfc->dfc_tpflags = tp->t_flags & XFS_TRANS_LOWMODE;
+	xfs_defer_reset(tp);
+
+	*dfcp = dfc;
+	return 0;
+}
+
+/* Attach a chain of captured deferred ops to a new transaction. */
+void
+xfs_defer_continue(
+	struct xfs_defer_capture	*dfc,
+	struct xfs_trans		*tp)
+{
+	ASSERT(tp->t_flags & XFS_TRANS_PERM_LOG_RES);
+	ASSERT(!(tp->t_flags & XFS_TRANS_DIRTY));
+
+	/* Move captured dfops chain and state to the transaction. */
+	list_splice_init(&dfc->dfc_dfops, &tp->t_dfops);
+	tp->t_flags |= dfc->dfc_tpflags;
+	dfc->dfc_tpflags = 0;
+}
+
+/* Release all resources that we used to capture deferred ops. */
+void
+xfs_defer_capture_free(
+	struct xfs_mount		*mp,
+	struct xfs_defer_capture	*dfc)
+{
+	xfs_defer_cancel_list(mp, &dfc->dfc_dfops);
+	kmem_free(dfc);
+}
