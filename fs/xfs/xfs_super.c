@@ -524,8 +524,15 @@ xfs_init_mount_workqueues(
 	if (!mp->m_sync_workqueue)
 		goto out_destroy_eofb;
 
+	mp->m_inactive_workqueue = alloc_workqueue("xfs-inactive/%s",
+			WQ_MEM_RECLAIM | WQ_FREEZABLE, 0, mp->m_super->s_id);
+	if (!mp->m_inactive_workqueue)
+		goto out_destroy_sync;
+
 	return 0;
 
+out_destroy_sync:
+	destroy_workqueue(mp->m_inactive_workqueue);
 out_destroy_eofb:
 	destroy_workqueue(mp->m_blockgc_workqueue);
 out_destroy_reclaim:
@@ -544,6 +551,7 @@ STATIC void
 xfs_destroy_mount_workqueues(
 	struct xfs_mount	*mp)
 {
+	destroy_workqueue(mp->m_inactive_workqueue);
 	destroy_workqueue(mp->m_sync_workqueue);
 	destroy_workqueue(mp->m_blockgc_workqueue);
 	destroy_workqueue(mp->m_reclaim_workqueue);
@@ -631,28 +639,34 @@ xfs_fs_destroy_inode(
 	struct inode		*inode)
 {
 	struct xfs_inode	*ip = XFS_I(inode);
+	struct xfs_mount	*mp = ip->i_mount;
+	bool			need_inactive;
 
 	trace_xfs_destroy_inode(ip);
 
 	ASSERT(!rwsem_is_locked(&inode->i_rwsem));
-	XFS_STATS_INC(ip->i_mount, vn_rele);
-	XFS_STATS_INC(ip->i_mount, vn_remove);
+	XFS_STATS_INC(mp, vn_rele);
+	XFS_STATS_INC(mp, vn_remove);
 
-	xfs_inactive(ip);
-
-	if (!XFS_FORCED_SHUTDOWN(ip->i_mount) && ip->i_delayed_blks) {
+	need_inactive = xfs_inode_needs_inactivation(ip);
+	if (need_inactive) {
+		trace_xfs_inode_set_need_inactive(ip);
+		xfs_inode_inactivation_prep(ip);
+	} else if (!XFS_FORCED_SHUTDOWN(ip->i_mount) && ip->i_delayed_blks) {
 		xfs_check_delalloc(ip, XFS_DATA_FORK);
 		xfs_check_delalloc(ip, XFS_COW_FORK);
 		ASSERT(0);
 	}
-
-	XFS_STATS_INC(ip->i_mount, vn_reclaim);
+	XFS_STATS_INC(mp, vn_reclaim);
+	trace_xfs_inode_set_reclaimable(ip);
 
 	/*
 	 * We should never get here with one of the reclaim flags already set.
 	 */
 	ASSERT_ALWAYS(!xfs_iflags_test(ip, XFS_IRECLAIMABLE));
 	ASSERT_ALWAYS(!xfs_iflags_test(ip, XFS_IRECLAIM));
+	ASSERT_ALWAYS(!xfs_iflags_test(ip, XFS_NEED_INACTIVE));
+	ASSERT_ALWAYS(!xfs_iflags_test(ip, XFS_INACTIVATING));
 
 	/*
 	 * We always use background reclaim here because even if the
@@ -661,7 +675,10 @@ xfs_fs_destroy_inode(
 	 * this more efficiently than we can here, so simply let background
 	 * reclaim tear down all inodes.
 	 */
-	xfs_inode_set_reclaim_tag(ip);
+	if (need_inactive)
+		xfs_inode_set_inactive_tag(ip);
+	else
+		xfs_inode_set_reclaim_tag(ip);
 }
 
 static void
@@ -942,6 +959,18 @@ xfs_fs_unfreeze(
 }
 
 /*
+ * Before we get to stage 1 of a freeze, force all the inactivation work so
+ * that there's less work to do if we crash during the freeze.
+ */
+STATIC int
+xfs_fs_freeze_super(
+	struct super_block	*sb)
+{
+	xfs_inactive_force(XFS_M(sb));
+	return freeze_super(sb);
+}
+
+/*
  * This function fills in xfs_mount_t fields based on mount args.
  * Note: the superblock _has_ now been read in.
  */
@@ -1140,6 +1169,7 @@ static const struct super_operations xfs_super_operations = {
 	.show_options		= xfs_fs_show_options,
 	.nr_cached_objects	= xfs_fs_nr_cached_objects,
 	.free_cached_objects	= xfs_fs_free_cached_objects,
+	.freeze_super		= xfs_fs_freeze_super,
 };
 
 static int
@@ -1722,6 +1752,13 @@ xfs_remount_ro(
 		return error;
 	}
 
+	/*
+	 * Perform all on-disk metadata updates required to inactivate inodes.
+	 * Since this can involve finobt updates, do it now before we lose the
+	 * per-AG space reservations.
+	 */
+	xfs_inactive_force(mp);
+
 	/* Free the per-AG metadata reservation pool. */
 	error = xfs_fs_unreserve_ag_blocks(mp);
 	if (error) {
@@ -1841,6 +1878,7 @@ static int xfs_init_fs_context(
 	mutex_init(&mp->m_growlock);
 	INIT_WORK(&mp->m_flush_inodes_work, xfs_flush_inodes_worker);
 	INIT_DELAYED_WORK(&mp->m_reclaim_work, xfs_reclaim_worker);
+	INIT_DELAYED_WORK(&mp->m_inactive_work, xfs_inactive_worker);
 	mp->m_kobj.kobject.kset = xfs_kset;
 	/*
 	 * We don't create the finobt per-ag space reservation until after log
