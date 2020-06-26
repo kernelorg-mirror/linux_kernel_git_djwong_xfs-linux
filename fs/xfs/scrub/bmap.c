@@ -128,10 +128,17 @@ xchk_bmap_get_rmap(
 	uint64_t		owner,
 	struct xfs_rmap_irec	*rmap)
 {
+	struct xfs_btree_cur	**curp = &info->sc->sa.rmap_cur;
 	xfs_fileoff_t		offset;
 	unsigned int		rflags = 0;
 	int			has_rmap;
 	int			error;
+
+	if (XFS_IS_REALTIME_INODE(info->sc->ip) &&
+	    info->whichfork != XFS_ATTR_FORK)
+		curp = &info->sc->sr.rmap_cur;
+	if (*curp == NULL)
+		return false;
 
 	if (info->whichfork == XFS_ATTR_FORK)
 		rflags |= XFS_RMAP_ATTR_FORK;
@@ -151,10 +158,9 @@ xchk_bmap_get_rmap(
 	 * range rmap lookup to make sure we get the correct owner/offset.
 	 */
 	if (info->is_shared) {
-		error = xfs_rmap_lookup_le_range(info->sc->sa.rmap_cur, agbno,
-				owner, offset, rflags, rmap, &has_rmap);
-		if (!xchk_should_check_xref(info->sc, &error,
-				&info->sc->sa.rmap_cur))
+		error = xfs_rmap_lookup_le_range(*curp, agbno, owner, offset,
+				rflags, rmap, &has_rmap);
+		if (!xchk_should_check_xref(info->sc, &error, curp))
 			return false;
 		goto out;
 	}
@@ -162,17 +168,15 @@ xchk_bmap_get_rmap(
 	/*
 	 * Otherwise, use the (faster) regular lookup.
 	 */
-	error = xfs_rmap_lookup_le(info->sc->sa.rmap_cur, agbno, 0, owner,
-			offset, rflags, &has_rmap);
-	if (!xchk_should_check_xref(info->sc, &error,
-			&info->sc->sa.rmap_cur))
+	error = xfs_rmap_lookup_le(*curp, agbno, 0, owner, offset, rflags,
+			&has_rmap);
+	if (!xchk_should_check_xref(info->sc, &error, curp))
 		return false;
 	if (!has_rmap)
 		goto out;
 
-	error = xfs_rmap_get_rec(info->sc->sa.rmap_cur, rmap, &has_rmap);
-	if (!xchk_should_check_xref(info->sc, &error,
-			&info->sc->sa.rmap_cur))
+	error = xfs_rmap_get_rec(*curp, rmap, &has_rmap);
+	if (!xchk_should_check_xref(info->sc, &error, curp))
 		return false;
 
 out:
@@ -193,7 +197,7 @@ xchk_bmap_xref_rmap(
 	unsigned long long	rmap_end;
 	uint64_t		owner;
 
-	if (!info->sc->sa.rmap_cur || xchk_skip_xref(info->sc->sm))
+	if (xchk_skip_xref(info->sc->sm))
 		return;
 
 	if (info->whichfork == XFS_COW_FORK)
@@ -269,6 +273,7 @@ xchk_bmap_rt_iextent_xref(
 
 	xchk_xref_is_used_rt_space(info->sc, irec->br_startblock,
 			irec->br_blockcount);
+	xchk_bmap_xref_rmap(info, irec, irec->br_startblock);
 
 	xchk_rt_free(info->sc, &info->sc->sr);
 
