@@ -221,6 +221,17 @@ xchk_block_set_corrupt(
 	trace_xchk_block_error(sc, bp->b_bn, __return_address);
 }
 
+/* Record a corrupt quota counter. */
+void
+xchk_qcheck_set_corrupt(
+	struct xfs_scrub	*sc,
+	unsigned int		dqtype,
+	xfs_dqid_t		id)
+{
+	sc->sm->sm_flags |= XFS_SCRUB_OFLAG_CORRUPT;
+	trace_xchk_qcheck_error(sc, dqtype, id, __return_address);
+}
+
 /* Record a corruption while cross-referencing. */
 void
 xchk_block_xref_set_corrupt(
