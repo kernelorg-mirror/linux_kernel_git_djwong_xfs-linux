@@ -577,4 +577,9 @@ void xfs_btree_copy_keys(struct xfs_btree_cur *cur,
 		union xfs_btree_key *dst_key, union xfs_btree_key *src_key,
 		int numkeys);
 
+int xbtree_alloc_ino_block(struct xfs_btree_cur *cur,
+		union xfs_btree_ptr *start, union xfs_btree_ptr	*newp,
+		int *stat);
+int xbtree_free_ino_block(struct xfs_btree_cur *cur, struct xfs_buf *bp);
+
 #endif	/* __XFS_BTREE_H__ */
