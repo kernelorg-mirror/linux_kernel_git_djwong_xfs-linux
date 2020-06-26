@@ -524,12 +524,26 @@ xfs_dquot_alloc(
 }
 
 /* Copy the in-core quota fields in from the on-disk buffer. */
-STATIC void
+STATIC int
 xfs_dquot_from_disk(
 	struct xfs_dquot	*dqp,
 	struct xfs_buf		*bp)
 {
 	struct xfs_disk_dquot	*ddqp = bp->b_addr + dqp->q_bufoffset;
+
+	/*
+	 * The only field the verifier didn't check was the quota type flag, so
+	 * do that here.
+	 */
+	if ((dqp->dq_flags & XFS_DQ_ALLTYPES) !=
+	    (ddqp->d_flags & XFS_DQ_ALLTYPES) ||
+	    dqp->q_core.d_id != ddqp->d_id) {
+		xfs_alert(bp->b_mount,
+			  "Metadata corruption detected at %pS, quota %u",
+			  __this_address, be32_to_cpu(dqp->q_core.d_id));
+		xfs_alert(bp->b_mount, "Unmount and run xfs_repair");
+		return -EFSCORRUPTED;
+	}
 
 	/* copy everything from disk dquot to the incore dquot */
 	memcpy(&dqp->q_core, ddqp, sizeof(struct xfs_disk_dquot));
@@ -544,6 +558,7 @@ xfs_dquot_from_disk(
 
 	/* initialize the dquot speculative prealloc thresholds */
 	xfs_dquot_set_prealloc_limits(dqp);
+	return 0;
 }
 
 /* Allocate and initialize the dquot buffer for this in-core dquot. */
@@ -617,9 +632,11 @@ xfs_qm_dqread(
 	 * further.
 	 */
 	ASSERT(xfs_buf_islocked(bp));
-	xfs_dquot_from_disk(dqp, bp);
-
+	error = xfs_dquot_from_disk(dqp, bp);
 	xfs_buf_relse(bp);
+	if (error)
+		goto err;
+
 	*dqpp = dqp;
 	return error;
 
