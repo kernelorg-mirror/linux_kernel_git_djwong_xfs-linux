@@ -77,6 +77,9 @@ void xfs_blockgc_start(struct xfs_mount *mp);
 void xfs_inactive_worker(struct work_struct *work);
 int xfs_inactive_inodes(struct xfs_mount *mp, struct xfs_eofblocks *eofb);
 void xfs_inactive_force(struct xfs_mount *mp);
+void xfs_inactive_force_ino(struct xfs_mount *mp, xfs_ino_t ino);
 void xfs_inactive_shutdown(struct xfs_mount *mp);
+void xfs_inactive_cancel_work(struct xfs_mount *mp);
+void xfs_inactive_schedule_now(struct xfs_mount *mp);
 
 #endif
