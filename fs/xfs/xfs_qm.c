@@ -869,7 +869,7 @@ xfs_qm_reset_dqcounts(
 		 * Reset type in case we are reusing group quota file for
 		 * project quotas or vice versa
 		 */
-		ddq->d_flags = xfs_dquot_type_to_disk(type);
+		ddq->d_type = xfs_dquot_type_to_disk(type);
 		ddq->d_bcount = 0;
 		ddq->d_icount = 0;
 		ddq->d_rtbcount = 0;

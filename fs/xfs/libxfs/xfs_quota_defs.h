@@ -31,40 +31,32 @@ typedef uint8_t		xfs_dqtype_t;
 	{ XFS_DQTYPE_PROJ,	"PROJ" }, \
 	{ XFS_DQTYPE_GROUP,	"GROUP" }
 
-/*
- * flags for q_flags field in the dquot.
- */
-#define XFS_DQ_USER		0x0001		/* a user quota */
-#define XFS_DQ_PROJ		0x0002		/* project quota */
-#define XFS_DQ_GROUP		0x0004		/* a group quota */
-#define XFS_DQFLAG_DIRTY	0x0008		/* dquot is dirty */
-#define XFS_DQFLAG_FREEING	0x0010		/* dquot is being torn down */
-
-#define XFS_DQ_ALLTYPES		(XFS_DQ_USER|XFS_DQ_PROJ|XFS_DQ_GROUP)
-
-#define XFS_DQFLAG_STRINGS \
-	{ XFS_DQ_USER,		"USER" }, \
-	{ XFS_DQ_PROJ,		"PROJ" }, \
-	{ XFS_DQ_GROUP,		"GROUP" }, \
-	{ XFS_DQFLAG_DIRTY,	"DIRTY" }, \
-	{ XFS_DQFLAG_FREEING,	"FREEING" }
-
 static inline __u8
 xfs_dquot_type_to_disk(
 	xfs_dqtype_t		type)
 {
 	switch (type) {
 	case XFS_DQTYPE_USER:
-		return XFS_DQ_USER;
+		return XFS_DDQTYPE_USER;
 	case XFS_DQTYPE_GROUP:
-		return XFS_DQ_GROUP;
+		return XFS_DDQTYPE_GROUP;
 	case XFS_DQTYPE_PROJ:
-		return XFS_DQ_PROJ;
+		return XFS_DDQTYPE_PROJ;
 	default:
 		ASSERT(0);
 		return 0;
 	}
 }
+
+/*
+ * flags for q_flags field in the dquot.
+ */
+#define XFS_DQFLAG_DIRTY	0x0008		/* dquot is dirty */
+#define XFS_DQFLAG_FREEING	0x0010		/* dquot is being torn down */
+
+#define XFS_DQFLAG_STRINGS \
+	{ XFS_DQFLAG_DIRTY,	"DIRTY" }, \
+	{ XFS_DQFLAG_FREEING,	"FREEING" }
 
 /*
  * We have the possibility of all three quota types being active at once, and
