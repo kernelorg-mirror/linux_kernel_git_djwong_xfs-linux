@@ -826,13 +826,16 @@ xfs_qm_qino_alloc(
 	return error;
 }
 
-
+/*
+ * Reset the dquot counters.  type should be one of the ondisk quota type flags
+ * (XFS_DQUOT_{USER,GROUP,PROJECT}.
+ */
 STATIC void
 xfs_qm_reset_dqcounts(
-	xfs_mount_t	*mp,
-	xfs_buf_t	*bp,
-	xfs_dqid_t	id,
-	uint		type)
+	struct xfs_mount	*mp,
+	struct xfs_buf		*bp,
+	xfs_dqid_t		id,
+	unsigned int		type)
 {
 	struct xfs_dqblk	*dqb;
 	int			j;
@@ -869,7 +872,7 @@ xfs_qm_reset_dqcounts(
 		 * Reset type in case we are reusing group quota file for
 		 * project quotas or vice versa
 		 */
-		ddq->d_flags = type;
+		ddq->d_flags = type & XFS_DDQFEAT_TYPE_MASK;
 		ddq->d_bcount = 0;
 		ddq->d_icount = 0;
 		ddq->d_rtbcount = 0;
@@ -907,11 +910,11 @@ xfs_qm_reset_dqcounts_all(
 {
 	struct xfs_buf		*bp;
 	int			error;
-	int			type;
+	unsigned int		type;
 
 	ASSERT(blkcnt > 0);
-	type = flags & XFS_QMOPT_UQUOTA ? XFS_DQ_USER :
-		(flags & XFS_QMOPT_PQUOTA ? XFS_DQ_PROJ : XFS_DQ_GROUP);
+	type = flags & XFS_QMOPT_UQUOTA ? XFS_DDQFEAT_USER :
+		(flags & XFS_QMOPT_PQUOTA ? XFS_DDQFEAT_PROJ : XFS_DDQFEAT_GROUP);
 	error = 0;
 
 	/*

@@ -1150,6 +1150,16 @@ static inline void xfs_dinode_put_rdev(struct xfs_dinode *dip, xfs_dev_t rdev)
 #define XFS_DQUOT_MAGIC		0x4451		/* 'DQ' */
 #define XFS_DQUOT_VERSION	(uint8_t)0x01	/* latest version number */
 
+#define XFS_DDQFEAT_USER	0x01		/* user dquot record */
+#define XFS_DDQFEAT_PROJ	0x02		/* project dquot record */
+#define XFS_DDQFEAT_GROUP	0x04		/* group dquot record */
+
+#define XFS_DDQFEAT_TYPE_MASK	(XFS_DDQFEAT_USER | \
+				 XFS_DDQFEAT_PROJ | \
+				 XFS_DDQFEAT_GROUP)
+
+#define XFS_DDQFEAT_ANY		(XFS_DDQFEAT_TYPE_MASK)
+
 /*
  * This is the main portion of the on-disk representation of quota
  * information for a user. This is the q_core of the struct xfs_dquot that
@@ -1159,7 +1169,7 @@ static inline void xfs_dinode_put_rdev(struct xfs_dinode *dip, xfs_dev_t rdev)
 struct xfs_disk_dquot {
 	__be16		d_magic;	/* dquot magic = XFS_DQUOT_MAGIC */
 	__u8		d_version;	/* dquot version */
-	__u8		d_flags;	/* XFS_DQ_USER/PROJ/GROUP */
+	__u8		d_flags;	/* XFS_DDQFEAT_* */
 	__be32		d_id;		/* user,project,group id */
 	__be64		d_blk_hardlimit;/* absolute limit on disk blks */
 	__be64		d_blk_softlimit;/* preferred limit on disk blks */

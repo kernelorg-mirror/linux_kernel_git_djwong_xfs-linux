@@ -21,9 +21,9 @@ typedef uint16_t	xfs_qwarncnt_t;
 /*
  * flags for q_flags field in the dquot.
  */
-#define XFS_DQ_USER		0x0001		/* a user quota */
-#define XFS_DQ_PROJ		0x0002		/* project quota */
-#define XFS_DQ_GROUP		0x0004		/* a group quota */
+#define XFS_DQ_USER		XFS_DDQFEAT_USER	/* a user quota */
+#define XFS_DQ_PROJ		XFS_DDQFEAT_PROJ	/* a project quota */
+#define XFS_DQ_GROUP		XFS_DDQFEAT_GROUP /* a group quota */
 #define XFS_DQ_DIRTY		0x0008		/* dquot is dirty */
 #define XFS_DQ_FREEING		0x0010		/* dquot is being torn down */
 
