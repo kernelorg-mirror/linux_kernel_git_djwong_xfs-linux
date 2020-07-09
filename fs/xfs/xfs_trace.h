@@ -879,7 +879,7 @@ DECLARE_EVENT_CLASS(xfs_dquot_class,
 		__entry->dev = dqp->q_mount->m_super->s_dev;
 		__entry->id = be32_to_cpu(dqp->q_core.d_id);
 		__entry->type = dqp->q_type;
-		__entry->flags = dqp->dq_flags;
+		__entry->flags = dqp->q_flags;
 		__entry->nrefs = dqp->q_nrefs;
 		__entry->res_bcount = dqp->q_res_bcount;
 		__entry->bcount = be64_to_cpu(dqp->q_core.d_bcount);
@@ -899,7 +899,7 @@ DECLARE_EVENT_CLASS(xfs_dquot_class,
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->id,
 		  __print_symbolic(__entry->type, XFS_DQTYPE_STRINGS),
-		  __print_flags(__entry->flags, "|", XFS_DQ_FLAGS),
+		  __print_flags(__entry->flags, "|", XFS_DQFLAG_STRINGS),
 		  __entry->nrefs,
 		  __entry->res_bcount,
 		  __entry->bcount,
