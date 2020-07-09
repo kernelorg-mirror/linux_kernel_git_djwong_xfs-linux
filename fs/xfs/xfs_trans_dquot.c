@@ -549,14 +549,21 @@ xfs_quota_warn(
 	struct xfs_dquot	*dqp,
 	int			type)
 {
-	enum quota_type qtype;
+	enum quota_type		qtype;
 
-	if (dqp->dq_flags & XFS_DQ_PROJ)
+	switch (dqp->q_type) {
+	case XFS_DQTYPE_PROJ:
 		qtype = PRJQUOTA;
-	else if (dqp->dq_flags & XFS_DQ_USER)
+		break;
+	case XFS_DQTYPE_USER:
 		qtype = USRQUOTA;
-	else
+		break;
+	case XFS_DQTYPE_GROUP:
 		qtype = GRPQUOTA;
+		break;
+	default:
+		return;
+	}
 
 	quota_send_warning(make_kqid(&init_user_ns, qtype,
 				     be32_to_cpu(dqp->q_core.d_id)),
@@ -591,7 +598,7 @@ xfs_trans_dqresv(
 
 	xfs_dqlock(dqp);
 
-	defq = xfs_get_defquota(q, xfs_dquot_type(dqp));
+	defq = xfs_get_defquota(q, dqp->q_type);
 
 	if (flags & XFS_TRANS_DQ_RES_BLKS) {
 		hardlimit = be64_to_cpu(dqp->q_core.d_blk_hardlimit);

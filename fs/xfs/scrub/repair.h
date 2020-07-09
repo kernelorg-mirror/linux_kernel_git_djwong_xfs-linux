@@ -9,6 +9,8 @@
 #include "scrub/bitmap.h"
 #include "xfs_btree.h"
 #include "xfs_btree_staging.h"
+#include "xfs_quota_defs.h"
+
 union xfs_btree_ptr;
 
 static inline int xrep_notsupported(struct xfs_scrub *sc)
@@ -54,7 +56,7 @@ struct xrep_find_ag_btree {
 
 int xrep_find_ag_btree_roots(struct xfs_scrub *sc, struct xfs_buf *agf_bp,
 		struct xrep_find_ag_btree *btree_info, struct xfs_buf *agfl_bp);
-void xrep_force_quotacheck(struct xfs_scrub *sc, uint dqtype);
+void xrep_force_quotacheck(struct xfs_scrub *sc, xfs_dqtype_t type);
 int xrep_ino_dqattach(struct xfs_scrub *sc);
 int xrep_reset_perag_resv(struct xfs_scrub *sc);
 

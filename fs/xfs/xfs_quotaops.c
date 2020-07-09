@@ -85,16 +85,16 @@ xfs_fs_get_quota_state(
 	return 0;
 }
 
-STATIC int
+STATIC xfs_dqtype_t
 xfs_quota_type(int type)
 {
 	switch (type) {
 	case USRQUOTA:
-		return XFS_DQ_USER;
+		return XFS_DQTYPE_USER;
 	case GRPQUOTA:
-		return XFS_DQ_GROUP;
+		return XFS_DQTYPE_GROUP;
 	default:
-		return XFS_DQ_PROJ;
+		return XFS_DQTYPE_PROJ;
 	}
 }
 

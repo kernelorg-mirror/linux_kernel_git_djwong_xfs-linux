@@ -864,6 +864,7 @@ DECLARE_EVENT_CLASS(xfs_dquot_class,
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(u32, id)
+		__field(xfs_dqtype_t, type)
 		__field(unsigned, flags)
 		__field(unsigned, nrefs)
 		__field(unsigned long long, res_bcount)
@@ -877,6 +878,7 @@ DECLARE_EVENT_CLASS(xfs_dquot_class,
 	TP_fast_assign(
 		__entry->dev = dqp->q_mount->m_super->s_dev;
 		__entry->id = be32_to_cpu(dqp->q_core.d_id);
+		__entry->type = dqp->q_type;
 		__entry->flags = dqp->dq_flags;
 		__entry->nrefs = dqp->q_nrefs;
 		__entry->res_bcount = dqp->q_res_bcount;
@@ -891,11 +893,12 @@ DECLARE_EVENT_CLASS(xfs_dquot_class,
 		__entry->ino_softlimit =
 			be64_to_cpu(dqp->q_core.d_ino_softlimit);
 	),
-	TP_printk("dev %d:%d id 0x%x flags %s nrefs %u res_bc 0x%llx "
+	TP_printk("dev %d:%d id 0x%x type %s flags %s nrefs %u res_bc 0x%llx "
 		  "bcnt 0x%llx bhardlimit 0x%llx bsoftlimit 0x%llx "
 		  "icnt 0x%llx ihardlimit 0x%llx isoftlimit 0x%llx]",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->id,
+		  __print_symbolic(__entry->type, XFS_DQTYPE_STRINGS),
 		  __print_flags(__entry->flags, "|", XFS_DQ_FLAGS),
 		  __entry->nrefs,
 		  __entry->res_bcount,

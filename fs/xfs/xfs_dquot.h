@@ -34,6 +34,7 @@ struct xfs_dquot {
 	uint			dq_flags;
 	struct list_head	q_lru;
 	struct xfs_mount	*q_mount;
+	xfs_dqtype_t		q_type;
 	uint			q_nrefs;
 	xfs_daddr_t		q_blkno;
 	int			q_bufoffset;
@@ -101,28 +102,34 @@ static inline void xfs_dqunlock(struct xfs_dquot *dqp)
 	mutex_unlock(&dqp->q_qlock);
 }
 
-static inline int xfs_this_quota_on(struct xfs_mount *mp, int type)
+static inline bool
+xfs_this_quota_on(
+	struct xfs_mount	*mp,
+	xfs_dqtype_t		type)
 {
-	switch (type & XFS_DQ_ALLTYPES) {
-	case XFS_DQ_USER:
+	switch (type) {
+	case XFS_DQTYPE_USER:
 		return XFS_IS_UQUOTA_ON(mp);
-	case XFS_DQ_GROUP:
+	case XFS_DQTYPE_GROUP:
 		return XFS_IS_GQUOTA_ON(mp);
-	case XFS_DQ_PROJ:
+	case XFS_DQTYPE_PROJ:
 		return XFS_IS_PQUOTA_ON(mp);
 	default:
-		return 0;
+		return false;
 	}
 }
 
-static inline struct xfs_dquot *xfs_inode_dquot(struct xfs_inode *ip, int type)
+static inline struct xfs_dquot *
+xfs_inode_dquot(
+	struct xfs_inode	*ip,
+	xfs_dqtype_t		type)
 {
-	switch (type & XFS_DQ_ALLTYPES) {
-	case XFS_DQ_USER:
+	switch (type) {
+	case XFS_DQTYPE_USER:
 		return ip->i_udquot;
-	case XFS_DQ_GROUP:
+	case XFS_DQTYPE_GROUP:
 		return ip->i_gdquot;
-	case XFS_DQ_PROJ:
+	case XFS_DQTYPE_PROJ:
 		return ip->i_pdquot;
 	default:
 		return NULL;
@@ -146,9 +153,9 @@ static inline bool xfs_dquot_lowsp(struct xfs_dquot *dqp)
 
 #define XFS_DQ_IS_LOCKED(dqp)	(mutex_is_locked(&((dqp)->q_qlock)))
 #define XFS_DQ_IS_DIRTY(dqp)	((dqp)->dq_flags & XFS_DQ_DIRTY)
-#define XFS_QM_ISUDQ(dqp)	((dqp)->dq_flags & XFS_DQ_USER)
-#define XFS_QM_ISPDQ(dqp)	((dqp)->dq_flags & XFS_DQ_PROJ)
-#define XFS_QM_ISGDQ(dqp)	((dqp)->dq_flags & XFS_DQ_GROUP)
+#define XFS_QM_ISUDQ(dqp)	((dqp)->q_type == XFS_DQTYPE_USER)
+#define XFS_QM_ISPDQ(dqp)	((dqp)->q_type == XFS_DQTYPE_PROJ)
+#define XFS_QM_ISGDQ(dqp)	((dqp)->q_type == XFS_DQTYPE_GROUP)
 
 void		xfs_qm_dqdestroy(struct xfs_dquot *dqp);
 int		xfs_qm_dqflush(struct xfs_dquot *dqp, struct xfs_buf **bpp);
@@ -157,18 +164,20 @@ void		xfs_qm_adjust_dqtimers(struct xfs_mount *mp,
 						struct xfs_dquot *d);
 void		xfs_qm_adjust_dqlimits(struct xfs_mount *mp,
 						struct xfs_dquot *d);
-xfs_dqid_t	xfs_qm_id_for_quotatype(struct xfs_inode *ip, uint type);
+xfs_dqid_t	xfs_qm_id_for_quotatype(struct xfs_inode *ip,
+				xfs_dqtype_t type);
 int		xfs_qm_dqget(struct xfs_mount *mp, xfs_dqid_t id,
-					uint type, bool can_alloc,
-					struct xfs_dquot **dqpp);
-int		xfs_qm_dqget_inode(struct xfs_inode *ip, uint type,
-						bool can_alloc,
-						struct xfs_dquot **dqpp);
+				xfs_dqtype_t type, bool can_alloc,
+				struct xfs_dquot **dqpp);
+int		xfs_qm_dqget_inode(struct xfs_inode *ip,
+				xfs_dqtype_t type,
+				bool can_alloc, struct xfs_dquot **dqpp);
 int		xfs_qm_dqget_next(struct xfs_mount *mp, xfs_dqid_t id,
-					uint type, struct xfs_dquot **dqpp);
-int		xfs_qm_dqget_uncached(struct xfs_mount *mp,
-						xfs_dqid_t id, uint type,
-						struct xfs_dquot **dqpp);
+				xfs_dqtype_t type,
+				struct xfs_dquot **dqpp);
+int		xfs_qm_dqget_uncached(struct xfs_mount *mp, xfs_dqid_t id,
+				xfs_dqtype_t type,
+				struct xfs_dquot **dqpp);
 void		xfs_qm_dqput(struct xfs_dquot *dqp);
 
 void		xfs_dqlock2(struct xfs_dquot *, struct xfs_dquot *);
@@ -183,9 +192,9 @@ static inline struct xfs_dquot *xfs_qm_dqhold(struct xfs_dquot *dqp)
 	return dqp;
 }
 
-typedef int (*xfs_qm_dqiterate_fn)(struct xfs_dquot *dq, uint dqtype,
-		void *priv);
-int xfs_qm_dqiterate(struct xfs_mount *mp, uint dqtype,
+typedef int (*xfs_qm_dqiterate_fn)(struct xfs_dquot *dq,
+		xfs_dqtype_t type, void *priv);
+int xfs_qm_dqiterate(struct xfs_mount *mp, xfs_dqtype_t type,
 		xfs_qm_dqiterate_fn iter_fn, void *priv);
 
 #endif /* __XFS_DQUOT_H__ */

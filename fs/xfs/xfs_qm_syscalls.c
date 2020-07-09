@@ -443,7 +443,7 @@ int
 xfs_qm_scall_setqlim(
 	struct xfs_mount	*mp,
 	xfs_dqid_t		id,
-	uint			type,
+	xfs_dqtype_t		type,
 	struct qc_dqblk		*newlim)
 {
 	struct xfs_quotainfo	*q = mp->m_quotainfo;
@@ -479,7 +479,7 @@ xfs_qm_scall_setqlim(
 		goto out_unlock;
 	}
 
-	defq = xfs_get_defquota(q, xfs_dquot_type(dqp));
+	defq = xfs_get_defquota(q, dqp->q_type);
 	xfs_dqunlock(dqp);
 
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_qm_setqlim, 0, 0, 0, &tp);
@@ -614,7 +614,7 @@ out_unlock:
 static void
 xfs_qm_scall_getquota_fill_qc(
 	struct xfs_mount	*mp,
-	uint			type,
+	xfs_dqtype_t		type,
 	const struct xfs_dquot	*dqp,
 	struct qc_dqblk		*dst)
 {
@@ -644,21 +644,18 @@ xfs_qm_scall_getquota_fill_qc(
 	 * gets turned off. No need to confuse the user level code,
 	 * so return zeroes in that case.
 	 */
-	if ((!XFS_IS_UQUOTA_ENFORCED(mp) &&
-	     dqp->q_core.d_flags == XFS_DQ_USER) ||
-	    (!XFS_IS_GQUOTA_ENFORCED(mp) &&
-	     dqp->q_core.d_flags == XFS_DQ_GROUP) ||
-	    (!XFS_IS_PQUOTA_ENFORCED(mp) &&
-	     dqp->q_core.d_flags == XFS_DQ_PROJ)) {
+	if ((!XFS_IS_UQUOTA_ENFORCED(mp) && dqp->q_type == XFS_DQTYPE_USER) ||
+	    (!XFS_IS_GQUOTA_ENFORCED(mp) && dqp->q_type == XFS_DQTYPE_GROUP) ||
+	    (!XFS_IS_PQUOTA_ENFORCED(mp) && dqp->q_type == XFS_DQTYPE_PROJ)) {
 		dst->d_spc_timer = 0;
 		dst->d_ino_timer = 0;
 		dst->d_rt_spc_timer = 0;
 	}
 
 #ifdef DEBUG
-	if (((XFS_IS_UQUOTA_ENFORCED(mp) && type == XFS_DQ_USER) ||
-	     (XFS_IS_GQUOTA_ENFORCED(mp) && type == XFS_DQ_GROUP) ||
-	     (XFS_IS_PQUOTA_ENFORCED(mp) && type == XFS_DQ_PROJ)) &&
+	if (((XFS_IS_UQUOTA_ENFORCED(mp) && type == XFS_DQTYPE_USER) ||
+	     (XFS_IS_GQUOTA_ENFORCED(mp) && type == XFS_DQTYPE_GROUP) ||
+	     (XFS_IS_PQUOTA_ENFORCED(mp) && type == XFS_DQTYPE_PROJ)) &&
 	    dqp->q_core.d_id != 0) {
 		if ((dst->d_space > dst->d_spc_softlimit) &&
 		    (dst->d_spc_softlimit > 0)) {
@@ -677,7 +674,7 @@ int
 xfs_qm_scall_getquota(
 	struct xfs_mount	*mp,
 	xfs_dqid_t		id,
-	uint			type,
+	xfs_dqtype_t		type,
 	struct qc_dqblk		*dst)
 {
 	struct xfs_dquot	*dqp;
@@ -715,7 +712,7 @@ int
 xfs_qm_scall_getquota_next(
 	struct xfs_mount	*mp,
 	xfs_dqid_t		*id,
-	uint			type,
+	xfs_dqtype_t		type,
 	struct qc_dqblk		*dst)
 {
 	struct xfs_dquot	*dqp;

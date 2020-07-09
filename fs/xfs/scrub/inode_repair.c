@@ -766,11 +766,11 @@ xrep_dinode_problems(
 
 	/* We had to fix a totally busted inode, schedule quotacheck. */
 	if (XFS_IS_UQUOTA_ON(sc->mp))
-		xrep_force_quotacheck(sc, XFS_DQ_USER);
+		xrep_force_quotacheck(sc, XFS_DQTYPE_USER);
 	if (XFS_IS_GQUOTA_ON(sc->mp))
-		xrep_force_quotacheck(sc, XFS_DQ_GROUP);
+		xrep_force_quotacheck(sc, XFS_DQTYPE_GROUP);
 	if (XFS_IS_PQUOTA_ON(sc->mp))
-		xrep_force_quotacheck(sc, XFS_DQ_PROJ);
+		xrep_force_quotacheck(sc, XFS_DQTYPE_PROJ);
 
 	return 0;
 }
@@ -835,14 +835,14 @@ xrep_inode_ids(
 		i_uid_write(VFS_I(sc->ip), 0);
 		VFS_I(sc->ip)->i_mode &= ~(S_ISUID | S_ISGID);
 		if (XFS_IS_UQUOTA_ON(sc->mp))
-			xrep_force_quotacheck(sc, XFS_DQ_USER);
+			xrep_force_quotacheck(sc, XFS_DQTYPE_USER);
 	}
 
 	if (i_gid_read(VFS_I(sc->ip)) == -1U) {
 		i_gid_write(VFS_I(sc->ip), 0);
 		VFS_I(sc->ip)->i_mode &= ~(S_ISUID | S_ISGID);
 		if (XFS_IS_GQUOTA_ON(sc->mp))
-			xrep_force_quotacheck(sc, XFS_DQ_GROUP);
+			xrep_force_quotacheck(sc, XFS_DQTYPE_GROUP);
 	}
 }
 

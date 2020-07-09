@@ -18,19 +18,20 @@
 #include "scrub/common.h"
 
 /* Convert a scrub type code to a DQ flag, or return 0 if error. */
-static inline uint
+static inline xfs_dqtype_t
 xchk_quota_to_dqtype(
 	struct xfs_scrub	*sc)
 {
 	switch (sc->sm->sm_type) {
 	case XFS_SCRUB_TYPE_UQUOTA:
-		return XFS_DQ_USER;
+		return XFS_DQTYPE_USER;
 	case XFS_SCRUB_TYPE_GQUOTA:
-		return XFS_DQ_GROUP;
+		return XFS_DQTYPE_GROUP;
 	case XFS_SCRUB_TYPE_PQUOTA:
-		return XFS_DQ_PROJ;
+		return XFS_DQTYPE_PROJ;
 	default:
-		return 0;
+		ASSERT(0);
+		return XFS_DQTYPE_NONE;
 	}
 }
 
@@ -40,7 +41,7 @@ xchk_setup_quota(
 	struct xfs_scrub	*sc,
 	struct xfs_inode	*ip)
 {
-	uint			dqtype;
+	xfs_dqtype_t		dqtype;
 	int			error;
 
 	if (!XFS_IS_QUOTA_RUNNING(sc->mp) || !XFS_IS_QUOTA_ON(sc->mp))
@@ -73,7 +74,7 @@ struct xchk_quota_info {
 STATIC int
 xchk_quota_item(
 	struct xfs_dquot	*dq,
-	uint			dqtype,
+	xfs_dqtype_t		dqtype,
 	void			*priv)
 {
 	struct xchk_quota_info	*sqi = priv;
@@ -109,7 +110,7 @@ xchk_quota_item(
 	sqi->last_id = id;
 
 	/* Did we get the dquot type we wanted? */
-	if (dqtype != (d->d_flags & XFS_DQ_ALLTYPES))
+	if (d->d_flags != xfs_dquot_type_to_disk(dqtype))
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, offset);
 
 	if (d->d_pad0 != cpu_to_be32(0) || d->d_pad != cpu_to_be16(0))
@@ -235,7 +236,7 @@ xchk_quota(
 	struct xchk_quota_info	sqi;
 	struct xfs_mount	*mp = sc->mp;
 	struct xfs_quotainfo	*qi = mp->m_quotainfo;
-	uint			dqtype;
+	xfs_dqtype_t		dqtype;
 	int			error = 0;
 
 	dqtype = xchk_quota_to_dqtype(sc);

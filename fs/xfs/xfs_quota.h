@@ -38,14 +38,14 @@ struct xfs_trans;
 
 static inline uint
 xfs_quota_chkd_flag(
-	uint		dqtype)
+	xfs_dqtype_t		type)
 {
-	switch (dqtype) {
-	case XFS_DQ_USER:
+	switch (type) {
+	case XFS_DQTYPE_USER:
 		return XFS_UQUOTA_CHKD;
-	case XFS_DQ_GROUP:
+	case XFS_DQTYPE_GROUP:
 		return XFS_GQUOTA_CHKD;
-	case XFS_DQ_PROJ:
+	case XFS_DQTYPE_PROJ:
 		return XFS_PQUOTA_CHKD;
 	default:
 		return 0;
