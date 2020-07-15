@@ -17,6 +17,7 @@
 #include "xfs_inode_item.h"
 #include "xfs_trace.h"
 #include "xfs_icache.h"
+#include "xfs_log.h"
 
 /*
  * Deferred Operations in XFS
@@ -372,15 +373,35 @@ xfs_defer_relog(
 	struct list_head		*dfops)
 {
 	struct xfs_defer_pending	*dfp;
+	xfs_lsn_t			threshold_lsn;
 
 	ASSERT((*tpp)->t_flags & XFS_TRANS_PERM_LOG_RES);
 
+	/*
+	 * Figure out where we need the tail to be in order to maintain the
+	 * minimum required free space in the log.
+	 */
+	threshold_lsn = xlog_grant_push_threshold((*tpp)->t_mountp->m_log, 0);
+	if (threshold_lsn == NULLCOMMITLSN)
+		return 0;
+
 	list_for_each_entry(dfp, dfops, dfp_list) {
+		/*
+		 * If the log intent item for this deferred op is behind the
+		 * threshold, we're running out of space and need to relog it
+		 * to release the tail.
+		 */
+		if (dfp->dfp_intent == NULL ||
+		    XFS_LSN_CMP(dfp->dfp_intent->li_lsn, threshold_lsn) < 0)
+			continue;
+
 		trace_xfs_defer_relog_intent((*tpp)->t_mountp, dfp);
 		dfp->dfp_intent = xfs_trans_item_relog(dfp->dfp_intent, *tpp);
 	}
 
-	return xfs_defer_trans_roll(tpp);
+	if ((*tpp)->t_flags & XFS_TRANS_DIRTY)
+		return xfs_defer_trans_roll(tpp);
+	return 0;
 }
 
 /*
@@ -444,7 +465,6 @@ xfs_defer_finish_noroll(
 	struct xfs_trans		**tp)
 {
 	struct xfs_defer_pending	*dfp;
-	unsigned int			nr_rolls = 0;
 	int				error = 0;
 	LIST_HEAD(dop_pending);
 
@@ -471,11 +491,9 @@ xfs_defer_finish_noroll(
 			goto out_shutdown;
 
 		/* Every few rolls we relog all the intent items. */
-		if (!(++nr_rolls % 7)) {
-			error = xfs_defer_relog(tp, &dop_pending);
-			if (error)
-				goto out_shutdown;
-		}
+		error = xfs_defer_relog(tp, &dop_pending);
+		if (error)
+			goto out_shutdown;
 
 		dfp = list_first_entry(&dop_pending, struct xfs_defer_pending,
 				       dfp_list);
