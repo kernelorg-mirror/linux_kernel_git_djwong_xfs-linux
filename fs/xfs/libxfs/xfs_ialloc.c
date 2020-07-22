@@ -998,7 +998,7 @@ xfs_ialloc_ag_select(
 	flags = XFS_ALLOC_FLAG_TRYLOCK;
 	for (;;) {
 		pag = xfs_perag_get(mp, agno);
-		if (!pag->pagi_inodeok) {
+		if (!pag->pagi_inodeok || pag->pagf_noalloc) {
 			xfs_ialloc_next_ag(mp);
 			goto nextag;
 		}
@@ -1175,6 +1175,7 @@ xfs_dialloc_ag_inobt(
 
 	ASSERT(pag->pagi_init);
 	ASSERT(pag->pagi_inodeok);
+	ASSERT(!pag->pagf_noalloc);
 	ASSERT(pag->pagi_freecount > 0);
 
  restart_pagno:
@@ -1818,7 +1819,7 @@ xfs_dialloc(
 	agno = start_agno;
 	for (;;) {
 		pag = xfs_perag_get(mp, agno);
-		if (!pag->pagi_inodeok) {
+		if (!pag->pagi_inodeok || pag->pagf_noalloc) {
 			xfs_ialloc_next_ag(mp);
 			goto nextag;
 		}
