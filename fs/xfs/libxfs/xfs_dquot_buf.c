@@ -288,3 +288,23 @@ const struct xfs_buf_ops xfs_dquot_buf_ra_ops = {
 	.verify_read = xfs_dquot_buf_readahead_verify,
 	.verify_write = xfs_dquot_buf_write_verify,
 };
+
+/* Convert an on-disk timer value into an incore timer value. */
+void
+xfs_dquot_from_disk_timestamp(
+	struct xfs_disk_dquot	*ddq,
+	time64_t		*timer,
+	__be32			dtimer)
+{
+	*timer = be32_to_cpu(dtimer);
+}
+
+/* Convert an incore timer value into an on-disk timer value. */
+void
+xfs_dquot_to_disk_timestamp(
+	struct xfs_dquot	*dqp,
+	__be32			*dtimer,
+	time64_t		timer)
+{
+	*dtimer = cpu_to_be32(timer);
+}
