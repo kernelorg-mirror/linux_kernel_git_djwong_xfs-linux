@@ -143,4 +143,10 @@ extern int xfs_calc_dquots_per_chunk(unsigned int nbblks);
 extern void xfs_dqblk_repair(struct xfs_mount *mp, struct xfs_dqblk *dqb,
 		xfs_dqid_t id, xfs_dqtype_t type);
 
+struct xfs_dquot;
+void xfs_dquot_from_disk_timestamp(struct xfs_disk_dquot *ddq,
+		time64_t *timer, __be32 dtimer);
+void xfs_dquot_to_disk_timestamp(struct xfs_dquot *ddq,
+		__be32 *dtimer, time64_t timer);
+
 #endif	/* __XFS_QUOTA_H__ */
