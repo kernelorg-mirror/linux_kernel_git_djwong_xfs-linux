@@ -6,6 +6,26 @@
 # Rewritten to use lists instead of if-statements.
 # 
 
+ccflags-$(CONFIG_KASAN) += -Wno-error
+ccflags-y += -g \
+-Werror \
+-femit-struct-debug-detailed=any \
+-Wunused-but-set-variable \
+-Wuninitialized \
+-Wno-pointer-sign \
+-Wall \
+-Wextra \
+-Wno-unused-parameter \
+-fstack-usage \
+-Wno-sign-compare \
+-Wno-ignored-qualifiers \
+-Wno-error=unused-but-set-variable \
+-Wno-error=format= \
+-Wno-error=empty-body \
+-Wno-error=missing-field-initializers
+
+UBSAN_SANITIZE := y
+
 obj-y :=	open.o read_write.o file_table.o super.o \
 		char_dev.o stat.o exec.o pipe.o namei.o fcntl.o \
 		ioctl.o readdir.o select.o dcache.o inode.o \
