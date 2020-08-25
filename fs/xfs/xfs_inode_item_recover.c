@@ -117,15 +117,34 @@ out_free_ip:
 
 /*
  * Convert a log timestamp to an ondisk timestamp.  See notes about the ondisk
- * encoding in the comments for xfs_inode_to_disk_ts.
+ * encoding in the comments for xfs_inode_to_disk_ts.  Note that the log format
+ * specifies host endian format!
+ *
+ * For traditional timestamps, the log format specifies that the seconds are
+ * stored in the first four bytes and the nanoseconds in the second four.  On a
+ * little-endian system, this means that we shift tv_nsec to extract it from
+ * the upper four bytes and mask tv_sec to extract it from the lower four
+ * bytes.  On big-endian systems, we shift tv_sec to extract it from the upper
+ * four bytes and mask tv_nsec to extract it from the lower four bytes.
  */
 static inline xfs_timestamp_t
 xfs_log_dinode_to_disk_ts(
 	const xfs_ictimestamp_t	its)
 {
+	struct timespec64	tv;
 	uint64_t		t;
 
-	t = ((int64_t)its.t_sec << 32) | (its.t_nsec & 0xffffffff);
+#ifdef __LITTLE_ENDIAN
+	tv.tv_sec = (time64_t)its & 0xffffffff;
+	tv.tv_nsec = (int64_t)its >> 32;
+#elif __BIG_ENDIAN
+	tv.tv_sec = (time64_t)its >> 32;
+	tv.tv_nsec = (int64_t)its & 0xffffffff;
+#else
+# error System is neither little nor big endian?
+#endif
+
+	t = ((int64_t)tv.tv_sec << 32) | (tv.tv_nsec & 0xffffffff);
 	return cpu_to_be64(t);
 }
 
