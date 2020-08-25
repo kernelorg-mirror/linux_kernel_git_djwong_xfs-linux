@@ -295,6 +295,33 @@ xfs_inode_item_format_attr_fork(
 	}
 }
 
+/*
+ * Convert an incore timestamp to a log timestamp.  Note that the log format
+ * specifies host endian format!
+ *
+ * For traditional timestamps, the log format specifies that the seconds are
+ * stored in the first four bytes and the nanoseconds in the second four.  On a
+ * little-endian system, this means that we shift tv_nsec to put it in the
+ * upper four bytes and mask tv_sec to put it in the lower four bytes.  On
+ * big-endian systems, we shift tv_sec to put it in the upper four bytes and
+ * mask tv_nsec to put it in the lower four bytes.
+ */
+static inline xfs_ictimestamp_t
+xfs_inode_to_log_dinode_ts(
+	const struct timespec64	tv)
+{
+	uint64_t		t;
+
+#ifdef __LITTLE_ENDIAN
+	t = ((uint64_t)tv.tv_nsec << 32) | ((uint64_t)tv.tv_sec & 0xffffffff);
+#elif __BIG_ENDIAN
+	t = ((int64_t)tv.tv_sec << 32) | ((uint64_t)tv.tv_nsec & 0xffffffff);
+#else
+# error System is neither little nor big endian?
+#endif
+	return t;
+}
+
 static void
 xfs_inode_to_log_dinode(
 	struct xfs_inode	*ip,
@@ -313,12 +340,9 @@ xfs_inode_to_log_dinode(
 
 	memset(to->di_pad, 0, sizeof(to->di_pad));
 	memset(to->di_pad3, 0, sizeof(to->di_pad3));
-	to->di_atime.t_sec = inode->i_atime.tv_sec;
-	to->di_atime.t_nsec = inode->i_atime.tv_nsec;
-	to->di_mtime.t_sec = inode->i_mtime.tv_sec;
-	to->di_mtime.t_nsec = inode->i_mtime.tv_nsec;
-	to->di_ctime.t_sec = inode->i_ctime.tv_sec;
-	to->di_ctime.t_nsec = inode->i_ctime.tv_nsec;
+	to->di_atime = xfs_inode_to_log_dinode_ts(inode->i_atime);
+	to->di_mtime = xfs_inode_to_log_dinode_ts(inode->i_mtime);
+	to->di_ctime = xfs_inode_to_log_dinode_ts(inode->i_ctime);
 	to->di_nlink = inode->i_nlink;
 	to->di_gen = inode->i_generation;
 	to->di_mode = inode->i_mode;
@@ -340,8 +364,7 @@ xfs_inode_to_log_dinode(
 	if (xfs_sb_version_has_v3inode(&ip->i_mount->m_sb)) {
 		to->di_version = 3;
 		to->di_changecount = inode_peek_iversion(inode);
-		to->di_crtime.t_sec = from->di_crtime.tv_sec;
-		to->di_crtime.t_nsec = from->di_crtime.tv_nsec;
+		to->di_crtime = xfs_inode_to_log_dinode_ts(from->di_crtime);
 		to->di_flags2 = from->di_flags2;
 		to->di_cowextsize = from->di_cowextsize;
 		to->di_ino = ip->i_ino;
