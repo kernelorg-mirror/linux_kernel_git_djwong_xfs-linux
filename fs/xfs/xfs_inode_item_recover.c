@@ -115,6 +115,12 @@ out_free_ip:
 	return error;
 }
 
+static inline bool xfs_log_dinode_has_bigtime(const struct xfs_log_dinode *ld)
+{
+	return ld->di_version >= 3 &&
+	       (ld->di_flags2 & XFS_DIFLAG2_BIGTIME);
+}
+
 /*
  * Convert a log timestamp to an ondisk timestamp.  See notes about the ondisk
  * encoding in the comments for xfs_inode_to_disk_ts.  Note that the log format
@@ -129,10 +135,14 @@ out_free_ip:
  */
 static inline xfs_timestamp_t
 xfs_log_dinode_to_disk_ts(
+	struct xfs_log_dinode	*from,
 	const xfs_ictimestamp_t	its)
 {
 	struct timespec64	tv;
 	uint64_t		t;
+
+	if (xfs_log_dinode_has_bigtime(from))
+		return cpu_to_be64(its);
 
 #ifdef __LITTLE_ENDIAN
 	tv.tv_sec = (time64_t)its & 0xffffffff;
@@ -165,9 +175,9 @@ xfs_log_dinode_to_disk(
 	to->di_projid_hi = cpu_to_be16(from->di_projid_hi);
 	memcpy(to->di_pad, from->di_pad, sizeof(to->di_pad));
 
-	to->di_atime = xfs_log_dinode_to_disk_ts(from->di_atime);
-	to->di_mtime = xfs_log_dinode_to_disk_ts(from->di_mtime);
-	to->di_ctime = xfs_log_dinode_to_disk_ts(from->di_ctime);
+	to->di_atime = xfs_log_dinode_to_disk_ts(from, from->di_atime);
+	to->di_mtime = xfs_log_dinode_to_disk_ts(from, from->di_mtime);
+	to->di_ctime = xfs_log_dinode_to_disk_ts(from, from->di_ctime);
 
 	to->di_size = cpu_to_be64(from->di_size);
 	to->di_nblocks = cpu_to_be64(from->di_nblocks);
@@ -183,7 +193,8 @@ xfs_log_dinode_to_disk(
 
 	if (from->di_version == 3) {
 		to->di_changecount = cpu_to_be64(from->di_changecount);
-		to->di_crtime = xfs_log_dinode_to_disk_ts(from->di_crtime);
+		to->di_crtime = xfs_log_dinode_to_disk_ts(from,
+							  from->di_crtime);
 		to->di_flags2 = cpu_to_be64(from->di_flags2);
 		to->di_cowextsize = cpu_to_be32(from->di_cowextsize);
 		to->di_ino = cpu_to_be64(from->di_ino);
