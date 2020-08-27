@@ -73,6 +73,12 @@ xfs_trans_ichgtime(
 		ip->i_d.di_crtime = tv;
 }
 
+static inline bool xfs_inode_want_bigtime_upgrade(struct xfs_inode *ip)
+{
+	return xfs_sb_version_hasbigtime(&ip->i_mount->m_sb) &&
+	       !xfs_inode_has_bigtime(ip);
+}
+
 /*
  * This is called to mark the fields indicated in fieldmask as needing to be
  * logged when the transaction is committed.  The inode must already be
@@ -129,6 +135,16 @@ xfs_trans_log_inode(
 		if (IS_I_VERSION(inode) &&
 		    inode_maybe_inc_iversion(inode, flags & XFS_ILOG_CORE))
 			iversion_flags = XFS_ILOG_CORE;
+	}
+
+	/*
+	 * If we're updating the inode core or the timestamps and it's possible
+	 * to upgrade this inode to bigtime format, do so now.
+	 */
+	if ((flags & (XFS_ILOG_CORE | XFS_ILOG_TIMESTAMP)) &&
+	    xfs_inode_want_bigtime_upgrade(ip)) {
+		ip->i_d.di_flags2 |= XFS_DIFLAG2_BIGTIME;
+		flags |= XFS_ILOG_CORE;
 	}
 
 	/*
