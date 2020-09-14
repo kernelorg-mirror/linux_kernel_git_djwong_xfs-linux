@@ -2503,8 +2503,8 @@ xlog_finish_defer_ops(
 	int			error = 0;
 
 	list_for_each_entry_safe(dfc, next, dfops_freezers, dfc_list) {
-		error = xfs_trans_alloc(mp, &M_RES(mp)->tr_itruncate, 0,
-				0, XFS_TRANS_RESERVE, &tp);
+		error = xfs_trans_alloc(mp, &dfc->dfc_tres, 0, 0,
+				XFS_TRANS_RESERVE, &tp);
 		if (error)
 			break;
 
