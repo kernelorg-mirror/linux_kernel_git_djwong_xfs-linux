@@ -577,6 +577,11 @@ xfs_defer_capture(
 	dfc->dfc_blkres = tp->t_blk_res - tp->t_blk_res_used;
 	tp->t_blk_res = tp->t_blk_res_used;
 
+	/* Preserve the transaction reservation type. */
+	dfc->dfc_tres.tr_logres = tp->t_log_res;
+	dfc->dfc_tres.tr_logcount = tp->t_log_count;
+	dfc->dfc_tres.tr_logflags = XFS_TRANS_PERM_LOG_RES;
+
 	return dfc;
 }
 
