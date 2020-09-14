@@ -590,6 +590,9 @@ xfs_defer_capture(
 		dfc->dfc_tpflags = tp->t_flags & XFS_TRANS_LOWMODE;
 		dfc->dfc_blkres = tp->t_blk_res - tp->t_blk_res_used;
 		tp->t_blk_res = tp->t_blk_res_used;
+		dfc->dfc_tres.tr_logres = tp->t_log_res;
+		dfc->dfc_tres.tr_logcount = tp->t_log_count;
+		dfc->dfc_tres.tr_logflags = XFS_TRANS_PERM_LOG_RES;
 		xfs_defer_reset(tp);
 	}
 
