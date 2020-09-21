@@ -200,6 +200,10 @@ struct xfs_ifork_broot_ops {
 	void *(*iroot_key)(struct xfs_mount *mp, struct xfs_btree_block *bb,
 			   unsigned int nptr);
 
+	/* Address of a record inside the incore btree root block. */
+	void *(*iroot_rec)(struct xfs_mount *mp, struct xfs_btree_block *bb,
+			   unsigned int nptr);
+
 	/* Calculate the space required for the ondisk btree root block. */
 	size_t (*droot_size)(struct xfs_btree_block *bb);
 };

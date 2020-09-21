@@ -363,8 +363,6 @@ xfs_iroot_realloc(
 	int				new_max;
 	size_t				new_size;
 
-	ASSERT(level > 0);
-
 	/*
 	 * Handle the degenerate case quietly.
 	 */
@@ -398,9 +396,13 @@ xfs_iroot_realloc(
 		new_size = ops->iroot_size(mp, new_max, level);
 
 		ifp->if_broot = kmem_realloc(ifp->if_broot, new_size, KM_NOFS);
-		op = ops->iroot_ptr(mp, ifp->if_broot, 1, ifp->if_broot_bytes);
-		np = ops->iroot_ptr(mp, ifp->if_broot, 1, new_size);
-		memmove(np, op, cur_max * ops->ptr_len);
+		if (level > 0) {
+			op = ops->iroot_ptr(mp, ifp->if_broot, 1,
+					ifp->if_broot_bytes);
+			np = ops->iroot_ptr(mp, ifp->if_broot, 1, new_size);
+
+			memmove(np, op, cur_max * ops->ptr_len);
+		}
 
 		goto out;
 	}
@@ -428,17 +430,25 @@ xfs_iroot_realloc(
 		ifp->if_flags &= ~XFS_IFBROOT;
 	}
 
-	/* Only copy the keys and pointers if there are any. */
+	/* Only copy the records or keys and pointers if there are any. */
 	if (new_max > 0) {
-		/* First copy the keys. */
-		op = ops->iroot_key(mp, ifp->if_broot, 1);
-		np = ops->iroot_key(mp, new_broot, 1);
-		memcpy(np, op, new_max * ops->key_len);
+		if (level > 0) {
+			/* First copy the keys. */
+			op = ops->iroot_key(mp, ifp->if_broot, 1);
+			np = ops->iroot_key(mp, new_broot, 1);
+			memcpy(np, op, new_max * ops->key_len);
 
-		/* Then copy the pointers. */
-		op = ops->iroot_ptr(mp, ifp->if_broot, 1, ifp->if_broot_bytes);
-		np = ops->iroot_ptr(mp, new_broot, 1, new_size);
-		memcpy(np, op, new_max * ops->ptr_len);
+			/* Then copy the pointers. */
+			op = ops->iroot_ptr(mp, ifp->if_broot, 1,
+					ifp->if_broot_bytes);
+			np = ops->iroot_ptr(mp, new_broot, 1, new_size);
+			memcpy(np, op, new_max * ops->ptr_len);
+		} else {
+			/* Copy the records. */
+			op = ops->iroot_rec(mp, ifp->if_broot, 1);
+			np = ops->iroot_rec(mp, new_broot, 1);
+			memcpy(np, op, new_max * ops->rec_len);
+		}
 	}
 
 	kmem_free(ifp->if_broot);
