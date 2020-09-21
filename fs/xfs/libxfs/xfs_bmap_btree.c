@@ -737,3 +737,33 @@ xfs_bmbt_calc_size(
 {
 	return xfs_btree_calc_size(mp->m_bmap_dmnr, len);
 }
+
+/* Create an incore bmbt btree root block. */
+void
+xfs_bmbt_create_broot(
+	struct xfs_inode	*ip,
+	int			whichfork)
+{
+	struct xfs_ifork	*ifp = XFS_IFORK_PTR(ip, whichfork);
+
+	/*
+	 * Make space in the inode incore. This needs to be undone if we fail
+	 * to expand the root.
+	 */
+	xfs_iroot_realloc(ip, 1, whichfork);
+	ifp->if_flags |= XFS_IFBROOT;
+
+	/* Fill in the root. */
+	xfs_btree_init_block_int(ip->i_mount, ifp->if_broot,
+			XFS_BUF_DADDR_NULL, XFS_BTNUM_BMAP, 1, 1, ip->i_ino,
+			XFS_BTREE_LONG_PTRS);
+}
+
+/* Undo the effects of xfs_bmbt_create_broot. */
+void
+xfs_bmbt_uncreate_broot(
+	struct xfs_inode	*ip,
+	int			whichfork)
+{
+	xfs_iroot_realloc(ip, -1, whichfork);
+}
