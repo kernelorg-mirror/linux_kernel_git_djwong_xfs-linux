@@ -318,8 +318,13 @@ xfs_trans_alloc(
 	 * by doing GFP_KERNEL allocations inside sb_start_intwrite().
 	 */
 	tp = kmem_cache_zalloc(xfs_trans_zone, GFP_KERNEL | __GFP_NOFAIL);
-	if (!(flags & XFS_TRANS_NO_WRITECOUNT))
+	if (!(flags & XFS_TRANS_NO_WRITECOUNT)) {
+		/* Be ready to handle two full splits of the rtrmapbt. */
+		if (xfs_sb_version_hasrtrmapbt(&mp->m_sb)) {
+			blocks += (mp->m_rtrmap_maxlevels * 2000);
+		}
 		sb_start_intwrite(mp->m_super);
+	}
 
 	/*
 	 * Zero-reservation ("empty") transactions can't modify anything, so
