@@ -538,6 +538,7 @@ __xfs_bmap_add_free(
 	xfs_fsblock_t			bno,
 	xfs_filblks_t			len,
 	const struct xfs_owner_info	*oinfo,
+	bool				realtime,
 	bool				skip_discard)
 {
 	struct xfs_extent_free_item	*new;		/* new element */
@@ -550,27 +551,41 @@ __xfs_bmap_add_free(
 	ASSERT(len > 0);
 	ASSERT(len <= MAXEXTLEN);
 	ASSERT(!isnullstartblock(bno));
-	agno = XFS_FSB_TO_AGNO(mp, bno);
-	agbno = XFS_FSB_TO_AGBNO(mp, bno);
-	ASSERT(agno < mp->m_sb.sb_agcount);
-	ASSERT(agbno < mp->m_sb.sb_agblocks);
-	ASSERT(len < mp->m_sb.sb_agblocks);
-	ASSERT(agbno + len <= mp->m_sb.sb_agblocks);
+	if (realtime) {
+		agno = 0;
+		agbno = bno;
+		ASSERT(bno < mp->m_sb.sb_rextents);
+		ASSERT(len < mp->m_sb.sb_rextents);
+		ASSERT(bno + len <= mp->m_sb.sb_rextents);
+	} else {
+		agno = XFS_FSB_TO_AGNO(mp, bno);
+		agbno = XFS_FSB_TO_AGBNO(mp, bno);
+		ASSERT(agno < mp->m_sb.sb_agcount);
+		ASSERT(agbno < mp->m_sb.sb_agblocks);
+		ASSERT(len < mp->m_sb.sb_agblocks);
+		ASSERT(agbno + len <= mp->m_sb.sb_agblocks);
+	}
 #endif
 	ASSERT(xfs_bmap_free_item_zone != NULL);
+
+	if (realtime)
+		trace_xfs_bmap_free_defer(tp->t_mountp, NULLAGNUMBER, 0,
+				bno, len);
+	else
+		trace_xfs_bmap_free_defer(tp->t_mountp,
+				XFS_FSB_TO_AGNO(tp->t_mountp, bno), 0,
+				XFS_FSB_TO_AGBNO(tp->t_mountp, bno), len);
 
 	new = kmem_cache_alloc(xfs_bmap_free_item_zone,
 			       GFP_KERNEL | __GFP_NOFAIL);
 	new->xefi_startblock = bno;
 	new->xefi_blockcount = (xfs_extlen_t)len;
+	new->xefi_realtime = realtime;
 	if (oinfo)
 		new->xefi_oinfo = *oinfo;
 	else
 		new->xefi_oinfo = XFS_RMAP_OINFO_SKIP_UPDATE;
 	new->xefi_skip_discard = skip_discard;
-	trace_xfs_bmap_free_defer(tp->t_mountp,
-			XFS_FSB_TO_AGNO(tp->t_mountp, bno), 0,
-			XFS_FSB_TO_AGBNO(tp->t_mountp, bno), len);
 	xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_FREE, &new->xefi_list);
 }
 
@@ -4841,6 +4856,14 @@ xfs_bmap_split_indlen(
 	return stolen;
 }
 
+static inline bool
+xfs_bmap_is_rt(
+	struct xfs_inode	*ip,
+	int			whichfork)
+{
+	return XFS_IS_REALTIME_INODE(ip) && whichfork != XFS_ATTR_FORK;
+}
+
 int
 xfs_bmap_del_extent_delay(
 	struct xfs_inode	*ip,
@@ -4861,7 +4884,7 @@ xfs_bmap_del_extent_delay(
 
 	XFS_STATS_INC(mp, xs_del_exlist);
 
-	isrt = (whichfork == XFS_DATA_FORK) && XFS_IS_REALTIME_INODE(ip);
+	isrt = xfs_bmap_is_rt(ip, whichfork);
 	del_endoff = del->br_startoff + del->br_blockcount;
 	got_endoff = got->br_startoff + got->br_blockcount;
 	da_old = startblockval(got->br_startblock);
@@ -5056,22 +5079,24 @@ xfs_bmap_del_extent_real(
 	int			whichfork, /* data or attr fork */
 	int			bflags)	/* bmapi flags */
 {
-	xfs_fsblock_t		del_endblock=0;	/* first block past del */
-	xfs_fileoff_t		del_endoff;	/* first offset past del */
-	int			do_fx;	/* free extent at end of routine */
-	int			error;	/* error return value */
-	int			flags = 0;/* inode logging flags */
-	struct xfs_bmbt_irec	got;	/* current extent entry */
-	xfs_fileoff_t		got_endoff;	/* first offset past got */
-	int			i;	/* temp state */
-	struct xfs_ifork	*ifp;	/* inode fork pointer */
-	xfs_mount_t		*mp;	/* mount structure */
-	xfs_filblks_t		nblks;	/* quota/sb block count */
-	xfs_bmbt_irec_t		new;	/* new record to be inserted */
-	/* REFERENCED */
-	uint			qfield;	/* quota field to update */
-	int			state = xfs_bmap_fork_to_state(whichfork);
 	struct xfs_bmbt_irec	old;
+	struct xfs_bmbt_irec	got;	/* current extent entry */
+	struct xfs_bmbt_irec	new;	/* new record to be inserted */
+	struct xfs_ifork	*ifp;	/* inode fork pointer */
+	struct xfs_mount	*mp;	/* mount structure */
+	xfs_fsblock_t		del_endblock = 0; /* first block past del */
+	xfs_fileoff_t		del_endoff;	/* first offset past del */
+	xfs_fileoff_t		got_endoff;	/* first offset past got */
+	xfs_filblks_t		nblks;	/* quota/sb block count */
+	xfs_fsblock_t		rt_bno = 0;
+	xfs_extlen_t		rt_len = 0;
+	unsigned int		qfield;	/* quota field to update */
+	int			flags = 0;/* inode logging flags */
+	int			i;	/* temp state */
+	int			state = xfs_bmap_fork_to_state(whichfork);
+	bool			isrt;
+	bool			want_free = true;
+	int			error;	/* error return value */
 
 	mp = ip->i_mount;
 	XFS_STATS_INC(mp, xs_del_exlist);
@@ -5102,31 +5127,33 @@ xfs_bmap_del_extent_real(
 		return -ENOSPC;
 
 	flags = XFS_ILOG_CORE;
-	if (whichfork == XFS_DATA_FORK && XFS_IS_REALTIME_INODE(ip)) {
-		xfs_filblks_t	len;
+	isrt = xfs_bmap_is_rt(ip, whichfork);
+	if (isrt) {
 		xfs_extlen_t	mod;
 
-		len = div_u64_rem(del->br_blockcount, mp->m_sb.sb_rextsize,
-				  &mod);
+		rt_len = div_u64_rem(del->br_blockcount, mp->m_sb.sb_rextsize,
+				&mod);
 		ASSERT(mod == 0);
 
-		if (!(bflags & XFS_BMAPI_REMAP)) {
-			xfs_fsblock_t	bno;
+		rt_bno = div_u64_rem(del->br_startblock,
+				mp->m_sb.sb_rextsize, &mod);
+		ASSERT(mod == 0);
 
-			bno = div_u64_rem(del->br_startblock,
-					mp->m_sb.sb_rextsize, &mod);
-			ASSERT(mod == 0);
-
-			error = xfs_rtfree_extent(tp, bno, (xfs_extlen_t)len);
+		/*
+		 * Kernels that don't support realtime rmap also don't know how
+		 * to deal with realtime EFIs, so free the extent now.
+		 */
+		if (!xfs_sb_version_hasrtrmapbt(&mp->m_sb) &&
+		    !(bflags & XFS_BMAPI_REMAP)) {
+			error = xfs_rtfree_extent(tp, rt_bno, rt_len);
 			if (error)
 				goto done;
+			want_free = false;
 		}
 
-		do_fx = 0;
-		nblks = len * mp->m_sb.sb_rextsize;
+		nblks = rt_len * mp->m_sb.sb_rextsize;
 		qfield = XFS_TRANS_DQ_RTBCOUNT;
 	} else {
-		do_fx = 1;
 		nblks = del->br_blockcount;
 		qfield = XFS_TRANS_DQ_BCOUNT;
 	}
@@ -5280,14 +5307,19 @@ xfs_bmap_del_extent_real(
 	/*
 	 * If we need to, add to list of extents to delete.
 	 */
-	if (do_fx && !(bflags & XFS_BMAPI_REMAP)) {
+	if (want_free && !(bflags & XFS_BMAPI_REMAP)) {
+		bool	skip_discard = (bflags & XFS_BMAPI_NODISCARD) ||
+				       del->br_state == XFS_EXT_UNWRITTEN;
+
 		if (xfs_is_reflink_inode(ip) && whichfork == XFS_DATA_FORK) {
 			xfs_refcount_decrease_extent(tp, del);
+		} else if (isrt) {
+			__xfs_bmap_add_free(tp, rt_bno, rt_len, NULL, true,
+					skip_discard);
 		} else {
 			__xfs_bmap_add_free(tp, del->br_startblock,
-					del->br_blockcount, NULL,
-					(bflags & XFS_BMAPI_NODISCARD) ||
-					del->br_state == XFS_EXT_UNWRITTEN);
+					del->br_blockcount, NULL, false,
+					skip_discard);
 		}
 	}
 
@@ -5377,7 +5409,7 @@ __xfs_bunmapi(
 		return 0;
 	}
 	XFS_STATS_INC(mp, xs_blk_unmap);
-	isrt = (whichfork == XFS_DATA_FORK) && XFS_IS_REALTIME_INODE(ip);
+	isrt = xfs_bmap_is_rt(ip, whichfork);
 	end = start + len;
 
 	if (!xfs_iext_lookup_extent_before(ip, ifp, &end, &icur, &got)) {
@@ -5394,7 +5426,7 @@ __xfs_bunmapi(
 	} else
 		cur = NULL;
 
-	if (isrt) {
+	if (isrt && !xfs_sb_version_hasrtrmapbt(&mp->m_sb)) {
 		/*
 		 * Synchronize by locking the bitmap inode.
 		 */

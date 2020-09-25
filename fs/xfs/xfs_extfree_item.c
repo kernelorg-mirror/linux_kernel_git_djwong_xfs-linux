@@ -24,6 +24,8 @@
 #include "xfs_error.h"
 #include "xfs_log_priv.h"
 #include "xfs_log_recover.h"
+#include "xfs_rtalloc.h"
+#include "xfs_inode.h"
 
 kmem_zone_t	*xfs_efi_zone;
 kmem_zone_t	*xfs_efd_zone;
@@ -356,6 +358,7 @@ xfs_trans_free_extent(
 	struct xfs_efd_log_item		*efdp,
 	xfs_fsblock_t			start_block,
 	xfs_extlen_t			ext_len,
+	bool				realtime,
 	const struct xfs_owner_info	*oinfo,
 	bool				skip_discard)
 {
@@ -369,8 +372,19 @@ xfs_trans_free_extent(
 
 	trace_xfs_bmap_free_deferred(tp->t_mountp, agno, 0, agbno, ext_len);
 
-	error = __xfs_free_extent(tp, start_block, ext_len,
-				  oinfo, XFS_AG_RESV_NONE, skip_discard);
+	if (realtime) {
+		/*
+		 * Synchronize by locking the bitmap inode.
+		 */
+		xfs_ilock(mp->m_rbmip, XFS_ILOCK_EXCL|XFS_ILOCK_RTBITMAP);
+		xfs_trans_ijoin(tp, mp->m_rbmip, XFS_ILOCK_EXCL);
+		xfs_ilock(mp->m_rsumip, XFS_ILOCK_EXCL|XFS_ILOCK_RTSUM);
+		xfs_trans_ijoin(tp, mp->m_rsumip, XFS_ILOCK_EXCL);
+
+		error = xfs_rtfree_extent(tp, start_block, ext_len);
+	} else
+		error = __xfs_free_extent(tp, start_block, ext_len, oinfo,
+				XFS_AG_RESV_NONE, skip_discard);
 	/*
 	 * Mark the transaction dirty, even on error. This ensures the
 	 * transaction is aborted, which:
@@ -431,6 +445,8 @@ xfs_extent_free_log_item(
 	extp = &efip->efi_format.efi_extents[next_extent];
 	extp->ext_start = free->xefi_startblock;
 	extp->ext_len = free->xefi_blockcount;
+	if (free->xefi_realtime)
+		extp->ext_len |= XFS_EFI_REALTIME_EXT;
 }
 
 static struct xfs_log_item *
@@ -478,7 +494,7 @@ xfs_extent_free_finish_item(
 	free = container_of(item, struct xfs_extent_free_item, xefi_list);
 	error = xfs_trans_free_extent(tp, EFD_ITEM(done),
 			free->xefi_startblock,
-			free->xefi_blockcount,
+			free->xefi_blockcount, free->xefi_realtime,
 			&free->xefi_oinfo, free->xefi_skip_discard);
 	kmem_free(free);
 	return error;
@@ -535,6 +551,7 @@ xfs_agfl_free_finish_item(
 
 	free = container_of(item, struct xfs_extent_free_item, xefi_list);
 	ASSERT(free->xefi_blockcount == 1);
+	ASSERT(!free->xefi_realtime);
 	agno = XFS_FSB_TO_AGNO(mp, free->xefi_startblock);
 	agbno = XFS_FSB_TO_AGBNO(mp, free->xefi_startblock);
 
@@ -616,9 +633,14 @@ xfs_efi_item_recover(
 	efdp = xfs_trans_get_efd(tp, efip, efip->efi_format.efi_nextents);
 
 	for (i = 0; i < efip->efi_format.efi_nextents; i++) {
+		xfs_extlen_t	len;
+		bool		realtime;
+
 		extp = &efip->efi_format.efi_extents[i];
+		len = extp->ext_len & ~XFS_EFI_REALTIME_EXT;
+		realtime = extp->ext_len & XFS_EFI_REALTIME_EXT;
 		error = xfs_trans_free_extent(tp, efdp, extp->ext_start,
-					      extp->ext_len,
+					      len, realtime,
 					      &XFS_RMAP_OINFO_ANY_OWNER, false);
 		if (error)
 			goto abort_error;
