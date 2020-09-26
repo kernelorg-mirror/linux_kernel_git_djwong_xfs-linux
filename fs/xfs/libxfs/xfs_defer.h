@@ -8,6 +8,7 @@
 
 struct xfs_btree_cur;
 struct xfs_defer_op_type;
+struct xfs_defer_capture;
 
 /*
  * Header for deferred operation list.
@@ -64,9 +65,26 @@ extern const struct xfs_defer_op_type xfs_extent_free_defer_type;
 extern const struct xfs_defer_op_type xfs_agfl_free_defer_type;
 
 /*
+ * Deferred operation freezer.  This structure enables a dfops user to detach
+ * the chain of deferred operations from a transaction so that they can be
+ * continued later.
+ */
+struct xfs_defer_capture {
+	/* List of other freezer heads. */
+	struct list_head	dfc_list;
+
+	/* Deferred ops state saved from the transaction. */
+	struct list_head	dfc_dfops;
+	unsigned int		dfc_tpflags;
+};
+
+/*
  * Functions to capture a chain of deferred operations and continue them later.
  * This doesn't normally happen except log recovery.
  */
-void xfs_defer_capture(struct xfs_trans *dtp, struct xfs_trans *stp);
+struct xfs_defer_capture *xfs_defer_capture(struct xfs_trans *tp);
+void xfs_defer_continue(struct xfs_defer_capture *dfc, struct xfs_trans *tp);
+void xfs_defer_capture_free(struct xfs_mount *mp,
+		struct xfs_defer_capture *dfc);
 
 #endif /* __XFS_DEFER_H__ */
