@@ -3813,3 +3813,11 @@ xfs_iunlock2_io_mmap(
 	if (!same_inode)
 		inode_unlock(VFS_I(ip1));
 }
+
+/* Grab an extra reference to the VFS inode. */
+void
+xfs_ihold(
+	struct xfs_inode	*ip)
+{
+	ihold(VFS_I(ip));
+}
