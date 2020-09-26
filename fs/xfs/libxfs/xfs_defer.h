@@ -76,6 +76,7 @@ struct xfs_defer_capture {
 	struct list_head	dfc_dfops;
 	unsigned int		dfc_tpflags;
 	unsigned int		dfc_blkres;
+	struct xfs_trans_res	dfc_tres;
 };
 
 /*

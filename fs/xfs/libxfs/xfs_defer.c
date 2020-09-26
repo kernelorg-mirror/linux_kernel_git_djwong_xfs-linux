@@ -579,6 +579,15 @@ xfs_defer_ops_capture(
 	dfc->dfc_blkres = tp->t_blk_res - tp->t_blk_res_used;
 	tp->t_blk_res = tp->t_blk_res_used;
 
+	/*
+	 * Preserve the transaction reservation type.  The logcount is
+	 * hardwired to 1 to so that we can make forward progress in recovery
+	 * no matter how full the log might be, at a cost of more regrants.
+	 */
+	dfc->dfc_tres.tr_logres = tp->t_log_res;
+	dfc->dfc_tres.tr_logcount = 1;
+	dfc->dfc_tres.tr_logflags = XFS_TRANS_PERM_LOG_RES;
+
 	return dfc;
 }
 
