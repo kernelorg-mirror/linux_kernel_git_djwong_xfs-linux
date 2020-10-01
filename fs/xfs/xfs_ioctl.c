@@ -1716,38 +1716,15 @@ out_free_buf:
 	return error;
 }
 
-struct getfsmap_info {
-	struct xfs_mount	*mp;
-	struct fsmap_head __user *data;
-	unsigned int		idx;
-	__u32			last_flags;
-};
-
-STATIC int
-xfs_getfsmap_format(struct xfs_fsmap *xfm, void *priv)
-{
-	struct getfsmap_info	*info = priv;
-	struct fsmap		fm;
-
-	trace_xfs_getfsmap_mapping(info->mp, xfm);
-
-	info->last_flags = xfm->fmr_flags;
-	xfs_fsmap_from_internal(&fm, xfm);
-	if (copy_to_user(&info->data->fmh_recs[info->idx++], &fm,
-			sizeof(struct fsmap)))
-		return -EFAULT;
-
-	return 0;
-}
-
 STATIC int
 xfs_ioc_getfsmap(
 	struct xfs_inode	*ip,
 	struct fsmap_head	__user *arg)
 {
-	struct getfsmap_info	info = { NULL };
 	struct xfs_fsmap_head	xhead = {0};
 	struct fsmap_head	head;
+	struct fsmap		*recs;
+	unsigned int		count;
 	bool			aborted = false;
 	int			error;
 
@@ -1760,38 +1737,50 @@ xfs_ioc_getfsmap(
 		       sizeof(head.fmh_keys[1].fmr_reserved)))
 		return -EINVAL;
 
+	count = min_t(unsigned int, head.fmh_count,
+			UINT_MAX / sizeof(struct fsmap));
+	recs = kvzalloc(count * sizeof(struct fsmap), GFP_KERNEL);
+	if (!recs)
+		return -ENOMEM;
+
 	xhead.fmh_iflags = head.fmh_iflags;
-	xhead.fmh_count = head.fmh_count;
+	xhead.fmh_count = count;
 	xfs_fsmap_to_internal(&xhead.fmh_keys[0], &head.fmh_keys[0]);
 	xfs_fsmap_to_internal(&xhead.fmh_keys[1], &head.fmh_keys[1]);
 
 	trace_xfs_getfsmap_low_key(ip->i_mount, &xhead.fmh_keys[0]);
 	trace_xfs_getfsmap_high_key(ip->i_mount, &xhead.fmh_keys[1]);
 
-	info.mp = ip->i_mount;
-	info.data = arg;
-	error = xfs_getfsmap(ip->i_mount, &xhead, xfs_getfsmap_format, &info);
+	error = xfs_getfsmap(ip->i_mount, &xhead, recs);
 	if (error == -ECANCELED) {
 		error = 0;
 		aborted = true;
 	} else if (error)
-		return error;
-
-	/* If we didn't abort, set the "last" flag in the last fmx */
-	if (!aborted && info.idx) {
-		info.last_flags |= FMR_OF_LAST;
-		if (copy_to_user(&info.data->fmh_recs[info.idx - 1].fmr_flags,
-				&info.last_flags, sizeof(info.last_flags)))
-			return -EFAULT;
-	}
+		goto out_free;
 
 	/* copy back header */
+	error = -EFAULT;
 	head.fmh_entries = xhead.fmh_entries;
 	head.fmh_oflags = xhead.fmh_oflags;
 	if (copy_to_user(arg, &head, sizeof(struct fsmap_head)))
-		return -EFAULT;
+		goto out_free;
 
-	return 0;
+	/* Copy records if userspace wasn't asking only for a record count. */
+	if (head.fmh_count > 0) {
+		/* If we didn't abort, set the "last" flag in the last record */
+		if (!aborted && xhead.fmh_entries > 0)
+			recs[xhead.fmh_entries - 1].fmr_flags |= FMR_OF_LAST;
+
+		/* Copy all records out to userspace. */
+		if (copy_to_user(arg->fmh_recs, recs,
+				 xhead.fmh_entries * sizeof(struct fsmap)))
+			goto out_free;
+	}
+
+	error = 0;
+out_free:
+	kmem_free(recs);
+	return error;
 }
 
 STATIC int
