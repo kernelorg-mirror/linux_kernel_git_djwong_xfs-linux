@@ -582,14 +582,14 @@ xfs_efi_validate_ext(
 	struct xfs_mount		*mp,
 	struct xfs_extent		*extp)
 {
-	xfs_fsblock_t			startblock_fsb;
+	xfs_fsblock_t			end;
 
-	startblock_fsb = XFS_BB_TO_FSB(mp,
-			   XFS_FSB_TO_DADDR(mp, extp->ext_start));
-	if (startblock_fsb == 0 ||
-	    extp->ext_len == 0 ||
-	    startblock_fsb >= mp->m_sb.sb_dblocks ||
-	    extp->ext_len >= mp->m_sb.sb_agblocks)
+	if (extp->ext_start + extp->ext_len <= extp->ext_start)
+		return false;
+
+	end = extp->ext_start + extp->ext_len - 1;
+	if (!xfs_verify_fsbno(mp, extp->ext_start) ||
+	    !xfs_verify_fsbno(mp, end))
 		return false;
 
 	return true;
