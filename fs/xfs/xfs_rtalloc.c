@@ -18,7 +18,7 @@
 #include "xfs_trans_space.h"
 #include "xfs_icache.h"
 #include "xfs_rtalloc.h"
-
+#include "xfs_sb.h"
 
 /*
  * Read and return the summary information for a given extent size,
@@ -1107,6 +1107,11 @@ error_cancel:
 	 * Free the fake mp structure.
 	 */
 	kmem_free(nmp);
+
+	/* Update secondary superblocks now the physical grow has completed */
+	error = xfs_update_secondary_sbs(mp);
+	if (error)
+		return error;
 
 	/*
 	 * If we had to allocate a new rsum_cache, we either need to free the
