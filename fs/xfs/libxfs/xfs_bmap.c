@@ -5073,7 +5073,6 @@ xfs_bmap_del_extent_real(
 {
 	xfs_fsblock_t		del_endblock=0;	/* first block past del */
 	xfs_fileoff_t		del_endoff;	/* first offset past del */
-	int			do_fx;	/* free extent at end of routine */
 	int			error;	/* error return value */
 	int			flags = 0;/* inode logging flags */
 	struct xfs_bmbt_irec	got;	/* current extent entry */
@@ -5087,6 +5086,8 @@ xfs_bmap_del_extent_real(
 	uint			qfield;	/* quota field to update */
 	int			state = xfs_bmap_fork_to_state(whichfork);
 	struct xfs_bmbt_irec	old;
+	bool			isrt = xfs_ifork_is_realtime(ip, whichfork);
+	bool			want_free = true;
 
 	mp = ip->i_mount;
 	XFS_STATS_INC(mp, xs_del_exlist);
@@ -5117,7 +5118,7 @@ xfs_bmap_del_extent_real(
 		return -ENOSPC;
 
 	flags = XFS_ILOG_CORE;
-	if (xfs_ifork_is_realtime(ip, whichfork)) {
+	if (isrt) {
 		xfs_filblks_t	len;
 		xfs_extlen_t	mod;
 
@@ -5125,7 +5126,15 @@ xfs_bmap_del_extent_real(
 				  &mod);
 		ASSERT(mod == 0);
 
-		if (!(bflags & XFS_BMAPI_REMAP)) {
+		/*
+		 * When reverse mapping is enabled, we must maintain the same
+		 * order of operations as the data device, which is to remove
+		 * the file mapping, remove the reverse mapping, and then free
+		 * the blocks.  This means that we must delay the freeing until
+		 * after we've scheduled the rmap update.
+		 */
+		if (!xfs_sb_version_hasrtrmapbt(&mp->m_sb) &&
+		    !(bflags & XFS_BMAPI_REMAP)) {
 			xfs_fsblock_t	bno;
 
 			bno = div_u64_rem(del->br_startblock,
@@ -5135,13 +5144,12 @@ xfs_bmap_del_extent_real(
 			error = xfs_rtfree_extent(tp, bno, (xfs_extlen_t)len);
 			if (error)
 				goto done;
+			want_free = false;
 		}
 
-		do_fx = 0;
 		nblks = len * mp->m_sb.sb_rextsize;
 		qfield = XFS_TRANS_DQ_RTBCOUNT;
 	} else {
-		do_fx = 1;
 		nblks = del->br_blockcount;
 		qfield = XFS_TRANS_DQ_BCOUNT;
 	}
@@ -5295,12 +5303,12 @@ xfs_bmap_del_extent_real(
 	/*
 	 * If we need to, add to list of extents to delete.
 	 */
-	if (do_fx && !(bflags & XFS_BMAPI_REMAP)) {
+	if (want_free && !(bflags & XFS_BMAPI_REMAP)) {
 		if (xfs_is_reflink_inode(ip) && whichfork == XFS_DATA_FORK) {
 			xfs_refcount_decrease_extent(tp, del);
 		} else {
 			__xfs_bmap_add_free(tp, del->br_startblock,
-					del->br_blockcount, NULL, false,
+					del->br_blockcount, NULL, isrt,
 					(bflags & XFS_BMAPI_NODISCARD) ||
 					del->br_state == XFS_EXT_UNWRITTEN);
 		}
@@ -5409,9 +5417,12 @@ __xfs_bunmapi(
 	} else
 		cur = NULL;
 
-	if (isrt) {
+	if (isrt && !xfs_sb_version_hasrtrmapbt(&mp->m_sb)) {
 		/*
-		 * Synchronize by locking the realtime bitmap.
+		 * Synchronize by locking the realtime bitmap.  When realtime
+		 * rmap is enabled, we have to used deferred freeing to
+		 * maintain the same order of operations as the data device
+		 * rmap.
 		 */
 		xfs_rtlock(tp, mp, XFS_RTLOCK_ALLOC);
 	}
