@@ -1084,6 +1084,101 @@ out_unlock:
 	return remapped > 0 ? remapped : ret;
 }
 
+/*
+ * Decide if we want to use reflink to accelerate a copy_file_range request.
+ *
+ * We need to use the generic pagecache copy routine if there's no reflink; if
+ * the two files are on different filesystems; if the two files are on
+ * different devices; or if the two offsets are not at the same offset within
+ * an fs block.  Studies on the author's computer show that reflink doesn't
+ * speed up copies smaller than 32k, so use the page cache for those.
+ */
+static inline bool
+xfs_want_reflink_copy_range(
+	struct xfs_inode	*src,
+	unsigned int		src_blkoff,
+	struct xfs_inode	*dst,
+	unsigned int		dst_blkoff,
+	size_t			len)
+{
+	if (len < 32768)
+		return false;
+	if (src->i_mount != dst->i_mount)
+		return false;
+	if (!xfs_sb_version_hasreflink(&src->i_mount->m_sb))
+		return false;
+	if (src_blkoff != dst_blkoff)
+		return false;
+	return XFS_IS_REALTIME_INODE(src) == XFS_IS_REALTIME_INODE(dst);
+}
+
+STATIC ssize_t
+xfs_file_copy_range(
+	struct file		*src_file,
+	loff_t			src_off,
+	struct file		*dst_file,
+	loff_t			dst_off,
+	size_t			len,
+	unsigned int		flags)
+{
+	struct inode		*inode_src = file_inode(src_file);
+	struct xfs_inode	*src = XFS_I(inode_src);
+	struct inode		*inode_dst = file_inode(dst_file);
+	struct xfs_inode	*dst = XFS_I(inode_dst);
+	struct xfs_mount	*mp = src->i_mount;
+	unsigned int		src_blkoff = src_off & mp->m_blockmask;
+	unsigned int		dst_blkoff = dst_off & mp->m_blockmask;
+	loff_t			copy_ret;
+	ssize_t			total_copied = 0;
+	size_t			copy_len;
+
+	if (!xfs_want_reflink_copy_range(src, src_blkoff, dst, dst_blkoff, len))
+		goto use_generic;
+
+	/* Use the regular copy until we're block aligned at the start. */
+	copy_len = min_t(size_t, len, mp->m_sb.sb_blocksize - src_blkoff);
+	if (copy_len > 0) {
+		copy_ret = generic_copy_file_range(src_file, src_off, dst_file,
+					dst_off, copy_len, flags);
+		if (copy_ret < 0)
+			return copy_ret;
+
+		src_off += copy_ret;
+		dst_off += copy_ret;
+		len -= copy_ret;
+		total_copied += copy_ret;
+		if (copy_ret < copy_len || len == 0)
+			return total_copied;
+	}
+
+	/*
+	 * Now try to reflink as many full blocks as we can.  If the end of the
+	 * copy request wasn't block-aligned or the reflink fails, we'll just
+	 * fall into the generic copy to do the rest.
+	 */
+	copy_len = round_down(len, mp->m_sb.sb_blocksize);
+	if (copy_len > 0) {
+		copy_ret = xfs_file_remap_range(src_file, src_off, dst_file,
+				dst_off, copy_len, REMAP_FILE_CAN_SHORTEN);
+		if (copy_ret >= 0) {
+			src_off += copy_ret;
+			dst_off += copy_ret;
+			len -= copy_ret;
+			total_copied += copy_ret;
+			if (copy_ret < copy_len || len == 0)
+				return total_copied;
+		}
+	}
+
+use_generic:
+	/* Use the regular copy to deal with leftover bytes. */
+	copy_ret = generic_copy_file_range(src_file, src_off, dst_file,
+			dst_off, len, flags);
+	if (copy_ret < 0)
+		return copy_ret;
+	return total_copied + copy_ret;
+}
+
 STATIC int
 xfs_file_swap_range(
 	struct file		*file1,
@@ -1403,6 +1498,7 @@ const struct file_operations xfs_file_operations = {
 	.get_unmapped_area = thp_get_unmapped_area,
 	.fallocate	= xfs_file_fallocate,
 	.fadvise	= xfs_file_fadvise,
+	.copy_file_range = xfs_file_copy_range,
 	.remap_file_range = xfs_file_remap_range,
 	.swap_file_range = xfs_file_swap_range,
 };
