@@ -1076,6 +1076,14 @@ xfs_reflink_remap_extent(
 	int			nimaps;
 	int			error;
 
+	/*
+	 * If the realtime extent size is larger than 1 block, we have to move
+	 * unwritten extents because the fundamental allocation unit is larger
+	 * than a single block.
+	 */
+	if (XFS_IS_REALTIME_INODE(ip) && xfs_is_reflink_inode(ip) &&
+	    ip->i_mount->m_sb.sb_rextsize > 1)
+		dmap_written = xfs_bmap_is_real_extent(dmap);
 retry:
 	/* Start a rolling transaction to switch the mappings */
 	resblks = XFS_EXTENTADD_SPACE_RES(mp, XFS_DATA_FORK);
@@ -1406,8 +1414,9 @@ xfs_reflink_remap_prep(
 	if (IS_DAX(inode_in) || IS_DAX(inode_out))
 		goto out_unlock;
 
-	ret = generic_remap_file_range_prep(file_in, pos_in, file_out, pos_out,
-			len, remap_flags);
+	ret = __generic_remap_file_range_prep(file_in, pos_in, file_out,
+			pos_out, len, remap_flags,
+			xfs_inode_alloc_blocksize(dest));
 	if (ret || *len == 0)
 		goto out_unlock;
 

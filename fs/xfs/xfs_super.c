@@ -1673,19 +1673,9 @@ xfs_fc_fill_super(
 		xfs_warn(mp,
 "EXPERIMENTAL metadata directory feature in use. Use at your own risk!");
 
-	if (xfs_sb_version_hasreflink(&mp->m_sb)) {
-		if (mp->m_sb.sb_rblocks && mp->m_sb.sb_rextsize != 1) {
-			xfs_alert(mp,
-	"reflink not compatible with realtime device with rextsize %u!",
-					mp->m_sb.sb_rextsize);
-			error = -EINVAL;
-			goto out_filestream_unmount;
-		}
-
-		if (xfs_globals.always_cow) {
-			xfs_info(mp, "using DEBUG-only always_cow mode.");
-			mp->m_always_cow = true;
-		}
+	if (xfs_sb_version_hasreflink(&mp->m_sb) && xfs_globals.always_cow) {
+		xfs_info(mp, "using DEBUG-only always_cow mode.");
+		mp->m_always_cow = true;
 	}
 
 

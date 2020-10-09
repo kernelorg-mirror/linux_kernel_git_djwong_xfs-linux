@@ -493,6 +493,16 @@ xfs_file_dio_aio_write(
 		return -EINVAL;
 
 	/*
+	 * We can't properly handle unaligned direct I/O to reflink files yet,
+	 * as we can't unshare a partial block.
+	 */
+	if (((iocb->ki_pos | count) & (xfs_inode_alloc_blocksize(ip) - 1)) &&
+	    xfs_is_cow_inode(ip)) {
+		trace_xfs_reflink_bounce_dio_write(ip, iocb->ki_pos, count);
+		return -ENOTBLK;
+	}
+
+	/*
 	 * Don't take the exclusive iolock here unless the I/O is unaligned to
 	 * the file system block size.  We don't need to consider the EOF
 	 * extension case here because xfs_file_aio_write_checks() will relock
@@ -502,15 +512,6 @@ xfs_file_dio_aio_write(
 	if ((iocb->ki_pos & mp->m_blockmask) ||
 	    ((iocb->ki_pos + count) & mp->m_blockmask)) {
 		unaligned_io = 1;
-
-		/*
-		 * We can't properly handle unaligned direct I/O to reflink
-		 * files yet, as we can't unshare a partial block.
-		 */
-		if (xfs_is_cow_inode(ip)) {
-			trace_xfs_reflink_bounce_dio_write(ip, iocb->ki_pos, count);
-			return -ENOTBLK;
-		}
 		iolock = XFS_IOLOCK_EXCL;
 	} else {
 		iolock = XFS_IOLOCK_SHARED;
@@ -681,6 +682,48 @@ out:
 	return ret;
 }
 
+/* Decide if we need to unshare the blocks around a range that we're writing. */
+static inline bool
+xfs_file_need_unshare_around(
+	struct xfs_inode	*ip)
+{
+	return XFS_IS_REALTIME_INODE(ip) && xfs_is_reflink_inode(ip) &&
+		ip->i_mount->m_sb.sb_rextsize > 1;
+}
+
+/*
+ * For files that have a fundamental allocation unit that isn't 1 fs block,
+ * use this function to unshare the allocation units at the start and end of
+ * the range so that we never COW a partial allocation unit.
+ */
+STATIC int
+xfs_file_unshare_around(
+	struct xfs_inode	*ip,
+	loff_t			pos,
+	size_t			count)
+{
+	loff_t			extsize = xfs_inode_alloc_blocksize(ip);
+	loff_t			extmask = extsize - 1;
+	loff_t			next = pos + count;
+	int			error;
+
+	/* Unshare at the start of the extent. */
+	if (pos & extmask) {
+		error = xfs_reflink_unshare(ip, pos & ~extmask, extsize);
+		if (error)
+			return error;
+	}
+
+	/* Unshare at the end. */
+	if (next & extmask) {
+		error = xfs_reflink_unshare(ip, next & ~extmask, extsize);
+		if (error)
+			return error;
+	}
+
+	return 0;
+}
+
 STATIC ssize_t
 xfs_file_write_iter(
 	struct kiocb		*iocb,
@@ -703,6 +746,12 @@ xfs_file_write_iter(
 
 	if (IS_DAX(inode))
 		return xfs_file_dax_write(iocb, from);
+
+	if (xfs_file_need_unshare_around(ip)) {
+		ret = xfs_file_unshare_around(ip, iocb->ki_pos, ocount);
+		if (ret)
+			return ret;
+	}
 
 	if (iocb->ki_flags & IOCB_DIRECT) {
 		/*
@@ -843,6 +892,14 @@ xfs_file_fallocate(
 	}
 
 	if (mode & FALLOC_FL_PUNCH_HOLE) {
+		/* Unshare around the region to zero, if needed. */
+		if (xfs_file_need_unshare_around(ip)) {
+			error = xfs_file_unshare_around(ip, offset,
+					len);
+			if (error)
+				goto out_unlock;
+		}
+
 		error = xfs_free_file_space(ip, offset, len);
 		if (error)
 			goto out_unlock;
@@ -914,6 +971,14 @@ xfs_file_fallocate(
 
 			trace_xfs_zero_file_space(ip);
 
+			/* Unshare around the region to zero, if needed. */
+			if (xfs_file_need_unshare_around(ip)) {
+				error = xfs_file_unshare_around(ip, offset,
+						len);
+				if (error)
+					goto out_unlock;
+			}
+
 			error = xfs_free_file_space(ip, offset, len);
 			if (error)
 				goto out_unlock;
@@ -922,6 +987,16 @@ xfs_file_fallocate(
 			      round_down(offset, blksize);
 			offset = round_down(offset, blksize);
 		} else if (mode & FALLOC_FL_UNSHARE_RANGE) {
+			/*
+			 * Enlarge the unshare region to align to a full
+			 * allocation unit.
+			 */
+			if (offset & blkmask) {
+				len += offset & blkmask;
+				offset &= ~blkmask;
+			}
+			if ((offset + len) & blkmask)
+				len = round_up(offset + len, blkmask) - offset;
 			error = xfs_reflink_unshare(ip, offset, len);
 			if (error)
 				goto out_unlock;
@@ -1357,6 +1432,19 @@ __xfs_filemap_fault(
 	if (write_fault) {
 		sb_start_pagefault(inode->i_sb);
 		file_update_time(vmf->vma->vm_file);
+
+		/* Unshare around the region to zero, if needed. */
+		if (xfs_file_need_unshare_around(ip)) {
+			int	error;
+
+			/* XXX is this the proper way?? */
+			xfs_ilock(ip, XFS_MMAPLOCK_EXCL);
+			error = xfs_file_unshare_around(ip,
+					page_offset(vmf->page), PAGE_SIZE);
+			xfs_iunlock(ip, XFS_MMAPLOCK_EXCL);
+			if (error)
+				return VM_FAULT_SIGBUS;
+		}
 	}
 
 	xfs_ilock(XFS_I(inode), XFS_MMAPLOCK_SHARED);
