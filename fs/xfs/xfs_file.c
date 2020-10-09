@@ -803,6 +803,8 @@ xfs_file_fallocate(
 	enum xfs_prealloc_flags	flags = 0;
 	uint			iolock = XFS_IOLOCK_EXCL | XFS_MMAPLOCK_EXCL;
 	loff_t			new_size = 0;
+	unsigned int		blksize = xfs_inode_alloc_blocksize(ip);
+	unsigned int		blkmask = blksize - 1;
 	bool			do_file_insert = false;
 
 	if (!S_ISREG(inode->i_mode))
@@ -850,9 +852,7 @@ xfs_file_fallocate(
 		if (error)
 			goto out_unlock;
 	} else if (mode & FALLOC_FL_COLLAPSE_RANGE) {
-		unsigned int blksize_mask = i_blocksize(inode) - 1;
-
-		if (offset & blksize_mask || len & blksize_mask) {
+		if ((offset | len) & blkmask) {
 			error = -EINVAL;
 			goto out_unlock;
 		}
@@ -872,10 +872,9 @@ xfs_file_fallocate(
 		if (error)
 			goto out_unlock;
 	} else if (mode & FALLOC_FL_INSERT_RANGE) {
-		unsigned int	blksize_mask = i_blocksize(inode) - 1;
 		loff_t		isize = i_size_read(inode);
 
-		if (offset & blksize_mask || len & blksize_mask) {
+		if ((offset | len) & blkmask) {
 			error = -EINVAL;
 			goto out_unlock;
 		}
@@ -917,7 +916,6 @@ xfs_file_fallocate(
 			 *   2.) If prealloc returns ENOSPC, the file range is
 			 *       still zero-valued by virtue of the hole punch.
 			 */
-			unsigned int blksize = i_blocksize(inode);
 
 			trace_xfs_zero_file_space(ip);
 
