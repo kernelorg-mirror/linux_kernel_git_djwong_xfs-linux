@@ -1076,14 +1076,6 @@ xfs_reflink_remap_extent(
 	int			nimaps;
 	int			error;
 
-	/*
-	 * If the realtime extent size is larger than 1 block, we have to move
-	 * unwritten extents because the fundamental allocation unit is larger
-	 * than a single block.
-	 */
-	if (XFS_IS_REALTIME_INODE(ip) && xfs_is_reflink_inode(ip) &&
-	    ip->i_mount->m_sb.sb_rextsize > 1)
-		dmap_written = xfs_bmap_is_real_extent(dmap);
 retry:
 	/* Start a rolling transaction to switch the mappings */
 	resblks = XFS_EXTENTADD_SPACE_RES(mp, XFS_DATA_FORK);
@@ -1282,6 +1274,15 @@ xfs_reflink_remap_blocks(
 	len = min_t(xfs_filblks_t, XFS_B_TO_FSB(mp, remap_len),
 			XFS_MAX_FILEOFF);
 
+	/*
+	 * Make sure the end is aligned with a rt extent (if desired), since
+	 * the end of the range could be EOF.
+	 */
+	if (XFS_IS_REALTIME_INODE(dest) && xfs_is_reflink_inode(dest) &&
+	    mp->m_sb.sb_rextsize > 1) {
+		len = round_up(len, mp->m_sb.sb_rextsize);
+	}
+
 	trace_xfs_reflink_remap_blocks(src, srcoff, len, dest, destoff);
 
 	while (len > 0) {
@@ -1356,6 +1357,79 @@ xfs_reflink_zero_posteof(
 }
 
 /*
+ * Convert all unwritten extents to written so that we can share them.  The
+ * reflink prep function already flushed all dirty pages to disk, so we can
+ * take care of this without going back to the VFS.
+ */
+static int
+xfs_reflink_convert_unwritten(
+	struct xfs_inode	*src,
+	struct xfs_inode	*dst,
+	loff_t			pos,
+	loff_t			len)
+{
+	struct xfs_bmbt_irec	irec;
+	struct xfs_trans	*tp;
+	struct xfs_mount	*mp = src->i_mount;
+	xfs_fileoff_t		off = XFS_B_TO_FSBT(mp, pos);
+	xfs_fileoff_t		endoff;
+	unsigned int		resblks;
+	int			ret;
+
+	endoff = round_up(XFS_B_TO_FSB(mp, pos + len), mp->m_sb.sb_rextsize);
+	while (off < endoff) {
+		int		nmap = 1;
+
+		resblks = XFS_DIOSTRAT_SPACE_RES(mp, 1);
+		ret = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, 0, 0,
+				&tp);
+		if (ret)
+			return ret;
+
+		xfs_ilock(src, XFS_ILOCK_EXCL);
+		xfs_trans_ijoin(tp, src, XFS_ILOCK_EXCL);
+
+		/* Read the mapping.  If we don't find a hole... */
+		ret = xfs_bmapi_read(src, off, endoff - off, &irec, &nmap, 0);
+		if (ret)
+			goto err;
+		if (nmap != 1) {
+		       ASSERT(0);
+		       ret = -EIO;
+		       goto err;
+		}
+		if (irec.br_startblock == HOLESTARTBLOCK) {
+			xfs_trans_cancel(tp);
+			off += irec.br_blockcount;
+			continue;
+		}
+
+		/* ...make sure it gets converted to written. */
+		nmap = 1;
+		ret = xfs_bmapi_write(tp, src, off, endoff - off,
+				XFS_BMAPI_CONVERT | XFS_BMAPI_ZERO, 0, &irec,
+				&nmap);
+		if (ret)
+			goto err;
+		if (nmap != 1 || irec.br_state != XFS_EXT_NORM) {
+			ASSERT(0);
+			ret = -EIO;
+			goto err;
+		}
+		ret = xfs_trans_commit(tp);
+		if (ret)
+			return ret;
+
+		off += irec.br_blockcount;
+	}
+
+	return 0;
+err:
+	xfs_trans_cancel(tp);
+	return ret;
+}
+
+/*
  * Prepare two files for range cloning.  Upon a successful return both inodes
  * will have the iolock and mmaplock held, the page cache of the out file will
  * be truncated, and any leases on the out file will have been broken.  This
@@ -1419,6 +1493,17 @@ xfs_reflink_remap_prep(
 			xfs_inode_alloc_blocksize(dest));
 	if (ret || *len == 0)
 		goto out_unlock;
+
+	/*
+	 * If the fundamental allocation unit is larger than a block, forcibly
+	 * convert the source file's unwritten extents to written so that we
+	 * can share the whole rt extent.
+	 */
+	if (XFS_IS_REALTIME_INODE(src) && src->i_mount->m_sb.sb_rextsize > 1) {
+		ret = xfs_reflink_convert_unwritten(src, dest, pos_in, *len);
+		if (ret)
+			return ret;
+	}
 
 	/* Attach dquots to dest inode before changing block map */
 	ret = xfs_qm_dqattach(dest);
