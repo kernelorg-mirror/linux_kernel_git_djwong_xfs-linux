@@ -23,6 +23,7 @@
 #include "xfs_ag_resv.h"
 #include "xfs_ag.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_rtrefcount_btree.h"
 
 /*
  * Per-AG Block Reservations
@@ -263,6 +264,10 @@ xfs_rt_resv_init(
 		ask = used = 0;
 
 		error = xfs_rtrmapbt_calc_reserves(mp, tp, &ask, &used);
+		if (error)
+			return error;
+
+		error = xfs_rtrefcountbt_calc_reserves(mp, tp, &ask, &used);
 		if (error)
 			return error;
 
