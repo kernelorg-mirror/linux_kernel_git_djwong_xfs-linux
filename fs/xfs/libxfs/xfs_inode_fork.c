@@ -259,6 +259,11 @@ xfs_iformat_data_fork(
 			return xfs_iformat_extents(ip, dip, XFS_DATA_FORK);
 		case XFS_DINODE_FMT_BTREE:
 			return xfs_iformat_btree(ip, dip, XFS_DATA_FORK);
+		case XFS_DINODE_FMT_RMAP:
+			if (!xfs_sb_version_hasrtrmapbt(&ip->i_mount->m_sb))
+				return -EFSCORRUPTED;
+			ASSERT(0); /* to be implemented later */
+			return -EFSCORRUPTED;
 		default:
 			xfs_inode_verifier_error(ip, -EFSCORRUPTED, __func__,
 					dip, sizeof(*dip), __this_address);
@@ -633,6 +638,10 @@ xfs_iflush_fork(
 			xfs_dinode_put_rdev(dip,
 					linux_to_xfs_dev_t(VFS_I(ip)->i_rdev));
 		}
+		break;
+
+	case XFS_DINODE_FMT_RMAP:
+		ASSERT(0); /* to be implemented later */
 		break;
 
 	default:
