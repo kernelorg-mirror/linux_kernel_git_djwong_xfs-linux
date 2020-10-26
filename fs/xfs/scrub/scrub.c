@@ -396,7 +396,7 @@ static const struct xchk_meta_ops meta_scrub_ops[] = {
 		.setup	= xchk_setup_rtrefcountbt,
 		.scrub	= xchk_rtrefcountbt,
 		.has	= xfs_sb_version_hasrtreflink,
-		.repair	= xrep_notsupported,
+		.repair	= xrep_rtrefcountbt,
 	},
 };
 

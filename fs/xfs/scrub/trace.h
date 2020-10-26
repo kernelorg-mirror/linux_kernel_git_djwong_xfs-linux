@@ -1451,6 +1451,29 @@ DEFINE_EVENT(xrep_rtrmap_class, name, \
 	TP_ARGS(mp, fsbno, len, owner, offset, flags))
 DEFINE_REPAIR_RTRMAP_EVENT(xrep_rtrmap_found);
 
+TRACE_EVENT(xrep_rtrefc_found,
+	TP_PROTO(struct xfs_mount *mp, xfs_fsblock_t startblock,
+		xfs_filblks_t blockcount, xfs_nlink_t refcount),
+	TP_ARGS(mp, startblock, blockcount, refcount),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_fsblock_t, startblock)
+		__field(xfs_filblks_t, blockcount)
+		__field(xfs_nlink_t, refcount)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->startblock = startblock;
+		__entry->blockcount = blockcount;
+		__entry->refcount = refcount;
+	),
+	TP_printk("dev %d:%d bno %llu len %llu refcount %u",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->startblock,
+		  __entry->blockcount,
+		  __entry->refcount)
+)
+
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
 
 #endif /* _TRACE_XFS_SCRUB_TRACE_H */
