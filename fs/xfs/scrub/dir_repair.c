@@ -1103,11 +1103,16 @@ xrep_dir_validate_parent(
 
 	/*
 	 * If the directory salvage scan found no parent or found an obviously
-	 * incorrect parent, jump to the filesystem scan.
+	 * incorrect parent, try asking the dcache for the parent.
+	 *
+	 * If the dcache doesn't know about a parent or the parent seems
+	 * obviously incorrect, jump to the filesystem scan.
 	 *
 	 * Otherwise, if the alleged parent seems plausible, scan the directory
 	 * to make sure it really points to us.
 	 */
+	if (!xrep_parent_acceptable(sc, rd->parent_ino))
+		rd->parent_ino = xrep_parent_check_dcache(sc->ip);
 	if (!xrep_parent_acceptable(sc, rd->parent_ino))
 		goto scan;
 
