@@ -373,7 +373,7 @@ xfs_reflink_allocate_cow(
 	xfs_fileoff_t		offset_fsb = imap->br_startoff;
 	xfs_filblks_t		count_fsb = imap->br_blockcount;
 	xfs_filblks_t		resaligned;
-	xfs_extlen_t		resblks = 0;
+	xfs_extlen_t		dres = 0, rres = 0;
 	bool			found;
 	bool			cleared_space = false;
 	int			nimaps, error = 0;
@@ -392,11 +392,15 @@ xfs_reflink_allocate_cow(
 
 	resaligned = xfs_aligned_fsb_count(imap->br_startoff,
 		imap->br_blockcount, xfs_get_cowextsz_hint(ip));
-	resblks = XFS_DIOSTRAT_SPACE_RES(mp, resaligned);
+	if (XFS_IS_REALTIME_INODE(ip))
+		rres = resaligned;
+	else
+		dres = resaligned;
+	dres += XFS_DIOSTRAT_SPACE_RES(mp, resaligned);
 
 	xfs_iunlock(ip, *lockmode);
 retry:
-	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, 0, 0, &tp);
+	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, dres, rres, 0, &tp);
 	/*
 	 * We weren't able to reserve enough space to handle copy on write.
 	 * Flush any disk space that was being held in the hopes of speeding up
@@ -430,7 +434,12 @@ retry:
 		goto convert;
 	}
 
-	error = xfs_trans_reserve_quota_nblks(tp, ip, resblks, 0,
+	error = xfs_trans_reserve_quota_nblks(tp, ip, rres, 0,
+			XFS_QMOPT_RES_RTBLKS);
+	if (error)
+		goto out_trans_cancel;
+
+	error = xfs_trans_reserve_quota_nblks(tp, ip, dres, 0,
 			XFS_QMOPT_RES_REGBLKS);
 	/*
 	 * We weren't able to reserve enough quota to handle copy on write.
@@ -450,7 +459,7 @@ retry:
 		return error;
 	}
 	if (error)
-		goto out_trans_cancel;
+		goto out_rtunreserve;
 
 	xfs_trans_ijoin(tp, ip, 0);
 
@@ -486,8 +495,11 @@ convert:
 	return xfs_reflink_convert_cow_locked(ip, offset_fsb, count_fsb);
 
 out_unreserve:
-	xfs_trans_unreserve_quota_nblks(tp, ip, (long)resblks, 0,
+	xfs_trans_unreserve_quota_nblks(tp, ip, (long)dres, 0,
 			XFS_QMOPT_RES_REGBLKS);
+out_rtunreserve:
+	xfs_trans_unreserve_quota_nblks(tp, ip, (long)rres, 0,
+			XFS_QMOPT_RES_RTBLKS);
 out_trans_cancel:
 	xfs_trans_cancel(tp);
 	return error;
@@ -547,7 +559,8 @@ xfs_reflink_cancel_cow_blocks(
 					XFS_IS_REALTIME_INODE(ip));
 
 			xfs_bmap_add_free(*tpp, del.br_startblock,
-					  del.br_blockcount, NULL, false);
+					  del.br_blockcount, NULL,
+					  XFS_IS_REALTIME_INODE(ip));
 
 			/* Roll the transaction */
 			error = xfs_defer_finish(tpp);
