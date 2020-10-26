@@ -2776,6 +2776,37 @@ DEFINE_AG_RESV_EVENT(xfs_ag_resv_needed);
 DEFINE_AG_ERROR_EVENT(xfs_ag_resv_free_error);
 DEFINE_AG_ERROR_EVENT(xfs_ag_resv_init_error);
 
+DECLARE_EVENT_CLASS(xfs_rt_resv_class,
+	TP_PROTO(struct xfs_mount *mp, xfs_filblks_t len),
+	TP_ARGS(mp, len),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned long long, freeblks)
+		__field(unsigned long long, reserved)
+		__field(unsigned long long, asked)
+		__field(unsigned long long, len)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->freeblks = percpu_counter_sum(&mp->m_fdblocks);
+		__entry->reserved = mp->m_rtmeta_resv.ar_reserved;
+		__entry->asked = mp->m_rtmeta_resv.ar_asked;
+		__entry->len = len;
+	),
+	TP_printk("dev %d:%d freeblks %llu resv %llu ask %llu len %llu",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->freeblks,
+		  __entry->reserved,
+		  __entry->asked,
+		  __entry->len)
+)
+#define DEFINE_RT_RESV_EVENT(name) \
+DEFINE_EVENT(xfs_rt_resv_class, name, \
+	TP_PROTO(struct xfs_mount *mp, xfs_filblks_t len), \
+	TP_ARGS(mp, len))
+DEFINE_RT_RESV_EVENT(xfs_rt_resv_init);
+DEFINE_RT_RESV_EVENT(xfs_rt_resv_free);
+
 /* refcount tracepoint classes */
 
 /* reuse the discard trace class for agbno/aglen-based traces */

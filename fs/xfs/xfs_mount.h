@@ -55,6 +55,16 @@ struct xfs_error_cfg {
 	long		retry_timeout;	/* in jiffies, -1 = infinite */
 };
 
+/* metadata object block reservation data structure */
+struct xfs_ag_resv {
+	/* number of blocks originally reserved here */
+	xfs_filblks_t			ar_orig_reserved;
+	/* number of blocks reserved here */
+	xfs_filblks_t			ar_reserved;
+	/* number of blocks originally asked for */
+	xfs_filblks_t			ar_asked;
+};
+
 /*
  * The struct xfsmount layout is optimised to separate read-mostly variables
  * from variables that are frequently modified. We put the read-mostly variables
@@ -227,6 +237,9 @@ typedef struct xfs_mount {
 	 * while a repair freeze is in progress.
 	 */
 	struct mutex		m_scrub_freeze;
+
+	/* Blocks reserved for all kinds of inode-based (rt) metadata. */
+	struct xfs_ag_resv	m_rtmeta_resv;
 } xfs_mount_t;
 
 #define M_IGEO(mp)		(&(mp)->m_ino_geo)
@@ -304,16 +317,6 @@ xfs_daddr_to_agbno(struct xfs_mount *mp, xfs_daddr_t d)
 	xfs_rfsblock_t ld = XFS_BB_TO_FSBT(mp, d);
 	return (xfs_agblock_t) do_div(ld, mp->m_sb.sb_agblocks);
 }
-
-/* per-AG block reservation data structures*/
-struct xfs_ag_resv {
-	/* number of blocks originally reserved here */
-	xfs_filblks_t			ar_orig_reserved;
-	/* number of blocks reserved here */
-	xfs_filblks_t			ar_reserved;
-	/* number of blocks originally asked for */
-	xfs_filblks_t			ar_asked;
-};
 
 /*
  * Per-ag incore structure, copies of information in agf and agi, to improve the
@@ -407,6 +410,8 @@ xfs_perag_resv(
 		return &pag->pag_meta_resv;
 	case XFS_AG_RESV_RMAPBT:
 		return &pag->pag_rmapbt_resv;
+	case XFS_AG_RESV_RTMETADATA:
+		return &pag->pag_mount->m_rtmeta_resv;
 	default:
 		return NULL;
 	}
