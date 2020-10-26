@@ -96,18 +96,8 @@ xchk_setup_rtsummary(
 	if (!sc->buf)
 		return -ENOMEM;
 
-	/*
-	 * Locking order requires us to take the rtbitmap first.  We must be
-	 * careful to unlock it ourselves when we are done with the rtbitmap
-	 * file since the scrub infrastructure won't do that for us.
-	 */
-	xfs_ilock(mp->m_rbmip, XFS_ILOCK_SHARED | XFS_ILOCK_RTBITMAP);
-
-	/* ...and then we can lock the rtsummary inode. */
-	sc->ilock_flags = XFS_ILOCK_EXCL | XFS_ILOCK_RTSUM;
+	xchk_rt_init(sc, &sc->sr);
 	sc->ip = sc->mp->m_rsumip;
-	xfs_ilock(sc->ip, sc->ilock_flags);
-
 	return 0;
 }
 
@@ -320,7 +310,7 @@ xchk_rtsummary(
 	/* Invoke the fork scrubber. */
 	error = xchk_metadata_inode_forks(sc);
 	if (error || (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT))
-		goto out_rbm;
+		return error;
 
 	/* Construct the new summary file from the rtbitmap. */
 	error = xchk_rtsum_compute(sc);
@@ -331,17 +321,11 @@ xchk_rtsummary(
 		 */
 		xchk_ino_xref_set_corrupt(sc, mp->m_rbmip->i_ino);
 		xchk_set_incomplete(sc);
-		error = 0;
-		goto out_rbm;
+		return 0;
 	}
 	if (error)
-		goto out_rbm;
+		return error;
 
 	/* Does the computed summary file match the actual rtsummary file? */
-	error = xchk_rtsum_compare(sc);
-
-out_rbm:
-	/* Unlock the rtbitmap since we're done with it. */
-	xfs_iunlock(mp->m_rbmip, XFS_ILOCK_SHARED | XFS_ILOCK_RTBITMAP);
-	return error;
+	return xchk_rtsum_compare(sc);
 }
