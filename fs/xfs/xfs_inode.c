@@ -694,28 +694,25 @@ xfs_inode_inherit_flags2(
  */
 static int
 xfs_ialloc(
-	xfs_trans_t	*tp,
-	xfs_inode_t	*pip,
-	umode_t		mode,
-	xfs_nlink_t	nlink,
-	dev_t		rdev,
-	prid_t		prid,
-	xfs_buf_t	**ialloc_context,
-	xfs_inode_t	**ipp)
+	struct xfs_trans		*tp,
+	const struct xfs_ialloc_args	*args,
+	struct xfs_buf			**ialloc_context,
+	struct xfs_inode		**ipp)
 {
-	struct xfs_mount *mp = tp->t_mountp;
-	xfs_ino_t	ino;
-	xfs_inode_t	*ip;
-	uint		flags;
-	int		error;
-	struct timespec64 tv;
-	struct inode	*inode;
+	struct xfs_mount		*mp = tp->t_mountp;
+	struct xfs_inode		*pip = args->pip;
+	struct xfs_inode		*ip;
+	struct inode			*inode;
+	xfs_ino_t			ino;
+	uint				flags;
+	int				error;
+	struct timespec64		tv;
 
 	/*
 	 * Call the space management code to pick
 	 * the on-disk inode to be allocated.
 	 */
-	error = xfs_dialloc(tp, pip ? pip->i_ino : 0, mode,
+	error = xfs_dialloc(tp, pip ? pip->i_ino : 0, args->mode,
 			    ialloc_context, &ino);
 	if (error)
 		return error;
@@ -750,18 +747,18 @@ xfs_ialloc(
 		return error;
 	ASSERT(ip != NULL);
 	inode = VFS_I(ip);
-	inode->i_mode = mode;
-	set_nlink(inode, nlink);
-	inode->i_uid = current_fsuid();
-	inode->i_rdev = rdev;
-	ip->i_d.di_projid = prid;
+	inode->i_mode = args->mode;
+	set_nlink(inode, args->nlink);
+	inode->i_uid = args->uid;
+	inode->i_rdev = args->rdev;
+	ip->i_d.di_projid = args->prid;
 
 	if (pip && XFS_INHERIT_GID(pip)) {
 		inode->i_gid = VFS_I(pip)->i_gid;
-		if ((VFS_I(pip)->i_mode & S_ISGID) && S_ISDIR(mode))
+		if ((VFS_I(pip)->i_mode & S_ISGID) && S_ISDIR(args->mode))
 			inode->i_mode |= S_ISGID;
 	} else {
-		inode->i_gid = current_fsgid();
+		inode->i_gid = args->gid;
 	}
 
 	/*
@@ -795,7 +792,7 @@ xfs_ialloc(
 	}
 
 	flags = XFS_ILOG_CORE;
-	switch (mode & S_IFMT) {
+	switch (args->mode & S_IFMT) {
 	case S_IFIFO:
 	case S_IFCHR:
 	case S_IFBLK:
@@ -857,6 +854,15 @@ xfs_dir_ialloc(
 	xfs_inode_t	**ipp)		/* pointer to inode; it will be
 					   locked. */
 {
+	struct xfs_ialloc_args	args = {
+		.pip	= dp,
+		.uid	= current_fsuid(),
+		.gid	= current_fsgid(),
+		.prid	= prid,
+		.nlink	= nlink,
+		.rdev	= rdev,
+		.mode	= mode,
+	};
 	xfs_trans_t	*tp;
 	xfs_inode_t	*ip;
 	xfs_buf_t	*ialloc_context = NULL;
@@ -882,8 +888,7 @@ xfs_dir_ialloc(
 	 * transaction commit so that no other process can steal
 	 * the inode(s) that we've just allocated.
 	 */
-	code = xfs_ialloc(tp, dp, mode, nlink, rdev, prid, &ialloc_context,
-			&ip);
+	code = xfs_ialloc(tp, &args, &ialloc_context, &ip);
 
 	/*
 	 * Return an error if we were unable to allocate a new inode.
@@ -952,8 +957,7 @@ xfs_dir_ialloc(
 		 * other allocations in this allocation group,
 		 * this call should always succeed.
 		 */
-		code = xfs_ialloc(tp, dp, mode, nlink, rdev, prid,
-				  &ialloc_context, &ip);
+		code = xfs_ialloc(tp, &args, &ialloc_context, &ip);
 
 		/*
 		 * If we get an error at this point, return to the caller
