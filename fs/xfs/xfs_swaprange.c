@@ -185,6 +185,40 @@ xfs_swap_range_reserve_quota(
 			res->ip2_rtbcount, XFS_QMOPT_RES_RTBLKS);
 }
 
+/* Decide if we can use xfs_swapext(). */
+static inline bool
+xfs_swapext_use_deferred(
+	struct xfs_mount		*mp,
+	const struct file_swap_range	*fsr)
+{
+	/* Fully recoverable extent swapping? Yes! */
+	if (xfs_sb_version_hasatomicswap(&mp->m_sb))
+		return true;
+
+	/* Non-atomic swap requested and we have the deferred bmap log items */
+	if ((fsr->flags & FILE_SWAP_RANGE_NONATOMIC) &&
+	    (xfs_sb_version_hasreflink(&mp->m_sb) ||
+	     xfs_sb_version_hasrmapbt(&mp->m_sb)))
+		return true;
+
+	return false;
+}
+
+/* Decide if we can use the old data fork exchange code. */
+static inline bool
+xfs_swapext_use_fork_exchange(
+	const struct file_swap_range	*fsr,
+	struct xfs_inode		*ip1,
+	struct xfs_inode		*ip2)
+{
+	return	(fsr->flags & FILE_SWAP_RANGE_NONATOMIC) &&
+		(fsr->flags & FILE_SWAP_RANGE_FULL_FILES) &&
+		!(fsr->flags & FILE_SWAP_RANGE_TO_EOF) &&
+		fsr->file1_offset == 0 && fsr->file2_offset == 0 &&
+		fsr->length == ip1->i_d.di_size &&
+		fsr->length == ip2->i_d.di_size;
+}
+
 /* Swap parts of two files. */
 int
 xfs_swap_range(
@@ -203,9 +237,6 @@ xfs_swap_range(
 	struct xfs_trans	*tp;
 	loff_t			req_len;
 	int			error;
-
-	if (!xfs_sb_version_hasatomicswap(&mp->m_sb))
-		return -EOPNOTSUPP;
 
 	if (fsr->flags & FILE_SWAP_RANGE_TO_EOF)
 		req.flags |= XFS_SWAPEXT_SET_SIZES;
@@ -277,20 +308,52 @@ xfs_swap_range(
 	if (error)
 		goto out_trans_cancel;
 
-	/* If we got this far on a dry run, all parameters are ok. */
-	if (fsr->flags & FILE_SWAP_RANGE_DRY_RUN)
-		goto out_trans_cancel;
+	/* Perform the file range swap... */
+	if (xfs_swapext_use_deferred(mp, fsr)) {
+		/* If we got this far on a dry run, all parameters are ok. */
+		if (fsr->flags & FILE_SWAP_RANGE_DRY_RUN)
+			goto out_trans_cancel;
 
-	/* Update the mtime and ctime of both files. */
-	if (private_flags & XFS_SWAP_RANGE_UPD_CMTIME1)
-		xfs_trans_ichgtime(tp, ip1,
-				XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
-	if (private_flags & XFS_SWAP_RANGE_UPD_CMTIME2)
-		xfs_trans_ichgtime(tp, ip2,
-				XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
+		/* Update the mtime and ctime of both files. */
+		if (private_flags & XFS_SWAP_RANGE_UPD_CMTIME1)
+			xfs_trans_ichgtime(tp, ip1,
+					XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
+		if (private_flags & XFS_SWAP_RANGE_UPD_CMTIME2)
+			xfs_trans_ichgtime(tp, ip2,
+					XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
 
-	/* Perform the file range swap. */
-	error = xfs_swapext(&tp, &req);
+		/* ...by using the deferred op swapext, since it's available. */
+		error = xfs_swapext(&tp, &req);
+	} else if (xfs_swapext_use_fork_exchange(fsr, ip1, ip2)) {
+		/*
+		 * ...by using the old bmap fork exchange code, if we're a
+		 * defrag tool doing a full file swap.
+		 */
+		error = xfs_swap_extents_check_format(ip2, ip1);
+		if (error) {
+			xfs_notice(mp,
+		"%s: inode 0x%llx format is incompatible for exchanging.",
+					__func__, ip2->i_ino);
+			goto out_trans_cancel;
+		}
+
+		/* If we got this far on a dry run, all parameters are ok. */
+		if (fsr->flags & FILE_SWAP_RANGE_DRY_RUN)
+			goto out_trans_cancel;
+
+		/* Update the mtime and ctime of both files. */
+		if (private_flags & XFS_SWAP_RANGE_UPD_CMTIME1)
+			xfs_trans_ichgtime(tp, ip1,
+					XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
+		if (private_flags & XFS_SWAP_RANGE_UPD_CMTIME2)
+			xfs_trans_ichgtime(tp, ip2,
+					XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
+
+		error = xfs_swap_extent_forks(&tp, &req);
+	} else {
+		/* ...or not at all, because we cannot do it. */
+		error = -EOPNOTSUPP;
+	}
 	if (error)
 		goto out_trans_cancel;
 
