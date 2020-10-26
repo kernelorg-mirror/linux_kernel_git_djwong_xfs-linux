@@ -158,6 +158,8 @@ xchk_teardown(
 	int			err2;
 
 	xchk_ag_free(sc, &sc->sa);
+	xchk_rt_btcur_free(&sc->sr);
+
 	if (sc->tp) {
 		if (error == 0 && (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR))
 			error = xfs_trans_commit(sc->tp);
@@ -381,6 +383,13 @@ static const struct xchk_meta_ops meta_scrub_ops[] = {
 		.setup	= xchk_setup_fs,
 		.scrub	= xchk_health_record,
 		.repair = xrep_notsupported,
+	},
+	[XFS_SCRUB_TYPE_RTRMAPBT] = {	/* realtime rmapbt */
+		.type	= ST_FS,
+		.setup	= xchk_setup_rtrmapbt,
+		.scrub	= xchk_rtrmapbt,
+		.has	= xfs_sb_version_hasrtrmapbt,
+		.repair	= xrep_notsupported,
 	},
 };
 
