@@ -125,14 +125,21 @@ static inline bool
 xchk_bmap_get_rmap(
 	struct xchk_bmap_info	*info,
 	struct xfs_bmbt_irec	*irec,
-	xfs_agblock_t		agbno,
+	xfs_fsblock_t		bno,
 	uint64_t		owner,
 	struct xfs_rmap_irec	*rmap)
 {
+	struct xfs_btree_cur	**curp = &info->sc->sa.rmap_cur;
 	xfs_fileoff_t		offset;
 	unsigned int		rflags = 0;
 	int			has_rmap;
 	int			error;
+
+	if (xfs_ifork_is_realtime(info->sc->ip, info->whichfork))
+		curp = &info->sc->sr.rmap_cur;
+
+	if (*curp == NULL)
+		return false;
 
 	if (info->whichfork == XFS_ATTR_FORK)
 		rflags |= XFS_RMAP_ATTR_FORK;
@@ -154,10 +161,9 @@ xchk_bmap_get_rmap(
 	 * range rmap lookup to make sure we get the correct owner/offset.
 	 */
 	if (info->is_shared) {
-		error = xfs_rmap_lookup_le_range(info->sc->sa.rmap_cur, agbno,
-				owner, offset, rflags, rmap, &has_rmap);
-		if (!xchk_should_check_xref(info->sc, &error,
-				&info->sc->sa.rmap_cur))
+		error = xfs_rmap_lookup_le_range(*curp, bno, owner, offset,
+				rflags, rmap, &has_rmap);
+		if (!xchk_should_check_xref(info->sc, &error, curp))
 			return false;
 		goto out;
 	}
@@ -165,17 +171,15 @@ xchk_bmap_get_rmap(
 	/*
 	 * Otherwise, use the (faster) regular lookup.
 	 */
-	error = xfs_rmap_lookup_le(info->sc->sa.rmap_cur, agbno, 0, owner,
-			offset, rflags, &has_rmap);
-	if (!xchk_should_check_xref(info->sc, &error,
-			&info->sc->sa.rmap_cur))
+	error = xfs_rmap_lookup_le(*curp, bno, 0, owner, offset, rflags,
+			&has_rmap);
+	if (!xchk_should_check_xref(info->sc, &error, curp))
 		return false;
 	if (!has_rmap)
 		goto out;
 
-	error = xfs_rmap_get_rec(info->sc->sa.rmap_cur, rmap, &has_rmap);
-	if (!xchk_should_check_xref(info->sc, &error,
-			&info->sc->sa.rmap_cur))
+	error = xfs_rmap_get_rec(*curp, rmap, &has_rmap);
+	if (!xchk_should_check_xref(info->sc, &error, curp))
 		return false;
 
 out:
@@ -232,13 +236,13 @@ STATIC void
 xchk_bmap_xref_rmap(
 	struct xchk_bmap_info	*info,
 	struct xfs_bmbt_irec	*irec,
-	xfs_agblock_t		agbno)
+	xfs_fsblock_t		bno)
 {
 	struct xfs_rmap_irec	rmap;
 	unsigned long long	rmap_end;
 	uint64_t		owner;
 
-	if (!info->sc->sa.rmap_cur || xchk_skip_xref(info->sc->sm))
+	if (xchk_skip_xref(info->sc->sm))
 		return;
 
 	if (info->whichfork == XFS_COW_FORK)
@@ -247,13 +251,12 @@ xchk_bmap_xref_rmap(
 		owner = info->sc->ip->i_ino;
 
 	/* Find the rmap record for this irec. */
-	if (!xchk_bmap_get_rmap(info, irec, agbno, owner, &rmap))
+	if (!xchk_bmap_get_rmap(info, irec, bno, owner, &rmap))
 		return;
 
 	/* Check the rmap. */
 	rmap_end = (unsigned long long)rmap.rm_startblock + rmap.rm_blockcount;
-	if (rmap.rm_startblock > agbno ||
-	    agbno + irec->br_blockcount > rmap_end)
+	if (rmap.rm_startblock > bno || bno + irec->br_blockcount > rmap_end)
 		xchk_fblock_xref_set_corrupt(info->sc, info->whichfork,
 				irec->br_startoff);
 
@@ -336,6 +339,7 @@ xchk_bmap_rt_iextent_xref(
 
 	xchk_xref_is_used_rt_space(info->sc, irec->br_startblock,
 			irec->br_blockcount);
+	xchk_bmap_xref_rmap(info, irec, irec->br_startblock);
 
 	xchk_rt_btcur_free(&info->sc->sr);
 	xchk_rt_unlock(info->sc, &info->sc->sr);
