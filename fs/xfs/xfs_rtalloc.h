@@ -137,7 +137,9 @@ int xfs_rtalloc_extent_is_free(struct xfs_mount *mp, struct xfs_trans *tp,
 			       bool *is_free);
 
 #define XFS_RTLOCK_ALLOC	(1 << 0) /* rt allocation */
-#define XFS_RTLOCK_ALL		(XFS_RTLOCK_ALLOC)
+#define XFS_RTLOCK_RMAP		(1 << 1) /* rmap operations */
+#define XFS_RTLOCK_ALL		(XFS_RTLOCK_ALLOC | \
+				 XFS_RTLOCK_RMAP)
 
 void xfs_rtlock(struct xfs_trans *tp, struct xfs_mount *mp,
 		unsigned int rtlock_flags);
