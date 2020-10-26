@@ -1717,9 +1717,10 @@ xfs_fc_fill_super(
 "EXPERIMENTAL metadata directory feature in use. Use at your own risk!");
 
 	if (xfs_sb_version_hasreflink(&mp->m_sb)) {
-		if (mp->m_sb.sb_rblocks) {
+		if (mp->m_sb.sb_rblocks && mp->m_sb.sb_rextsize != 1) {
 			xfs_alert(mp,
-	"reflink not compatible with realtime device!");
+	"reflink not compatible with realtime device with rextsize %u!",
+					mp->m_sb.sb_rextsize);
 			error = -EINVAL;
 			goto out_filestream_unmount;
 		}
