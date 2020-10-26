@@ -1688,9 +1688,15 @@ xfs_fc_fill_super(
  "EXPERIMENTAL inode btree counters feature in use. Use at your own risk!");
 
 	if (xfs_sb_version_hasatomicswap(&mp->m_sb)) {
-		if (xfs_sb_version_hasrealtime(&mp->m_sb)) {
+		/*
+		 * Atomic extent swapping doesn't support rt extent sizes that
+		 * aren't an even power of two because the VFS helpers aren't
+		 * built to handle such things.
+		 */
+		if (!is_power_of_2(mp->m_sb.sb_rextsize)) {
 			xfs_alert(mp,
- "Atomic file range swap cannot realtime files!");
+ "Atomic file range swap cannot handle non-power-of-2 rextsize %u blocks!",
+					mp->m_sb.sb_rextsize);
 			error = -EINVAL;
 			goto out_filestream_unmount;
 		}
