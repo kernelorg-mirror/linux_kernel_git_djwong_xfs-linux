@@ -34,6 +34,9 @@ struct xfs_dquot_res {
 	/* Total resources allocated. */
 	xfs_qcnt_t		count;
 
+	/* Resources that would be freed by forcing inode inactivation. */
+	xfs_qcnt_t		inactive;
+
 	/* Absolute and preferred limits. */
 	xfs_qcnt_t		hardlimit;
 	xfs_qcnt_t		softlimit;
@@ -73,6 +76,9 @@ struct xfs_dquot {
 	struct xfs_dquot_res	q_rtb;	/* realtime blocks */
 
 	struct xfs_dq_logitem	q_logitem;
+
+	/* inactive inodes attached to this dquot */
+	uint64_t		q_ina_total;
 
 	xfs_qcnt_t		q_prealloc_lo_wmark;
 	xfs_qcnt_t		q_prealloc_hi_wmark;
