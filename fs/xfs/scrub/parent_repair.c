@@ -19,9 +19,11 @@
 #include "xfs_da_format.h"
 #include "xfs_da_btree.h"
 #include "xfs_dir2.h"
+#include "xfs_bmap_btree.h"
 #include "xfs_dir2_priv.h"
 #include "xfs_trans_space.h"
 #include "xfs_iwalk.h"
+#include "xfs_health.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
@@ -232,4 +234,103 @@ xrep_scan_for_parents(
 
 	return xfs_iwalk(sc->mp, sc->tp, 0, 0, xrep_parents_scan_inode, 0,
 			&rps);
+}
+
+/*
+ * Repairing Parent Pointers
+ * =========================
+ *
+ * Currently, only directories support parent pointers (in the form of '..'
+ * entries), so we simply scan the filesystem and update the '..' entry.
+ *
+ * Note that because the only parent pointer is the dotdot entry, we won't
+ * touch an unhealthy directory, since the directory repair code is perfectly
+ * capable of rebuilding a directory with the proper parent inode.
+ */
+struct xrep_parent {
+	struct xfs_scrub	*sc;
+
+	/* Potential parent pointer. */
+	xfs_ino_t		parent_ino;
+};
+
+/*
+ * If this directory entry points to the directory we're rebuilding, then the
+ * directory we're scanning is the parent.  Remember the parent.
+ */
+STATIC int
+xrep_parent_absorb(
+	struct xfs_inode	*dp,
+	struct xfs_name		*name,
+	unsigned int		dtype,
+	void			*data)
+{
+	struct xrep_parent	*rp = data;
+	int			error = 0;
+
+	/* Uhoh, more than one parent for a dir? */
+	if (rp->parent_ino != NULLFSINO)
+		return -EFSCORRUPTED;
+
+	if (xchk_should_terminate(rp->sc, &error))
+		return error;
+
+	/* We found a potential parent; remember this. */
+	rp->parent_ino = dp->i_ino;
+	return 0;
+}
+
+int
+xrep_parent(
+	struct xfs_scrub	*sc)
+{
+	struct xrep_parent	rp = {
+		.sc		= sc,
+		.parent_ino	= NULLFSINO,
+	};
+	unsigned int		sick, checked;
+	unsigned int		spaceres;
+	int			error;
+
+	/*
+	 * Avoid sick directories.  The parent pointer scrubber dropped the
+	 * ILOCK, but we still hold IOLOCK_EXCL on the directory, so there
+	 * shouldn't be anyone else clearing the directory's sick status.
+	 */
+	xfs_inode_measure_sickness(sc->ip, &sick, &checked);
+	if (sick & XFS_SICK_INO_DIR)
+		return -EFSCORRUPTED;
+
+	/*
+	 * Ask the dcache who it thinks the parent might be.  If that doesn't
+	 * pass muster, scan the entire filesystem for the directory's parent.
+	 */
+	rp.parent_ino = xrep_parent_check_dcache(sc->ip);
+	if (!xrep_parent_acceptable(sc, rp.parent_ino)) {
+		error = xrep_scan_for_parents(sc, sc->ip->i_ino,
+				xrep_parent_absorb, &rp);
+		if (error)
+			return error;
+	}
+
+	/* If we still don't have a parent, bail out. */
+	if (!xrep_parent_acceptable(sc, rp.parent_ino))
+		return 0;
+
+	trace_xrep_parent_dir(sc->ip, rp.parent_ino);
+
+	/* Reserve more space just in case we have to expand the dir. */
+	spaceres = XFS_RENAME_SPACE_RES(sc->mp, 2);
+	error = xfs_trans_reserve_more(sc->tp, spaceres, 0);
+	if (error)
+		return error;
+
+	/* Re-take the ILOCK, we're going to need it to modify the dir. */
+	sc->ilock_flags |= XFS_ILOCK_EXCL;
+	xfs_ilock(sc->ip, XFS_ILOCK_EXCL);
+
+	/* Replace the dotdot entry. */
+	xfs_trans_ijoin(sc->tp, sc->ip, 0);
+	return xfs_dir_replace(sc->tp, sc->ip, &xfs_name_dotdot, rp.parent_ino,
+			spaceres);
 }
