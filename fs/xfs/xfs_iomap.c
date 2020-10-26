@@ -905,6 +905,7 @@ xfs_buffered_write_iomap_begin(
 	struct xfs_iext_cursor	icur, ccur;
 	xfs_fsblock_t		prealloc_blocks = 0;
 	bool			eof = false, cow_eof = false, shared = false;
+	bool			cleared_space = false;
 	int			allocfork = XFS_DATA_FORK;
 	int			error = 0;
 
@@ -915,6 +916,7 @@ xfs_buffered_write_iomap_begin(
 
 	ASSERT(!XFS_IS_REALTIME_INODE(ip));
 
+start_over:
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
 
 	if (XFS_IS_CORRUPT(mp, !xfs_ifork_has_extents(&ip->i_df)) ||
@@ -1064,6 +1066,18 @@ retry:
 		break;
 	case -ENOSPC:
 	case -EDQUOT:
+		/*
+		 * If the delalloc reservation failed due to a lack of space,
+		 * try to flush inactive inodes to free some space.
+		 */
+		if (!cleared_space) {
+			cleared_space = true;
+			allocfork = XFS_DATA_FORK;
+			xfs_iunlock(ip, XFS_ILOCK_EXCL);
+			xfs_inactive_force(mp);
+			error = 0;
+			goto start_over;
+		}
 		/* retry without any preallocation */
 		trace_xfs_delalloc_enospc(ip, offset, count);
 		if (prealloc_blocks) {
