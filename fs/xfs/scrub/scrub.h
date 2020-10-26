@@ -64,6 +64,9 @@ struct xchk_ag {
 /* Btree cursors for the RT volume. */
 struct xchk_rt {
 	bool			locked:1;
+	bool			cursors:1;
+
+	struct xfs_btree_cur	*rmap_cur;
 };
 
 struct xfs_scrub {
@@ -141,6 +144,7 @@ int xchk_parent(struct xfs_scrub *sc);
 #ifdef CONFIG_XFS_RT
 int xchk_rtbitmap(struct xfs_scrub *sc);
 int xchk_rtsummary(struct xfs_scrub *sc);
+int xchk_rtrmapbt(struct xfs_scrub *sc);
 #else
 static inline int
 xchk_rtbitmap(struct xfs_scrub *sc)
@@ -149,6 +153,11 @@ xchk_rtbitmap(struct xfs_scrub *sc)
 }
 static inline int
 xchk_rtsummary(struct xfs_scrub *sc)
+{
+	return -ENOENT;
+}
+static inline int
+xchk_rtrmapbt(struct xfs_scrub *sc)
 {
 	return -ENOENT;
 }
