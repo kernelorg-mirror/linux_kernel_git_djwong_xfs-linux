@@ -458,9 +458,15 @@ xfs_cui_validate_phys(
 		return false;
 
 	end = refc->pe_startblock + refc->pe_len - 1;
-	if (!xfs_verify_fsbno(mp, refc->pe_startblock) ||
-	    !xfs_verify_fsbno(mp, end))
-		return false;
+	if (refc->pe_flags & XFS_REFCOUNT_EXTENT_REALTIME) {
+		if (!xfs_verify_rtbno(mp, refc->pe_startblock) ||
+		    !xfs_verify_rtbno(mp, end))
+			return false;
+	} else {
+		if (!xfs_verify_fsbno(mp, refc->pe_startblock) ||
+		    !xfs_verify_fsbno(mp, end))
+			return false;
+	}
 
 	return true;
 }
