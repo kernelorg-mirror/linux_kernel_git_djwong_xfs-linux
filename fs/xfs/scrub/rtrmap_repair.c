@@ -327,6 +327,7 @@ xrep_rtrmap_scan_inode(
 	int				error;
 
 	if (ino == mp->m_rrmapip->i_ino ||
+	    ino == mp->m_rrefcountip->i_ino ||
 	    ino == mp->m_rbmip->i_ino ||
 	    ino == mp->m_rsumip->i_ino)
 		return 0;
