@@ -94,7 +94,12 @@ xchk_rtrmapbt_helper(
 				irec.rm_blockcount - 1)))
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 
-	non_inode = XFS_RMAP_NON_INODE_OWNER(irec.rm_owner);
+	if (xfs_sb_version_hasrtreflink(&mp->m_sb) &&
+	    irec.rm_owner == XFS_RMAP_OWN_COW)
+		non_inode = false;
+	else
+		non_inode = XFS_RMAP_NON_INODE_OWNER(irec.rm_owner);
+
 	is_bmbt = irec.rm_flags & XFS_RMAP_BMBT_BLOCK;
 	is_attr = irec.rm_flags & XFS_RMAP_ATTR_FORK;
 
