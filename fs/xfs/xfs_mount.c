@@ -1047,7 +1047,8 @@ xfs_mountfs(
 	/* Clean out dquots that might be in memory after quotacheck. */
 	xfs_qm_unmount(mp);
 	/*
-	 * Cancel all delayed reclaim work and reclaim the inodes directly.
+	 * Shut down all pending inode inactivation work, which will also
+	 * cancel all delayed reclaim work and reclaim the inodes directly.
 	 * We have to do this /after/ rtunmount and qm_unmount because those
 	 * two will have scheduled delayed reclaim for the rt/quota inodes.
 	 *
@@ -1057,8 +1058,7 @@ xfs_mountfs(
 	 * qm_unmount_quotas and therefore rely on qm_unmount to release the
 	 * quota inodes.
 	 */
-	cancel_delayed_work_sync(&mp->m_reclaim_work);
-	xfs_reclaim_inodes(mp);
+	xfs_inactive_shutdown(mp);
 	xfs_health_unmount(mp);
  out_log_dealloc:
 	mp->m_flags |= XFS_MOUNT_UNMOUNTING;
@@ -1095,6 +1095,13 @@ xfs_unmountfs(
 {
 	uint64_t		resblks;
 	int			error;
+
+	/*
+	 * Perform all on-disk metadata updates required to inactivate inodes.
+	 * Since this can involve finobt updates, do it now before we lose the
+	 * per-AG space reservations.
+	 */
+	xfs_inactive_force(mp);
 
 	xfs_blockgc_stop(mp);
 	xfs_fs_unreserve_ag_blocks(mp);
@@ -1145,6 +1152,13 @@ xfs_unmountfs(
 	xfs_health_unmount(mp);
 
 	xfs_qm_unmount(mp);
+
+	/*
+	 * Kick off inode inactivation again to push the metadata inodes into
+	 * reclamation, then flush out all the work because we're going away
+	 * soon.
+	 */
+	xfs_inactive_shutdown(mp);
 
 	/*
 	 * Unreserve any blocks we have so that when we unmount we don't account
