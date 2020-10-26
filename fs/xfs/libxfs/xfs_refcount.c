@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0+
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2016 Oracle.  All Rights Reserved.
  * Author: Darrick J. Wong <darrick.wong@oracle.com>
@@ -33,9 +33,9 @@ enum xfs_refc_adjust_op {
 };
 
 STATIC int __xfs_refcount_cow_alloc(struct xfs_btree_cur *rcur,
-		xfs_agblock_t agbno, xfs_extlen_t aglen);
+		xfs_fsblock_t bno, xfs_filblks_t len);
 STATIC int __xfs_refcount_cow_free(struct xfs_btree_cur *rcur,
-		xfs_agblock_t agbno, xfs_extlen_t aglen);
+		xfs_fsblock_t bno, xfs_filblks_t len);
 
 /*
  * Look up the first record less than or equal to [bno, len] in the btree
@@ -44,7 +44,7 @@ STATIC int __xfs_refcount_cow_free(struct xfs_btree_cur *rcur,
 int
 xfs_refcount_lookup_le(
 	struct xfs_btree_cur	*cur,
-	xfs_agblock_t		bno,
+	xfs_fsblock_t		bno,
 	int			*stat)
 {
 	trace_xfs_refcount_lookup(cur->bc_mp, cur->bc_ag.agno, bno,
@@ -61,7 +61,7 @@ xfs_refcount_lookup_le(
 int
 xfs_refcount_lookup_ge(
 	struct xfs_btree_cur	*cur,
-	xfs_agblock_t		bno,
+	xfs_fsblock_t		bno,
 	int			*stat)
 {
 	trace_xfs_refcount_lookup(cur->bc_mp, cur->bc_ag.agno, bno,
@@ -78,7 +78,7 @@ xfs_refcount_lookup_ge(
 int
 xfs_refcount_lookup_eq(
 	struct xfs_btree_cur	*cur,
-	xfs_agblock_t		bno,
+	xfs_fsblock_t		bno,
 	int			*stat)
 {
 	trace_xfs_refcount_lookup(cur->bc_mp, cur->bc_ag.agno, bno,
@@ -112,7 +112,7 @@ xfs_refcount_get_rec(
 	xfs_agnumber_t			agno = cur->bc_ag.agno;
 	union xfs_btree_rec		*rec;
 	int				error;
-	xfs_agblock_t			realstart;
+	xfs_fsblock_t			realstart;
 
 	error = xfs_btree_get_rec(cur, &rec, stat);
 	if (error || !*stat)
@@ -152,7 +152,7 @@ out_bad_rec:
 	xfs_warn(mp,
 		"Refcount BTree record corruption in AG %d detected!", agno);
 	xfs_warn(mp,
-		"Start block 0x%x, block count 0x%x, references 0x%x",
+		"Start block 0x%llx, block count 0x%llx, references 0x%x",
 		irec->rc_startblock, irec->rc_blockcount, irec->rc_refcount);
 	xfs_btree_mark_sick(cur);
 	return -EFSCORRUPTED;
@@ -333,7 +333,7 @@ out_error:
  */
 
 /* Next block after this extent. */
-static inline xfs_agblock_t
+static inline xfs_fsblock_t
 xfs_refc_next(
 	struct xfs_refcount_irec	*rc)
 {
@@ -341,12 +341,12 @@ xfs_refc_next(
 }
 
 /*
- * Split a refcount extent that crosses agbno.
+ * Split a refcount extent that crosses bno.
  */
 STATIC int
 xfs_refcount_split_extent(
 	struct xfs_btree_cur		*cur,
-	xfs_agblock_t			agbno,
+	xfs_fsblock_t			bno,
 	bool				*shape_changed)
 {
 	struct xfs_refcount_irec	rcext, tmp;
@@ -354,7 +354,7 @@ xfs_refcount_split_extent(
 	int				error;
 
 	*shape_changed = false;
-	error = xfs_refcount_lookup_le(cur, agbno, &found_rec);
+	error = xfs_refcount_lookup_le(cur, bno, &found_rec);
 	if (error)
 		goto out_error;
 	if (!found_rec)
@@ -368,24 +368,24 @@ xfs_refcount_split_extent(
 		error = -EFSCORRUPTED;
 		goto out_error;
 	}
-	if (rcext.rc_startblock == agbno || xfs_refc_next(&rcext) <= agbno)
+	if (rcext.rc_startblock == bno || xfs_refc_next(&rcext) <= bno)
 		return 0;
 
 	*shape_changed = true;
 	trace_xfs_refcount_split_extent(cur->bc_mp, cur->bc_ag.agno,
-			&rcext, agbno);
+			&rcext, bno);
 
 	/* Establish the right extent. */
 	tmp = rcext;
-	tmp.rc_startblock = agbno;
-	tmp.rc_blockcount -= (agbno - rcext.rc_startblock);
+	tmp.rc_startblock = bno;
+	tmp.rc_blockcount -= (bno - rcext.rc_startblock);
 	error = xfs_refcount_update(cur, &tmp);
 	if (error)
 		goto out_error;
 
 	/* Insert the left extent. */
 	tmp = rcext;
-	tmp.rc_blockcount = agbno - rcext.rc_startblock;
+	tmp.rc_blockcount = bno - rcext.rc_startblock;
 	error = xfs_refcount_insert(cur, &tmp, &found_rec);
 	if (error)
 		goto out_error;
@@ -412,7 +412,7 @@ xfs_refcount_merge_center_extents(
 	struct xfs_refcount_irec	*center,
 	struct xfs_refcount_irec	*right,
 	unsigned long long		extlen,
-	xfs_extlen_t			*aglen)
+	xfs_filblks_t			*len)
 {
 	int				error;
 	int				found_rec;
@@ -474,7 +474,7 @@ xfs_refcount_merge_center_extents(
 	if (error)
 		goto out_error;
 
-	*aglen = 0;
+	*len = 0;
 	return error;
 
 out_error:
@@ -491,8 +491,8 @@ xfs_refcount_merge_left_extent(
 	struct xfs_btree_cur		*cur,
 	struct xfs_refcount_irec	*left,
 	struct xfs_refcount_irec	*cleft,
-	xfs_agblock_t			*agbno,
-	xfs_extlen_t			*aglen)
+	xfs_fsblock_t			*bno,
+	xfs_filblks_t			*len)
 {
 	int				error;
 	int				found_rec;
@@ -500,7 +500,7 @@ xfs_refcount_merge_left_extent(
 	trace_xfs_refcount_merge_left_extent(cur->bc_mp,
 			cur->bc_ag.agno, left, cleft);
 
-	/* If the extent at agbno (cleft) wasn't synthesized, remove it. */
+	/* If the extent at bno (cleft) wasn't synthesized, remove it. */
 	if (cleft->rc_refcount > 1) {
 		error = xfs_refcount_lookup_le(cur, cleft->rc_startblock,
 				&found_rec);
@@ -538,8 +538,8 @@ xfs_refcount_merge_left_extent(
 	if (error)
 		goto out_error;
 
-	*agbno += cleft->rc_blockcount;
-	*aglen -= cleft->rc_blockcount;
+	*bno += cleft->rc_blockcount;
+	*len -= cleft->rc_blockcount;
 	return error;
 
 out_error:
@@ -556,7 +556,7 @@ xfs_refcount_merge_right_extent(
 	struct xfs_btree_cur		*cur,
 	struct xfs_refcount_irec	*right,
 	struct xfs_refcount_irec	*cright,
-	xfs_extlen_t			*aglen)
+	xfs_filblks_t			*len)
 {
 	int				error;
 	int				found_rec;
@@ -565,7 +565,7 @@ xfs_refcount_merge_right_extent(
 			cur->bc_ag.agno, cright, right);
 
 	/*
-	 * If the extent ending at agbno+aglen (cright) wasn't synthesized,
+	 * If the extent ending at bno+len (cright) wasn't synthesized,
 	 * remove it.
 	 */
 	if (cright->rc_refcount > 1) {
@@ -606,7 +606,7 @@ xfs_refcount_merge_right_extent(
 	if (error)
 		goto out_error;
 
-	*aglen -= cright->rc_blockcount;
+	*len -= cright->rc_blockcount;
 	return error;
 
 out_error:
@@ -619,23 +619,23 @@ out_error:
 #define XFS_FIND_RCEXT_COW	2
 /*
  * Find the left extent and the one after it (cleft).  This function assumes
- * that we've already split any extent crossing agbno.
+ * that we've already split any extent crossing bno.
  */
 STATIC int
 xfs_refcount_find_left_extents(
 	struct xfs_btree_cur		*cur,
 	struct xfs_refcount_irec	*left,
 	struct xfs_refcount_irec	*cleft,
-	xfs_agblock_t			agbno,
-	xfs_extlen_t			aglen,
+	xfs_fsblock_t			bno,
+	xfs_filblks_t			len,
 	int				flags)
 {
 	struct xfs_refcount_irec	tmp;
 	int				error;
 	int				found_rec;
 
-	left->rc_startblock = cleft->rc_startblock = NULLAGBLOCK;
-	error = xfs_refcount_lookup_le(cur, agbno - 1, &found_rec);
+	left->rc_startblock = cleft->rc_startblock = NULLFSBLOCK;
+	error = xfs_refcount_lookup_le(cur, bno - 1, &found_rec);
 	if (error)
 		goto out_error;
 	if (!found_rec)
@@ -650,7 +650,7 @@ xfs_refcount_find_left_extents(
 		goto out_error;
 	}
 
-	if (xfs_refc_next(&tmp) != agbno)
+	if (xfs_refc_next(&tmp) != bno)
 		return 0;
 	if ((flags & XFS_FIND_RCEXT_SHARED) && tmp.rc_refcount < 2)
 		return 0;
@@ -673,20 +673,20 @@ xfs_refcount_find_left_extents(
 		}
 
 		/* if tmp starts at the end of our range, just use that */
-		if (tmp.rc_startblock == agbno)
+		if (tmp.rc_startblock == bno)
 			*cleft = tmp;
 		else {
 			/*
 			 * There's a gap in the refcntbt at the start of the
 			 * range we're interested in (refcount == 1) so
 			 * synthesize the implied extent and pass it back.
-			 * We assume here that the agbno/aglen range was
+			 * We assume here that the bno/len range was
 			 * passed in from a data fork extent mapping and
 			 * therefore is allocated to exactly one owner.
 			 */
-			cleft->rc_startblock = agbno;
-			cleft->rc_blockcount = min(aglen,
-					tmp.rc_startblock - agbno);
+			cleft->rc_startblock = bno;
+			cleft->rc_blockcount = min(len,
+					tmp.rc_startblock - bno);
 			cleft->rc_refcount = 1;
 		}
 	} else {
@@ -694,12 +694,12 @@ xfs_refcount_find_left_extents(
 		 * No extents, so pretend that there's one covering the whole
 		 * range.
 		 */
-		cleft->rc_startblock = agbno;
-		cleft->rc_blockcount = aglen;
+		cleft->rc_startblock = bno;
+		cleft->rc_blockcount = len;
 		cleft->rc_refcount = 1;
 	}
 	trace_xfs_refcount_find_left_extent(cur->bc_mp, cur->bc_ag.agno,
-			left, cleft, agbno);
+			left, cleft, bno);
 	return error;
 
 out_error:
@@ -710,23 +710,23 @@ out_error:
 
 /*
  * Find the right extent and the one before it (cright).  This function
- * assumes that we've already split any extents crossing agbno + aglen.
+ * assumes that we've already split any extents crossing bno + len.
  */
 STATIC int
 xfs_refcount_find_right_extents(
 	struct xfs_btree_cur		*cur,
 	struct xfs_refcount_irec	*right,
 	struct xfs_refcount_irec	*cright,
-	xfs_agblock_t			agbno,
-	xfs_extlen_t			aglen,
+	xfs_fsblock_t			bno,
+	xfs_filblks_t			len,
 	int				flags)
 {
 	struct xfs_refcount_irec	tmp;
 	int				error;
 	int				found_rec;
 
-	right->rc_startblock = cright->rc_startblock = NULLAGBLOCK;
-	error = xfs_refcount_lookup_ge(cur, agbno + aglen, &found_rec);
+	right->rc_startblock = cright->rc_startblock = NULLFSBLOCK;
+	error = xfs_refcount_lookup_ge(cur, bno + len, &found_rec);
 	if (error)
 		goto out_error;
 	if (!found_rec)
@@ -741,7 +741,7 @@ xfs_refcount_find_right_extents(
 		goto out_error;
 	}
 
-	if (tmp.rc_startblock != agbno + aglen)
+	if (tmp.rc_startblock != bno + len)
 		return 0;
 	if ((flags & XFS_FIND_RCEXT_SHARED) && tmp.rc_refcount < 2)
 		return 0;
@@ -764,18 +764,18 @@ xfs_refcount_find_right_extents(
 		}
 
 		/* if tmp ends at the end of our range, just use that */
-		if (xfs_refc_next(&tmp) == agbno + aglen)
+		if (xfs_refc_next(&tmp) == bno + len)
 			*cright = tmp;
 		else {
 			/*
 			 * There's a gap in the refcntbt at the end of the
 			 * range we're interested in (refcount == 1) so
 			 * create the implied extent and pass it back.
-			 * We assume here that the agbno/aglen range was
+			 * We assume here that the bno/len range was
 			 * passed in from a data fork extent mapping and
 			 * therefore is allocated to exactly one owner.
 			 */
-			cright->rc_startblock = max(agbno, xfs_refc_next(&tmp));
+			cright->rc_startblock = max(bno, xfs_refc_next(&tmp));
 			cright->rc_blockcount = right->rc_startblock -
 					cright->rc_startblock;
 			cright->rc_refcount = 1;
@@ -785,12 +785,12 @@ xfs_refcount_find_right_extents(
 		 * No extents, so pretend that there's one covering the whole
 		 * range.
 		 */
-		cright->rc_startblock = agbno;
-		cright->rc_blockcount = aglen;
+		cright->rc_startblock = bno;
+		cright->rc_blockcount = len;
 		cright->rc_refcount = 1;
 	}
 	trace_xfs_refcount_find_right_extent(cur->bc_mp, cur->bc_ag.agno,
-			cright, right, agbno + aglen);
+			cright, right, bno + len);
 	return error;
 
 out_error:
@@ -804,7 +804,7 @@ static inline bool
 xfs_refc_valid(
 	struct xfs_refcount_irec	*rc)
 {
-	return rc->rc_startblock != NULLAGBLOCK;
+	return rc->rc_startblock != NULLFSBLOCK;
 }
 
 /*
@@ -813,8 +813,8 @@ xfs_refc_valid(
 STATIC int
 xfs_refcount_merge_extents(
 	struct xfs_btree_cur	*cur,
-	xfs_agblock_t		*agbno,
-	xfs_extlen_t		*aglen,
+	xfs_fsblock_t		*bno,
+	xfs_filblks_t		*len,
 	enum xfs_refc_adjust_op adjust,
 	int			flags,
 	bool			*shape_changed)
@@ -827,16 +827,16 @@ xfs_refcount_merge_extents(
 
 	*shape_changed = false;
 	/*
-	 * Find the extent just below agbno [left], just above agbno [cleft],
-	 * just below (agbno + aglen) [cright], and just above (agbno + aglen)
+	 * Find the extent just below bno [left], just above bno [cleft],
+	 * just below (bno + len) [cright], and just above (bno + len)
 	 * [right].
 	 */
-	error = xfs_refcount_find_left_extents(cur, &left, &cleft, *agbno,
-			*aglen, flags);
+	error = xfs_refcount_find_left_extents(cur, &left, &cleft, *bno,
+			*len, flags);
 	if (error)
 		return error;
-	error = xfs_refcount_find_right_extents(cur, &right, &cright, *agbno,
-			*aglen, flags);
+	error = xfs_refcount_find_right_extents(cur, &right, &cright, *bno,
+			*len, flags);
 	if (error)
 		return error;
 
@@ -857,7 +857,7 @@ xfs_refcount_merge_extents(
 	    ulen < MAXREFCEXTLEN) {
 		*shape_changed = true;
 		return xfs_refcount_merge_center_extents(cur, &left, &cleft,
-				&right, ulen, aglen);
+				&right, ulen, len);
 	}
 
 	/* Try to merge left and cleft. */
@@ -867,7 +867,7 @@ xfs_refcount_merge_extents(
 	    ulen < MAXREFCEXTLEN) {
 		*shape_changed = true;
 		error = xfs_refcount_merge_left_extent(cur, &left, &cleft,
-				agbno, aglen);
+				bno, len);
 		if (error)
 			return error;
 
@@ -886,7 +886,7 @@ xfs_refcount_merge_extents(
 	    ulen < MAXREFCEXTLEN) {
 		*shape_changed = true;
 		return xfs_refcount_merge_right_extent(cur, &right, &cright,
-				aglen);
+				len);
 	}
 
 	return error;
@@ -928,14 +928,14 @@ xfs_refcount_still_have_space(
 /*
  * Adjust the refcounts of middle extents.  At this point we should have
  * split extents that crossed the adjustment range; merged with adjacent
- * extents; and updated agbno/aglen to reflect the merges.  Therefore,
- * all we have to do is update the extents inside [agbno, agbno + aglen].
+ * extents; and updated bno/len to reflect the merges.  Therefore,
+ * all we have to do is update the extents inside [bno, bno + len].
  */
 STATIC int
 xfs_refcount_adjust_extents(
 	struct xfs_btree_cur	*cur,
-	xfs_agblock_t		*agbno,
-	xfs_extlen_t		*aglen,
+	xfs_fsblock_t		*bno,
+	xfs_filblks_t		*len,
 	enum xfs_refc_adjust_op	adj)
 {
 	struct xfs_refcount_irec	ext, tmp;
@@ -944,14 +944,14 @@ xfs_refcount_adjust_extents(
 	xfs_fsblock_t			fsbno;
 
 	/* Merging did all the work already. */
-	if (*aglen == 0)
+	if (*len == 0)
 		return 0;
 
-	error = xfs_refcount_lookup_ge(cur, *agbno, &found_rec);
+	error = xfs_refcount_lookup_ge(cur, *bno, &found_rec);
 	if (error)
 		goto out_error;
 
-	while (*aglen > 0 && xfs_refcount_still_have_space(cur)) {
+	while (*len > 0 && xfs_refcount_still_have_space(cur)) {
 		error = xfs_refcount_get_rec(cur, &ext, &found_rec);
 		if (error)
 			goto out_error;
@@ -966,10 +966,10 @@ xfs_refcount_adjust_extents(
 		 * these blocks and there's no refcountbt record, pretend that
 		 * there is one with refcount == 1.
 		 */
-		if (ext.rc_startblock != *agbno) {
-			tmp.rc_startblock = *agbno;
-			tmp.rc_blockcount = min(*aglen,
-					ext.rc_startblock - *agbno);
+		if (ext.rc_startblock != *bno) {
+			tmp.rc_startblock = *bno;
+			tmp.rc_blockcount = min(*len,
+					ext.rc_startblock - *bno);
 			tmp.rc_refcount = 1 + adj;
 			trace_xfs_refcount_modify_extent(cur->bc_mp,
 					cur->bc_ag.agno, &tmp);
@@ -999,17 +999,17 @@ xfs_refcount_adjust_extents(
 						  false);
 			}
 
-			(*agbno) += tmp.rc_blockcount;
-			(*aglen) -= tmp.rc_blockcount;
+			(*bno) += tmp.rc_blockcount;
+			(*len) -= tmp.rc_blockcount;
 
-			error = xfs_refcount_lookup_ge(cur, *agbno,
+			error = xfs_refcount_lookup_ge(cur, *bno,
 					&found_rec);
 			if (error)
 				goto out_error;
 		}
 
 		/* Stop if there's nothing left to modify */
-		if (*aglen == 0 || !xfs_refcount_still_have_space(cur))
+		if (*len == 0 || !xfs_refcount_still_have_space(cur))
 			break;
 
 		/*
@@ -1051,8 +1051,8 @@ skip:
 			goto out_error;
 
 advloop:
-		(*agbno) += ext.rc_blockcount;
-		(*aglen) -= ext.rc_blockcount;
+		(*bno) += ext.rc_blockcount;
+		(*len) -= ext.rc_blockcount;
 	}
 
 	return error;
@@ -1066,35 +1066,35 @@ out_error:
 STATIC int
 xfs_refcount_adjust(
 	struct xfs_btree_cur	*cur,
-	xfs_agblock_t		agbno,
-	xfs_extlen_t		aglen,
-	xfs_agblock_t		*new_agbno,
-	xfs_extlen_t		*new_aglen,
+	xfs_fsblock_t		bno,
+	xfs_filblks_t		len,
+	xfs_fsblock_t		*new_bno,
+	xfs_filblks_t		*new_len,
 	enum xfs_refc_adjust_op	adj)
 {
 	bool			shape_changed;
 	int			shape_changes = 0;
 	int			error;
 
-	*new_agbno = agbno;
-	*new_aglen = aglen;
+	*new_bno = bno;
+	*new_len = len;
 	if (adj == XFS_REFCOUNT_ADJUST_INCREASE)
 		trace_xfs_refcount_increase(cur->bc_mp, cur->bc_ag.agno,
-				agbno, aglen);
+				bno, len);
 	else
 		trace_xfs_refcount_decrease(cur->bc_mp, cur->bc_ag.agno,
-				agbno, aglen);
+				bno, len);
 
 	/*
 	 * Ensure that no rcextents cross the boundary of the adjustment range.
 	 */
-	error = xfs_refcount_split_extent(cur, agbno, &shape_changed);
+	error = xfs_refcount_split_extent(cur, bno, &shape_changed);
 	if (error)
 		goto out_error;
 	if (shape_changed)
 		shape_changes++;
 
-	error = xfs_refcount_split_extent(cur, agbno + aglen, &shape_changed);
+	error = xfs_refcount_split_extent(cur, bno + len, &shape_changed);
 	if (error)
 		goto out_error;
 	if (shape_changed)
@@ -1103,7 +1103,7 @@ xfs_refcount_adjust(
 	/*
 	 * Try to merge with the left or right extents of the range.
 	 */
-	error = xfs_refcount_merge_extents(cur, new_agbno, new_aglen, adj,
+	error = xfs_refcount_merge_extents(cur, new_bno, new_len, adj,
 			XFS_FIND_RCEXT_SHARED, &shape_changed);
 	if (error)
 		goto out_error;
@@ -1113,7 +1113,7 @@ xfs_refcount_adjust(
 		cur->bc_ag.refc.shape_changes++;
 
 	/* Now that we've taken care of the ends, adjust the middle extents */
-	error = xfs_refcount_adjust_extents(cur, new_agbno, new_aglen, adj);
+	error = xfs_refcount_adjust_extents(cur, new_bno, new_len, adj);
 	if (error)
 		goto out_error;
 
@@ -1154,9 +1154,9 @@ xfs_refcount_finish_one(
 	struct xfs_trans		*tp,
 	enum xfs_refcount_intent_type	type,
 	xfs_fsblock_t			startblock,
-	xfs_extlen_t			blockcount,
+	xfs_filblks_t			blockcount,
 	xfs_fsblock_t			*new_fsb,
-	xfs_extlen_t			*new_len,
+	xfs_filblks_t			*new_len,
 	struct xfs_btree_cur		**pcur)
 {
 	struct xfs_mount		*mp = tp->t_mountp;
@@ -1164,8 +1164,8 @@ xfs_refcount_finish_one(
 	struct xfs_buf			*agbp = NULL;
 	int				error = 0;
 	xfs_agnumber_t			agno;
-	xfs_agblock_t			bno;
-	xfs_agblock_t			new_agbno;
+	xfs_fsblock_t			bno;
+	xfs_fsblock_t			new_bno;
 	unsigned long			nr_ops = 0;
 	int				shape_changes = 0;
 
@@ -1211,14 +1211,14 @@ xfs_refcount_finish_one(
 
 	switch (type) {
 	case XFS_REFCOUNT_INCREASE:
-		error = xfs_refcount_adjust(rcur, bno, blockcount, &new_agbno,
+		error = xfs_refcount_adjust(rcur, bno, blockcount, &new_bno,
 				new_len, XFS_REFCOUNT_ADJUST_INCREASE);
-		*new_fsb = XFS_AGB_TO_FSB(mp, agno, new_agbno);
+		*new_fsb = XFS_AGB_TO_FSB(mp, agno, new_bno);
 		break;
 	case XFS_REFCOUNT_DECREASE:
-		error = xfs_refcount_adjust(rcur, bno, blockcount, &new_agbno,
+		error = xfs_refcount_adjust(rcur, bno, blockcount, &new_bno,
 				new_len, XFS_REFCOUNT_ADJUST_DECREASE);
-		*new_fsb = XFS_AGB_TO_FSB(mp, agno, new_agbno);
+		*new_fsb = XFS_AGB_TO_FSB(mp, agno, new_bno);
 		break;
 	case XFS_REFCOUNT_ALLOC_COW:
 		*new_fsb = startblock + blockcount;
@@ -1236,7 +1236,7 @@ xfs_refcount_finish_one(
 	}
 	if (!error && *new_len > 0)
 		trace_xfs_refcount_finish_one_leftover(mp, agno, type,
-				bno, blockcount, new_agbno, *new_len);
+				bno, blockcount, new_bno, *new_len);
 	return error;
 
 out_cur:
@@ -1253,7 +1253,7 @@ __xfs_refcount_add(
 	struct xfs_trans		*tp,
 	enum xfs_refcount_intent_type	type,
 	xfs_fsblock_t			startblock,
-	xfs_extlen_t			blockcount)
+	xfs_filblks_t			blockcount)
 {
 	struct xfs_refcount_intent	*ri;
 
@@ -1307,16 +1307,16 @@ xfs_refcount_decrease_extent(
  * within that range and return the range in fbno/flen.  If
  * find_end_of_shared is set, return the longest contiguous extent of
  * shared blocks; if not, just return the first extent we find.  If no
- * shared blocks are found, fbno and flen will be set to NULLAGBLOCK
+ * shared blocks are found, fbno and flen will be set to NULLFSBLOCK
  * and 0, respectively.
  */
 int
 xfs_refcount_find_shared(
 	struct xfs_btree_cur		*cur,
-	xfs_agblock_t			agbno,
-	xfs_extlen_t			aglen,
-	xfs_agblock_t			*fbno,
-	xfs_extlen_t			*flen,
+	xfs_fsblock_t			bno,
+	xfs_filblks_t			len,
+	xfs_fsblock_t			*fbno,
+	xfs_filblks_t			*flen,
 	bool				find_end_of_shared)
 {
 	struct xfs_refcount_irec	tmp;
@@ -1325,14 +1325,14 @@ xfs_refcount_find_shared(
 	int				error;
 
 	trace_xfs_refcount_find_shared(cur->bc_mp, cur->bc_ag.agno,
-			agbno, aglen);
+			bno, len);
 
 	/* By default, skip the whole range */
-	*fbno = NULLAGBLOCK;
+	*fbno = NULLFSBLOCK;
 	*flen = 0;
 
 	/* Try to find a refcount extent that crosses the start */
-	error = xfs_refcount_lookup_le(cur, agbno, &have);
+	error = xfs_refcount_lookup_le(cur, bno, &have);
 	if (error)
 		goto out_error;
 	if (!have) {
@@ -1353,7 +1353,7 @@ xfs_refcount_find_shared(
 	}
 
 	/* If the extent ends before the start, look at the next one */
-	if (tmp.rc_startblock + tmp.rc_blockcount <= agbno) {
+	if (tmp.rc_startblock + tmp.rc_blockcount <= bno) {
 		error = xfs_btree_increment(cur, 0, &have);
 		if (error)
 			goto out_error;
@@ -1370,22 +1370,22 @@ xfs_refcount_find_shared(
 	}
 
 	/* If the extent starts after the range we want, bail out */
-	if (tmp.rc_startblock >= agbno + aglen)
+	if (tmp.rc_startblock >= bno + len)
 		goto done;
 
 	/* We found the start of a shared extent! */
-	if (tmp.rc_startblock < agbno) {
-		tmp.rc_blockcount -= (agbno - tmp.rc_startblock);
-		tmp.rc_startblock = agbno;
+	if (tmp.rc_startblock < bno) {
+		tmp.rc_blockcount -= (bno - tmp.rc_startblock);
+		tmp.rc_startblock = bno;
 	}
 
 	*fbno = tmp.rc_startblock;
-	*flen = min(tmp.rc_blockcount, agbno + aglen - *fbno);
+	*flen = min(tmp.rc_blockcount, bno + len - *fbno);
 	if (!find_end_of_shared)
 		goto done;
 
 	/* Otherwise, find the end of this shared extent */
-	while (*fbno + *flen < agbno + aglen) {
+	while (*fbno + *flen < bno + len) {
 		error = xfs_btree_increment(cur, 0, &have);
 		if (error)
 			goto out_error;
@@ -1399,10 +1399,10 @@ xfs_refcount_find_shared(
 			error = -EFSCORRUPTED;
 			goto out_error;
 		}
-		if (tmp.rc_startblock >= agbno + aglen ||
+		if (tmp.rc_startblock >= bno + len ||
 		    tmp.rc_startblock != *fbno + *flen)
 			break;
-		*flen = min(*flen + tmp.rc_blockcount, agbno + aglen - *fbno);
+		*flen = min(*flen + tmp.rc_blockcount, bno + len - *fbno);
 	}
 
 done:
@@ -1471,19 +1471,19 @@ out_error:
 STATIC int
 xfs_refcount_adjust_cow_extents(
 	struct xfs_btree_cur	*cur,
-	xfs_agblock_t		agbno,
-	xfs_extlen_t		aglen,
+	xfs_fsblock_t		bno,
+	xfs_filblks_t		len,
 	enum xfs_refc_adjust_op	adj)
 {
 	struct xfs_refcount_irec	ext, tmp;
 	int				error;
 	int				found_rec, found_tmp;
 
-	if (aglen == 0)
+	if (len == 0)
 		return 0;
 
 	/* Find any overlapping refcount records */
-	error = xfs_refcount_lookup_ge(cur, agbno, &found_rec);
+	error = xfs_refcount_lookup_ge(cur, bno, &found_rec);
 	if (error)
 		goto out_error;
 	error = xfs_refcount_get_rec(cur, &ext, &found_rec);
@@ -1500,14 +1500,14 @@ xfs_refcount_adjust_cow_extents(
 	case XFS_REFCOUNT_ADJUST_COW_ALLOC:
 		/* Adding a CoW reservation, there should be nothing here. */
 		if (XFS_IS_CORRUPT(cur->bc_mp,
-				   agbno + aglen > ext.rc_startblock)) {
+				   bno + len > ext.rc_startblock)) {
 			xfs_btree_mark_sick(cur);
 			error = -EFSCORRUPTED;
 			goto out_error;
 		}
 
-		tmp.rc_startblock = agbno;
-		tmp.rc_blockcount = aglen;
+		tmp.rc_startblock = bno;
+		tmp.rc_blockcount = len;
 		tmp.rc_refcount = 1;
 		trace_xfs_refcount_modify_extent(cur->bc_mp,
 				cur->bc_ag.agno, &tmp);
@@ -1524,12 +1524,12 @@ xfs_refcount_adjust_cow_extents(
 		break;
 	case XFS_REFCOUNT_ADJUST_COW_FREE:
 		/* Removing a CoW reservation, there should be one extent. */
-		if (XFS_IS_CORRUPT(cur->bc_mp, ext.rc_startblock != agbno)) {
+		if (XFS_IS_CORRUPT(cur->bc_mp, ext.rc_startblock != bno)) {
 			xfs_btree_mark_sick(cur);
 			error = -EFSCORRUPTED;
 			goto out_error;
 		}
-		if (XFS_IS_CORRUPT(cur->bc_mp, ext.rc_blockcount != aglen)) {
+		if (XFS_IS_CORRUPT(cur->bc_mp, ext.rc_blockcount != len)) {
 			xfs_btree_mark_sick(cur);
 			error = -EFSCORRUPTED;
 			goto out_error;
@@ -1569,36 +1569,36 @@ out_error:
 STATIC int
 xfs_refcount_adjust_cow(
 	struct xfs_btree_cur	*cur,
-	xfs_agblock_t		agbno,
-	xfs_extlen_t		aglen,
+	xfs_fsblock_t		bno,
+	xfs_filblks_t		len,
 	enum xfs_refc_adjust_op	adj)
 {
 	bool			shape_changed;
 	int			error;
 
-	agbno += XFS_REFC_COW_START;
+	bno += XFS_REFC_COW_START;
 
 	/*
 	 * Ensure that no rcextents cross the boundary of the adjustment range.
 	 */
-	error = xfs_refcount_split_extent(cur, agbno, &shape_changed);
+	error = xfs_refcount_split_extent(cur, bno, &shape_changed);
 	if (error)
 		goto out_error;
 
-	error = xfs_refcount_split_extent(cur, agbno + aglen, &shape_changed);
+	error = xfs_refcount_split_extent(cur, bno + len, &shape_changed);
 	if (error)
 		goto out_error;
 
 	/*
 	 * Try to merge with the left or right extents of the range.
 	 */
-	error = xfs_refcount_merge_extents(cur, &agbno, &aglen, adj,
+	error = xfs_refcount_merge_extents(cur, &bno, &len, adj,
 			XFS_FIND_RCEXT_COW, &shape_changed);
 	if (error)
 		goto out_error;
 
 	/* Now that we've taken care of the ends, adjust the middle extents */
-	error = xfs_refcount_adjust_cow_extents(cur, agbno, aglen, adj);
+	error = xfs_refcount_adjust_cow_extents(cur, bno, len, adj);
 	if (error)
 		goto out_error;
 
@@ -1616,14 +1616,14 @@ out_error:
 STATIC int
 __xfs_refcount_cow_alloc(
 	struct xfs_btree_cur	*rcur,
-	xfs_agblock_t		agbno,
-	xfs_extlen_t		aglen)
+	xfs_fsblock_t		bno,
+	xfs_filblks_t		len)
 {
 	trace_xfs_refcount_cow_increase(rcur->bc_mp, rcur->bc_ag.agno,
-			agbno, aglen);
+			bno, len);
 
 	/* Add refcount btree reservation */
-	return xfs_refcount_adjust_cow(rcur, agbno, aglen,
+	return xfs_refcount_adjust_cow(rcur, bno, len,
 			XFS_REFCOUNT_ADJUST_COW_ALLOC);
 }
 
@@ -1633,14 +1633,14 @@ __xfs_refcount_cow_alloc(
 STATIC int
 __xfs_refcount_cow_free(
 	struct xfs_btree_cur	*rcur,
-	xfs_agblock_t		agbno,
-	xfs_extlen_t		aglen)
+	xfs_fsblock_t		bno,
+	xfs_filblks_t		len)
 {
 	trace_xfs_refcount_cow_decrease(rcur->bc_mp, rcur->bc_ag.agno,
-			agbno, aglen);
+			bno, len);
 
 	/* Remove refcount btree reservation */
-	return xfs_refcount_adjust_cow(rcur, agbno, aglen,
+	return xfs_refcount_adjust_cow(rcur, bno, len,
 			XFS_REFCOUNT_ADJUST_COW_FREE);
 }
 
@@ -1649,7 +1649,7 @@ void
 xfs_refcount_alloc_cow_extent(
 	struct xfs_trans		*tp,
 	xfs_fsblock_t			fsb,
-	xfs_extlen_t			len)
+	xfs_filblks_t			len)
 {
 	struct xfs_mount		*mp = tp->t_mountp;
 
@@ -1667,7 +1667,7 @@ void
 xfs_refcount_free_cow_extent(
 	struct xfs_trans		*tp,
 	xfs_fsblock_t			fsb,
-	xfs_extlen_t			len)
+	xfs_filblks_t			len)
 {
 	struct xfs_mount		*mp = tp->t_mountp;
 
@@ -1721,7 +1721,7 @@ xfs_refcount_recover_cow_leftovers(
 	union xfs_btree_irec		low;
 	union xfs_btree_irec		high;
 	xfs_fsblock_t			fsb;
-	xfs_agblock_t			agbno;
+	xfs_fsblock_t			bno;
 	int				error;
 
 	if (mp->m_sb.sb_agblocks >= XFS_REFC_COW_START)
@@ -1771,8 +1771,8 @@ xfs_refcount_recover_cow_leftovers(
 		trace_xfs_refcount_recover_extent(mp, agno, &rr->rr_rrec);
 
 		/* Free the orphan record */
-		agbno = rr->rr_rrec.rc_startblock - XFS_REFC_COW_START;
-		fsb = XFS_AGB_TO_FSB(mp, agno, agbno);
+		bno = rr->rr_rrec.rc_startblock - XFS_REFC_COW_START;
+		fsb = XFS_AGB_TO_FSB(mp, agno, bno);
 		xfs_refcount_free_cow_extent(tp, fsb,
 				rr->rr_rrec.rc_blockcount);
 
@@ -1806,7 +1806,7 @@ xfs_refcount_has_key_gap(
 	const union xfs_btree_key	*key1,
 	const union xfs_btree_key	*key2)
 {
-	xfs_agblock_t			next;
+	xfs_fsblock_t			next;
 
 	next = be32_to_cpu(key1->refc.rc_startblock) + 1;
 	return next != be32_to_cpu(key2->refc.rc_startblock);
@@ -1816,8 +1816,8 @@ xfs_refcount_has_key_gap(
 int
 xfs_refcount_has_record(
 	struct xfs_btree_cur	*cur,
-	xfs_agblock_t		bno,
-	xfs_extlen_t		len,
+	xfs_fsblock_t		bno,
+	xfs_filblks_t		len,
 	bool			*exists)
 {
 	union xfs_btree_irec	low;

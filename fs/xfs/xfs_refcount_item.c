@@ -242,9 +242,9 @@ xfs_trans_log_finish_refcount_update(
 	struct xfs_cud_log_item		*cudp,
 	enum xfs_refcount_intent_type	type,
 	xfs_fsblock_t			startblock,
-	xfs_extlen_t			blockcount,
+	xfs_filblks_t			blockcount,
 	xfs_fsblock_t			*new_fsb,
-	xfs_extlen_t			*new_len,
+	xfs_filblks_t			*new_len,
 	struct xfs_btree_cur		**pcur)
 {
 	int				error;
@@ -368,7 +368,7 @@ xfs_refcount_update_finish_item(
 {
 	struct xfs_refcount_intent	*refc;
 	xfs_fsblock_t			new_fsb;
-	xfs_extlen_t			new_aglen;
+	xfs_filblks_t			new_aglen;
 	int				error;
 
 	refc = container_of(item, struct xfs_refcount_intent, ri_list);
@@ -469,7 +469,7 @@ xfs_cui_item_recover(
 	struct xfs_btree_cur		*rcur = NULL;
 	struct xfs_mount		*mp = lip->li_mountp;
 	xfs_fsblock_t			new_fsb;
-	xfs_extlen_t			new_len;
+	xfs_filblks_t			new_len;
 	unsigned int			refc_type;
 	bool				requeue_only = false;
 	enum xfs_refcount_intent_type	type;
