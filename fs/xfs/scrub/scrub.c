@@ -391,6 +391,13 @@ static const struct xchk_meta_ops meta_scrub_ops[] = {
 		.has	= xfs_sb_version_hasrtrmapbt,
 		.repair	= xrep_rtrmapbt,
 	},
+	[XFS_SCRUB_TYPE_RTREFCBT] = {	/* realtime refcountbt */
+		.type	= ST_FS,
+		.setup	= xchk_setup_rtrefcountbt,
+		.scrub	= xchk_rtrefcountbt,
+		.has	= xfs_sb_version_hasrtreflink,
+		.repair	= xrep_notsupported,
+	},
 };
 
 /* This isn't a stable feature, warn once per day. */
