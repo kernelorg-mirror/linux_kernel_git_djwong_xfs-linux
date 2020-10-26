@@ -481,5 +481,7 @@ void xfs_end_io(struct work_struct *work);
 int xfs_ilock2_io_mmap(struct xfs_inode *ip1, struct xfs_inode *ip2);
 void xfs_iunlock2_io_mmap(struct xfs_inode *ip1, struct xfs_inode *ip2);
 unsigned int xfs_inode_alloc_unitsize(struct xfs_inode *ip);
+int xfs_file_unshare_around(struct xfs_inode *ip, loff_t pos,
+		long long int count);
 
 #endif	/* __XFS_INODE_H__ */
