@@ -1243,6 +1243,7 @@ xfs_btree_set_refs(
 		xfs_buf_set_ref(bp, XFS_RMAP_BTREE_REF);
 		break;
 	case XFS_BTNUM_REFC:
+	case XFS_BTNUM_RTREFC:
 		xfs_buf_set_ref(bp, XFS_REFC_BTREE_REF);
 		break;
 	default:
