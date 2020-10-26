@@ -2724,7 +2724,7 @@ DEFINE_BMAP_DEFERRED_EVENT(xfs_bmap_deferred);
 /* per-AG reservation */
 DECLARE_EVENT_CLASS(xfs_ag_resv_class,
 	TP_PROTO(struct xfs_perag *pag, enum xfs_ag_resv_type resv,
-		 xfs_extlen_t len),
+		 unsigned long long len),
 	TP_ARGS(pag, resv, len),
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
@@ -2732,9 +2732,9 @@ DECLARE_EVENT_CLASS(xfs_ag_resv_class,
 		__field(int, resv)
 		__field(xfs_extlen_t, freeblks)
 		__field(xfs_extlen_t, flcount)
-		__field(xfs_extlen_t, reserved)
-		__field(xfs_extlen_t, asked)
-		__field(xfs_extlen_t, len)
+		__field(unsigned long long, reserved)
+		__field(unsigned long long, asked)
+		__field(unsigned long long, len)
 	),
 	TP_fast_assign(
 		struct xfs_ag_resv	*r = xfs_perag_resv(pag, resv);
@@ -2749,7 +2749,7 @@ DECLARE_EVENT_CLASS(xfs_ag_resv_class,
 		__entry->len = len;
 	),
 	TP_printk("dev %d:%d agno %u resv %d freeblks %u flcount %u "
-		  "resv %u ask %u len %u",
+		  "resv %llu ask %llu len %llu",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->agno,
 		  __entry->resv,
@@ -2762,7 +2762,7 @@ DECLARE_EVENT_CLASS(xfs_ag_resv_class,
 #define DEFINE_AG_RESV_EVENT(name) \
 DEFINE_EVENT(xfs_ag_resv_class, name, \
 	TP_PROTO(struct xfs_perag *pag, enum xfs_ag_resv_type type, \
-		 xfs_extlen_t len), \
+		 unsigned long long len), \
 	TP_ARGS(pag, type, len))
 
 /* per-AG reservation tracepoints */

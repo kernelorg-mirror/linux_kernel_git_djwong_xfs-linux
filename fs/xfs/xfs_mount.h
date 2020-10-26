@@ -308,11 +308,11 @@ xfs_daddr_to_agbno(struct xfs_mount *mp, xfs_daddr_t d)
 /* per-AG block reservation data structures*/
 struct xfs_ag_resv {
 	/* number of blocks originally reserved here */
-	xfs_extlen_t			ar_orig_reserved;
+	xfs_filblks_t			ar_orig_reserved;
 	/* number of blocks reserved here */
-	xfs_extlen_t			ar_reserved;
+	xfs_filblks_t			ar_reserved;
 	/* number of blocks originally asked for */
-	xfs_extlen_t			ar_asked;
+	xfs_filblks_t			ar_asked;
 };
 
 /*
