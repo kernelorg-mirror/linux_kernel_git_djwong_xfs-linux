@@ -20,6 +20,8 @@
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/btree.h"
+#include "scrub/xfile.h"
+#include "scrub/repair.h"
 
 /* Set us up with the realtime metadata locked. */
 int
@@ -27,11 +29,47 @@ xchk_setup_rtbitmap(
 	struct xfs_scrub	*sc,
 	struct xfs_inode	*ip)
 {
+	unsigned long long	resblks = 0;
 	int			error;
 
-	error = xchk_trans_alloc(sc, 0);
+	error = xrep_setup_tempfile(sc, S_IFREG);
 	if (error)
 		return error;
+
+	/*
+	 * If we're doing a repair, we reserve 2x the bitmap blocks: once for
+	 * the new bitmap contents and again for the bmbt blocks and the
+	 * remapping operation.
+	 */
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		loff_t		bmp_bytes;
+
+		/* Create an xfile to hold our reconstructed bitmap. */
+		bmp_bytes = XFS_FSB_TO_B(sc->mp, sc->mp->m_sb.sb_rbmblocks);
+		sc->xfile = xfile_create("rtbitmap", bmp_bytes);
+		if (IS_ERR(sc->xfile))
+			return PTR_ERR(sc->xfile);
+
+		resblks = sc->mp->m_sb.sb_rbmblocks * 2;
+		if (resblks > UINT_MAX)
+			return -EOPNOTSUPP;
+	}
+	error = xchk_trans_alloc(sc, resblks);
+	if (error)
+		return error;
+
+#ifdef CONFIG_XFS_ONLINE_REPAIR
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		/*
+		 * Allocate a memory buffer for faster creation of the new
+		 * bitmap.
+		 */
+		sc->buf = kmem_alloc_large(sc->mp->m_sb.sb_blocksize,
+				KM_MAYFAIL);
+		if (!sc->buf)
+			return -ENOMEM;
+	}
+#endif
 
 	xchk_rt_init(sc, &sc->sr);
 	sc->ip = sc->mp->m_rbmip;
