@@ -21,6 +21,7 @@
 #include "xfs_ialloc_btree.h"
 #include "xfs_sb.h"
 #include "xfs_ag_resv.h"
+#include "xfs_ag.h"
 
 /*
  * Per-AG Block Reservations
@@ -74,6 +75,10 @@ xfs_ag_resv_critical(
 	xfs_filblks_t			orig;
 
 	switch (type) {
+	case XFS_AG_RESV_RTMETADATA:
+		avail = percpu_counter_sum(&pag->pag_mount->m_fdblocks);
+		orig = pag->pag_mount->m_rtmeta_resv.ar_asked;
+		break;
 	case XFS_AG_RESV_METADATA:
 		avail = pag->pagf_freeblks - pag->pag_rmapbt_resv.ar_reserved;
 		orig = pag->pag_meta_resv.ar_asked;
@@ -109,6 +114,7 @@ xfs_ag_resv_needed(
 
 	len = pag->pag_meta_resv.ar_reserved + pag->pag_rmapbt_resv.ar_reserved;
 	switch (type) {
+	case XFS_AG_RESV_RTMETADATA:
 	case XFS_AG_RESV_METADATA:
 	case XFS_AG_RESV_RMAPBT:
 		len -= xfs_perag_resv(pag, type)->ar_reserved;
@@ -175,6 +181,82 @@ xfs_ag_resv_free(
 	return error;
 }
 
+/* Clean out a rt reservation */
+int
+xfs_rt_resv_free(
+	struct xfs_mount		*mp)
+{
+	int				error;
+
+	trace_xfs_rt_resv_free(mp, 0);
+
+	error = xfs_mod_fdblocks(mp, mp->m_rtmeta_resv.ar_reserved, true);
+	if (error)
+		return error;
+
+	mp->m_rtmeta_resv.ar_reserved = 0;
+	mp->m_rtmeta_resv.ar_asked = 0;
+	mp->m_rtmeta_resv.ar_orig_reserved = 0;
+	return 0;
+}
+
+static int
+__xfs_rt_resv_init(
+	struct xfs_mount		*mp,
+	xfs_filblks_t			ask,
+	xfs_filblks_t			used)
+{
+	xfs_filblks_t			hidden_space;
+	int				error;
+
+	/*
+	 * Space taken by all other metadata btrees are accounted on-disk as
+	 * used space.  We therefore only hide the space that is reserved but
+	 * not used by the trees.
+	 */
+	if (used > ask)
+		ask = used;
+	hidden_space = ask - used;
+
+	error = xfs_mod_fdblocks(mp, -(int64_t)hidden_space, true);
+	if (error) {
+		trace_xfs_ag_resv_init_error(mp, NULLAGNUMBER, error,
+				_RET_IP_);
+		xfs_warn(mp,
+"Space reservation for rt metadata failed.  Filesystem may run out of space.");
+		return error;
+	}
+
+	mp->m_rtmeta_resv.ar_asked = ask;
+	mp->m_rtmeta_resv.ar_orig_reserved = hidden_space;
+	mp->m_rtmeta_resv.ar_reserved = ask - used;
+
+	trace_xfs_rt_resv_init(mp, ask);
+	return 0;
+}
+
+/* Create a rt metadata block reservation. */
+int
+xfs_rt_resv_init(
+	struct xfs_mount	*mp,
+	struct xfs_trans	*tp)
+{
+	xfs_filblks_t		ask;
+	xfs_filblks_t		used;
+	int			error;
+
+	/* Create the rt metadata reservation. */
+	if (mp->m_rtmeta_resv.ar_asked == 0) {
+		ask = used = 0;
+
+		error = __xfs_rt_resv_init(mp, ask, used);
+		if (error)
+			return error;
+	}
+
+	return 0;
+}
+
 static int
 __xfs_ag_resv_init(
 	struct xfs_perag		*pag,
@@ -200,6 +282,7 @@ __xfs_ag_resv_init(
 		 */
 		hidden_space = ask;
 		break;
+	case XFS_AG_RESV_RTMETADATA:
 	case XFS_AG_RESV_METADATA:
 		/*
 		 * Space taken by all other metadata btrees are accounted
@@ -333,6 +416,7 @@ xfs_ag_resv_alloc_extent(
 	switch (type) {
 	case XFS_AG_RESV_AGFL:
 		return;
+	case XFS_AG_RESV_RTMETADATA:
 	case XFS_AG_RESV_METADATA:
 	case XFS_AG_RESV_RMAPBT:
 		resv = xfs_perag_resv(pag, type);
@@ -375,6 +459,7 @@ xfs_ag_resv_free_extent(
 	switch (type) {
 	case XFS_AG_RESV_AGFL:
 		return;
+	case XFS_AG_RESV_RTMETADATA:
 	case XFS_AG_RESV_METADATA:
 	case XFS_AG_RESV_RMAPBT:
 		resv = xfs_perag_resv(pag, type);
