@@ -1311,6 +1311,7 @@ DEFINE_EVENT(xrep_dir_class, name, \
 	TP_PROTO(struct xfs_inode *dp, xfs_ino_t parent_ino), \
 	TP_ARGS(dp, parent_ino))
 DEFINE_XREP_DIR_CLASS(xrep_dir_reset_fork);
+DEFINE_XREP_DIR_CLASS(xrep_parent_dir);
 
 #define XFS_DIR3_FTYPE_STR \
 	{ XFS_DIR3_FT_UNKNOWN,	"unknown" }, \
