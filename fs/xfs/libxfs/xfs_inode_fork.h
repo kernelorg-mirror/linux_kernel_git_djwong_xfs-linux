@@ -201,4 +201,6 @@ struct xfs_ifork_broot_ops {
 void xfs_iroot_realloc(struct xfs_inode *ip, int whichfork,
 		const struct xfs_ifork_broot_ops *ops, int rec_diff);
 
+bool xfs_ifork_is_realtime(struct xfs_inode *ip, int whichfork);
+
 #endif	/* __XFS_INODE_FORK_H__ */
