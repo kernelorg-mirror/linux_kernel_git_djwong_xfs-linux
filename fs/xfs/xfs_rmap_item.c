@@ -511,9 +511,15 @@ xfs_rui_validate_map(
 		return false;
 
 	end = rmap->me_startblock + rmap->me_len - 1;
-	if (!xfs_verify_fsbno(mp, rmap->me_startblock) ||
-	    !xfs_verify_fsbno(mp, end))
-		return false;
+	if (rmap->me_flags & XFS_RMAP_EXTENT_REALTIME) {
+		if (!xfs_verify_rtbno(mp, rmap->me_startblock) ||
+		    !xfs_verify_rtbno(mp, end))
+			return false;
+	} else {
+		if (!xfs_verify_fsbno(mp, rmap->me_startblock) ||
+		    !xfs_verify_fsbno(mp, end))
+			return false;
+	}
 
 	return true;
 }
