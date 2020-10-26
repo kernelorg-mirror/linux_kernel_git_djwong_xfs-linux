@@ -381,7 +381,14 @@ restart:
 			drained_dio = true;
 			goto restart;
 		}
-	
+
+		if (xfs_reflink_need_unshare_around(ip)) {
+			error = xfs_file_unshare_around(ip, isize,
+					iocb->ki_pos - isize);
+			if (error)
+				return error;
+		}
+
 		trace_xfs_zero_eof(ip, isize, iocb->ki_pos - isize);
 		error = iomap_zero_range(inode, isize, iocb->ki_pos - isize,
 				NULL, &xfs_buffered_write_iomap_ops);
@@ -526,6 +533,16 @@ xfs_file_dio_aio_write(
 		return -EINVAL;
 
 	/*
+	 * We can't properly handle unaligned direct I/O to reflink files yet,
+	 * as we can't unshare a partial block.
+	 */
+	if (xfs_is_cow_inode(ip) &&
+	    !xfs_is_falloc_aligned(ip, iocb->ki_pos, count)) {
+		trace_xfs_reflink_bounce_dio_write(ip, iocb->ki_pos, count);
+		return -ENOTBLK;
+	}
+
+	/*
 	 * Don't take the exclusive iolock here unless the I/O is unaligned to
 	 * the file system block size.  We don't need to consider the EOF
 	 * extension case here because xfs_file_aio_write_checks() will relock
@@ -535,15 +552,6 @@ xfs_file_dio_aio_write(
 	if ((iocb->ki_pos & mp->m_blockmask) ||
 	    ((iocb->ki_pos + count) & mp->m_blockmask)) {
 		unaligned_io = 1;
-
-		/*
-		 * We can't properly handle unaligned direct I/O to reflink
-		 * files yet, as we can't unshare a partial block.
-		 */
-		if (xfs_is_cow_inode(ip)) {
-			trace_xfs_reflink_bounce_dio_write(ip, iocb->ki_pos, count);
-			return -ENOTBLK;
-		}
 		iolock = XFS_IOLOCK_EXCL;
 	} else {
 		iolock = XFS_IOLOCK_SHARED;
@@ -714,6 +722,72 @@ out:
 	return ret;
 }
 
+static inline int
+xfs_file_unshare_bytes(
+	struct xfs_inode	*ip,
+	loff_t			off,
+	loff_t			len,
+	loff_t			isize)
+{
+	loff_t			end = min(isize, off + len);
+
+	if (off >= isize)
+		return 0;
+
+	trace_xfs_reflink_unshare(ip, off, end - off);
+
+	return iomap_file_unshare(VFS_I(ip), off, end - off,
+			&xfs_buffered_write_iomap_ops);
+}
+
+/*
+ * Dirty the pages on either side of a write request as needed to satisfy
+ * alignment requirements.  Realtime files on a rt volume where the rt extent
+ * size is larger than 1 fs block can only map and unmap full extent blocks,
+ * because that is how xfs chose to simplify rt extent management.
+ *
+ * This adds a requirement to CoW and reflink that we can only ever remap and
+ * CoW full rt extents.  To facilitate the CoW end of this, we use the unshare
+ * functionality to dirty the pages before the start and after the end of a
+ * write request as needed so that we always dirty entire rt extents.  Note
+ * that page cache doesn't exist above EOF, so be careful to stay below EOF.
+ */
+int
+xfs_file_unshare_around(
+	struct xfs_inode	*ip,
+	loff_t			pos,
+	long long int		count)
+{
+	unsigned int		extsize = xfs_inode_alloc_unitsize(ip);
+	loff_t			next = pos + count;
+	loff_t			isize = i_size_read(VFS_I(ip));
+	uint32_t		mod;
+	int			error;
+
+	if (xfs_is_falloc_aligned(ip, pos, count))
+		return 0;
+
+	inode_dio_wait(VFS_I(ip));
+
+	/* Unshare at the start of the extent. */
+	div_u64_rem(pos, extsize, &mod);
+	if (mod != 0) {
+		error = xfs_file_unshare_bytes(ip, pos - mod, extsize, isize);
+		if (error)
+			return error;
+	}
+
+	/* Unshare at the end. */
+	div_u64_rem(next, extsize, &mod);
+	if (mod != 0) {
+		error = xfs_file_unshare_bytes(ip, next - mod, extsize, isize);
+		if (error)
+			return error;
+	}
+
+	return 0;
+}
+
 STATIC ssize_t
 xfs_file_write_iter(
 	struct kiocb		*iocb,
@@ -736,6 +810,12 @@ xfs_file_write_iter(
 
 	if (IS_DAX(inode))
 		return xfs_file_dax_write(iocb, from);
+
+	if (xfs_reflink_need_unshare_around(ip)) {
+		ret = xfs_file_unshare_around(ip, iocb->ki_pos, ocount);
+		if (ret)
+			return ret;
+	}
 
 	if (iocb->ki_flags & IOCB_DIRECT) {
 		/*
@@ -874,6 +954,13 @@ xfs_file_fallocate(
 	}
 
 	if (mode & FALLOC_FL_PUNCH_HOLE) {
+		/* Unshare around the region to punch, if needed. */
+		if (xfs_reflink_need_unshare_around(ip)) {
+			error = xfs_file_unshare_around(ip, offset, len);
+			if (error)
+				goto out_unlock;
+		}
+
 		error = xfs_free_file_space(ip, offset, len);
 		if (error)
 			goto out_unlock;
@@ -946,6 +1033,14 @@ xfs_file_fallocate(
 
 			trace_xfs_zero_file_space(ip);
 
+			/* Unshare around the region to zero, if needed. */
+			if (xfs_reflink_need_unshare_around(ip)) {
+				error = xfs_file_unshare_around(ip, offset,
+						len);
+				if (error)
+					goto out_unlock;
+			}
+
 			error = xfs_free_file_space(ip, offset, len);
 			if (error)
 				goto out_unlock;
@@ -954,6 +1049,23 @@ xfs_file_fallocate(
 			      round_down(offset, blksize);
 			offset = round_down(offset, blksize);
 		} else if (mode & FALLOC_FL_UNSHARE_RANGE) {
+			/*
+			 * Enlarge the unshare region to align to a full
+			 * allocation unit.
+			 */
+			if (xfs_reflink_need_unshare_around(ip)) {
+				unsigned int	rextsize;
+				uint32_t	mod;
+
+				rextsize = xfs_inode_alloc_unitsize(ip);
+				div_u64_rem(offset, rextsize, &mod);
+				offset -= mod;
+				len += mod;
+
+				div_u64_rem(offset + len, rextsize, &mod);
+				if (mod)
+					len += rextsize - mod;
+			}
 			error = xfs_reflink_unshare(ip, offset, len);
 			if (error)
 				goto out_unlock;
@@ -1405,12 +1517,27 @@ __xfs_filemap_fault(
 		if (ret & VM_FAULT_NEEDDSYNC)
 			ret = dax_finish_sync_fault(vmf, pe_size, pfn);
 	} else {
-		if (write_fault)
+		if (write_fault) {
+			/* Unshare around the region to zero, if needed. */
+			if (xfs_reflink_need_unshare_around(ip) &&
+			    !xfs_is_falloc_aligned(ip, page_offset(vmf->page),
+						       page_size(vmf->page))) {
+				int	error;
+
+				error = xfs_file_unshare_around(ip,
+						page_offset(vmf->page),
+						page_size(vmf->page));
+				if (error) {
+					ret = VM_FAULT_SIGBUS;
+					goto unlock;
+				}
+			}
 			ret = iomap_page_mkwrite(vmf,
 					&xfs_buffered_write_iomap_ops);
-		else
+		} else
 			ret = filemap_fault(vmf);
 	}
+unlock:
 	xfs_iunlock(XFS_I(inode), XFS_MMAPLOCK_SHARED);
 
 	if (write_fault)
