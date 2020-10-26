@@ -1343,9 +1343,14 @@ xfs_ioctl_setattr_check_cowextsize(
 	if (cowextsize_fsb > MAXEXTLEN)
 		return -EINVAL;
 
-	size = mp->m_sb.sb_blocksize;
-	if (cowextsize_fsb > mp->m_sb.sb_agblocks / 2)
-		return -EINVAL;
+	if (XFS_IS_REALTIME_INODE(ip) ||
+	    (fa->fsx_xflags & FS_XFLAG_REALTIME)) {
+		size = mp->m_sb.sb_rextsize << mp->m_sb.sb_blocklog;
+	} else {
+		size = mp->m_sb.sb_blocksize;
+		if (cowextsize_fsb > mp->m_sb.sb_agblocks / 2)
+			return -EINVAL;
+	}
 
 	if (fa->fsx_cowextsize % size)
 		return -EINVAL;
