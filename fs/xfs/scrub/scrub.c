@@ -155,7 +155,7 @@ xchk_teardown(
 	struct xfs_inode	*ip_in,
 	int			error)
 {
-	int				err2;
+	int			err2;
 
 	xchk_ag_free(sc, &sc->sa);
 	if (sc->tp) {
@@ -165,6 +165,7 @@ xchk_teardown(
 			xfs_trans_cancel(sc->tp);
 		sc->tp = NULL;
 	}
+	xchk_rt_unlock(sc, &sc->sr);
 	if (sc->ip) {
 		if (sc->ilock_flags)
 			xfs_iunlock(sc->ip, sc->ilock_flags);
