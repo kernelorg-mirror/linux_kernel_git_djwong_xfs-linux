@@ -3948,7 +3948,8 @@ DEFINE_EOFBLOCKS_EVENT(xfs_inode_free_quota_blocks);
 DEFINE_EOFBLOCKS_EVENT(xfs_inode_free_blocks);
 
 #define XFS_SWAPEXT_STRINGS \
-	{ XFS_SWAPEXT_SET_SIZES,		"SETSIZES" }
+	{ XFS_SWAPEXT_SET_SIZES,		"SETSIZES" }, \
+	{ XFS_SWAPEXT_INO2_SHORTFORM,		"INO2_SHORTFORM" }
 
 TRACE_EVENT(xfs_swapext_estimate,
 	TP_PROTO(const struct xfs_swapext_req *req,
@@ -4003,7 +4004,8 @@ TRACE_EVENT(xfs_swapext_estimate,
 
 #define XFS_SWAP_EXTENT_STRINGS \
 	{ XFS_SWAP_EXTENT_ATTR_FORK,		"ATTRFORK" }, \
-	{ XFS_SWAP_EXTENT_SET_SIZES,		"SETSIZES" }
+	{ XFS_SWAP_EXTENT_SET_SIZES,		"SETSIZES" }, \
+	{ XFS_SWAP_EXTENT_INO2_SHORTFORM,	"INO2_SHORTFORM" }
 
 TRACE_EVENT(xfs_swapext_defer,
 	TP_PROTO(struct xfs_mount *mp, const struct xfs_swapext_intent *sxi),
