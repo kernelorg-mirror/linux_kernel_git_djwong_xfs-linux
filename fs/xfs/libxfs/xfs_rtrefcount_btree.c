@@ -386,3 +386,46 @@ xfs_rtrefcountbt_compute_maxlevels(
 	mp->m_rtrefc_maxlevels = xfs_btree_compute_maxlevels(mp->m_rtrefc_mnr,
 			mp->m_sb.sb_rblocks);
 }
+
+/* Calculate the rtrefcount btree size for some records. */
+static unsigned long long
+xfs_rtrefcountbt_calc_size(
+	struct xfs_mount	*mp,
+	unsigned long long	len)
+{
+	return xfs_btree_calc_size(mp->m_rtrefc_mnr, len);
+}
+
+/*
+ * Calculate the maximum refcount btree size.
+ */
+static unsigned long long
+xfs_rtrefcountbt_max_size(
+	struct xfs_mount	*mp,
+	xfs_rtblock_t		rtblocks)
+{
+	/* Bail out if we're uninitialized, which can happen in mkfs. */
+	if (mp->m_rtrefc_mxr[0] == 0)
+		return 0;
+
+	return xfs_rtrefcountbt_calc_size(mp, rtblocks);
+}
+
+/*
+ * Figure out how many blocks to reserve and how many are used by this btree.
+ */
+int
+xfs_rtrefcountbt_calc_reserves(
+	struct xfs_mount	*mp,
+	struct xfs_trans	*tp,
+	xfs_filblks_t		*ask,
+	xfs_filblks_t		*used)
+{
+	if (!xfs_sb_version_hasrtreflink(&mp->m_sb))
+		return 0;
+
+	*ask += xfs_rtrefcountbt_max_size(mp, mp->m_sb.sb_rblocks);
+	*used += mp->m_rrefcountip->i_d.di_nblocks;
+
+	return 0;
+}
