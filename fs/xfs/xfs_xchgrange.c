@@ -217,6 +217,46 @@ xfs_add_atomic_swap(
 			XFS_SB_FEAT_INCOMPAT_LOG_ATOMIC_SWAP);
 }
 
+/* Decide if we can use log-assisted extent swapping (aka xfs_swapext()). */
+static inline bool
+xfs_xchg_use_log_items(
+	struct xfs_mount		*mp,
+	const struct file_xchg_range	*fxr)
+{
+	/*
+	 * By definition, we can always use xfs_swapext() if atomic extent
+	 * swapping is enabled.
+	 */
+	if (xfs_sb_version_hasatomicswap(&mp->m_sb))
+		return true;
+
+	/*
+	 * If the user requested a non-atomic swap but our filesystem supports
+	 * the deferred bmap log intent items that log-assisted swapping builds
+	 * upon, then we're also ok.
+	 */
+	if ((fxr->flags & FILE_XCHG_RANGE_NONATOMIC) &&
+	    xfs_sb_version_canatomicswap(&mp->m_sb))
+		return true;
+
+	return false;
+}
+
+/* Decide if we can use the old data fork exchange code. */
+static inline bool
+xfs_xchg_use_forkswap(
+	const struct file_xchg_range	*fxr,
+	struct xfs_inode		*ip1,
+	struct xfs_inode		*ip2)
+{
+	return	(fxr->flags & FILE_XCHG_RANGE_NONATOMIC) &&
+		(fxr->flags & FILE_XCHG_RANGE_FULL_FILES) &&
+		!(fxr->flags & FILE_XCHG_RANGE_TO_EOF) &&
+		fxr->file1_offset == 0 && fxr->file2_offset == 0 &&
+		fxr->length == ip1->i_d.di_size &&
+		fxr->length == ip2->i_d.di_size;
+}
+
 /* Exchange the contents of two files. */
 int
 xfs_xchg_range(
@@ -235,10 +275,6 @@ xfs_xchg_range(
 	struct xfs_trans		*tp;
 	loff_t				req_len;
 	int				error;
-
-	/* We don't support whole-fork swapping yet. */
-	if (!xfs_sb_version_canatomicswap(&mp->m_sb))
-		return -EOPNOTSUPP;
 
 	if (fxr->flags & FILE_XCHG_RANGE_TO_EOF)
 		req.flags |= XFS_SWAPEXT_SET_SIZES;
@@ -322,20 +358,53 @@ xfs_xchg_range(
 	if (error)
 		goto out_trans_cancel;
 
-	/* If we got this far on a dry run, all parameters are ok. */
-	if (fxr->flags & FILE_XCHG_RANGE_DRY_RUN)
-		goto out_trans_cancel;
+	if (xfs_xchg_use_log_items(mp, fxr)) {
+		/* Exchange the file contents by swapping the block mappings. */
 
-	/* Update the mtime and ctime of both files. */
-	if (private_flags & XFS_XCHG_RANGE_UPD_CMTIME1)
-		xfs_trans_ichgtime(tp, ip1,
-				XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
-	if (private_flags & XFS_XCHG_RANGE_UPD_CMTIME2)
-		xfs_trans_ichgtime(tp, ip2,
-				XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
+		/* If we got this far on a dry run, all parameters are ok. */
+		if (fxr->flags & FILE_XCHG_RANGE_DRY_RUN)
+			goto out_trans_cancel;
 
-	/* Exchange the file contents by swapping the block mappings. */
-	error = xfs_swapext(&tp, &req);
+		/* Update the mtime and ctime of both files. */
+		if (private_flags & XFS_XCHG_RANGE_UPD_CMTIME1)
+			xfs_trans_ichgtime(tp, ip1,
+					XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
+		if (private_flags & XFS_XCHG_RANGE_UPD_CMTIME2)
+			xfs_trans_ichgtime(tp, ip2,
+					XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
+
+		error = xfs_swapext(&tp, &req);
+	} else if (xfs_xchg_use_forkswap(fxr, ip1, ip2)) {
+		/*
+		 * Exchange the file contents by using the old bmap fork
+		 * exchange code, if we're a defrag tool doing a full file
+		 * swap.
+		 */
+		error = xfs_swap_extents_check_format(ip2, ip1);
+		if (error) {
+			xfs_notice(mp,
+		"%s: inode 0x%llx format is incompatible for exchanging.",
+					__func__, ip2->i_ino);
+			goto out_trans_cancel;
+		}
+
+		/* If we got this far on a dry run, all parameters are ok. */
+		if (fxr->flags & FILE_XCHG_RANGE_DRY_RUN)
+			goto out_trans_cancel;
+
+		/* Update the mtime and ctime of both files. */
+		if (private_flags & XFS_XCHG_RANGE_UPD_CMTIME1)
+			xfs_trans_ichgtime(tp, ip1,
+					XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
+		if (private_flags & XFS_XCHG_RANGE_UPD_CMTIME2)
+			xfs_trans_ichgtime(tp, ip2,
+					XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
+
+		error = xfs_swap_extent_forks(&tp, &req);
+	} else {
+		/* We cannot exchange the file contents. */
+		error = -EOPNOTSUPP;
+	}
 	if (error)
 		goto out_trans_cancel;
 
