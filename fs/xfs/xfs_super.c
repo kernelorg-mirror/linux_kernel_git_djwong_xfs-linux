@@ -1669,9 +1669,15 @@ xfs_fc_fill_super(
 "EXPERIMENTAL metadata directory feature in use. Use at your own risk!");
 
 	if (xfs_sb_version_hasreflink(&mp->m_sb)) {
-		if (mp->m_sb.sb_rblocks && mp->m_sb.sb_rextsize != 1) {
+		/*
+		 * Reflink doesn't support rt extent sizes that aren't an even
+		 * power of two because the VFS helpers aren't built to handle
+		 * such things.
+		 */
+		if (mp->m_sb.sb_rblocks &&
+		    !is_power_of_2(mp->m_sb.sb_rextsize)) {
 			xfs_alert(mp,
-	"reflink not compatible with realtime device with rextsize %u!",
+	"Realtime reflink cannot handle non-power-of-2 rextsize %u blocks!",
 					mp->m_sb.sb_rextsize);
 			error = -EINVAL;
 			goto out_filestream_unmount;
@@ -1682,7 +1688,6 @@ xfs_fc_fill_super(
 			mp->m_always_cow = true;
 		}
 	}
-
 
 	if (xfs_sb_version_hasinobtcounts(&mp->m_sb))
 		xfs_warn(mp,
