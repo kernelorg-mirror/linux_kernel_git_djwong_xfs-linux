@@ -260,13 +260,16 @@ xfs_trans_set_rmap_flags(
 	struct xfs_map_extent		*rmap,
 	enum xfs_rmap_intent_type	type,
 	int				whichfork,
-	xfs_exntst_t			state)
+	xfs_exntst_t			state,
+	bool				rt)
 {
 	rmap->me_flags = 0;
 	if (state == XFS_EXT_UNWRITTEN)
 		rmap->me_flags |= XFS_RMAP_EXTENT_UNWRITTEN;
 	if (whichfork == XFS_ATTR_FORK)
 		rmap->me_flags |= XFS_RMAP_EXTENT_ATTR_FORK;
+	if (rt)
+		rmap->me_flags |= XFS_RMAP_EXTENT_REALTIME;
 	switch (type) {
 	case XFS_RMAP_MAP:
 		rmap->me_flags |= XFS_RMAP_EXTENT_MAP;
@@ -313,6 +316,7 @@ xfs_trans_log_finish_rmap_update(
 	xfs_fsblock_t			startblock,
 	xfs_filblks_t			blockcount,
 	xfs_exntst_t			state,
+	bool				rt,
 	struct xfs_btree_cur		**pcur)
 {
 	int				error;
@@ -343,11 +347,19 @@ xfs_rmap_update_diff_items(
 	struct xfs_mount		*mp = priv;
 	struct xfs_rmap_intent		*ra;
 	struct xfs_rmap_intent		*rb;
+	xfs_agnumber_t			a_ag, b_ag;
 
 	ra = container_of(a, struct xfs_rmap_intent, ri_list);
 	rb = container_of(b, struct xfs_rmap_intent, ri_list);
-	return  XFS_FSB_TO_AGNO(mp, ra->ri_bmap.br_startblock) -
-		XFS_FSB_TO_AGNO(mp, rb->ri_bmap.br_startblock);
+	if (ra->ri_realtime)
+		a_ag = NULLAGNUMBER;
+	else
+		a_ag = XFS_FSB_TO_AGNO(mp, ra->ri_bmap.br_startblock);
+	if (rb->ri_realtime)
+		b_ag = NULLAGNUMBER;
+	else
+		b_ag = XFS_FSB_TO_AGNO(mp, rb->ri_bmap.br_startblock);
+	return a_ag - b_ag;
 }
 
 /* Log rmap updates in the intent item. */
@@ -376,7 +388,7 @@ xfs_rmap_update_log_item(
 	map->me_startoff = rmap->ri_bmap.br_startoff;
 	map->me_len = rmap->ri_bmap.br_blockcount;
 	xfs_trans_set_rmap_flags(map, rmap->ri_type, rmap->ri_whichfork,
-			rmap->ri_bmap.br_state);
+			rmap->ri_bmap.br_state, rmap->ri_realtime);
 }
 
 static struct xfs_log_item *
@@ -426,7 +438,7 @@ xfs_rmap_update_finish_item(
 			rmap->ri_type, rmap->ri_owner, rmap->ri_whichfork,
 			rmap->ri_bmap.br_startoff, rmap->ri_bmap.br_startblock,
 			rmap->ri_bmap.br_blockcount, rmap->ri_bmap.br_state,
-			state);
+			rmap->ri_realtime, state);
 	kmem_free(rmap);
 	return error;
 }
@@ -523,6 +535,7 @@ xfs_rui_item_recover(
 	struct xfs_mount		*mp = lip->li_mountp;
 	enum xfs_rmap_intent_type	type;
 	xfs_exntst_t			state;
+	bool				rt;
 	int				i;
 	int				whichfork;
 	int				error = 0;
@@ -548,6 +561,7 @@ xfs_rui_item_recover(
 				XFS_EXT_UNWRITTEN : XFS_EXT_NORM;
 		whichfork = (rmap->me_flags & XFS_RMAP_EXTENT_ATTR_FORK) ?
 				XFS_ATTR_FORK : XFS_DATA_FORK;
+		rt = !!(rmap->me_flags & XFS_RMAP_EXTENT_REALTIME);
 		switch (rmap->me_flags & XFS_RMAP_EXTENT_TYPE_MASK) {
 		case XFS_RMAP_EXTENT_MAP:
 			type = XFS_RMAP_MAP;
@@ -581,7 +595,7 @@ xfs_rui_item_recover(
 		error = xfs_trans_log_finish_rmap_update(tp, rudp, type,
 				rmap->me_owner, whichfork,
 				rmap->me_startoff, rmap->me_startblock,
-				rmap->me_len, state, &rcur);
+				rmap->me_len, state, rt, &rcur);
 		if (error)
 			goto abort_error;
 
