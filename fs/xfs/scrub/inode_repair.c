@@ -165,8 +165,6 @@ xrep_dinode_flags(
 		flags2 |= XFS_DIFLAG2_REFLINK;
 	else
 		flags2 &= ~(XFS_DIFLAG2_REFLINK | XFS_DIFLAG2_COWEXTSIZE);
-	if (flags & XFS_DIFLAG_REALTIME)
-		flags2 &= ~XFS_DIFLAG2_REFLINK;
 	if (flags2 & XFS_DIFLAG2_REFLINK)
 		flags2 &= ~XFS_DIFLAG2_DAX;
 	if (!xfs_sb_version_hasbigtime(&mp->m_sb))
@@ -922,10 +920,6 @@ xrep_inode_flags(
 	/* DAX only applies to files and dirs. */
 	if (!(S_ISREG(mode) || S_ISDIR(mode)))
 		sc->ip->i_d.di_flags2 &= ~XFS_DIFLAG2_DAX;
-
-	/* No reflink files on the realtime device. */
-	if (sc->ip->i_d.di_flags & XFS_DIFLAG_REALTIME)
-		sc->ip->i_d.di_flags2 &= ~XFS_DIFLAG2_REFLINK;
 
 	/* No mixing reflink and DAX yet. */
 	if (sc->ip->i_d.di_flags2 & XFS_DIFLAG2_REFLINK)
