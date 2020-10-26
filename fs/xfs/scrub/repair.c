@@ -662,7 +662,8 @@ xrep_newbt_destroy_reservation(
 			XFS_FSB_TO_AGBNO(sc->mp, resv->fsbno),
 			resv->len, xnr->oinfo.oi_owner);
 
-	__xfs_bmap_add_free(sc->tp, resv->fsbno, resv->len, &xnr->oinfo, true);
+	__xfs_bmap_add_free(sc->tp, resv->fsbno, resv->len, &xnr->oinfo, false,
+			true);
 
 	return 0;
 }
@@ -1035,7 +1036,7 @@ xrep_reap_block(
 		 * reservation.
 		 */
 		xrep_reap_invalidate_block(sc, fsbno);
-		__xfs_bmap_add_free(sc->tp, fsbno, 1, rb->oinfo, false);
+		__xfs_bmap_add_free(sc->tp, fsbno, 1, rb->oinfo, false, false);
 		rb->deferred++;
 		need_roll = rb->deferred > 100;
 	}
