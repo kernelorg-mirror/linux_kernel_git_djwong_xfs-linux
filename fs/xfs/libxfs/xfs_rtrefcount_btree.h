@@ -176,4 +176,9 @@ void xfs_rtrefcountbt_to_disk(struct xfs_mount *mp,
 		struct xfs_rtrefcount_root *dblock, int dblocklen);
 void xfs_iflush_rtrefcount(struct xfs_inode *ip, struct xfs_dinode *dip);
 
+struct xfs_imeta_end;
+
+int xfs_rtrefcountbt_create(struct xfs_trans **tpp, struct xfs_imeta_end *ic,
+		struct xfs_inode **ipp);
+
 #endif	/* __XFS_RTREFCOUNT_BTREE_H__ */
