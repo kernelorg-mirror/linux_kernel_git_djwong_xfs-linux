@@ -538,6 +538,11 @@ xfs_dinode_verify(
 
 	flags2 = be64_to_cpu(dip->di_flags2);
 
+	/* don't allow the metadata iflag if we don't have metadir */
+	if ((flags2 & XFS_DIFLAG2_METADATA) &&
+	    !xfs_sb_version_hasmetadir(&mp->m_sb))
+		return __this_address;
+
 	/* don't allow reflink/cowextsize if we don't have reflink */
 	if ((flags2 & (XFS_DIFLAG2_REFLINK | XFS_DIFLAG2_COWEXTSIZE)) &&
 	     !xfs_sb_version_hasreflink(&mp->m_sb))
@@ -565,6 +570,16 @@ xfs_dinode_verify(
 	if (xfs_dinode_has_bigtime(dip) &&
 	    !xfs_sb_version_hasbigtime(&mp->m_sb))
 		return __this_address;
+
+	if (flags2 & XFS_DIFLAG2_METADATA) {
+		/* Metadata files can only be directories or regular files. */
+		if (!S_ISDIR(mode) && !S_ISREG(mode))
+			return __this_address;
+
+		/* They must have zero access permissions */
+		if (mode & 00777)
+			return __this_address;
+	}
 
 	return NULL;
 }
