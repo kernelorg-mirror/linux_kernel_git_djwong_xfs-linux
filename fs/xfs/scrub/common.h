@@ -101,6 +101,7 @@ int xchk_setup_parent(struct xfs_scrub *sc,
 int xchk_setup_rtbitmap(struct xfs_scrub *sc, struct xfs_inode *ip);
 int xchk_setup_rtsummary(struct xfs_scrub *sc, struct xfs_inode *ip);
 int xchk_setup_rtrmapbt(struct xfs_scrub *sc, struct xfs_inode *ip);
+int xchk_setup_rtrefcountbt(struct xfs_scrub *sc, struct xfs_inode *ip);
 #else
 static inline int
 xchk_setup_rtbitmap(struct xfs_scrub *sc, struct xfs_inode *ip)
@@ -114,6 +115,11 @@ xchk_setup_rtsummary(struct xfs_scrub *sc, struct xfs_inode *ip)
 }
 static inline int
 xchk_setup_rtrmapbt(struct xfs_scrub *sc, struct xfs_inode *ip)
+{
+	return -ENOENT;
+}
+static inline int
+xchk_setup_rtrefcountbt(struct xfs_scrub *sc, struct xfs_inode *ip)
 {
 	return -ENOENT;
 }
