@@ -477,11 +477,9 @@ xfs_add_atomic_swap(
 
 	/*
 	 * Atomic extent swapping is only supported on filesystems new enough
-	 * to have reflink or rmap support enabled, and only if the filesystem
-	 * isn't configured with realtime support.
+	 * to have reflink or rmap support enabled.
 	 */
-	if (!xfs_sb_version_canatomicswap(&mp->m_sb) ||
-	    xfs_sb_version_hasrealtime(&mp->m_sb))
+	if (!xfs_sb_version_canatomicswap(&mp->m_sb))
 		return -EOPNOTSUPP;
 
 	xfs_warn(mp,

@@ -278,7 +278,14 @@ xfs_swapext_check_extents(
 	struct xfs_mount		*mp,
 	const struct xfs_swapext_req	*req)
 {
+	struct xfs_bmbt_irec		irec1, irec2;
 	struct xfs_ifork		*ifp1, *ifp2;
+	xfs_fileoff_t			startoff1 = req->startoff1;
+	xfs_fileoff_t			startoff2 = req->startoff2;
+	xfs_filblks_t			blockcount = req->blockcount;
+	uint32_t			mod;
+	int				nimaps;
+	int				error;
 
 	/* No fork? */
 	ifp1 = XFS_IFORK_PTR(req->ip1, req->whichfork);
@@ -291,8 +298,68 @@ xfs_swapext_check_extents(
 	    ifp2->if_format == XFS_DINODE_FMT_LOCAL)
 		return -EINVAL;
 
-	/* We don't support realtime files yet. */
-	return XFS_IS_REALTIME_INODE(req->ip1) ? -EINVAL : 0;
+	/*
+	 * There may be partially written rt extents lurking in the ranges to
+	 * be swapped.  If we support the swapext log intent item, we can
+	 * guarantee that operations will always finish and never leave an rt
+	 * extent partially mapped to two files, and can move on.  If we don't
+	 * have that coordination, we have to scan both ranges to ensure that
+	 * there are no partially written extents.
+	 */
+	if (!XFS_IS_REALTIME_INODE(req->ip1))
+		return 0;
+	if (xfs_sb_version_hasatomicswap(&mp->m_sb))
+		return 0;
+	if (mp->m_sb.sb_rextsize == 1)
+		return 0;
+	if (req->whichfork == XFS_ATTR_FORK)
+		return 0;
+
+	while (blockcount > 0) {
+		/* Read extent from the first file */
+		nimaps = 1;
+		error = xfs_bmapi_read(req->ip1, startoff1, blockcount,
+				&irec1, &nimaps, 0);
+		if (error)
+			return error;
+		ASSERT(nimaps == 1);
+
+		/* Read extent from the second file */
+		nimaps = 1;
+		error = xfs_bmapi_read(req->ip2, startoff2,
+				irec1.br_blockcount, &irec2, &nimaps,
+				0);
+		if (error)
+			return error;
+		ASSERT(nimaps == 1);
+
+		/*
+		 * We can only swap as many blocks as the smaller of the two
+		 * extent maps.
+		 */
+		irec1.br_blockcount = min(irec1.br_blockcount,
+					  irec2.br_blockcount);
+
+		/*
+		 * Both mappings must be aligned to the realtime extent size
+		 * if either mapping comes from the realtime volume.
+		 */
+		div_u64_rem(irec1.br_startoff, mp->m_sb.sb_rextsize, &mod);
+		if (mod)
+			return -EINVAL;
+		div_u64_rem(irec2.br_startoff, mp->m_sb.sb_rextsize, &mod);
+		if (mod)
+			return -EINVAL;
+		div_u64_rem(irec1.br_blockcount, mp->m_sb.sb_rextsize, &mod);
+		if (mod)
+			return -EINVAL;
+
+		startoff1 += irec1.br_blockcount;
+		startoff2 += irec1.br_blockcount;
+		blockcount -= irec1.br_blockcount;
+	}
+
+	return 0;
 }
 
 /* Finish one extent swap, possibly log more. */
