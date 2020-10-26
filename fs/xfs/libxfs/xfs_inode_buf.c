@@ -742,10 +742,16 @@ xfs_inode_validate_cowextsize(
 	bool				rt_flag;
 	bool				hint_flag;
 	uint32_t			cowextsize_bytes;
+	uint32_t			blocksize_bytes;
 
 	rt_flag = (flags & XFS_DIFLAG_REALTIME);
 	hint_flag = (flags2 & XFS_DIFLAG2_COWEXTSIZE);
 	cowextsize_bytes = XFS_FSB_TO_B(mp, cowextsize);
+
+	if (rt_flag)
+		blocksize_bytes = mp->m_sb.sb_rextsize << mp->m_sb.sb_blocklog;
+	else
+		blocksize_bytes = mp->m_sb.sb_blocksize;
 
 	if (hint_flag && !xfs_sb_version_hasreflink(&mp->m_sb))
 		return __this_address;
@@ -763,7 +769,7 @@ xfs_inode_validate_cowextsize(
 	if (hint_flag && !xfs_sb_version_hasrtreflink(&mp->m_sb) && rt_flag)
 		return __this_address;
 
-	if (cowextsize_bytes % mp->m_sb.sb_blocksize)
+	if (cowextsize_bytes % blocksize_bytes)
 		return __this_address;
 
 	if (cowextsize > MAXEXTLEN)
