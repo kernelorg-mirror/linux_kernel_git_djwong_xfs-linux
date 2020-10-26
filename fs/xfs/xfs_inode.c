@@ -1374,6 +1374,10 @@ xfs_inode_needs_inactivation(
 	if (mp->m_flags & XFS_MOUNT_RDONLY)
 		return false;
 
+	/* Metadata inodes require explicit resource cleanup. */
+	if (xfs_is_metadata_inode(ip))
+		return false;
+
 	/* Try to clean out the cow blocks if there are any. */
 	if (cow_ifp && cow_ifp->if_bytes > 0)
 		return true;
@@ -1466,6 +1470,10 @@ xfs_inactive(
 
 	/* If this is a read-only mount, don't do this (would generate I/O) */
 	if (mp->m_flags & XFS_MOUNT_RDONLY)
+		return;
+
+	/* Metadata inodes require explicit resource cleanup. */
+	if (xfs_is_metadata_inode(ip))
 		return;
 
 	xfs_inactive_health(ip);
