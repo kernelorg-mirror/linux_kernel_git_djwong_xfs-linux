@@ -119,26 +119,32 @@
  */
 
 /*
- * Given an AG extent, find the lowest-numbered run of shared blocks
- * within that range and return the range in fbno/flen.  If
- * find_end_of_shared is true, return the longest contiguous extent of
- * shared blocks.  If there are no shared extents, fbno and flen will
- * be set to NULLAGBLOCK and 0, respectively.
+ * Given an AG extent, find the lowest-numbered run of shared blocks within
+ * that range and return the range in fbno/flen.  If find_end_of_shared is
+ * true, return the longest contiguous extent of shared blocks.  If there are
+ * no shared extents, fbno and flen will be set to NULLFSBLOCK and 0,
+ * respectively.
  */
-int
+STATIC int
 xfs_reflink_find_shared(
-	struct xfs_mount	*mp,
+	struct xfs_inode	*ip,
 	struct xfs_trans	*tp,
-	xfs_agnumber_t		agno,
-	xfs_agblock_t		agbno,
-	xfs_extlen_t		aglen,
-	xfs_agblock_t		*fbno,
-	xfs_extlen_t		*flen,
+	struct xfs_bmbt_irec	*irec,
+	xfs_fsblock_t		*fbno,
+	xfs_filblks_t		*flen,
 	bool			find_end_of_shared)
 {
+	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_buf		*agbp;
 	struct xfs_btree_cur	*cur;
+	xfs_agnumber_t		agno;
+	xfs_agblock_t		agbno;
+	xfs_agblock_t		shared_bno;
+	xfs_extlen_t		shared_len;
 	int			error;
+
+	agno = XFS_FSB_TO_AGNO(mp, irec->br_startblock);
+	agbno = XFS_FSB_TO_AGBNO(mp, irec->br_startblock);
 
 	error = xfs_alloc_read_agf(mp, tp, agno, 0, &agbp);
 	if (error)
@@ -146,12 +152,18 @@ xfs_reflink_find_shared(
 
 	cur = xfs_refcountbt_init_cursor(mp, tp, agbp, agno);
 
-	error = xfs_refcount_find_shared(cur, agbno, aglen, fbno, flen,
-			find_end_of_shared);
+	error = xfs_refcount_find_shared(cur, agbno, irec->br_blockcount,
+			&shared_bno, &shared_len, find_end_of_shared);
 
 	xfs_btree_del_cursor(cur, error);
 
 	xfs_trans_brelse(tp, agbp);
+
+	if (shared_bno == NULLAGBLOCK)
+		*fbno = NULLFSBLOCK;
+	else
+		*fbno = XFS_AGB_TO_FSB(mp, agno, shared_bno);
+	*flen = shared_len;
 	return error;
 }
 
@@ -171,11 +183,8 @@ xfs_reflink_trim_around_shared(
 	struct xfs_bmbt_irec	*irec,
 	bool			*shared)
 {
-	xfs_agnumber_t		agno;
-	xfs_agblock_t		agbno;
-	xfs_extlen_t		aglen;
-	xfs_agblock_t		fbno;
-	xfs_extlen_t		flen;
+	xfs_fsblock_t		fbno;
+	xfs_filblks_t		flen;
 	int			error = 0;
 
 	/* Holes, unwritten, and delalloc extents cannot be shared */
@@ -186,20 +195,15 @@ xfs_reflink_trim_around_shared(
 
 	trace_xfs_reflink_trim_around_shared(ip, irec);
 
-	agno = XFS_FSB_TO_AGNO(ip->i_mount, irec->br_startblock);
-	agbno = XFS_FSB_TO_AGBNO(ip->i_mount, irec->br_startblock);
-	aglen = irec->br_blockcount;
-
-	error = xfs_reflink_find_shared(ip->i_mount, NULL, agno, agbno,
-			aglen, &fbno, &flen, true);
+	error = xfs_reflink_find_shared(ip, NULL, irec, &fbno, &flen, true);
 	if (error)
 		return error;
 
 	*shared = false;
-	if (fbno == NULLAGBLOCK) {
+	if (fbno == NULLFSBLOCK) {
 		/* No shared blocks at all. */
 		return 0;
-	} else if (fbno == agbno) {
+	} else if (fbno == irec->br_startblock) {
 		/*
 		 * The start of this extent is shared.  Truncate the
 		 * mapping at the end of the shared region so that a
@@ -216,7 +220,7 @@ xfs_reflink_trim_around_shared(
 		 * extent so that a subsequent iteration starts at the
 		 * start of the shared region.
 		 */
-		irec->br_blockcount = fbno - agbno;
+		irec->br_blockcount = fbno - irec->br_startblock;
 		return 0;
 	}
 }
@@ -1417,13 +1421,9 @@ xfs_reflink_inode_has_shared_extents(
 	bool				*has_shared)
 {
 	struct xfs_bmbt_irec		got;
-	struct xfs_mount		*mp = ip->i_mount;
 	struct xfs_ifork		*ifp;
-	xfs_agnumber_t			agno;
-	xfs_agblock_t			agbno;
-	xfs_extlen_t			aglen;
-	xfs_agblock_t			rbno;
-	xfs_extlen_t			rlen;
+	xfs_fsblock_t			rbno;
+	xfs_filblks_t			rlen;
 	struct xfs_iext_cursor		icur;
 	bool				found;
 	int				error;
@@ -1441,16 +1441,13 @@ xfs_reflink_inode_has_shared_extents(
 		if (isnullstartblock(got.br_startblock) ||
 		    got.br_state != XFS_EXT_NORM)
 			goto next;
-		agno = XFS_FSB_TO_AGNO(mp, got.br_startblock);
-		agbno = XFS_FSB_TO_AGBNO(mp, got.br_startblock);
-		aglen = got.br_blockcount;
 
-		error = xfs_reflink_find_shared(mp, tp, agno, agbno, aglen,
-				&rbno, &rlen, false);
+		error = xfs_reflink_find_shared(ip, tp, &got, &rbno, &rlen,
+				false);
 		if (error)
 			return error;
 		/* Is there still a shared block here? */
-		if (rbno != NULLAGBLOCK) {
+		if (rbno != NULLFSBLOCK) {
 			*has_shared = true;
 			return 0;
 		}
