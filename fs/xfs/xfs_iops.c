@@ -41,6 +41,15 @@
 static struct lock_class_key xfs_nondir_ilock_class;
 static struct lock_class_key xfs_dir_ilock_class;
 
+/*
+ * Metadata directories and files are not exposed to userspace, which means
+ * that they never access any of the VFS IO locks and never experience page
+ * faults.  Give them separate locking classes so that lockdep will not
+ * complain about conflicts that cannot happen.
+ */
+static struct lock_class_key xfs_metadata_file_ilock_class;
+static struct lock_class_key xfs_metadata_dir_ilock_class;
+
 static int
 xfs_initxattrs(
 	struct inode		*inode,
@@ -1340,6 +1349,7 @@ xfs_setup_inode(
 {
 	struct inode		*inode = &ip->i_vnode;
 	gfp_t			gfp_mask;
+	bool			is_meta = xfs_is_metadata_inode(ip);
 
 	inode->i_ino = ip->i_ino;
 	inode->i_state = I_NEW;
@@ -1360,9 +1370,19 @@ xfs_setup_inode(
 		 */
 		lockdep_set_class(&inode->i_rwsem,
 				  &inode->i_sb->s_type->i_mutex_dir_key);
-		lockdep_set_class(&ip->i_lock.mr_lock, &xfs_dir_ilock_class);
+		if (is_meta)
+			lockdep_set_class(&ip->i_lock.mr_lock,
+					  &xfs_metadata_dir_ilock_class);
+		else
+			lockdep_set_class(&ip->i_lock.mr_lock,
+					  &xfs_dir_ilock_class);
 	} else {
-		lockdep_set_class(&ip->i_lock.mr_lock, &xfs_nondir_ilock_class);
+		if (is_meta)
+			lockdep_set_class(&ip->i_lock.mr_lock,
+					  &xfs_metadata_file_ilock_class);
+		else
+			lockdep_set_class(&ip->i_lock.mr_lock,
+					  &xfs_nondir_ilock_class);
 	}
 
 	/*
