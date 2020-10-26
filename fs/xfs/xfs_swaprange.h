@@ -27,4 +27,6 @@ int xfs_swap_range_prep(struct file *file1, struct file *file2,
 int xfs_swap_range(struct xfs_inode *ip1, struct xfs_inode *ip2,
 		const struct file_swap_range *fsr, unsigned int private_flags);
 
+int xfs_add_atomic_swap(struct xfs_mount *mp);
+
 #endif /* __XFS_SWAPRANGE_H__ */

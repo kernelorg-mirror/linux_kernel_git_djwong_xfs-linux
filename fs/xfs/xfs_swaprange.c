@@ -468,7 +468,7 @@ xfs_swap_range_reserve_quota(
 }
 
 /* Enable the atomic file extent swap feature in the primary superblock. */
-STATIC int
+int
 xfs_add_atomic_swap(
 	struct xfs_mount	*mp)
 {
