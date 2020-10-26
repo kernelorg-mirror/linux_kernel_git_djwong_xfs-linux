@@ -29,6 +29,8 @@
 #include "xfs_iomap.h"
 #include "xfs_sb.h"
 #include "xfs_ag_resv.h"
+#include "xfs_rtrefcount_btree.h"
+#include "xfs_rtalloc.h"
 
 /*
  * Copy on Write of Shared Blocks
@@ -135,7 +137,7 @@ xfs_reflink_find_shared(
 	bool			find_end_of_shared)
 {
 	struct xfs_mount	*mp = ip->i_mount;
-	struct xfs_buf		*agbp;
+	struct xfs_buf		*agbp = NULL;
 	struct xfs_btree_cur	*cur;
 	xfs_agnumber_t		agno;
 	xfs_fsblock_t		agbno;
@@ -143,24 +145,36 @@ xfs_reflink_find_shared(
 	xfs_filblks_t		shared_len;
 	int			error;
 
-	agno = XFS_FSB_TO_AGNO(mp, irec->br_startblock);
-	agbno = XFS_FSB_TO_AGBNO(mp, irec->br_startblock);
+	if (XFS_IS_REALTIME_INODE(ip)) {
+		agno = NULLAGNUMBER;
+		agbno = irec->br_startblock;
+		xfs_rtlock(NULL, mp, XFS_RTLOCK_REFCOUNT);
+		cur = xfs_rtrefcountbt_init_cursor(mp, tp, mp->m_rrefcountip);
+	} else {
+		agno = XFS_FSB_TO_AGNO(mp, irec->br_startblock);
+		agbno = XFS_FSB_TO_AGBNO(mp, irec->br_startblock);
 
-	error = xfs_alloc_read_agf(mp, tp, agno, 0, &agbp);
-	if (error)
-		return error;
+		error = xfs_alloc_read_agf(mp, tp, agno, 0, &agbp);
+		if (error)
+			return error;
 
-	cur = xfs_refcountbt_init_cursor(mp, tp, agbp, agno);
+		cur = xfs_refcountbt_init_cursor(mp, tp, agbp, agno);
+	}
 
 	error = xfs_refcount_find_shared(cur, agbno, irec->br_blockcount,
 			&shared_bno, &shared_len, find_end_of_shared);
 
 	xfs_btree_del_cursor(cur, error);
 
-	xfs_trans_brelse(tp, agbp);
+	if (agbp)
+		xfs_trans_brelse(tp, agbp);
+	else
+		xfs_rtunlock(mp, XFS_RTLOCK_REFCOUNT);
 
 	if (shared_bno == NULLFSBLOCK)
 		*fbno = NULLFSBLOCK;
+	else if (XFS_IS_REALTIME_INODE(ip))
+		*fbno = shared_bno;
 	else
 		*fbno = XFS_AGB_TO_FSB(mp, agno, shared_bno);
 	*flen = shared_len;
