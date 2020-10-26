@@ -619,14 +619,22 @@ xfs_efi_validate_ext(
 	struct xfs_extent		*extp)
 {
 	xfs_fsblock_t			end;
+	xfs_extlen_t			len;
 
-	if (extp->ext_start + extp->ext_len <= extp->ext_start)
+	len = extp->ext_len & ~XFS_EFI_REALTIME_EXT;
+	if (extp->ext_start + len <= extp->ext_start)
 		return false;
 
-	end = extp->ext_start + extp->ext_len - 1;
-	if (!xfs_verify_fsbno(mp, extp->ext_start) ||
-	    !xfs_verify_fsbno(mp, end))
-		return false;
+	end = extp->ext_start + len - 1;
+	if (extp->ext_len & XFS_EFI_REALTIME_EXT) {
+		if (!xfs_verify_rtbno(mp, extp->ext_start) ||
+		    !xfs_verify_rtbno(mp, end))
+			return false;
+	} else {
+		if (!xfs_verify_fsbno(mp, extp->ext_start) ||
+		    !xfs_verify_fsbno(mp, end))
+			return false;
+	}
 
 	return true;
 }
