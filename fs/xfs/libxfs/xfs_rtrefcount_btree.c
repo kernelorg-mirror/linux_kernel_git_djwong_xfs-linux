@@ -24,6 +24,7 @@
 #include "xfs_error.h"
 #include "xfs_extent_busy.h"
 #include "xfs_ag_resv.h"
+#include "xfs_imeta.h"
 
 /*
  * Realtime Reference Count btree.
@@ -665,4 +666,50 @@ xfs_iflush_rtrefcount(
 	xfs_rtrefcountbt_to_disk(ip->i_mount, ifp->if_broot,
 			ifp->if_broot_bytes, dfp,
 			XFS_DFORK_SIZE(dip, ip->i_mount, XFS_DATA_FORK));
+}
+
+/*
+ * Create a realtime refcount btree inode.  The caller must clean up @ic and
+ * release the inode stored in @ipp (if it isn't NULL) regardless of the return
+ * value.
+ */
+int
+xfs_rtrefcountbt_create(
+	struct xfs_trans	**tpp,
+	struct xfs_imeta_end	*ic,
+	struct xfs_inode	**ipp)
+{
+	struct xfs_mount	*mp = (*tpp)->t_mountp;
+	struct xfs_ifork	*ifp;
+	struct xfs_inode	*ip;
+	xfs_ino_t		ino = NULLFSINO;
+	int			error;
+
+	*ipp = NULL;
+	error = xfs_imeta_lookup(mp, &XFS_IMETA_RTREFCOUNTBT, &ino);
+	if (error)
+		return error;
+	if (ino != NULLFSINO)
+		return -EEXIST;
+
+	error = xfs_imeta_create(tpp, &XFS_IMETA_RTREFCOUNTBT, S_IFREG, ipp,
+			ic);
+	if (error)
+		return error;
+
+	ip = *ipp;
+	ifp = &ip->i_df;
+	ifp->if_format = XFS_DINODE_FMT_REFCOUNT;
+	ASSERT(ifp->if_broot_bytes == 0);
+	ASSERT(ifp->if_bytes == 0);
+
+	/* Initialize the empty incore btree root. */
+	xfs_iroot_alloc(ip, XFS_DATA_FORK,
+			xfs_rtrefcount_broot_space_calc(mp, 0, 0));
+	xfs_btree_init_block_int(ip->i_mount, ifp->if_broot,
+			XFS_BUF_DADDR_NULL, XFS_BTNUM_RTREFC, 0, 0, ip->i_ino,
+			XFS_BTREE_LONG_PTRS | XFS_BTREE_CRC_BLOCKS);
+	xfs_trans_log_inode(*tpp, ip, XFS_ILOG_CORE | XFS_ILOG_DBROOT);
+
+	return 0;
 }
