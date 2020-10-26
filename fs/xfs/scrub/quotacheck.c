@@ -569,6 +569,13 @@ xqcheck_iwalk(
 			retries = 20;
 			break;
 		case -ENOENT:
+			/*¬
+			 * It's possible that this inode has lost all of its
+			 * links but hasn't yet been inactivated.  Try to push
+			 * it towards inactivation.
+			 */
+			xfs_inactive_inodes(xqc->sc->mp, NULL);
+			/* fall through */
 		case -EINVAL:
 			/*
 			 * We thought the inode was allocated, but iget failed
