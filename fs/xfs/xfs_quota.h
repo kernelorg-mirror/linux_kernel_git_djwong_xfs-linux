@@ -74,6 +74,15 @@ struct xfs_dqtrx {
 	int64_t		qt_icount_delta;  /* dquot inode count changes */
 };
 
+/*
+ * Parameters for xfs_trans_apply_dquot_deltas hook.  The hook arg parameter
+ * is 1 to apply and 0 to cancel the update.
+ */
+struct xfs_trans_apply_dquot_deltas_params {
+	struct xfs_trans	*tp;
+	struct xfs_dquot	*dqp;
+};
+
 #ifdef CONFIG_XFS_QUOTA
 extern void xfs_trans_dup_dqinfo(struct xfs_trans *, struct xfs_trans *);
 extern void xfs_trans_free_dqinfo(struct xfs_trans *);
@@ -150,6 +159,16 @@ static inline int xfs_trans_reserve_quota_bydquots(struct xfs_trans *tp,
 #define xfs_qm_unmount(mp)
 #define xfs_qm_unmount_quotas(mp)
 #endif /* CONFIG_XFS_QUOTA */
+
+#if IS_ENABLED(CONFIG_XFS_QUOTA) && IS_ENABLED(CONFIG_XFS_ONLINE_SCRUB)
+extern void xfs_trans_mod_ino_dquot(struct xfs_trans *tp, struct xfs_inode *ip,
+		struct xfs_dquot *dqp, uint field, int64_t delta);
+#elif IS_ENABLED(CONFIG_XFS_QUOTA)
+# define xfs_trans_mod_ino_dquot(tp, ip, dqp, field, delta) \
+		xfs_trans_mod_dquot((tp), (dqp), (field), (delta))
+#else
+# define xfs_trans_mod_ino_dquot(tp, ip, dqp, field, delta)
+#endif
 
 #define xfs_trans_unreserve_quota_nblks(tp, ip, nblks, ninos, flags) \
 	xfs_trans_reserve_quota_nblks(tp, ip, -(nblks), -(ninos), flags)
