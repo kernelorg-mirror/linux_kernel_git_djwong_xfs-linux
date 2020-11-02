@@ -356,6 +356,9 @@ xfs_iget_check_free_state(
 	struct xfs_inode	*ip,
 	int			flags)
 {
+	if (flags & XFS_IGET_UNLINKED)
+		return 0;
+
 	/*
 	 * Unlinked inodes awaiting inactivation must not be reused until we
 	 * have a chance to clear the on-disk metadata.
