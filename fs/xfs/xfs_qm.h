@@ -111,6 +111,23 @@ xfs_quota_inode(struct xfs_mount *mp, xfs_dqtype_t type)
 	return NULL;
 }
 
+static inline unsigned int
+xfs_quota_active_flag(
+	xfs_dqtype_t		type)
+{
+	switch (type) {
+	case XFS_DQTYPE_USER:
+		return XFS_UQUOTA_ACTIVE;
+	case XFS_DQTYPE_GROUP:
+		return XFS_GQUOTA_ACTIVE;
+	case XFS_DQTYPE_PROJ:
+		return XFS_PQUOTA_ACTIVE;
+	default:
+		ASSERT(0);
+	}
+	return 0;
+}
+
 /* Parameters for xfs_trans_mod_dquot hook. */
 struct xfs_trans_mod_dquot_params {
 	struct xfs_trans	*tp;
