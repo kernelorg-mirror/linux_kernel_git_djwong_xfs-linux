@@ -468,6 +468,9 @@ xfs_rui_validate_map(
 {
 	xfs_fsblock_t			end;
 
+	if (!xfs_sb_version_hasrmapbt(&mp->m_sb))
+		return false;
+
 	if (rmap->me_flags & ~XFS_RMAP_EXTENT_FLAGS)
 		return false;
 
