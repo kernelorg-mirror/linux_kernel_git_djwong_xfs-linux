@@ -425,6 +425,9 @@ xfs_cui_validate_phys(
 {
 	xfs_fsblock_t			end;
 
+	if (!xfs_sb_version_hasreflink(&mp->m_sb))
+		return false;
+
 	if (refc->pe_flags & ~XFS_REFCOUNT_EXTENT_FLAGS)
 		return false;
 
