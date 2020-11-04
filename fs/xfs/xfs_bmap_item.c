@@ -426,6 +426,10 @@ xfs_bui_validate(
 	struct xfs_map_extent		*bmap;
 	xfs_fsblock_t			end;
 
+	if (!xfs_sb_version_hasrmapbt(&mp->m_sb) &&
+	    !xfs_sb_version_hasreflink(&mp->m_sb))
+		return false;
+
 	/* Only one mapping operation per BUI... */
 	if (buip->bui_format.bui_nextents != XFS_BUI_MAX_FAST_EXTENTS)
 		return false;
