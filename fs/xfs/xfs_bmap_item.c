@@ -431,7 +431,8 @@ xfs_bui_validate(
 	xfs_fsblock_t			end;
 
 	if (!xfs_sb_version_hasrmapbt(&mp->m_sb) &&
-	    !xfs_sb_version_hasreflink(&mp->m_sb))
+	    !xfs_sb_version_hasreflink(&mp->m_sb) &&
+	    !xfs_sb_version_hasatomicswap(&mp->m_sb))
 		return false;
 
 	/* Only one mapping operation per BUI... */
