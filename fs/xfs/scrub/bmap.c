@@ -19,6 +19,8 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_rmap.h"
 #include "xfs_rmap_btree.h"
+#include "xfs_rtalloc.h"
+#include "xfs_rtrmap_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/btree.h"
@@ -682,6 +684,29 @@ out_agf:
 	return error;
 }
 
+/* Make sure each rt rmap has a corresponding bmbt entry. */
+STATIC int
+xchk_bmap_check_rt_rmaps(
+	struct xfs_scrub		*sc)
+{
+	struct xchk_bmap_check_rmap_info	sbcri;
+	struct xfs_btree_cur		*cur;
+	int				error;
+
+	xfs_rtlock(NULL, sc->mp, XFS_RTLOCK_RMAP);
+	cur = xfs_rtrmapbt_init_cursor(sc->mp, sc->tp, sc->mp->m_rrmapip);
+
+	sbcri.sc = sc;
+	sbcri.whichfork = XFS_DATA_FORK;
+	error = xfs_rmap_query_all(cur, xchk_bmap_check_rmap, &sbcri);
+	if (error == -ECANCELED)
+		error = 0;
+
+	xfs_btree_del_cursor(cur, error);
+	xfs_rtunlock(sc->mp, XFS_RTLOCK_RMAP);
+	return error;
+}
+
 /* Make sure each rmap has a corresponding bmbt entry. */
 STATIC int
 xchk_bmap_check_rmaps(
@@ -696,10 +721,6 @@ xchk_bmap_check_rmaps(
 	if (!xfs_sb_version_hasrmapbt(&sc->mp->m_sb) ||
 	    whichfork == XFS_COW_FORK ||
 	    (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT))
-		return 0;
-
-	/* Don't support realtime rmap checks yet. */
-	if (xfs_ifork_is_realtime(sc->ip, whichfork))
 		return 0;
 
 	ASSERT(XFS_IFORK_PTR(sc->ip, whichfork) != NULL);
@@ -720,6 +741,9 @@ xchk_bmap_check_rmaps(
 	if (ifp->if_format != XFS_DINODE_FMT_BTREE &&
 	    (zero_size || ifp->if_nextents > 0))
 		return 0;
+
+	if (xfs_ifork_is_realtime(sc->ip, whichfork))
+		return xchk_bmap_check_rt_rmaps(sc);
 
 	for (agno = 0; agno < sc->mp->m_sb.sb_agcount; agno++) {
 		error = xchk_bmap_check_ag_rmaps(sc, whichfork, agno);
