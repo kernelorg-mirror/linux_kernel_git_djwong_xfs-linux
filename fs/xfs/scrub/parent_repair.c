@@ -280,6 +280,84 @@ xrep_parent_absorb(
 	return 0;
 }
 
+/*
+ * Move the current file to the orphanage.  The caller must not hold any locks
+ * on the orphanage and must hold only the IOLOCK on sc->ip.  The function
+ * returns with both inodes joined, ILOCKed, and dirty.
+ */
+STATIC int
+xrep_move_to_orphanage(
+	struct xfs_scrub	*sc)
+{
+	struct xfs_name		xname;
+	unsigned char		fname[MAXNAMELEN + 1];
+	struct xfs_inode	*dp = sc->tempip;
+	struct xfs_mount	*mp = sc->mp;
+	xfs_ino_t		ino;
+	unsigned int		incr = 0;
+	unsigned int		linkres, dotdotres;
+	int			error;
+
+	/* No orphanage?  We can't fix this. */
+	if (!sc->tempip)
+		return -EFSCORRUPTED;
+
+	xname.name = fname;
+	xname.len = snprintf(fname, sizeof(fname), "%llu", sc->ip->i_ino);
+	xname.type = xfs_mode_to_ftype(VFS_I(sc->ip)->i_mode);
+
+	/* Make sure the filename is unique in the lost+found. */
+	error = xfs_dir_lookup(sc->tp, dp, &xname, &ino, NULL);
+	while (error == 0 && incr < 10000) {
+		xname.len = snprintf(fname, sizeof(fname), "%llu.%d",
+				sc->ip->i_ino, ++incr);
+		error = xfs_dir_lookup(sc->tp, dp, &xname, &ino, NULL);
+	}
+	if (error == 0) {
+		/* We already have 10,000 entries in the orphanage? */
+		return -EFSCORRUPTED;
+	}
+	if (error != -ENOENT)
+		return error;
+
+	trace_xrep_move_orphanage(sc->ip, &xname, dp->i_ino);
+
+	/*
+	 * Reserve enough space to add a directory entry to the orphanage and
+	 * update the dotdot entry.
+	 */
+	linkres = XFS_LINK_SPACE_RES(mp, xname.len);
+	dotdotres = XFS_RENAME_SPACE_RES(mp, 2);
+	error = xfs_trans_reserve_more(sc->tp, linkres + dotdotres, 0);
+	if (error)
+		return error;
+
+	xfs_lock_two_inodes(dp, XFS_ILOCK_EXCL, sc->ip, XFS_ILOCK_EXCL);
+	sc->ilock_flags |= XFS_ILOCK_EXCL;
+	sc->temp_ilock_flags |= XFS_ILOCK_EXCL;
+
+	xfs_trans_ijoin(sc->tp, dp, 0);
+	xfs_trans_ijoin(sc->tp, sc->ip, 0);
+
+	/*
+	 * Create the new name in the orphanage, and bump the link count of
+	 * the orphanage if we just added a directory.
+	 */
+	error = xfs_dir_createname(sc->tp, dp, &xname, sc->ip->i_ino,
+			linkres);
+	if (error)
+		return error;
+
+	xfs_trans_ichgtime(sc->tp, dp, XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
+	if (S_ISDIR(VFS_I(sc->ip)->i_mode))
+		xfs_bumplink(sc->tp, dp);
+	xfs_trans_log_inode(sc->tp, dp, XFS_ILOG_CORE);
+
+	/* Replace the dotdot entry. */
+	return xfs_dir_replace(sc->tp, sc->ip, &xfs_name_dotdot, dp->i_ino,
+			dotdotres);
+}
+
 int
 xrep_parent(
 	struct xfs_scrub	*sc)
@@ -313,9 +391,9 @@ xrep_parent(
 			return error;
 	}
 
-	/* If we still don't have a parent, bail out. */
+	/* If we still don't have a parent, move it to lost+found. */
 	if (!xrep_parent_acceptable(sc, rp.parent_ino))
-		return 0;
+		return xrep_move_to_orphanage(sc);
 
 	trace_xrep_parent_dir(sc->ip, rp.parent_ino);
 

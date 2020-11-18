@@ -17,6 +17,7 @@
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/parent.h"
+#include "scrub/repair.h"
 
 /* Set us up to scrub parents. */
 int
@@ -25,6 +26,21 @@ xchk_setup_parent(
 	struct xfs_inode	*ip)
 {
 	int			error;
+
+	error = xrep_setup_orphanage(sc);
+	switch (error) {
+	case 0:
+	case -ENOENT:
+	case -ENOTDIR:
+		/*
+		 * If the orphanage can't be found or isn't a directory, we'll
+		 * keep going, but we won't be able to attach the file to the
+		 * orphanage if we can't find any parents.
+		 */
+		break;
+	default:
+		return error;
+	}
 
 	/*
 	 * If we're attempting a repair having failed a previous repair due to
