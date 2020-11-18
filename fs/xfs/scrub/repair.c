@@ -37,12 +37,14 @@
 #include "xfs_attr.h"
 #include "xfs_swapext.h"
 #include "xfs_xchgrange.h"
+#include "xfs_icache.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
 #include "scrub/repair.h"
 #include "scrub/bitmap.h"
 #include "scrub/xfile.h"
+#include <linux/namei.h>
 
 /*
  * Attempt to repair some metadata, if the metadata is corrupt and userspace
@@ -1697,6 +1699,170 @@ out_release_inode:
 	xfs_qm_dqrele(pdqp);
 
 	return error;
+}
+
+#define ORPHANAGE	"lost+found"
+
+/* Create the orphanage directory, and set sc->orphanage to it. */
+int
+xrep_setup_orphanage(
+	struct xfs_scrub	*sc)
+{
+	struct xfs_mount	*mp = sc->mp;
+	struct dentry		*root_dentry, *orphanage_dentry;
+	struct inode		*root_inode = VFS_I(sc->mp->m_rootip);
+	struct inode		*orphanage_inode;
+	int			error;
+
+	if (XFS_FORCED_SHUTDOWN(mp))
+		return -EIO;
+
+	ASSERT(sc->tp == NULL);
+	ASSERT(sc->orphanage == NULL);
+
+	/* Find the dentry for the root directory... */
+	root_dentry = d_find_alias(root_inode);
+	if (!root_dentry) {
+		error = -EFSCORRUPTED;
+		goto out;
+	}
+
+	/* ...which is a directory, right? */
+	if (!d_is_dir(root_dentry)) {
+		error = -EFSCORRUPTED;
+		goto out_dput_root;
+	}
+
+	/* Try to find the orphanage directory. */
+	inode_lock_nested(root_inode, I_MUTEX_PARENT);
+	orphanage_dentry = lookup_one_len(ORPHANAGE, root_dentry,
+			strlen(ORPHANAGE));
+	if (IS_ERR(orphanage_dentry)) {
+		error = PTR_ERR(orphanage_dentry);
+		goto out_unlock_root;
+	}
+
+	/* Nothing found?  Call mkdir to create the orphanage. */
+	if (d_really_is_negative(orphanage_dentry)) {
+		error = vfs_mkdir(root_inode, orphanage_dentry, 0755);
+		if (error)
+			goto out_dput_orphanage;
+	}
+
+	/* Not a directory? Bail out. */
+	if (!d_is_dir(orphanage_dentry)) {
+		error = -ENOTDIR;
+		goto out_dput_orphanage;
+	}
+
+	/*
+	 * Grab a reference to the orphanage.  This /should/ succeed since
+	 * we hold the root directory locked and therefore nobody can delete
+	 * the orphanage.
+	 */
+	orphanage_inode = igrab(d_inode(orphanage_dentry));
+	if (!orphanage_inode) {
+		error = -ENOENT;
+		goto out_dput_orphanage;
+	}
+
+	/* Stash the reference for later and bail out. */
+	sc->orphanage = XFS_I(orphanage_inode);
+	sc->orphanage_ilock_flags = 0;
+
+out_dput_orphanage:
+	dput(orphanage_dentry);
+out_unlock_root:
+	inode_unlock(VFS_I(sc->mp->m_rootip));
+out_dput_root:
+	dput(root_dentry);
+out:
+	return error;
+}
+
+/*
+ * Move the current file to the orphanage.  The caller must not hold any locks
+ * on the orphanage and must not hold the ILOCK on sc->ip.  sc->ip and
+ * sc->orphanage must not be joined to the transaction.  The function returns
+ * with both inodes joined, ILOCKed, and dirty.
+ */
+int
+xrep_move_to_orphanage(
+	struct xfs_scrub	*sc)
+{
+	struct xfs_name		xname;
+	unsigned char		fname[MAXNAMELEN + 1];
+	struct xfs_inode	*dp = sc->orphanage;
+	struct xfs_mount	*mp = sc->mp;
+	xfs_ino_t		ino;
+	unsigned int		incr = 0;
+	unsigned int		linkres, dotdotres;
+	int			error;
+
+	/* No orphanage?  We can't fix this. */
+	if (!sc->orphanage)
+		return -EFSCORRUPTED;
+
+	/* Try to grab the IOLOCK on the orphanage. */
+	error = xchk_ilock_inverted(sc->orphanage, XFS_IOLOCK_EXCL);
+	if (error)
+		return error;
+	sc->orphanage_ilock_flags |= XFS_IOLOCK_EXCL;
+
+	xname.name = fname;
+	xname.len = snprintf(fname, sizeof(fname), "%llu", sc->ip->i_ino);
+	xname.type = xfs_mode_to_ftype(VFS_I(sc->ip)->i_mode);
+
+	/* Make sure the filename is unique in the lost+found. */
+	error = xfs_dir_lookup(sc->tp, dp, &xname, &ino, NULL);
+	while (error == 0 && incr < 10000) {
+		xname.len = snprintf(fname, sizeof(fname), "%llu.%d",
+				sc->ip->i_ino, ++incr);
+		error = xfs_dir_lookup(sc->tp, dp, &xname, &ino, NULL);
+	}
+	if (error == 0) {
+		/* We already have 10,000 entries in the orphanage? */
+		return -EFSCORRUPTED;
+	}
+	if (error != -ENOENT)
+		return error;
+
+	trace_xrep_move_orphanage(sc->ip, &xname, dp->i_ino);
+
+	/*
+	 * Reserve enough space to add a directory entry to the orphanage and
+	 * update the dotdot entry.
+	 */
+	linkres = XFS_LINK_SPACE_RES(mp, xname.len);
+	dotdotres = XFS_RENAME_SPACE_RES(mp, 2);
+	error = xfs_trans_reserve_more(sc->tp, linkres + dotdotres, 0);
+	if (error)
+		return error;
+
+	xfs_lock_two_inodes(dp, XFS_ILOCK_EXCL, sc->ip, XFS_ILOCK_EXCL);
+	sc->ilock_flags |= XFS_ILOCK_EXCL;
+	sc->orphanage_ilock_flags |= XFS_ILOCK_EXCL;
+
+	xfs_trans_ijoin(sc->tp, dp, 0);
+	xfs_trans_ijoin(sc->tp, sc->ip, 0);
+
+	/*
+	 * Create the new name in the orphanage, and bump the link count of
+	 * the orphanage if we just added a directory.
+	 */
+	error = xfs_dir_createname(sc->tp, dp, &xname, sc->ip->i_ino,
+			linkres);
+	if (error)
+		return error;
+
+	xfs_trans_ichgtime(sc->tp, dp, XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
+	if (S_ISDIR(VFS_I(sc->ip)->i_mode))
+		xfs_bumplink(sc->tp, dp);
+	xfs_trans_log_inode(sc->tp, dp, XFS_ILOG_CORE);
+
+	/* Replace the dotdot entry. */
+	return xfs_dir_replace(sc->tp, sc->ip, &xfs_name_dotdot, dp->i_ino,
+			dotdotres);
 }
 
 /*
