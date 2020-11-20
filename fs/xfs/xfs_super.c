@@ -919,6 +919,15 @@ xfs_quiesce_attr(
 	/* force the log to unpin objects from the now complete transactions */
 	xfs_log_force(mp, XFS_LOG_SYNC);
 
+	/*
+	 * Clear log incompat features since we're freezing or remounting ro.
+	 * Report failures, though it's not fatal to have a higher log feature
+	 * protection level than the log contents actually require.
+	 */
+	error = xfs_clear_incompat_log_features(mp);
+	if (error)
+		xfs_warn(mp, "Unable to clear superblock log incompat flags. "
+				"Frozen image may not be consistent.");
 
 	/* Push the superblock and write an unmount record */
 	error = xfs_log_sbcount(mp);
