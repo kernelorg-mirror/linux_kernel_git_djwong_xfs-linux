@@ -738,6 +738,14 @@ xfs_log_mount_finish(
 	 * that aren't removed until recovery is cancelled.
 	 */
 	if (!error && recovered) {
+		/*
+		 * Now that we've recovered the log and all the intents, we can
+		 * clear the log incompat feature bits in the superblock
+		 * because there's no longer anything to protect.  We rely on
+		 * the AIL push to write out the updated superblock after
+		 * everything else.
+		 */
+		error = xfs_clear_incompat_log_features(mp);
 		xfs_log_force(mp, XFS_LOG_SYNC);
 		xfs_ail_push_all_sync(mp->m_ail);
 	}
