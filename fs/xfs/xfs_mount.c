@@ -1188,6 +1188,14 @@ xfs_unmountfs(
 		xfs_warn(mp, "Unable to update superblock counters. "
 				"Freespace may not be correct on next mount.");
 
+	/*
+	 * Clear log incompat features since we're unmounting cleanly.  Report
+	 * failures, though it's not fatal to have a higher log feature
+	 * protection level than the log contents actually require.
+	 */
+	error = xfs_clear_incompat_log_features(mp);
+	if (error)
+		xfs_warn(mp, "Unable to clear superblock log incompat flags.");
 
 	xfs_log_unmount(mp);
 	xfs_da_unmount(mp);
@@ -1396,6 +1404,104 @@ xfs_force_summary_recalc(
 
 	xfs_fs_mark_sick(mp, XFS_SICK_FS_COUNTERS);
 	xfs_fs_mark_checked(mp, XFS_SICK_FS_COUNTERS);
+}
+
+/*
+ * Enable a log incompat feature flag in the primary superblock.  The caller
+ * cannot have any other transactions in progress.
+ */
+int
+xfs_add_incompat_log_feature(
+	struct xfs_mount	*mp,
+	uint32_t		feature)
+{
+	int			error = 0;
+
+	ASSERT(hweight32(feature) == 1);
+	ASSERT(!(feature & XFS_SB_FEAT_INCOMPAT_LOG_UNKNOWN));
+
+	/*
+	 * Lock the primary superblock buffer to serialize all callers that
+	 * are trying to set feature bits.
+	 */
+	xfs_buf_lock(mp->m_sb_bp);
+	xfs_buf_hold(mp->m_sb_bp);
+
+	if (XFS_FORCED_SHUTDOWN(mp)) {
+		error = -EIO;
+		goto rele;
+	}
+
+	if (!xfs_sb_has_incompat_log_feature(&mp->m_sb, feature)) {
+		struct xfs_dsb	*dsb = mp->m_sb_bp->b_addr;
+
+		/*
+		 * Write the primary superblock to disk immediately, because we
+		 * need the log_incompat bit to be set in the primary super to
+		 * protect the log items that we're going to commit later.
+		 */
+		xfs_sb_to_disk(mp->m_sb_bp->b_addr, &mp->m_sb);
+		dsb->sb_features_log_incompat |= cpu_to_be32(feature);
+		error = xfs_bwrite(mp->m_sb_bp);
+		if (error)
+			goto rele;
+
+		/*
+		 * Add the feature bits to the incore superblock before we
+		 * unlock the buffer.
+		 */
+		xfs_sb_add_incompat_log_features(&mp->m_sb, feature);
+	}
+
+rele:
+	xfs_buf_relse(mp->m_sb_bp);
+	if (error)
+		xfs_force_shutdown(mp, SHUTDOWN_META_IO_ERROR);
+	return error;
+}
+
+/*
+ * Clear all the log incompat flags from the superblock.
+ *
+ * The caller must have freeze protection, cannot have any other transactions
+ * in progress, must ensure that the log does not contain any log items
+ * protected by any log incompat bit, and must ensure that there are no other
+ * threads that could be reading or writing the log incompat feature flag in
+ * the primary super.  In other words, we can only turn features off as one of
+ * the final steps of quiescing or unmounting the log.
+ */
+int
+xfs_clear_incompat_log_features(
+	struct xfs_mount	*mp)
+{
+	bool			update = false;
+
+	if (!xfs_sb_version_hascrc(&mp->m_sb) ||
+	    !xfs_sb_has_incompat_log_feature(&mp->m_sb,
+				XFS_SB_FEAT_INCOMPAT_LOG_ALL) ||
+	    XFS_FORCED_SHUTDOWN(mp))
+		return 0;
+
+	/*
+	 * Update the incore superblock.  We synchronize on the primary super
+	 * buffer lock to be consistent with the add function, though at least
+	 * in theory this shouldn't be necessary.
+	 */
+	xfs_buf_lock(mp->m_sb_bp);
+	xfs_buf_hold(mp->m_sb_bp);
+
+	if (xfs_sb_has_incompat_log_feature(&mp->m_sb,
+				XFS_SB_FEAT_INCOMPAT_LOG_ALL)) {
+		xfs_sb_remove_incompat_log_features(&mp->m_sb);
+		update = true;
+	}
+	xfs_buf_relse(mp->m_sb_bp);
+
+	if (!update)
+		return 0;
+
+	/* Log the superblock to disk. */
+	return xfs_sync_sb(mp, false);
 }
 
 /*
