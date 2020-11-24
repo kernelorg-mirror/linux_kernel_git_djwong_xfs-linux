@@ -259,6 +259,37 @@ out_unwind_new_pags:
 	return error;
 }
 
+/* Validate the superblock is compatible with this mount. */
+int
+xfs_sb_validate_mount(
+	struct xfs_mount	*mp,
+	struct xfs_buf		*bp,
+	struct xfs_sb		*sbp)
+{
+	/*
+	 * Don't touch the filesystem if a user tool thinks it owns the primary
+	 * superblock.  mkfs doesn't clear the flag from secondary supers, so
+	 * we don't check them at all.
+	 */
+	if (XFS_BUF_ADDR(bp) == XFS_SB_DADDR && sbp->sb_inprogress) {
+		xfs_warn(mp, "Offline file system operation in progress!");
+		return -EFSCORRUPTED;
+	}
+
+	/*
+	 * Until this is fixed only page-sized or smaller data blocks work.
+	 */
+	if (unlikely(sbp->sb_blocksize > PAGE_SIZE)) {
+		xfs_warn(mp,
+		"File system with blocksize %d bytes. "
+		"Only pagesize (%ld) or less will currently work.",
+				sbp->sb_blocksize, PAGE_SIZE);
+		return -ENOSYS;
+	}
+
+	return 0;
+}
+
 /*
  * xfs_readsb
  *
