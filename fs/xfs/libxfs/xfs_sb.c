@@ -223,6 +223,7 @@ xfs_validate_sb_common(
 	struct xfs_dsb		*dsb = bp->b_addr;
 	uint32_t		agcount = 0;
 	uint32_t		rem;
+	int			error;
 
 	if (!xfs_verify_magic(bp, dsb->sb_magicnum)) {
 		xfs_warn(mp, "bad magic number");
@@ -382,16 +383,9 @@ xfs_validate_sb_common(
 		return -EFSCORRUPTED;
 	}
 
-	/*
-	 * Until this is fixed only page-sized or smaller data blocks work.
-	 */
-	if (unlikely(sbp->sb_blocksize > PAGE_SIZE)) {
-		xfs_warn(mp,
-		"File system with blocksize %d bytes. "
-		"Only pagesize (%ld) or less will currently work.",
-				sbp->sb_blocksize, PAGE_SIZE);
-		return -ENOSYS;
-	}
+	error = xfs_sb_validate_mount(mp, bp, sbp);
+	if (error)
+		return error;
 
 	/*
 	 * Currently only very few inode sizes are supported.
@@ -415,15 +409,6 @@ xfs_validate_sb_common(
 		return -EFBIG;
 	}
 
-	/*
-	 * Don't touch the filesystem if a user tool thinks it owns the primary
-	 * superblock.  mkfs doesn't clear the flag from secondary supers, so
-	 * we don't check them at all.
-	 */
-	if (XFS_BUF_ADDR(bp) == XFS_SB_DADDR && sbp->sb_inprogress) {
-		xfs_warn(mp, "Offline file system operation in progress!");
-		return -EFSCORRUPTED;
-	}
 	return 0;
 }
 

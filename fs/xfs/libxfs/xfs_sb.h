@@ -42,4 +42,7 @@ extern int	xfs_sb_get_secondary(struct xfs_mount *mp,
 				struct xfs_trans *tp, xfs_agnumber_t agno,
 				struct xfs_buf **bpp);
 
+int xfs_sb_validate_mount(struct xfs_mount *mp, struct xfs_buf *bp,
+		struct xfs_sb *sbp);
+
 #endif	/* __XFS_SB_H__ */
