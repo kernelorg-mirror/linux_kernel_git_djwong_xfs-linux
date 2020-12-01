@@ -537,28 +537,50 @@ xfs_rmapbt_maxrecs(
 		(2 * sizeof(struct xfs_rmap_key) + sizeof(xfs_rmap_ptr_t));
 }
 
+/*
+ * On a reflink filesystem, each AG block can have up to 2^32 (per the refcount
+ * record format) owners, which means that theoretically we could face up to
+ * 2^64 rmap records.  However, we're likely to run out of blocks in the AG
+ * long before that happens, which means that we can compute the max height
+ * based on what the btree will look like if it consumes almost all the blocks
+ * in the AG due to maximal sharing factor.
+ */
+STATIC unsigned int
+xfs_rmapbt_reflink_maxlevels(
+	struct xfs_mount		*mp)
+{
+	unsigned int			blocks = mp->m_sb.sb_agblocks;
+	unsigned int			fan_out = mp->m_rmap_mnr[1];
+	unsigned int			new_fan_out;
+	unsigned int			levels = 1;
+
+	/*
+	 * In the worst case, the next level down (towards the leaves) in an
+	 * rmap btree can have at least as many blocks as the minimum fanout
+	 * factor for an internal node.  Note that minimum fanout produces
+	 * maximally tall btrees.  While there's still enough blocks left to
+	 * feed the next level, keep incrementing the level.
+	 */
+	for (blocks--; fan_out < blocks; fan_out = new_fan_out) {
+		levels++;
+		blocks -= fan_out;
+
+		/* Detect integer overflow */
+		new_fan_out = fan_out * mp->m_rmap_mnr[1];
+		if (new_fan_out < fan_out)
+			break;
+	}
+
+	return levels;
+}
+
 /* Compute the maximum height of an rmap btree. */
 void
 xfs_rmapbt_compute_maxlevels(
 	struct xfs_mount		*mp)
 {
-	/*
-	 * On a non-reflink filesystem, the maximum number of rmap
-	 * records is the number of blocks in the AG, hence the max
-	 * rmapbt height is log_$maxrecs($agblocks).  However, with
-	 * reflink each AG block can have up to 2^32 (per the refcount
-	 * record format) owners, which means that theoretically we
-	 * could face up to 2^64 rmap records.
-	 *
-	 * That effectively means that the max rmapbt height must be
-	 * XFS_BTREE_MAXLEVELS.  "Fortunately" we'll run out of AG
-	 * blocks to feed the rmapbt long before the rmapbt reaches
-	 * maximum height.  The reflink code uses ag_resv_critical to
-	 * disallow reflinking when less than 10% of the per-AG metadata
-	 * block reservation since the fallback is a regular file copy.
-	 */
 	if (xfs_sb_version_hasreflink(&mp->m_sb))
-		mp->m_rmap_maxlevels = XFS_BTREE_MAXLEVELS;
+		mp->m_rmap_maxlevels = xfs_rmapbt_reflink_maxlevels(mp);
 	else
 		mp->m_rmap_maxlevels = xfs_btree_compute_maxlevels(
 				mp->m_rmap_mnr, mp->m_sb.sb_agblocks);
