@@ -549,13 +549,53 @@ xfs_rtrmapbt_maxrecs(
 		(2 * sizeof(struct xfs_rtrmap_key) + sizeof(xfs_rtrmap_ptr_t));
 }
 
+/*
+ * On a reflink filesystem, each rt extent can have up to 2^32 (per the
+ * refcount record format) owners, which means that theoretically we could face
+ * up to 2^96 rmap records.  However, we're likely to run out of blocks on the
+ * data device long before that happens, which means that we can compute the
+ * max height based on what the btree will look like if it consumes almost all
+ * the blocks in the data device due to maximal sharing factor.
+ */
+STATIC unsigned int
+xfs_rtrmapbt_reflink_maxlevels(
+	struct xfs_mount		*mp)
+{
+	unsigned long long		blocks = mp->m_sb.sb_dblocks;
+	unsigned long long		fan_out = mp->m_rtrmap_mnr[1];
+	unsigned long long		new_fan_out;
+	unsigned int			levels = 1;
+
+	/*
+	 * In the worst case, the next level down (towards the leaves) in an
+	 * rmap btree can have at least as many blocks as the minimum fanout
+	 * factor for an internal node.  Note that minimum fanout produces
+	 * maximally tall btrees.  While there's still enough blocks left to
+	 * feed the next level, keep incrementing the level.
+	 */
+	for (blocks--; fan_out < blocks; fan_out = new_fan_out) {
+		levels++;
+		blocks -= fan_out;
+
+		/* Detect integer overflow */
+		new_fan_out = fan_out * mp->m_rtrmap_mnr[1];
+		if (new_fan_out < fan_out)
+			break;
+	}
+
+	return levels;
+}
+
 /* Compute the maximum height of an rmap btree. */
 void
 xfs_rtrmapbt_compute_maxlevels(
 	struct xfs_mount		*mp)
 {
-	mp->m_rtrmap_maxlevels = xfs_btree_compute_maxlevels(mp->m_rtrmap_mnr,
-			mp->m_sb.sb_rblocks);
+	if (xfs_sb_version_hasrtreflink(&mp->m_sb))
+		mp->m_rtrmap_maxlevels = xfs_rtrmapbt_reflink_maxlevels(mp);
+	else
+		mp->m_rtrmap_maxlevels = xfs_btree_compute_maxlevels(
+				mp->m_rtrmap_mnr, mp->m_sb.sb_rblocks);
 }
 
 /* Calculate the rtrmap btree size for some records. */
