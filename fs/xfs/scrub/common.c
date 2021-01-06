@@ -28,6 +28,7 @@
 #include "xfs_attr.h"
 #include "xfs_reflink.h"
 #include "xfs_rtalloc.h"
+#include "xfs_rtrmap_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -580,6 +581,18 @@ xchk_perag_get(
 		sa->pag = xfs_perag_get(mp, sa->agno);
 }
 
+/* Lock everything we need to work on realtime metadata. */
+void
+xchk_rt_lock(
+	struct xfs_scrub	*sc,
+	struct xchk_rt		*sr)
+{
+	struct xfs_mount	*mp = sc->mp;
+
+	xfs_rtlock(NULL, mp, XFS_RTLOCK_ALL);
+	sr->locked = true;
+}
+
 /*
  * For scrubbing a realtime file, grab all the in-core resources we'll need to
  * check the realtime metadata, which means taking the ILOCK of the realtime
@@ -591,8 +604,28 @@ xchk_rt_init(
 	struct xfs_scrub	*sc,
 	struct xchk_rt		*sr)
 {
-	xfs_rtlock(NULL, sc->mp, XFS_RTLOCK_ALL);
-	sr->locked = true;
+	struct xfs_mount	*mp = sc->mp;
+
+	xchk_rt_lock(sc, sr);
+
+	if (xfs_sb_version_hasrtrmapbt(&mp->m_sb))
+		sr->rmap_cur = xfs_rtrmapbt_init_cursor(mp, sc->tp,
+				mp->m_rrmapip);
+}
+
+/*
+ * Free all the btree cursors and other incore data relating to the realtime
+ * volume.  This has to be done /before/ committing (or cancelling) the scrub
+ * transaction.
+ */
+void
+xchk_rt_btcur_free(
+	struct xchk_rt		*sr)
+{
+	if (sr->rmap_cur)
+		xfs_btree_del_cursor(sr->rmap_cur, XFS_BTREE_ERROR);
+
+	sr->rmap_cur = NULL;
 }
 
 /*
