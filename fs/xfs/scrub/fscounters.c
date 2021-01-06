@@ -15,6 +15,7 @@
 #include "xfs_health.h"
 #include "xfs_rtalloc.h"
 #include "xfs_inode.h"
+#include "xfs_ag.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -210,6 +211,8 @@ retry:
 		 */
 		fsc->fdblocks -= pag->pag_meta_resv.ar_reserved;
 		fsc->fdblocks -= pag->pag_rmapbt_resv.ar_orig_reserved;
+		if (pag->pagf_noalloc)
+			fsc->fdblocks -= xfs_ag_fdblocks(pag);
 
 		xfs_perag_put(pag);
 
