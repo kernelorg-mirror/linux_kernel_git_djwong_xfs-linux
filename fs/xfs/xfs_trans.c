@@ -73,6 +73,8 @@ xfs_trans_free(
 
 	if (tp->t_flags & XFS_TRANS_LOG_INCOMPAT)
 		xlog_drop_incompat_feat(tp->t_mountp->m_log);
+	if (tp->t_dfops_finished > 0)
+		trace_xfs_defer_stats(tp);
 
 	trace_xfs_trans_free(tp, _RET_IP_);
 	xfs_trans_clear_context(tp);
