@@ -1829,16 +1829,20 @@ xfs_refcount_recover_cow_leftovers(
 {
 	struct xfs_trans		*tp;
 	struct xfs_btree_cur		*cur;
-	struct xfs_buf			*agbp;
+	struct xfs_buf			*agbp = NULL;
 	struct xfs_refcount_recovery	*rr, *n;
 	struct list_head		debris;
 	union xfs_btree_irec		low;
 	union xfs_btree_irec		high;
 	xfs_fsblock_t			fsb;
 	xfs_fsblock_t			bno;
+	xfs_fsblock_t			cow_start;
+	bool				isrt = pag == NULL;
 	int				error;
 
-	if (mp->m_sb.sb_agblocks >= XFS_REFC_COW_START)
+	if (!isrt && mp->m_sb.sb_agblocks >= XFS_REFC_COW_START)
+		return -EOPNOTSUPP;
+	if (isrt && mp->m_sb.sb_rextents >= XFS_RTREFC_COW_START)
 		return -EOPNOTSUPP;
 
 	INIT_LIST_HEAD(&debris);
@@ -1857,20 +1861,29 @@ xfs_refcount_recover_cow_leftovers(
 	if (error)
 		return error;
 
-	error = xfs_alloc_read_agf(mp, tp, pag->pag_agno, 0, &agbp);
-	if (error)
-		goto out_trans;
-	cur = xfs_refcountbt_init_cursor(mp, tp, agbp, pag);
+	if (isrt) {
+		xfs_rtlock(NULL, mp, XFS_RTLOCK_REFCOUNT);
+		cur = xfs_rtrefcountbt_init_cursor(mp, tp, mp->m_rrefcountip);
+	} else {
+		error = xfs_alloc_read_agf(mp, tp, pag->pag_agno, 0, &agbp);
+		if (error)
+			goto out_trans;
+		cur = xfs_refcountbt_init_cursor(mp, tp, agbp, pag);
+	}
+	cow_start = xrefc_cow_start(cur);
 
 	/* Find all the leftover CoW staging extents. */
 	memset(&low, 0, sizeof(low));
 	memset(&high, 0, sizeof(high));
-	low.rc.rc_startblock = XFS_REFC_COW_START;
-	high.rc.rc_startblock = -1U;
+	low.rc.rc_startblock = cow_start;
+	high.rc.rc_startblock = -1ULL;
 	error = xfs_btree_query_range(cur, &low, &high,
 			xfs_refcount_recover_extent, &debris);
 	xfs_btree_del_cursor(cur, error);
-	xfs_trans_brelse(tp, agbp);
+	if (agbp)
+		xfs_trans_brelse(tp, agbp);
+	else
+		xfs_rtunlock(mp, XFS_RTLOCK_REFCOUNT);
 	xfs_trans_cancel(tp);
 	if (error)
 		goto out_free;
@@ -1882,17 +1895,18 @@ xfs_refcount_recover_cow_leftovers(
 		if (error)
 			goto out_free;
 
-		trace_xfs_refcount_recover_extent(mp, pag->pag_agno,
+		trace_xfs_refcount_recover_extent(mp,
+				isrt ? NULLAGNUMBER : pag->pag_agno,
 				&rr->rr_rrec);
 
 		/* Free the orphan record */
-		bno = rr->rr_rrec.rc_startblock - XFS_REFC_COW_START;
-		fsb = XFS_AGB_TO_FSB(mp, pag->pag_agno, bno);
-		xfs_refcount_free_cow_extent(tp, false, fsb,
+		bno = rr->rr_rrec.rc_startblock - cow_start;
+		fsb = isrt ? bno : XFS_AGB_TO_FSB(mp, pag->pag_agno, bno);
+		xfs_refcount_free_cow_extent(tp, isrt, fsb,
 				rr->rr_rrec.rc_blockcount);
 
 		/* Free the block. */
-		xfs_bmap_add_free(tp, false, fsb, rr->rr_rrec.rc_blockcount,
+		xfs_bmap_add_free(tp, isrt, fsb, rr->rr_rrec.rc_blockcount,
 				NULL);
 
 		error = xfs_trans_commit(tp);
