@@ -1311,6 +1311,13 @@ xfs_reflink_remap_blocks(
 	len = min_t(xfs_filblks_t, XFS_B_TO_FSB(mp, remap_len),
 			XFS_MAX_FILEOFF);
 
+	/*
+	 * Make sure the end is aligned with a rt extent (if desired), since
+	 * the end of the range could be EOF.
+	 */
+	if (xfs_reflink_need_unshare_around(dest))
+		len = roundup_64(len, mp->m_sb.sb_rextsize);
+
 	trace_xfs_reflink_remap_blocks(src, srcoff, len, dest, destoff);
 
 	while (len > 0) {
@@ -1550,8 +1557,11 @@ xfs_reflink_remap_prep(
 	if (IS_DAX(inode_in) || IS_DAX(inode_out))
 		goto out_unlock;
 
-	ret = generic_remap_file_range_prep(file_in, pos_in, file_out, pos_out,
-			len, remap_flags);
+	ASSERT(is_power_of_2(xfs_inode_alloc_unitsize(dest)));
+
+	ret = __generic_remap_file_range_prep(file_in, pos_in, file_out,
+			pos_out, len, remap_flags,
+			xfs_inode_alloc_unitsize(dest));
 	if (ret || *len == 0)
 		goto out_unlock;
 
