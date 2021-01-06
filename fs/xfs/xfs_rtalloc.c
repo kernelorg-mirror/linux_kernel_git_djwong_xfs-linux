@@ -1428,6 +1428,12 @@ xfs_rtlock(
 		if (tp)
 			xfs_trans_ijoin(tp, mp->m_rsumip, XFS_ILOCK_EXCL);
 	}
+
+	if ((lock_flags & XFS_RTLOCK_RMAP) && mp->m_rrmapip) {
+		xfs_ilock(mp->m_rrmapip, XFS_ILOCK_EXCL | XFS_ILOCK_PARENT);
+		if (tp)
+			xfs_trans_ijoin(tp, mp->m_rrmapip, XFS_ILOCK_EXCL);
+	}
 }
 
 /* Unlock the realtime metadata inodes. */
@@ -1437,6 +1443,9 @@ xfs_rtunlock(
 	unsigned int		lock_flags)
 {
 	ASSERT(!(lock_flags & ~XFS_RTLOCK_ALL));
+
+	if ((lock_flags & XFS_RTLOCK_RMAP && mp->m_rrmapip))
+		xfs_iunlock(mp->m_rrmapip, XFS_ILOCK_EXCL);
 
 	if (lock_flags & XFS_RTLOCK_ALLOC)
 		xfs_iunlock(mp->m_rsumip, XFS_ILOCK_EXCL | XFS_ILOCK_RTSUM);
