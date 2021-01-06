@@ -375,7 +375,7 @@ xfs_reflink_allocate_cow(
 	int			nimaps, error = 0;
 	bool			found;
 	xfs_filblks_t		resaligned;
-	xfs_extlen_t		resblks = 0;
+	unsigned int		dblocks = 0, rblocks = 0;
 
 	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL));
 	if (!ip->i_cowfp) {
@@ -391,13 +391,19 @@ xfs_reflink_allocate_cow(
 
 	resaligned = xfs_aligned_fsb_count(imap->br_startoff,
 		imap->br_blockcount, xfs_get_cowextsz_hint(ip));
-	resblks = XFS_DIOSTRAT_SPACE_RES(mp, resaligned);
+	if (XFS_IS_REALTIME_INODE(ip)) {
+		dblocks = XFS_DIOSTRAT_SPACE_RES(mp, 0);
+		rblocks = resaligned;
+	} else {
+		dblocks = XFS_DIOSTRAT_SPACE_RES(mp, resaligned);
+		rblocks = 0;
+	}
 
 	xfs_iunlock(ip, *lockmode);
 	*lockmode = 0;
 
-	error = xfs_trans_alloc_inode(ip, &M_RES(mp)->tr_write, resblks, 0,
-			false, &tp);
+	error = xfs_trans_alloc_inode(ip, &M_RES(mp)->tr_write, dblocks,
+			rblocks, false, &tp);
 	if (error)
 		return error;
 
@@ -504,7 +510,8 @@ xfs_reflink_cancel_cow_blocks(
 					XFS_IS_REALTIME_INODE(ip));
 
 			xfs_bmap_add_free(*tpp, del.br_startblock,
-					  del.br_blockcount, NULL, false);
+					  del.br_blockcount, NULL,
+					  XFS_IS_REALTIME_INODE(ip));
 
 			/* Roll the transaction */
 			error = xfs_defer_finish(tpp);
@@ -588,6 +595,24 @@ out:
 	trace_xfs_reflink_cancel_cow_range_error(ip, error, _RET_IP_);
 	return error;
 }
+
+#ifdef CONFIG_XFS_QUOTA
+/* Charge this new data fork mapping to the on-disk quota. */
+static inline void
+xfs_reflink_update_quota(
+	struct xfs_trans	*tp,
+	struct xfs_inode	*ip,
+	int64_t			blocks)
+{
+	unsigned int		qflag;
+
+	qflag = XFS_IS_REALTIME_INODE(ip) ? XFS_TRANS_DQ_DELRTBCOUNT :
+					    XFS_TRANS_DQ_DELBCOUNT;
+	xfs_trans_mod_dquot_byino(tp, ip, qflag, blocks);
+}
+#else
+# define xfs_reflink_update_quota(tp, ip, blocks)	((void)0)
+#endif
 
 /*
  * Remap part of the CoW fork into the data fork.
@@ -688,9 +713,7 @@ xfs_reflink_end_cow_extent(
 	/* Map the new blocks into the data fork. */
 	xfs_bmap_map_extent(tp, ip, XFS_DATA_FORK, &del);
 
-	/* Charge this new data fork mapping to the on-disk quota. */
-	xfs_trans_mod_dquot_byino(tp, ip, XFS_TRANS_DQ_DELBCOUNT,
-			(long)del.br_blockcount);
+	xfs_reflink_update_quota(tp, ip, del.br_blockcount);
 
 	/* Remove the mapping from the CoW fork. */
 	xfs_bmap_del_extent_cow(ip, &icur, &got, &del);
@@ -1010,7 +1033,7 @@ xfs_reflink_remap_extent(
 	struct xfs_trans	*tp;
 	xfs_off_t		newlen;
 	int64_t			qdelta = 0;
-	unsigned int		resblks;
+	unsigned int		dblocks, rblocks, resblks;
 	bool			quota_reserved = true;
 	bool			smap_real;
 	bool			dmap_written = xfs_bmap_is_written_extent(dmap);
@@ -1040,8 +1063,15 @@ xfs_reflink_remap_extent(
 	 * we're remapping.
 	 */
 	resblks = XFS_EXTENTADD_SPACE_RES(mp, XFS_DATA_FORK);
+	if (XFS_IS_REALTIME_INODE(ip)) {
+		dblocks = resblks;
+		rblocks = dmap->br_blockcount;
+	} else {
+		dblocks = resblks + dmap->br_blockcount;
+		rblocks = 0;
+	}
 	error = xfs_trans_alloc_inode(ip, &M_RES(mp)->tr_write,
-			resblks + dmap->br_blockcount, 0, false, &tp);
+			dblocks, rblocks, false, &tp);
 	if (error == -EDQUOT || error == -ENOSPC) {
 		quota_reserved = false;
 		error = xfs_trans_alloc_inode(ip, &M_RES(mp)->tr_write,
@@ -1119,8 +1149,15 @@ xfs_reflink_remap_extent(
 	 * done.
 	 */
 	if (!quota_reserved && !smap_real && dmap_written) {
-		error = xfs_trans_reserve_quota_nblks(tp, ip,
-				dmap->br_blockcount, 0, false);
+		if (XFS_IS_REALTIME_INODE(ip)) {
+			dblocks = 0;
+			rblocks = dmap->br_blockcount;
+		} else {
+			dblocks = dmap->br_blockcount;
+			rblocks = 0;
+		}
+		error = xfs_trans_reserve_quota_nblks(tp, ip, dblocks, rblocks,
+				false);
 		if (error)
 			goto out_cancel;
 	}
