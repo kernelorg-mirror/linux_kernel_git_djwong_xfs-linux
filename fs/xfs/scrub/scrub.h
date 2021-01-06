@@ -65,6 +65,7 @@ struct xchk_rt {
 	bool			locked;
 
 	struct xfs_btree_cur	*rmap_cur;
+	struct xfs_btree_cur	*refc_cur;
 };
 
 struct xfs_scrub {
@@ -163,6 +164,7 @@ int xchk_parent(struct xfs_scrub *sc);
 int xchk_rtbitmap(struct xfs_scrub *sc);
 int xchk_rtsummary(struct xfs_scrub *sc);
 int xchk_rtrmapbt(struct xfs_scrub *sc);
+int xchk_rtrefcountbt(struct xfs_scrub *sc);
 #else
 static inline int
 xchk_rtbitmap(struct xfs_scrub *sc)
@@ -176,6 +178,11 @@ xchk_rtsummary(struct xfs_scrub *sc)
 }
 static inline int
 xchk_rtrmapbt(struct xfs_scrub *sc)
+{
+	return -ENOENT;
+}
+static inline int
+xchk_rtrefcountbt(struct xfs_scrub *sc)
 {
 	return -ENOENT;
 }
