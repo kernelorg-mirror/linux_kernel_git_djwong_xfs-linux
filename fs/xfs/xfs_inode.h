@@ -375,8 +375,10 @@ void		xfs_inactive(struct xfs_inode *ip);
 int		xfs_lookup(struct xfs_inode *dp, struct xfs_name *name,
 			   struct xfs_inode **ipp, struct xfs_name *ci_name);
 int		xfs_create(struct xfs_inode *dp, struct xfs_name *name,
-			   umode_t mode, dev_t rdev, struct xfs_inode **ipp);
-int		xfs_create_tmpfile(struct xfs_inode *dp, umode_t mode,
+			   const struct xfs_ialloc_args *iargs,
+			   struct xfs_inode **ipp);
+int		xfs_create_tmpfile(struct xfs_inode *dp,
+			   const struct xfs_ialloc_args *iargs,
 			   struct xfs_inode **ipp);
 int		xfs_remove(struct xfs_inode *dp, struct xfs_name *name,
 			   struct xfs_inode *ip);
@@ -409,8 +411,7 @@ int		xfs_iflush_cluster(struct xfs_buf *);
 void		xfs_lock_two_inodes(struct xfs_inode *ip0, uint ip0_mode,
 				struct xfs_inode *ip1, uint ip1_mode);
 
-int xfs_dir_ialloc(struct xfs_trans **tpp, struct xfs_inode *dp, umode_t mode,
-		   xfs_nlink_t nlink, dev_t dev, prid_t prid,
+int xfs_dir_ialloc(struct xfs_trans **tpp, const struct xfs_ialloc_args *args,
 		   struct xfs_inode **ipp);
 
 static inline int
