@@ -232,6 +232,13 @@ typedef struct xfs_mount {
 	struct xfs_kobj		m_errortag_kobj;
 #endif
 	atomic_t		m_inodegc_bad; /* inodegc things we hit */
+
+	/*
+	 * Only allow one thread to initiate a repair freeze at a time.  We
+	 * also use this to block userspace from changing the freeze state
+	 * while a repair freeze is in progress.
+	 */
+	struct mutex		m_scrub_freeze;
 } xfs_mount_t;
 
 #define M_IGEO(mp)		(&(mp)->m_ino_geo)
