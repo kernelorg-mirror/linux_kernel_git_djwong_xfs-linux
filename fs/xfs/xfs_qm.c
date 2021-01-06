@@ -167,9 +167,14 @@ xfs_qm_dqpurge(
 
 	/*
 	 * We move dquots to the freelist as soon as their reference count
-	 * hits zero, so it really should be on the freelist here.
+	 * hits zero, so it really should be on the freelist here.  If we're
+	 * running quotaoff, it's possible that we're purging a zero-refcount
+	 * dquot with active incore reservation because there are inodes
+	 * awaiting inactivation.  Dquots in this state will not be on the LRU
+	 * but it's quotaoff, so we don't care.
 	 */
-	ASSERT(!list_empty(&dqp->q_lru));
+	ASSERT(!(mp->m_qflags & xfs_quota_active_flag(xfs_dquot_type(dqp))) ||
+	       !list_empty(&dqp->q_lru));
 	list_lru_del(&qi->qi_lru, &dqp->q_lru);
 	XFS_STATS_DEC(mp, xs_qm_dquot_unused);
 
@@ -412,6 +417,15 @@ struct xfs_qm_isolate {
 	struct list_head	dispose;
 };
 
+static inline bool
+xfs_dquot_has_incore_resv(
+	struct xfs_dquot	*dqp)
+{
+	return  dqp->q_blk.reserved > dqp->q_blk.count ||
+		dqp->q_ino.reserved > dqp->q_ino.count ||
+		dqp->q_rtb.reserved > dqp->q_rtb.count;
+}
+
 static enum lru_status
 xfs_qm_dquot_isolate(
 	struct list_head	*item,
@@ -428,10 +442,15 @@ xfs_qm_dquot_isolate(
 		goto out_miss_busy;
 
 	/*
-	 * This dquot has acquired a reference in the meantime remove it from
-	 * the freelist and try again.
+	 * Either this dquot has incore reservations or it has acquired a
+	 * reference.  Remove it from the freelist and try again.
+	 *
+	 * Inodes tagged for inactivation drop their dquot references to avoid
+	 * deadlocks with quotaoff.  If these inodes have delalloc reservations
+	 * in the data fork or any extents in the CoW fork, these contribute
+	 * to the dquot's incore block reservation exceeding the count.
 	 */
-	if (dqp->q_nrefs) {
+	if (xfs_dquot_has_incore_resv(dqp) || dqp->q_nrefs) {
 		xfs_dqunlock(dqp);
 		XFS_STATS_INC(dqp->q_mount, xs_qm_dqwants);
 
