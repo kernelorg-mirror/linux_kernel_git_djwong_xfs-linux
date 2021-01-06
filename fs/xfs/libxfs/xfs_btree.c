@@ -1229,6 +1229,7 @@ xfs_btree_set_refs(
 		xfs_buf_set_ref(bp, XFS_BMAP_BTREE_REF);
 		break;
 	case XFS_BTNUM_RMAP:
+	case XFS_BTNUM_RTRMAP:
 		xfs_buf_set_ref(bp, XFS_RMAP_BTREE_REF);
 		break;
 	case XFS_BTNUM_REFC:
@@ -5284,6 +5285,8 @@ xfs_btree_maxlevels(
 		return mp->m_rmap_maxlevels;
 	case XFS_BTNUM_REFC:
 		return mp->m_refc_maxlevels;
+	case XFS_BTNUM_RTRMAP:
+		return mp->m_rtrmap_maxlevels;
 	default:
 		break;
 	}
@@ -5293,6 +5296,7 @@ xfs_btree_maxlevels(
 	ret = max(ret, mp->m_bm_maxlevels[XFS_ATTR_FORK]);
 	ret = max(ret, M_IGEO(mp)->inobt_maxlevels);
 	ret = max(ret, mp->m_rmap_maxlevels);
+	ret = max(ret, mp->m_rtrmap_maxlevels);
 	return max(ret, mp->m_refc_maxlevels);
 }
 
