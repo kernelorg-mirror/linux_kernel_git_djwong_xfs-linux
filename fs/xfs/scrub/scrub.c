@@ -155,6 +155,8 @@ xchk_teardown(
 	struct xfs_inode	*ip_in,
 	int			error)
 {
+	int				err2;
+
 	xchk_ag_free(sc, &sc->sa);
 	if (sc->tp) {
 		if (error == 0 && (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR))
@@ -169,7 +171,13 @@ xchk_teardown(
 		xfs_irele(sc->ip);
 		sc->ip = NULL;
 	}
-	sb_end_write(sc->mp->m_super);
+	if (sc->flags & XCHK_FS_FROZEN) {
+		err2 = xchk_fs_thaw(sc);
+		if (!error && err2)
+			error = err2;
+	} else {
+		sb_end_write(sc->mp->m_super);
+	}
 	if (sc->flags & XCHK_REAPING_DISABLED)
 		xchk_start_reaping(sc);
 	if (sc->flags & XCHK_HAS_QUOTAOFFLOCK) {
