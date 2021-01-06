@@ -461,8 +461,10 @@ xrep_abt_dispose_reservations(
 		 * online.
 		 */
 		if (resv->used < resv->len)
-			__xfs_bmap_add_free(sc->tp, resv->fsbno + resv->used,
-					resv->len - resv->used, NULL, true);
+			__xfs_bmap_add_free(sc->tp, false,
+					resv->fsbno + resv->used,
+					resv->len - resv->used,
+					NULL, true);
 	}
 
 junkit:
