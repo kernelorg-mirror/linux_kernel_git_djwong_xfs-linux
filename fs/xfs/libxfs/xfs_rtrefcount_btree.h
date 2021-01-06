@@ -62,4 +62,7 @@ xfs_rtrefcount_ptr_addr(
 		 (index - 1) * sizeof(xfs_rtrefcount_ptr_t));
 }
 
+int xfs_rtrefcountbt_calc_reserves(struct xfs_mount *mp, struct xfs_trans *tp,
+		xfs_filblks_t *ask, xfs_filblks_t *used);
+
 #endif	/* __XFS_RTREFCOUNT_BTREE_H__ */
