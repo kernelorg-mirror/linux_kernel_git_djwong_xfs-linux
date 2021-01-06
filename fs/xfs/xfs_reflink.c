@@ -138,9 +138,9 @@ xfs_reflink_find_shared(
 	struct xfs_buf		*agbp;
 	struct xfs_btree_cur	*cur;
 	xfs_agnumber_t		agno;
-	xfs_agblock_t		agbno;
-	xfs_agblock_t		shared_bno;
-	xfs_extlen_t		shared_len;
+	xfs_fsblock_t		agbno;
+	xfs_fsblock_t		shared_bno;
+	xfs_filblks_t		shared_len;
 	int			error;
 
 	agno = XFS_FSB_TO_AGNO(mp, irec->br_startblock);
@@ -159,7 +159,7 @@ xfs_reflink_find_shared(
 
 	xfs_trans_brelse(tp, agbp);
 
-	if (shared_bno == NULLAGBLOCK)
+	if (shared_bno == NULLFSBLOCK)
 		*fbno = NULLFSBLOCK;
 	else
 		*fbno = XFS_AGB_TO_FSB(mp, agno, shared_bno);
