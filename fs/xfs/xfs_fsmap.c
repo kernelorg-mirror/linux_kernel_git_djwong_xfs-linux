@@ -197,8 +197,8 @@ xfs_getfsmap_is_shared(
 {
 	struct xfs_mount		*mp = tp->t_mountp;
 	struct xfs_btree_cur		*cur;
-	xfs_agblock_t			fbno;
-	xfs_extlen_t			flen;
+	xfs_fsblock_t			fbno;
+	xfs_filblks_t			flen;
 	int				error;
 
 	*stat = false;
