@@ -667,16 +667,12 @@ xfs_inode_inherit_flags2(
  */
 static int
 xfs_init_new_inode(
-	struct user_namespace	*mnt_userns,
 	struct xfs_trans	*tp,
-	struct xfs_inode	*pip,
 	xfs_ino_t		ino,
-	umode_t			mode,
-	xfs_nlink_t		nlink,
-	dev_t			rdev,
-	prid_t			prid,
+	const struct xfs_ialloc_args *args,
 	struct xfs_inode	**ipp)
 {
+	struct xfs_inode	*pip = args->pip;
 	struct inode		*dir = pip ? VFS_I(pip) : NULL;
 	struct xfs_mount	*mp = tp->t_mountp;
 	struct xfs_inode	*ip;
@@ -709,17 +705,17 @@ xfs_init_new_inode(
 
 	ASSERT(ip != NULL);
 	inode = VFS_I(ip);
-	set_nlink(inode, nlink);
-	inode->i_rdev = rdev;
-	ip->i_d.di_projid = prid;
+	set_nlink(inode, args->nlink);
+	inode->i_rdev = args->rdev;
+	ip->i_d.di_projid = args->prid;
 
 	if (dir && !(dir->i_mode & S_ISGID) &&
 	    (mp->m_flags & XFS_MOUNT_GRPID)) {
-		inode->i_uid = fsuid_into_mnt(mnt_userns);
+		inode->i_uid = args->uid;
 		inode->i_gid = dir->i_gid;
-		inode->i_mode = mode;
+		inode->i_mode = args->mode;
 	} else {
-		inode_init_owner(mnt_userns, inode, dir, mode);
+		inode_init_owner(args->mnt_userns, inode, dir, args->mode);
 	}
 
 	/*
@@ -729,8 +725,20 @@ xfs_init_new_inode(
 	 */
 	if (irix_sgid_inherit &&
 	    (inode->i_mode & S_ISGID) &&
-	    !in_group_p(i_gid_into_mnt(mnt_userns, inode)))
+	    !in_group_p(i_gid_into_mnt(args->mnt_userns, inode)))
 		inode->i_mode &= ~S_ISGID;
+
+	/* struct copies */
+	if (args->flags & XFS_IALLOC_ARGS_FORCE_UID)
+		inode->i_uid = args->uid;
+	else
+		ASSERT(uid_eq(inode->i_uid, args->uid));
+	if (args->flags & XFS_IALLOC_ARGS_FORCE_GID)
+		inode->i_gid = args->gid;
+	else if (!pip || !XFS_INHERIT_GID(pip))
+		ASSERT(gid_eq(inode->i_gid, args->gid));
+	if (args->flags & XFS_IALLOC_ARGS_FORCE_MODE)
+		inode->i_mode = args->mode;
 
 	ip->i_d.di_size = 0;
 	ip->i_df.if_nextents = 0;
@@ -754,7 +762,7 @@ xfs_init_new_inode(
 	}
 
 	flags = XFS_ILOG_CORE;
-	switch (mode & S_IFMT) {
+	switch (args->mode & S_IFMT) {
 	case S_IFIFO:
 	case S_IFCHR:
 	case S_IFBLK:
@@ -793,6 +801,20 @@ xfs_init_new_inode(
 	return 0;
 }
 
+/* Set up the inode allocation parameters for standard file inheritance. */
+void
+xfs_ialloc_inherit_args(
+	struct user_namespace	*mnt_userns,
+	struct xfs_inode	*dp,
+	struct xfs_ialloc_args	*args)
+{
+	args->mnt_userns = mnt_userns;
+	args->pip = dp;
+	args->uid = fsuid_into_mnt(mnt_userns);
+	args->gid = fsgid_into_mnt(mnt_userns);
+	args->prid = xfs_get_initial_prid(dp);
+}
+
 /*
  * Allocates a new inode from disk and return a pointer to the incore copy. This
  * routine will internally commit the current transaction and allocate a new one
@@ -815,10 +837,18 @@ xfs_dir_ialloc(
 	prid_t			prid,
 	struct xfs_inode	**ipp)
 {
+	struct xfs_ialloc_args	args = {
+		.prid		= prid,
+		.nlink		= nlink,
+		.rdev		= rdev,
+		.mode		= mode,
+	};
 	struct xfs_buf		*agibp;
 	xfs_ino_t		parent_ino = dp ? dp->i_ino : 0;
 	xfs_ino_t		ino;
 	int			error;
+
+	xfs_ialloc_inherit_args(mnt_userns, dp, &args);
 
 	ASSERT((*tpp)->t_flags & XFS_TRANS_PERM_LOG_RES);
 
@@ -839,8 +869,7 @@ xfs_dir_ialloc(
 		return error;
 	ASSERT(ino != NULLFSINO);
 
-	return xfs_init_new_inode(mnt_userns, *tpp, dp, ino, mode, nlink, rdev,
-				  prid, ipp);
+	return xfs_init_new_inode(*tpp, ino, &args, ipp);
 }
 
 /*
