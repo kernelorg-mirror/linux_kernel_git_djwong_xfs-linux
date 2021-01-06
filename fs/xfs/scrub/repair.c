@@ -2182,14 +2182,15 @@ xrep_swapext_prep(
 }
 
 /*
- * Check if any part of this range of rt blocks is free, so that we don't
- * rebuild things with bad records.  Returns -EFSCORRUPTED if bad.
+ * Check if any part of this range of rt blocks is free or misaligned, so that
+ * we don't rebuild things with bad records.  Returns -EFSCORRUPTED if bad.
  */
 int
 xrep_rtext_is_free(
 	struct xfs_scrub	*sc,
 	xfs_rtblock_t		rtbno,
-	xfs_filblks_t		len)
+	xfs_filblks_t		len,
+	bool			must_align)
 {
 	struct xfs_mount	*mp = sc->mp;
 	xfs_rtblock_t		startext;
@@ -2199,9 +2200,13 @@ xrep_rtext_is_free(
 	bool			is_free = false;
 	int			error;
 
-	/* Convert rt blocks to rt extents. */
+	/* Convert rt blocks to rt extents, and enforce alignment. */
 	startext = div_u64_rem(rtbno, mp->m_sb.sb_rextsize, &mod);
+	if (mod != 0 && must_align)
+		return -EFSCORRUPTED;
 	endext = div_u64_rem(rtbno + len - 1, mp->m_sb.sb_rextsize, &mod);
+	if (mod != 0 && must_align)
+		return -EFSCORRUPTED;
 
 	/* Make sure this isn't free space. */
 	extcount = endext - startext + 1;
@@ -2223,6 +2228,7 @@ xrep_is_rtmeta_ino(
 {
 	return ino == sc->mp->m_rbmip->i_ino ||
 	       ino == sc->mp->m_rsumip->i_ino ||
+	       ino == sc->mp->m_rrefcountip->i_ino ||
 	       ino == sc->mp->m_rrmapip->i_ino;
 }
 
