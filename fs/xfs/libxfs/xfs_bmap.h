@@ -53,6 +53,7 @@ struct xfs_extent_free_item
 	xfs_fsblock_t		xefi_startblock;/* starting fs block number */
 	xfs_extlen_t		xefi_blockcount;/* number of blocks in extent */
 	bool			xefi_skip_discard;
+	bool			xefi_realtime;
 	struct list_head	xefi_list;
 	struct xfs_owner_info	xefi_oinfo;	/* extent owner */
 };
@@ -189,7 +190,7 @@ unsigned int xfs_bmap_compute_attr_offset(struct xfs_mount *mp);
 int	xfs_bmap_add_attrfork(struct xfs_inode *ip, int size, int rsvd);
 void	xfs_bmap_local_to_extents_empty(struct xfs_trans *tp,
 		struct xfs_inode *ip, int whichfork);
-void	__xfs_bmap_add_free(struct xfs_trans *tp, xfs_fsblock_t bno,
+void	__xfs_bmap_add_free(struct xfs_trans *tp, bool isrt, xfs_fsblock_t bno,
 		xfs_filblks_t len, const struct xfs_owner_info *oinfo,
 		bool skip_discard);
 void	xfs_bmap_compute_maxlevels(struct xfs_mount *mp, int whichfork);
@@ -242,11 +243,12 @@ int	xfs_bmap_add_extent_unwritten_real(struct xfs_trans *tp,
 static inline void
 xfs_bmap_add_free(
 	struct xfs_trans		*tp,
+	bool				isrt,
 	xfs_fsblock_t			bno,
 	xfs_filblks_t			len,
 	const struct xfs_owner_info	*oinfo)
 {
-	__xfs_bmap_add_free(tp, bno, len, oinfo, false);
+	__xfs_bmap_add_free(tp, isrt, bno, len, oinfo, false);
 }
 
 enum xfs_bmap_intent_type {
