@@ -73,4 +73,6 @@ xfs_rtrmap_ptr_addr(
 		 (index - 1) * sizeof(xfs_rtrmap_ptr_t));
 }
 
+xfs_filblks_t xfs_rtrmapbt_calc_reserves(struct xfs_mount *mp);
+
 #endif	/* __XFS_RTRMAP_BTREE_H__ */
