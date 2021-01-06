@@ -105,6 +105,12 @@ xfs_qm_scall_quotaoff(
 	struct xfs_qoff_logitem	*qoffstart = NULL;
 
 	/*
+	 * Clean up the inactive list before we turn quota off, to reduce the
+	 * amount of quotaoff work we have to do with the mutex held.
+	 */
+	xfs_inactive_force(mp);
+
+	/*
 	 * No file system can have quotas enabled on disk but not in core.
 	 * Note that quota utilities (like quotaoff) _expect_
 	 * errno == -EEXIST here.
@@ -698,6 +704,13 @@ xfs_qm_scall_getquota(
 	int			error;
 
 	/*
+	 * Process all the queued file and speculative preallocation cleanup so
+	 * that the counter values we report here do not incorporate any
+	 * resources that were previously deleted.
+	 */
+	xfs_inactive_force(mp);
+
+	/*
 	 * Try to get the dquot. We don't want it allocated on disk, so don't
 	 * set doalloc. If it doesn't exist, we'll get ENOENT back.
 	 */
@@ -734,6 +747,13 @@ xfs_qm_scall_getquota_next(
 {
 	struct xfs_dquot	*dqp;
 	int			error;
+
+	/*
+	 * Process all the queued file and speculative preallocation cleanup so
+	 * that the counter values we report here do not incorporate any
+	 * resources that were previously deleted.
+	 */
+	xfs_inactive_force(mp);
 
 	error = xfs_qm_dqget_next(mp, *id, type, &dqp);
 	if (error)

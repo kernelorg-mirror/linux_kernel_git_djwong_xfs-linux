@@ -521,6 +521,8 @@ and the short name of the data device.  They all can be found in:
   xfs-blockgc     Background garbage collection of disk space that have been
                   speculatively allocated beyond EOF or for staging copy on
                   write operations.
+  xfs-inactive    Background disposal of unlinked files and speculative
+                  preallocations after the final file descriptor is closed.
 ================  ===========
 
 For example, the knobs for the quotacheck workqueue for /dev/nvme0n1 would be
