@@ -623,7 +623,9 @@ xfs_dinode_verify(
 		return __this_address;
 
 	/* don't let reflink and realtime mix */
-	if ((flags2 & XFS_DIFLAG2_REFLINK) && (flags & XFS_DIFLAG_REALTIME))
+	if ((flags2 & XFS_DIFLAG2_REFLINK) &&
+	    !xfs_sb_version_hasrtreflink(&mp->m_sb) &&
+	    (flags & XFS_DIFLAG_REALTIME))
 		return __this_address;
 
 	/* COW extent size hint validation */
@@ -754,7 +756,7 @@ xfs_inode_validate_cowextsize(
 	if (mode && !hint_flag && cowextsize != 0)
 		return __this_address;
 
-	if (hint_flag && rt_flag)
+	if (hint_flag && !xfs_sb_version_hasrtreflink(&mp->m_sb) && rt_flag)
 		return __this_address;
 
 	if (cowextsize_bytes % mp->m_sb.sb_blocksize)
