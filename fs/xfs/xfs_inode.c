@@ -1631,6 +1631,35 @@ xfs_inactive_ifree(
 	return 0;
 }
 
+/* Prepare inode for inactivation. */
+void
+xfs_inode_inactivation_prep(
+	struct xfs_inode	*ip)
+{
+	if (XFS_FORCED_SHUTDOWN(ip->i_mount))
+		return;
+
+	/*
+	 * If this inode is unlinked (and now unreferenced) we need to dispose
+	 * of it in the on disk metadata.
+	 *
+	 * Change the generation so that the inode can't be opened by handle
+	 * now that the last external references has dropped.  Bulkstat won't
+	 * return inodes with zero nlink so nobody will ever find this inode
+	 * again.  Then add this inode & blocks to the counts of things that
+	 * will be freed during the next inactivation run.
+	 */
+	if (VFS_I(ip)->i_nlink == 0)
+		VFS_I(ip)->i_generation = prandom_u32();
+
+	/*
+	 * Detach dquots just in case someone tries a quotaoff while the inode
+	 * is waiting on the inactive list.  We'll reattach them (if needed)
+	 * when inactivating the inode.
+	 */
+	xfs_qm_dqdetach(ip);
+}
+
 /*
  * Returns true if we need to update the on-disk metadata before we can free
  * the memory used by this inode.  Updates include freeing post-eof
@@ -1704,7 +1733,7 @@ xfs_inode_needs_inactivation(
  */
 void
 xfs_inactive(
-	xfs_inode_t	*ip)
+	struct xfs_inode	*ip)
 {
 	struct xfs_mount	*mp;
 	int			error;
@@ -1728,6 +1757,16 @@ xfs_inactive(
 
 	/* Metadata inodes require explicit resource cleanup. */
 	if (xfs_is_metadata_inode(ip))
+		return;
+
+	/*
+	 * Re-attach dquots prior to freeing EOF blocks or CoW staging extents.
+	 * We dropped the dquot prior to inactivation (because quotaoff can't
+	 * resurrect inactive inodes to force-drop the dquot) so we /must/
+	 * do this before touching any block mappings.
+	 */
+	error = xfs_qm_dqattach(ip);
+	if (error)
 		return;
 
 	/* Try to clean out the cow blocks if there are any. */
@@ -1754,10 +1793,6 @@ xfs_inactive(
 	    (ip->i_d.di_size != 0 || XFS_ISIZE(ip) != 0 ||
 	     ip->i_df.if_nextents > 0 || ip->i_delayed_blks > 0))
 		truncate = 1;
-
-	error = xfs_qm_dqattach(ip);
-	if (error)
-		return;
 
 	if (S_ISLNK(VFS_I(ip)->i_mode))
 		error = xfs_inactive_symlink(ip);
