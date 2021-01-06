@@ -1041,7 +1041,8 @@ xfs_growfs_rt(
 	     xfs_sb_version_hasreflink(&mp->m_sb)))
 		return -EOPNOTSUPP;
 
-	if (xfs_sb_version_hasreflink(&mp->m_sb) && in->extsize != 1)
+	if (xfs_sb_version_hasreflink(&mp->m_sb) &&
+	    !is_power_of_2(mp->m_sb.sb_rextsize))
 		return -EOPNOTSUPP;
 
 	nrblocks = in->newblocks;
