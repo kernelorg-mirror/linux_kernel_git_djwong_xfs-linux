@@ -135,6 +135,13 @@ bool xfs_verify_rtbno(struct xfs_mount *mp, xfs_rtblock_t rtbno);
 int xfs_rtalloc_extent_is_free(struct xfs_mount *mp, struct xfs_trans *tp,
 			       xfs_rtblock_t start, xfs_extlen_t len,
 			       bool *is_free);
+
+#define XFS_RTLOCK_ALLOC	(1 << 0) /* rt allocation */
+#define XFS_RTLOCK_ALL		(XFS_RTLOCK_ALLOC)
+
+void xfs_rtlock(struct xfs_trans *tp, struct xfs_mount *mp,
+		unsigned int rtlock_flags);
+void xfs_rtunlock(struct xfs_mount *mp, unsigned int lock_flags);
 #else
 # define xfs_rtallocate_extent(t,b,min,max,l,f,p,rb)    (ENOSYS)
 # define xfs_rtfree_extent(t,b,l)                       (ENOSYS)
@@ -157,6 +164,8 @@ xfs_rtmount_init(
 }
 # define xfs_rtmount_inodes(m)  (((mp)->m_sb.sb_rblocks == 0)? 0 : (ENOSYS))
 # define xfs_rtunmount_inodes(m)
+# define xfs_rtlock(tp, mp, lock_flags)	do { } while (0)
+# define xfs_rtunlock(mp, lock_flags)	do { } while (0)
 #endif	/* CONFIG_XFS_RT */
 
 #endif	/* __XFS_RTALLOC_H__ */
