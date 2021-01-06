@@ -733,9 +733,10 @@ struct xfs_scrub_metadata {
 #define XFS_SCRUB_TYPE_QUOTACHECK 25	/* quota counters */
 #define XFS_SCRUB_TYPE_HEALTHY	26	/* everything checked out ok */
 #define XFS_SCRUB_TYPE_RTRMAPBT	27	/* realtime reverse mapping btree */
+#define XFS_SCRUB_TYPE_RTREFCBT	28	/* realtime reference count btree */
 
 /* Number of scrub subcommands. */
-#define XFS_SCRUB_TYPE_NR	28
+#define XFS_SCRUB_TYPE_NR	29
 
 /* i: Repair this metadata. */
 #define XFS_SCRUB_IFLAG_REPAIR		(1 << 0)
