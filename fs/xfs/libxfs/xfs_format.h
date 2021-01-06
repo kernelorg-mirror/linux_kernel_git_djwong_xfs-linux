@@ -1898,6 +1898,7 @@ struct xfs_refcount_irec {
 
 #define MAXREFCOUNT	((xfs_nlink_t)~0U)
 #define MAXREFCEXTLEN	((xfs_extlen_t)~0U)
+#define MAXRTREFCEXTLEN	((xfs_filblks_t)~0U)
 
 /* btree pointer type */
 typedef __be32 xfs_refcount_ptr_t;
@@ -1908,6 +1909,33 @@ typedef __be32 xfs_refcount_ptr_t;
  * This is a btree for reference count records for realtime volumes
  */
 #define	XFS_RTREFC_CRC_MAGIC	0x52434e54	/* 'RCNT' */
+
+/*
+ * Extents that are being used to stage a copy on write are stored
+ * in the refcount btree with a refcount of 1 and the upper bit set
+ * on the startblock.  This speeds up mount time deletion of stale
+ * staging extents because they're all at the right side of the tree.
+ */
+#define XFS_RTREFC_COW_START		((xfs_fsblock_t)(1ULL << 63))
+#define RTREFCNTBT_COWFLAG_BITLEN	1
+#define RTREFCNTBT_RTBLOCK_BITLEN	63
+
+/*
+ * Reference count record for realtime volumes.  Note that the units here are
+ * blocks, even though allocations are done in units of rt extents.
+ */
+struct xfs_rtrefcount_rec {
+	__be64		rc_startblock;	/* starting block number */
+	__be64		rc_blockcount;	/* count of blocks */
+	__be32		rc_refcount;	/* number of inodes linked here */
+} __attribute__((packed));
+
+struct xfs_rtrefcount_key {
+	__be64		rc_startblock;	/* starting block number */
+};
+
+/* btree pointer type */
+typedef __be64 xfs_rtrefcount_ptr_t;
 
 /*
  * BMAP Btree format definitions
