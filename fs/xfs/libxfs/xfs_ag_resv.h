@@ -8,6 +8,8 @@
 
 int xfs_ag_resv_free(struct xfs_perag *pag);
 int xfs_ag_resv_init(struct xfs_perag *pag, struct xfs_trans *tp);
+int xfs_rt_resv_free(struct xfs_mount *mp);
+int xfs_rt_resv_init(struct xfs_mount *mp, struct xfs_trans *tp);
 
 bool xfs_ag_resv_critical(struct xfs_perag *pag, enum xfs_ag_resv_type type);
 xfs_filblks_t xfs_ag_resv_needed(struct xfs_perag *pag,
