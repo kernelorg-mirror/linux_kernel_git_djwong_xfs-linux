@@ -524,7 +524,7 @@ xfs_getfsmap_rtdev_rtbitmap_query(
 	struct xfs_mount		*mp = tp->t_mountp;
 	int				error;
 
-	xfs_ilock(mp->m_rbmip, XFS_ILOCK_SHARED);
+	xfs_rtlock(NULL, mp, XFS_RTLOCK_ALL);
 
 	/*
 	 * Set up query parameters to return free extents covering the range we
@@ -553,7 +553,7 @@ xfs_getfsmap_rtdev_rtbitmap_query(
 	if (error)
 		goto err;
 err:
-	xfs_iunlock(mp->m_rbmip, XFS_ILOCK_SHARED);
+	xfs_rtunlock(mp, XFS_RTLOCK_ALL);
 	return error;
 }
 
