@@ -573,7 +573,7 @@ xfs_ag_shrink_space(
 		if (err2 != -ENOSPC)
 			goto resv_err;
 
-		__xfs_bmap_add_free(*tpp, args.fsbno, delta, NULL, true);
+		__xfs_bmap_add_free(*tpp, args.fsbno, delta, NULL, false, true);
 
 		/*
 		 * Roll the transaction before trying to re-init the per-ag
