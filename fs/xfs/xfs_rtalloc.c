@@ -1323,6 +1323,7 @@ xfs_rt_resv_init(
 static struct lock_class_key xfs_rbmip_key;
 static struct lock_class_key xfs_rsumip_key;
 static struct lock_class_key xfs_rrmapip_key;
+static struct lock_class_key xfs_rrefcountip_key;
 
 static inline int
 xfs_rt_iget(
@@ -1390,8 +1391,29 @@ xfs_rtmount_inodes(
 		}
 	}
 
+	/* If we have reflink and a realtime device, load the refcount btree. */
+	if (xfs_sb_version_hasrtreflink(&mp->m_sb)) {
+		error = xfs_imeta_lookup(mp, &XFS_IMETA_RTREFCOUNTBT, &ino);
+		if (error)
+			goto out_rrmap;
+
+		error = xfs_rt_iget(mp, ino, &xfs_rrefcountip_key,
+				&mp->m_rrefcountip);
+		if (error)
+			goto out_rrmap;
+
+		if (XFS_IS_CORRUPT(mp,
+				   mp->m_rrefcountip->i_df.if_format !=
+				   XFS_DINODE_FMT_REFCOUNT)) {
+			error = -EFSCORRUPTED;
+			goto out_rrefcount;
+		}
+	}
+
 	xfs_alloc_rsum_cache(mp, sbp->sb_rbmblocks);
 	return 0;
+out_rrefcount:
+	xfs_imeta_irele(mp->m_rrefcountip);
 out_rrmap:
 	xfs_imeta_irele(mp->m_rrmapip);
 out_rsum:
@@ -1422,6 +1444,12 @@ xfs_rtmount_dqattach(
 			return error;
 	}
 
+	if (xfs_sb_version_hasrtreflink(&mp->m_sb)) {
+		error = xfs_qm_dqattach(mp->m_rrefcountip);
+		if (error)
+			return error;
+	}
+
 	return 0;
 }
 
@@ -1430,6 +1458,8 @@ xfs_rtunmount_inodes(
 	struct xfs_mount	*mp)
 {
 	kmem_free(mp->m_rsum_cache);
+	if (mp->m_rrefcountip)
+		xfs_imeta_irele(mp->m_rrefcountip);
 	if (mp->m_rrmapip)
 		xfs_imeta_irele(mp->m_rrmapip);
 	if (mp->m_rbmip)
