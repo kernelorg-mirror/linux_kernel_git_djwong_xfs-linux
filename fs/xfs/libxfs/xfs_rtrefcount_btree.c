@@ -160,6 +160,7 @@ xfs_rtrefcountbt_verify(
 	struct xfs_mount	*mp = bp->b_target->bt_mount;
 	struct xfs_btree_block	*block = XFS_BUF_TO_BLOCK(bp);
 	xfs_failaddr_t		fa;
+	xfs_ino_t		ino = XFS_RMAP_OWN_UNKNOWN;
 	int			level;
 
 	if (block->bb_magic != cpu_to_be32(XFS_RTREFC_CRC_MAGIC))
@@ -167,7 +168,9 @@ xfs_rtrefcountbt_verify(
 
 	if (!xfs_sb_version_hasreflink(&mp->m_sb))
 		return __this_address;
-	fa = xfs_btree_lblock_v5hdr_verify(bp, XFS_RMAP_OWN_UNKNOWN);
+	if (mp->m_rrefcountip)
+		ino = mp->m_rrefcountip->i_ino;
+	fa = xfs_btree_lblock_v5hdr_verify(bp, ino);
 	if (fa)
 		return fa;
 	level = be16_to_cpu(block->bb_level);
@@ -331,6 +334,7 @@ xfs_rtrefcountbt_commit_staged_btree(
 	int			flags = XFS_ILOG_CORE | XFS_ILOG_DBROOT;
 
 	ASSERT(cur->bc_flags & XFS_BTREE_STAGING);
+	ASSERT(ifake->if_fork->if_format == XFS_DINODE_FMT_REFCOUNT);
 
 	/*
 	 * Free any resources hanging off the real fork, then shallow-copy the
