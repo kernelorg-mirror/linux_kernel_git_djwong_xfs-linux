@@ -788,10 +788,12 @@ xfs_reflink_recover_cow(
 	for (agno = 0; agno < mp->m_sb.sb_agcount; agno++) {
 		error = xfs_refcount_recover_cow_leftovers(mp, agno);
 		if (error)
-			break;
+			return error;
 	}
 
-	return error;
+	if (xfs_sb_version_hasrealtime(&mp->m_sb))
+		return xfs_refcount_recover_cow_leftovers(mp, NULLAGNUMBER);
+	return 0;
 }
 
 /*
