@@ -24,6 +24,7 @@
 #include "xfs_rmap.h"
 #include "xfs_health.h"
 #include "xfs_rtalloc.h"
+#include "xfs_rtrefcount_btree.h"
 
 /* Allowable refcount adjustment amounts. */
 enum xfs_refc_adjust_op {
@@ -1287,8 +1288,9 @@ xfs_refcount_finish_one(
 	}
 	if (rcur == NULL) {
 		if (is_rt) {
-			ASSERT(0);
-			return -EFSCORRUPTED; /* XXX coming later */
+			xfs_rtlock(tp, mp, XFS_RTLOCK_REFCOUNT);
+			rcur = xfs_rtrefcountbt_init_cursor(mp, tp,
+					mp->m_rrefcountip);
 		} else {
 			error = xfs_alloc_read_agf(tp->t_mountp, tp, agno,
 					XFS_ALLOC_FLAG_FREEING, &agbp);
