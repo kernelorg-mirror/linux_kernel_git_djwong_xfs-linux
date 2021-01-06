@@ -25,6 +25,8 @@ struct xfs_eofblocks {
 #define XFS_ICI_RECLAIM_TAG	0	/* inode is to be reclaimed */
 /* Inode has speculative preallocations (posteof or cow) to clean. */
 #define XFS_ICI_BLOCKGC_TAG	1
+/* Inode can be inactivated. */
+#define XFS_ICI_INACTIVE_TAG	2
 
 /*
  * Flags for xfs_iget()
@@ -38,6 +40,7 @@ struct xfs_eofblocks {
  * flags for AG inode iterator
  */
 #define XFS_INODE_WALK_INEW_WAIT	0x1	/* wait on new inodes */
+#define XFS_INODE_WALK_INACTIVE		0x2	/* inactivation loop */
 
 int xfs_iget(struct xfs_mount *mp, struct xfs_trans *tp, xfs_ino_t ino,
 	     uint flags, uint lock_flags, xfs_inode_t **ipp);
@@ -53,6 +56,7 @@ int xfs_reclaim_inodes_count(struct xfs_mount *mp);
 long xfs_reclaim_inodes_nr(struct xfs_mount *mp, int nr_to_scan);
 
 void xfs_inode_set_reclaim_tag(struct xfs_inode *ip);
+void xfs_inode_set_inactive_tag(struct xfs_inode *ip);
 
 int xfs_blockgc_free_dquots(struct xfs_mount *mp, struct xfs_dquot *udqp,
 		struct xfs_dquot *gdqp, struct xfs_dquot *pdqp,
@@ -77,5 +81,10 @@ int xfs_icache_inode_is_allocated(struct xfs_mount *mp, struct xfs_trans *tp,
 
 void xfs_blockgc_stop(struct xfs_mount *mp);
 void xfs_blockgc_start(struct xfs_mount *mp);
+
+void xfs_inactive_worker(struct work_struct *work);
+int xfs_inactive_inodes(struct xfs_mount *mp, struct xfs_eofblocks *eofb);
+void xfs_inactive_force(struct xfs_mount *mp);
+void xfs_inactive_shutdown(struct xfs_mount *mp);
 
 #endif
