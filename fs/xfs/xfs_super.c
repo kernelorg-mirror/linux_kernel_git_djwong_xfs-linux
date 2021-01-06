@@ -1631,14 +1631,23 @@ xfs_fs_fill_super(
 
 	if (xfs_sb_version_hasreflink(&mp->m_sb)) {
 		/*
-		 * Reflink doesn't support rt extent sizes larger than a single
-		 * block because we would have to perform unshare-around for
-		 * rtext-unaligned write requests.
+		 * Reflink doesn't support pagecache pages that span multiple
+		 * realtime extents because iomap doesn't track subpage dirty
+		 * state.  This means that we cannot dirty all the pages
+		 * backing an rt extent without dirtying the adjoining rt
+		 * extents.  If those rt extents are shared and extend into
+		 * other pages, this leads to crazy write amplification.  The
+		 * VFS remap_range checks assume power-of-two block sizes, so
+		 * we don't support that either.
+		 *
+		 * Hence we only support rt extent sizes that are an integer
+		 * power of two because we know those will align with the page
+		 * size.
 		 */
 		if (xfs_sb_version_hasrealtime(&mp->m_sb) &&
-		    mp->m_sb.sb_rextsize != 1) {
+		    !is_power_of_2(mp->m_sb.sb_rextsize)) {
 			xfs_alert(mp,
-	"reflink not compatible with realtime extent size %u!",
+	"reflink not compatible with non-power-of-2 realtime extent size %u!",
 					mp->m_sb.sb_rextsize);
 			error = -EINVAL;
 			goto out_filestream_unmount;
@@ -1657,7 +1666,6 @@ xfs_fs_fill_super(
 			mp->m_always_cow = true;
 		}
 	}
-
 
 	error = xfs_mountfs(mp);
 	if (error)
