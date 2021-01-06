@@ -24,6 +24,7 @@
 #include "xfs_pnfs.h"
 #include "xfs_iomap.h"
 #include "xfs_reflink.h"
+#include "xfs_xchgrange.h"
 
 #include <linux/falloc.h>
 #include <linux/backing-dev.h>
@@ -1214,6 +1215,53 @@ use_generic:
 }
 
 STATIC int
+xfs_file_xchg_range(
+	struct file		*file1,
+	struct file		*file2,
+	struct file_xchg_range	*fxr)
+{
+	struct inode		*inode1 = file_inode(file1);
+	struct inode		*inode2 = file_inode(file2);
+	struct xfs_inode	*ip1 = XFS_I(inode1);
+	struct xfs_inode	*ip2 = XFS_I(inode2);
+	struct xfs_mount	*mp = ip1->i_mount;
+	unsigned int		priv_flags = 0;
+	int			ret;
+
+	if (XFS_FORCED_SHUTDOWN(mp))
+		return -EIO;
+
+	/* Update cmtime if the fd/inode don't forbid it. */
+	if (likely(!(file1->f_mode & FMODE_NOCMTIME) && !IS_NOCMTIME(inode1)))
+		priv_flags |= XFS_XCHG_RANGE_UPD_CMTIME1;
+	if (likely(!(file2->f_mode & FMODE_NOCMTIME) && !IS_NOCMTIME(inode2)))
+		priv_flags |= XFS_XCHG_RANGE_UPD_CMTIME2;
+
+	/* Lock both files against IO */
+	ret = xfs_ilock2_io_mmap(ip1, ip2);
+	if (ret)
+		return ret;
+
+	/* Prepare and then exchange file contents. */
+	ret = xfs_xchg_range_prep(file1, file2, fxr);
+	if (ret)
+		goto out_unlock;
+
+	trace_xfs_file_xchg_range(ip1, fxr->file1_offset, fxr->length, ip2,
+			fxr->file2_offset);
+
+	ret = xfs_xchg_range(ip1, ip2, fxr, priv_flags);
+	if (ret)
+		goto out_unlock;
+
+out_unlock:
+	xfs_iunlock2_io_mmap(ip1, ip2);
+	if (ret)
+		trace_xfs_file_xchg_range_error(ip2, ret, _RET_IP_);
+	return ret;
+}
+
+STATIC int
 xfs_file_open(
 	struct inode	*inode,
 	struct file	*file)
@@ -1477,6 +1525,7 @@ const struct file_operations xfs_file_operations = {
 	.fadvise	= xfs_file_fadvise,
 	.copy_file_range = xfs_file_copy_range,
 	.remap_file_range = xfs_file_remap_range,
+	.xchg_file_range = xfs_file_xchg_range,
 };
 
 const struct file_operations xfs_dir_file_operations = {
