@@ -112,3 +112,23 @@ xchk_rtrmapbt(
 	return xchk_btree(sc, sc->sr.rmap_cur, xchk_rtrmapbt_rec, &oinfo,
 			NULL);
 }
+
+/* xref check that the extent has no realtime reverse mapping at all */
+void
+xchk_xref_has_no_rt_owner(
+	struct xfs_scrub	*sc,
+	xfs_rtblock_t		bno,
+	xfs_filblks_t		len)
+{
+	bool			has_rmap;
+	int			error;
+
+	if (!sc->sr.rmap_cur || xchk_skip_xref(sc->sm))
+		return;
+
+	error = xfs_rmap_has_record(sc->sr.rmap_cur, bno, len, &has_rmap);
+	if (!xchk_should_check_xref(sc, &error, &sc->sr.rmap_cur))
+		return;
+	if (has_rmap)
+		xchk_btree_xref_set_corrupt(sc, sc->sr.rmap_cur, 0);
+}
