@@ -84,6 +84,8 @@ int xrep_xattr_reset_fork(struct xfs_scrub *sc, struct xfs_inode *ip);
 
 void xrep_ag_btcur_init(struct xfs_scrub *sc, struct xchk_ag *sa);
 void xrep_rt_btcur_init(struct xfs_scrub *sc, struct xchk_rt *sr);
+int xrep_check_ino_btree_mapping(struct xfs_scrub *sc,
+		const struct xfs_rmap_irec *rec);
 
 #ifdef CONFIG_XFS_RT
 int xrep_require_rtext_inuse(struct xfs_scrub *sc, xfs_rtblock_t rtbno,
@@ -145,9 +147,11 @@ int xrep_quotacheck(struct xfs_scrub *sc);
 #ifdef CONFIG_XFS_RT
 int xrep_rtsummary(struct xfs_scrub *sc);
 int xrep_rtbitmap(struct xfs_scrub *sc);
+int xrep_rtrmapbt(struct xfs_scrub *sc);
 #else
 # define xrep_rtsummary			xrep_notsupported
 # define xrep_rtbitmap			xrep_notsupported
+# define xrep_rtrmapbt			xrep_notsupported
 #endif /* CONFIG_XFS_RT */
 
 struct xrep_newbt_resv {
@@ -272,6 +276,7 @@ xrep_rmapbt_setup(
 #define xrep_dir			xrep_notsupported
 #define xrep_parent			xrep_notsupported
 #define xrep_rtbitmap			xrep_notsupported
+#define xrep_rtrmapbt			xrep_notsupported
 
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
