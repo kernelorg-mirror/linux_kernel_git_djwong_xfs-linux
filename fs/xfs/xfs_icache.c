@@ -2221,6 +2221,22 @@ xfs_inodegc_flush(
 		flush_delayed_work(&pag->pag_inodegc_work);
 }
 
+/* Flush inactivation work for all inodes in the same AGs as this inode. */
+void
+xfs_inodegc_flush_ino(
+	struct xfs_mount	*mp,
+	xfs_ino_t		ino)
+{
+	struct xfs_perag	*pag;
+
+	pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, ino));
+	if (radix_tree_tagged(&pag->pag_ici_root, XFS_ICI_INODEGC_TAG)) {
+		trace_xfs_inodegc_queue(mp, pag->pag_agno, 0, _RET_IP_);
+		flush_delayed_work(&pag->pag_inodegc_work);
+	}
+	xfs_perag_put(pag);
+}
+
 /* Disable the inode inactivation background worker and wait for it to stop. */
 void
 xfs_inodegc_stop(
