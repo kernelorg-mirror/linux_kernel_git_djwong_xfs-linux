@@ -27,4 +27,7 @@ int xfs_xchg_range_prep(struct file *file1, struct file *file2,
 int xfs_xchg_range(struct xfs_inode *ip1, struct xfs_inode *ip2,
 		const struct file_xchg_range *fxr, unsigned int private_flags);
 
+int xfs_swapext_enable_log_assist(struct xfs_mount *mp, bool force,
+		bool *enabled);
+
 #endif /* __XFS_XCHGRANGE_H__ */
