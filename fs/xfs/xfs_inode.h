@@ -492,6 +492,7 @@ void xfs_inode_inactivation_prep(struct xfs_inode *ip);
 
 int xfs_iunlink_init(struct xfs_perag *pag);
 void xfs_iunlink_destroy(struct xfs_perag *pag);
+int xfs_iunlink(struct xfs_trans *tp, struct xfs_inode *ip);
 
 void xfs_end_io(struct work_struct *work);
 
