@@ -24,6 +24,7 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_rmap.h"
 #include "xfs_rmap_btree.h"
+#include "xfs_rtrmap_btree.h"
 #include "xfs_refcount.h"
 #include "xfs_quota.h"
 #include "xfs_ialloc.h"
@@ -259,6 +260,82 @@ xrep_bmap_scan_ag(
 	xchk_ag_free(sc, &sc->sa);
 	return error;
 }
+/* Check for any obvious errors or conflicts in the file mapping. */
+STATIC int
+xrep_bmap_check_rtfork_rmap(
+	struct xfs_scrub	*sc,
+	const struct xfs_rmap_irec *rec)
+{
+	/* xattr extents are never stored on realtime devices */
+	if (rec->rm_flags & XFS_RMAP_ATTR_FORK)
+		return -EFSCORRUPTED;
+
+	/* bmbt blocks are never stored on realtime devices */
+	if (rec->rm_flags & XFS_RMAP_BMBT_BLOCK)
+		return -EFSCORRUPTED;
+
+	/* Data extents for non-rt files are never stored on the rt device. */
+	if (!XFS_IS_REALTIME_INODE(sc->ip))
+		return -EFSCORRUPTED;
+
+	/* Check the file offsets and physical extents. */
+	if (!xfs_verify_fileext(sc->mp, rec->rm_offset, rec->rm_blockcount))
+		return -EFSCORRUPTED;
+
+	/* Check that this fits in the rt volume. */
+	if (!xfs_verify_rtext(sc->mp, rec->rm_startblock, rec->rm_blockcount))
+		return -EFSCORRUPTED;
+
+	/* Make sure this isn't free space. */
+	return xrep_rtext_is_free(sc, rec->rm_startblock, rec->rm_blockcount);
+}
+
+/* Record realtime extents that belong to this inode's fork. */
+STATIC int
+xrep_bmap_walk_rtrmap(
+	struct xfs_btree_cur	*cur,
+	struct xfs_rmap_irec	*rec,
+	void			*priv)
+{
+	struct xrep_bmap	*rb = priv;
+	int			error = 0;
+
+	if (xchk_should_terminate(rb->sc, &error))
+		return error;
+
+	/* Skip extents which are not owned by this inode and fork. */
+	if (rec->rm_owner != rb->sc->ip->i_ino)
+		return 0;
+
+	error = xrep_bmap_check_rtfork_rmap(rb->sc, rec);
+	if (error)
+		return error;
+
+	rb->nblocks += rec->rm_blockcount;
+
+	return xrep_bmap_from_rmap(rb, rec->rm_offset, rec->rm_startblock,
+			rec->rm_blockcount,
+			rec->rm_flags & XFS_RMAP_UNWRITTEN);
+}
+
+/* Scan the realtime reverse mappings to build the new extent map. */
+STATIC int
+xrep_bmap_scan_rt(
+	struct xrep_bmap	*rb)
+{
+	struct xfs_scrub	*sc = rb->sc;
+	int			error;
+
+	if (xrep_is_rtmeta_ino(sc, sc->ip->i_ino))
+		return 0;
+
+	xchk_rt_lock(sc, &sc->sr);
+	xrep_rt_btcur_init(sc, &sc->sr);
+	error = xfs_rmap_query_all(sc->sr.rmap_cur, xrep_bmap_walk_rtrmap, rb);
+	xchk_rt_btcur_free(&sc->sr);
+	xchk_rt_unlock(sc, &sc->sr);
+	return error;
+}
 
 /*
  * Collect block mappings for this fork of this inode and decide if we have
@@ -272,6 +349,12 @@ xrep_bmap_find_mappings(
 	struct xfs_scrub	*sc = rb->sc;
 	xfs_agnumber_t		agno;
 	int			error = 0;
+
+	if (xfs_sb_version_hasrealtime(&sc->mp->m_sb)) {
+		error = xrep_bmap_scan_rt(rb);
+		if (error)
+			return error;
+	}
 
 	/* Iterate the rmaps for extents. */
 	for (agno = 0; agno < sc->mp->m_sb.sb_agcount; agno++) {
@@ -568,10 +651,6 @@ xrep_bmap_check_inputs(
 	/* If we somehow have delalloc extents, forget it. */
 	if (sc->ip->i_delayed_blks)
 		return -EBUSY;
-
-	/* Don't know how to rebuild realtime data forks. */
-	if (XFS_IS_REALTIME_INODE(sc->ip))
-		return -EOPNOTSUPP;
 
 	return 0;
 }
