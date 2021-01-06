@@ -22,6 +22,7 @@
 #include "xfs_sb.h"
 #include "xfs_ag_resv.h"
 #include "xfs_ag.h"
+#include "xfs_rtrmap_btree.h"
 
 /*
  * Per-AG Block Reservations
@@ -250,6 +251,10 @@ xfs_rt_resv_init(
 	/* Create the rt metadata reservation. */
 	if (mp->m_rtmeta_resv.ar_asked == 0) {
 		ask = used = 0;
+
+		error = xfs_rtrmapbt_calc_reserves(mp, tp, &ask, &used);
+		if (error)
+			return error;
 
 		error = __xfs_rt_resv_init(mp, ask, used);
 		if (error)
