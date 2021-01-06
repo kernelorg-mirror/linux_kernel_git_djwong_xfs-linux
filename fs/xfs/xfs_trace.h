@@ -1376,6 +1376,31 @@ TRACE_EVENT(xfs_log_assign_tail_lsn,
 		  CYCLE_LSN(__entry->last_sync_lsn), BLOCK_LSN(__entry->last_sync_lsn))
 )
 
+#define XFS_RTLOCK_STRINGS \
+	{ XFS_RTLOCK_ALLOC,		"rbm|rsum" }
+
+DECLARE_EVENT_CLASS(xfs_rtlock_class,
+	TP_PROTO(struct xfs_mount *mp, unsigned int flags),
+	TP_ARGS(mp, flags),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned int, flags)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->flags = flags;
+	),
+	TP_printk("dev %d:%d flags %s",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __print_flags(__entry->flags, "|", XFS_RTLOCK_STRINGS))
+)
+#define DEFINE_RTLOCK_EVENT(name)		\
+DEFINE_EVENT(xfs_rtlock_class, name,		\
+	TP_PROTO(struct xfs_mount *mp, unsigned int flags),		\
+	TP_ARGS(mp, flags))
+DEFINE_RTLOCK_EVENT(xfs_rtlock);
+DEFINE_RTLOCK_EVENT(xfs_rtunlock);
+
 DECLARE_EVENT_CLASS(xfs_file_class,
 	TP_PROTO(struct kiocb *iocb, struct iov_iter *iter),
 	TP_ARGS(iocb, iter),
