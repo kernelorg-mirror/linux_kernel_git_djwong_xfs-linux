@@ -267,7 +267,9 @@ xfs_rmap_get_rec(
 		if (!xfs_verify_rtbno(mp,
 				irec->rm_startblock + irec->rm_blockcount - 1))
 			goto out_bad_rec;
-		if (XFS_RMAP_NON_INODE_OWNER(irec->rm_owner))
+		if (XFS_RMAP_NON_INODE_OWNER(irec->rm_owner) &&
+		    (!xfs_sb_version_hasrtreflink(&mp->m_sb) ||
+		     irec->rm_owner != XFS_RMAP_OWN_COW))
 			goto out_bad_rec;
 	} else if (irec->rm_startblock <= XFS_AGFL_BLOCK(mp)) {
 		if (irec->rm_owner != XFS_RMAP_OWN_FS)
