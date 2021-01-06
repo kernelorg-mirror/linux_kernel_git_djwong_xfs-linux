@@ -1378,7 +1378,8 @@ TRACE_EVENT(xfs_log_assign_tail_lsn,
 
 #define XFS_RTLOCK_STRINGS \
 	{ XFS_RTLOCK_ALLOC,		"rbm|rsum" }, \
-	{ XFS_RTLOCK_RMAP,		"rmap" }
+	{ XFS_RTLOCK_RMAP,		"rmap" }, \
+	{ XFS_RTLOCK_REFCOUNT,		"refc" }
 
 DECLARE_EVENT_CLASS(xfs_rtlock_class,
 	TP_PROTO(struct xfs_mount *mp, unsigned int flags),
