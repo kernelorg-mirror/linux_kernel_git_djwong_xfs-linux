@@ -4744,19 +4744,19 @@ xfs_btree_sblock_verify(
 
 /*
  * Calculate the number of btree levels needed to store a given number of
- * records in a short-format btree.
+ * records in btree blocks.  This does not include the inode root level.
  */
-uint
+unsigned int
 xfs_btree_compute_maxlevels(
-	uint			*limits,
-	unsigned long		len)
+	unsigned int		*limits,
+	unsigned long long	len)
 {
-	uint			level;
-	unsigned long		maxblocks;
+	unsigned int		level;
+	unsigned long long	maxblocks;
 
-	maxblocks = (len + limits[0] - 1) / limits[0];
+	maxblocks = howmany_64(len, limits[0]);
 	for (level = 1; maxblocks > 1; level++)
-		maxblocks = (maxblocks + limits[1] - 1) / limits[1];
+		maxblocks = howmany_64(maxblocks, limits[1]);
 	return level;
 }
 
