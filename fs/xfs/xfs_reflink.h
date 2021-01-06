@@ -43,4 +43,16 @@ extern int xfs_reflink_remap_blocks(struct xfs_inode *src, loff_t pos_in,
 extern int xfs_reflink_update_dest(struct xfs_inode *dest, xfs_off_t newlen,
 		xfs_extlen_t cowextsize, unsigned int remap_flags);
 
+/* Decide if we need to unshare the blocks around a range that we're writing. */
+static inline bool
+xfs_reflink_need_unshare_around(
+	struct xfs_inode	*ip)
+{
+	return XFS_IS_REALTIME_INODE(ip) && xfs_is_reflink_inode(ip) &&
+		ip->i_mount->m_sb.sb_rextsize > 1;
+}
+
+int xfs_reflink_unshare_stage(struct xfs_inode *ip, xfs_off_t off,
+		xfs_off_t len);
+
 #endif /* __XFS_REFLINK_H */

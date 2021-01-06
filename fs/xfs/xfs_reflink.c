@@ -266,8 +266,25 @@ xfs_reflink_convert_cow_locked(
 	struct xfs_iext_cursor	icur;
 	struct xfs_bmbt_irec	got;
 	struct xfs_btree_cur	*dummy_cur = NULL;
+	struct xfs_mount	*mp = ip->i_mount;
 	int			dummy_logflags;
 	int			error = 0;
+
+	/*
+	 * We can only remap full rt extents, so make sure that we convert the
+	 * entire extent.  The caller must ensure that this is either a direct
+	 * write that's aligned to the rt extent size, or a buffered write for
+	 * which we've dirtied extra pages to make this work properly.
+	 */
+	if (xfs_reflink_need_unshare_around(ip)) {
+		xfs_fileoff_t	new_off;
+
+		new_off = rounddown_64(offset_fsb, mp->m_sb.sb_rextsize);
+		count_fsb += offset_fsb - new_off;
+		offset_fsb = new_off;
+
+		count_fsb = roundup_64(count_fsb, mp->m_sb.sb_rextsize);
+	}
 
 	if (!xfs_iext_lookup_extent(ip, ip->i_cowfp, offset_fsb, &icur, &got))
 		return 0;
@@ -475,9 +492,19 @@ xfs_reflink_cancel_cow_blocks(
 	bool				cancel_real)
 {
 	struct xfs_ifork		*ifp = XFS_IFORK_PTR(ip, XFS_COW_FORK);
+	struct xfs_mount		*mp = ip->i_mount;
 	struct xfs_bmbt_irec		got, del;
 	struct xfs_iext_cursor		icur;
 	int				error = 0;
+
+	/*
+	 * Shrink the range that we're cancelling if they don't align to the
+	 * realtime extent size, since we can only free full extents.
+	 */
+	if (xfs_reflink_need_unshare_around(ip)) {
+		offset_fsb = roundup_64(offset_fsb, mp->m_sb.sb_rextsize);
+		end_fsb = rounddown_64(end_fsb, mp->m_sb.sb_rextsize);
+	}
 
 	if (!xfs_inode_has_cow_data(ip))
 		return 0;
@@ -692,7 +719,8 @@ xfs_reflink_end_cow_extent(
 	 * preallocations can leak into the range we are called upon, and we
 	 * need to skip them.
 	 */
-	if (!xfs_bmap_is_written_extent(&got)) {
+	if (!xfs_bmap_is_written_extent(&got) &&
+	    !xfs_reflink_need_unshare_around(ip)) {
 		*end_fsb = del.br_startoff;
 		goto out_cancel;
 	}
@@ -743,6 +771,7 @@ xfs_reflink_end_cow(
 	xfs_off_t			offset,
 	xfs_off_t			count)
 {
+	struct xfs_mount		*mp = ip->i_mount;
 	xfs_fileoff_t			offset_fsb;
 	xfs_fileoff_t			end_fsb;
 	int				error = 0;
@@ -751,6 +780,16 @@ xfs_reflink_end_cow(
 
 	offset_fsb = XFS_B_TO_FSBT(ip->i_mount, offset);
 	end_fsb = XFS_B_TO_FSB(ip->i_mount, offset + count);
+
+	/*
+	 * Make sure the end is aligned with a rt extent (if desired), since
+	 * the end of the range could be EOF.  The _convert_cow function should
+	 * have set us up to swap only full rt extents.
+	 */
+	if (xfs_reflink_need_unshare_around(ip)) {
+		offset_fsb = rounddown_64(offset_fsb, mp->m_sb.sb_rextsize);
+		end_fsb = roundup_64(end_fsb, mp->m_sb.sb_rextsize);
+	}
 
 	/*
 	 * Walk backwards until we're out of the I/O range.  The loop function
@@ -1568,6 +1607,23 @@ out:
 }
 
 /*
+ * Start the process of unsharing part of a file by dirtying the pagecache for
+ * any shared extents in the given region.  Caller must ensure the range is
+ * within EOF.
+ */
+int
+xfs_reflink_unshare_stage(
+	struct xfs_inode	*ip,
+	xfs_off_t		off,
+	xfs_off_t		len)
+{
+	trace_xfs_reflink_unshare(ip, off, len);
+
+	return iomap_file_unshare(VFS_I(ip), off, len,
+			&xfs_buffered_write_iomap_ops);
+}
+
+/*
  * Pre-COW all shared blocks within a given byte range of a file and turn off
  * the reflink flag if we unshare all of the file's blocks.
  */
@@ -1583,12 +1639,9 @@ xfs_reflink_unshare(
 	if (!xfs_is_reflink_inode(ip))
 		return 0;
 
-	trace_xfs_reflink_unshare(ip, offset, len);
-
 	inode_dio_wait(inode);
 
-	error = iomap_file_unshare(inode, offset, len,
-			&xfs_buffered_write_iomap_ops);
+	error = xfs_reflink_unshare_stage(ip, offset, len);
 	if (error)
 		goto out;
 
