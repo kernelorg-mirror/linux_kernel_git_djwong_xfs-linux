@@ -307,6 +307,7 @@ xfs_set_inode_alloc(
 			pag->pagi_inodeok = 1;
 			pag->pagf_metadata = 0;
 		}
+		pag->pagf_noalloc = 0;
 
 		xfs_perag_put(pag);
 	}
