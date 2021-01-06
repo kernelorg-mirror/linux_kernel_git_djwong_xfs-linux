@@ -482,7 +482,7 @@ xfs_xchg_range_reserve_quota(
  * permission either (1) by calling xlog_drop_incompat_feat when they're done,
  * or (2) by setting XFS_TRANS_LOG_INCOMPAT on a transaction.
  */
-STATIC int
+int
 xfs_swapext_enable_log_assist(
 	struct xfs_mount	*mp,
 	bool			force,
