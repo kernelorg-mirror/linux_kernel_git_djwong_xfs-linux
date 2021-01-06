@@ -70,8 +70,8 @@ xfs_ag_resv_critical(
 	struct xfs_perag		*pag,
 	enum xfs_ag_resv_type		type)
 {
-	xfs_extlen_t			avail;
-	xfs_extlen_t			orig;
+	xfs_filblks_t			avail;
+	xfs_filblks_t			orig;
 	xfs_extlen_t			btree_maxlevels;
 
 	switch (type) {
@@ -93,20 +93,21 @@ xfs_ag_resv_critical(
 
 	/* Critically low if less than 10% or max btree height remains. */
 	btree_maxlevels = xfs_btree_maxlevels(pag->pag_mount, XFS_BTNUM_MAX);
-	return XFS_TEST_ERROR(avail < orig / 10 || avail < btree_maxlevels,
-			pag->pag_mount, XFS_ERRTAG_AG_RESV_CRITICAL);
+	return XFS_TEST_ERROR(avail < div_u64(orig, 10) ||
+			      avail < btree_maxlevels,
+			      pag->pag_mount, XFS_ERRTAG_AG_RESV_CRITICAL);
 }
 
 /*
  * How many blocks are reserved but not used, and therefore must not be
  * allocated away?
  */
-xfs_extlen_t
+xfs_filblks_t
 xfs_ag_resv_needed(
 	struct xfs_perag		*pag,
 	enum xfs_ag_resv_type		type)
 {
-	xfs_extlen_t			len;
+	xfs_filblks_t			len;
 
 	len = pag->pag_meta_resv.ar_reserved + pag->pag_rmapbt_resv.ar_reserved;
 	switch (type) {
@@ -133,7 +134,7 @@ __xfs_ag_resv_free(
 	enum xfs_ag_resv_type		type)
 {
 	struct xfs_ag_resv		*resv;
-	xfs_extlen_t			oldresv;
+	xfs_filblks_t			oldresv;
 	int				error;
 
 	trace_xfs_ag_resv_free(pag, type, 0);
@@ -180,13 +181,13 @@ static int
 __xfs_ag_resv_init(
 	struct xfs_perag		*pag,
 	enum xfs_ag_resv_type		type,
-	xfs_extlen_t			ask,
-	xfs_extlen_t			used)
+	xfs_filblks_t			ask,
+	xfs_filblks_t			used)
 {
 	struct xfs_mount		*mp = pag->pag_mount;
 	struct xfs_ag_resv		*resv;
 	int				error;
-	xfs_extlen_t			hidden_space;
+	xfs_filblks_t			hidden_space;
 
 	if (used > ask)
 		ask = used;
@@ -330,7 +331,7 @@ xfs_ag_resv_alloc_extent(
 	struct xfs_alloc_arg		*args)
 {
 	struct xfs_ag_resv		*resv;
-	xfs_extlen_t			len;
+	xfs_filblks_t			len;
 	uint				field;
 
 	trace_xfs_ag_resv_alloc_extent(pag, type, args->len);
@@ -352,7 +353,7 @@ xfs_ag_resv_alloc_extent(
 		return;
 	}
 
-	len = min_t(xfs_extlen_t, args->len, resv->ar_reserved);
+	len = min_t(xfs_filblks_t, args->len, resv->ar_reserved);
 	resv->ar_reserved -= len;
 	if (type == XFS_AG_RESV_RMAPBT)
 		return;
@@ -370,9 +371,9 @@ xfs_ag_resv_free_extent(
 	struct xfs_perag		*pag,
 	enum xfs_ag_resv_type		type,
 	struct xfs_trans		*tp,
-	xfs_extlen_t			len)
+	xfs_filblks_t			len)
 {
-	xfs_extlen_t			leftover;
+	xfs_filblks_t			leftover;
 	struct xfs_ag_resv		*resv;
 
 	trace_xfs_ag_resv_free_extent(pag, type, len);
@@ -394,7 +395,7 @@ xfs_ag_resv_free_extent(
 		return;
 	}
 
-	leftover = min_t(xfs_extlen_t, len, resv->ar_asked - resv->ar_reserved);
+	leftover = min_t(xfs_filblks_t, len, resv->ar_asked - resv->ar_reserved);
 	resv->ar_reserved += leftover;
 	if (type == XFS_AG_RESV_RMAPBT)
 		return;
