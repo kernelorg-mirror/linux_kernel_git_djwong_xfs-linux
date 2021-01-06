@@ -618,6 +618,10 @@ xfs_efi_validate_ext(
 	struct xfs_mount		*mp,
 	struct xfs_extent		*extp)
 {
+	if (extp->ext_len & XFS_EFI_REALTIME_EXT)
+		return xfs_verify_rtext(mp, extp->ext_start,
+				extp->ext_len & ~XFS_EFI_REALTIME_EXT);
+
 	return xfs_verify_fsbext(mp, extp->ext_start, extp->ext_len);
 }
 
