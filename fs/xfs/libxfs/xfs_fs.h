@@ -212,6 +212,7 @@ struct xfs_fsop_geom {
 #define XFS_FSOP_GEOM_SICK_RT_SUMMARY	(1 << 5)  /* realtime summary */
 #define XFS_FSOP_GEOM_SICK_QUOTACHECK	(1 << 6)  /* quota counts */
 #define XFS_FSOP_GEOM_SICK_RT_RMAPBT	(1 << 7)  /* realtime rmapbt */
+#define XFS_FSOP_GEOM_SICK_RT_REFCNTBT	(1 << 8)  /* realtime refcountbt */
 
 /* Output for XFS_FS_COUNTS */
 typedef struct xfs_fsop_counts {
