@@ -1566,6 +1566,58 @@ DEFINE_EVENT(xrep_dirent_class, name, \
 DEFINE_XREP_DIRENT_CLASS(xrep_dir_insert_rec);
 DEFINE_XREP_DIRENT_CLASS(xrep_move_orphanage);
 
+DECLARE_EVENT_CLASS(xrep_rtbitmap_class,
+	TP_PROTO(struct xfs_mount *mp, xfs_rtblock_t start, xfs_rtblock_t end),
+	TP_ARGS(mp, start, end),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_rtblock_t, start)
+		__field(xfs_rtblock_t, end)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->start = start;
+		__entry->end = end;
+	),
+	TP_printk("dev %d:%d start %llu end %llu",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->start,
+		  __entry->end)
+);
+#define DEFINE_REPAIR_RTBITMAP_EVENT(name) \
+DEFINE_EVENT(xrep_rtbitmap_class, name, \
+	TP_PROTO(struct xfs_mount *mp, xfs_rtblock_t start, \
+		 xfs_rtblock_t end), \
+	TP_ARGS(mp, start, end))
+DEFINE_REPAIR_RTBITMAP_EVENT(xrep_rtbitmap_record_free);
+DEFINE_REPAIR_RTBITMAP_EVENT(xrep_rtbitmap_record_free_bulk);
+
+TRACE_EVENT(xrep_rtbitmap_or,
+	TP_PROTO(struct xfs_mount *mp, xfs_rtblock_t start, loff_t pos,
+		 xfs_rtword_t mask, xfs_rtword_t word),
+	TP_ARGS(mp, start, pos, mask, word),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_rtblock_t, start)
+		__field(loff_t, pos)
+		__field(unsigned int, mask)
+		__field(unsigned int, word)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->start = start;
+		__entry->pos = pos;
+		__entry->mask = mask;
+		__entry->word = word;
+	),
+	TP_printk("dev %d:%d start %llu pos %lld mask 0x%x word 0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->start,
+		  __entry->pos,
+		  __entry->mask,
+		  __entry->word)
+)
+
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
 
 #endif /* _TRACE_XFS_SCRUB_TRACE_H */
