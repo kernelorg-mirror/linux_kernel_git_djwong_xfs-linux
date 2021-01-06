@@ -237,7 +237,8 @@ retry:
 		 */
 		fsc->fdblocks -= iter.pag->pag_meta_resv.ar_reserved;
 		fsc->fdblocks -= iter.pag->pag_rmapbt_resv.ar_orig_reserved;
-
+		if (iter.pag->pagf_noalloc)
+			fsc->fdblocks -= xfs_ag_fdblocks(iter.pag);
 	}
 	if (error)
 		return error;
