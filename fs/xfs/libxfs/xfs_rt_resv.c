@@ -19,6 +19,7 @@
 #include "xfs_btree.h"
 #include "xfs_sb.h"
 #include "xfs_rt_resv.h"
+#include "xfs_rtrmap_btree.h"
 
 /*
  * Is the amount of space that could be allocated towards a given rt metadata
@@ -90,6 +91,7 @@ void
 xfs_rt_resv_free(
 	struct xfs_mount	*mp)
 {
+	__xfs_rt_resv_free_inode(mp, mp->m_rrmapip);
 }
 
 static inline int
@@ -139,7 +141,10 @@ int
 xfs_rt_resv_init(
 	struct xfs_mount	*mp)
 {
-	return 0;
+	xfs_filblks_t		ask;
+
+	ask = xfs_rtrmapbt_calc_reserves(mp);
+	return __xfs_rt_resv_init(mp, mp->m_rrmapip, ask);
 }
 
 /* Allocate a block from the rt metadata file's reservation. */
