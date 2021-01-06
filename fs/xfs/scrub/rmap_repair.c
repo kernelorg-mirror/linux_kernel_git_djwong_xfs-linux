@@ -28,6 +28,7 @@
 #include "xfs_refcount.h"
 #include "xfs_refcount_btree.h"
 #include "xfs_iwalk.h"
+#include "xfs_rtrmap_btree.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
@@ -521,6 +522,24 @@ xrep_rmap_scan_iext(
 	return xrep_rmap_stash_accumulated(rf);
 }
 
+static int
+xrep_rmap_scan_rtrmapbt(
+	struct xrep_rmap_ifork	*rf,
+	struct xfs_inode	*ip)
+{
+	struct xfs_scrub	*sc = rf->rr->sc;
+	struct xfs_btree_cur	*cur;
+	int			error;
+
+	if (ip != sc->mp->m_rrmapip || rf->whichfork != XFS_DATA_FORK)
+		return -EFSCORRUPTED;
+
+	cur = xfs_rtrmapbt_init_cursor(sc->mp, sc->tp, ip);
+	error = xrep_rmap_scan_iroot_btree(rf, cur);
+	xfs_btree_del_cursor(cur, error);
+	return error;
+}
+
 /* Find all the extents from a given AG in an inode fork. */
 STATIC int
 xrep_rmap_scan_ifork(
@@ -549,6 +568,8 @@ xrep_rmap_scan_ifork(
 		break;
 	case XFS_DINODE_FMT_EXTENTS:
 		break;
+	case XFS_DINODE_FMT_RMAP:
+		return xrep_rmap_scan_rtrmapbt(&rf, ip);
 	default:
 		return 0;
 	}
