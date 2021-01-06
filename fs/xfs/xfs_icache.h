@@ -35,6 +35,11 @@ struct xfs_eofblocks {
 #define XFS_IGET_UNTRUSTED	0x2
 #define XFS_IGET_DONTCACHE	0x4
 #define XFS_IGET_INCORE		0x8	/* don't read from disk or reinit */
+/*
+ * Return unlinked inodes.  Callers must disable inactivation prior to using
+ * this.  This is one of those weird repair things; don't use it.
+ */
+#define XFS_IGET_UNLINKED	0x10
 
 /*
  * flags for AG inode iterator
