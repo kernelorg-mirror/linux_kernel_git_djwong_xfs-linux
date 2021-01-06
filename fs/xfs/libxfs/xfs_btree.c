@@ -22,6 +22,9 @@
 #include "xfs_log.h"
 #include "xfs_btree_staging.h"
 #include "xfs_health.h"
+#include "xfs_bmap.h"
+#include "xfs_rmap.h"
+#include "xfs_quota.h"
 
 /*
  * Btree magic numbers.
@@ -5318,4 +5321,107 @@ xfs_btree_alloc_cursor(
 	cur->bc_maxlevels = maxlevels;
 
 	return cur;
+}
+
+/* Allocate a block for an inode-rooted realtime metadata btree. */
+int
+xfs_btree_alloc_rtmeta_block(
+	struct xfs_btree_cur	*cur,
+	union xfs_btree_ptr	*start,
+	union xfs_btree_ptr	*new,
+	int			*stat)
+{
+	struct xfs_alloc_arg	args = { .mp = cur->bc_mp, .tp = cur->bc_tp };
+	struct xfs_inode	*ip = cur->bc_ino.ip;
+	struct xfs_trans	*tp = cur->bc_tp;
+	int			error;
+
+	ASSERT(!XFS_NOT_DQATTACHED(cur->bc_mp, ip));
+
+	args.fsbno = tp->t_firstblock;
+	args.resv = XFS_AG_RESV_RTMETADATA;
+	xfs_rmap_ino_bmbt_owner(&args.oinfo, ip->i_ino, cur->bc_ino.whichfork);
+
+	if (args.fsbno == NULLFSBLOCK) {
+		args.fsbno = be64_to_cpu(start->l);
+		args.type = XFS_ALLOCTYPE_START_BNO;
+		/*
+		 * Make sure there is sufficient room left in the AG to
+		 * complete a full tree split for an extent insert.  If
+		 * we are converting the middle part of an extent then
+		 * we may need space for two tree splits.
+		 *
+		 * We are relying on the caller to make the correct block
+		 * reservation for this operation to succeed.  If the
+		 * reservation amount is insufficient then we may fail a
+		 * block allocation here and corrupt the filesystem.
+		 */
+		args.minleft = tp->t_blk_res;
+	} else if (tp->t_flags & XFS_TRANS_LOWMODE) {
+		args.type = XFS_ALLOCTYPE_START_BNO;
+	} else {
+		args.type = XFS_ALLOCTYPE_NEAR_BNO;
+	}
+
+	args.minlen = args.maxlen = args.prod = 1;
+	args.wasdel = 0;
+	error = xfs_alloc_vextent(&args);
+	if (error)
+		goto error0;
+
+	if (args.fsbno == NULLFSBLOCK && args.minleft) {
+		/*
+		 * Could not find an AG with enough free space to satisfy
+		 * a full btree split.  Try again without minleft and if
+		 * successful activate the lowspace algorithm.
+		 */
+		args.fsbno = 0;
+		args.type = XFS_ALLOCTYPE_FIRST_AG;
+		args.minleft = 0;
+		error = xfs_alloc_vextent(&args);
+		if (error)
+			goto error0;
+		tp->t_flags |= XFS_TRANS_LOWMODE;
+	}
+	if (args.fsbno == NULLFSBLOCK) {
+		*stat = 0;
+		return 0;
+	}
+	ASSERT(args.len == 1);
+
+	cur->bc_ino.allocated++;
+	ip->i_d.di_nblocks++;
+	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
+	xfs_trans_mod_dquot_byino(tp, ip, XFS_TRANS_DQ_BCOUNT, 1);
+
+	new->l = cpu_to_be64(args.fsbno);
+	*stat = 1;
+	return 0;
+
+ error0:
+	return error;
+}
+
+/* Free a block from an inode-rooted realtime metadata btree. */
+int
+xfs_btree_free_rtmeta_block(
+	struct xfs_btree_cur	*cur,
+	struct xfs_buf		*bp)
+{
+	struct xfs_owner_info	oinfo;
+	struct xfs_mount	*mp = cur->bc_mp;
+	struct xfs_inode	*ip = cur->bc_ino.ip;
+	struct xfs_trans	*tp = cur->bc_tp;
+	xfs_fsblock_t		fsbno = XFS_DADDR_TO_FSB(mp, XFS_BUF_ADDR(bp));
+
+	ASSERT(!XFS_NOT_DQATTACHED(mp, ip));
+
+	xfs_rmap_ino_bmbt_owner(&oinfo, ip->i_ino, cur->bc_ino.whichfork);
+	xfs_bmap_add_free(cur->bc_tp, fsbno, 1, &oinfo, false);
+
+	ip->i_d.di_nblocks--;
+	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
+	xfs_trans_mod_dquot_byino(tp, ip, XFS_TRANS_DQ_BCOUNT, -1);
+
+	return 0;
 }
