@@ -346,6 +346,7 @@ typedef struct xfs_perag {
 	uint8_t		pagi_inodeok:1;	/* The agi is ok for inodes */
 	uint8_t		pagf_metadata:1; /* the agf is preferred to be metadata */
 	uint8_t		pagf_agflreset:1; /* agfl requires reset before use */
+	uint8_t		pagf_noalloc:1;	/* Do not allocate in this AG */
 	uint8_t		pagf_levels[XFS_BTNUM_AGF];
 					/* # of levels in bno & cnt btree */
 	uint32_t	pagf_flcount;	/* count of blocks in freelist */
