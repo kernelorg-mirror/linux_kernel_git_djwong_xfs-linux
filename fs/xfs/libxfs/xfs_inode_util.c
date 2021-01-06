@@ -3,6 +3,7 @@
  * Copyright (c) 2000-2006 Silicon Graphics, Inc.
  * All Rights Reserved.
  */
+#include <linux/iversion.h>
 #include "xfs.h"
 #include "xfs_fs.h"
 #include "xfs_shared.h"
@@ -13,6 +14,9 @@
 #include "xfs_mount.h"
 #include "xfs_inode.h"
 #include "xfs_inode_util.h"
+#include "xfs_trans.h"
+#include "xfs_ialloc.h"
+#include "xfs_health.h"
 
 uint16_t
 xfs_flags2diflags(
@@ -135,4 +139,158 @@ xfs_get_initial_prid(
 		return dp->i_d.di_projid;
 
 	return XFS_PROJID_DEFAULT;
+}
+
+/* Propagate di_flags from a parent inode to a child inode. */
+static void
+xfs_inode_inherit_flags(
+	struct xfs_inode	*ip,
+	const struct xfs_inode	*pip)
+{
+	unsigned int		di_flags = 0;
+	umode_t			mode = VFS_I(ip)->i_mode;
+
+	if (S_ISDIR(mode)) {
+		if (pip->i_d.di_flags & XFS_DIFLAG_RTINHERIT)
+			di_flags |= XFS_DIFLAG_RTINHERIT;
+		if (pip->i_d.di_flags & XFS_DIFLAG_EXTSZINHERIT) {
+			di_flags |= XFS_DIFLAG_EXTSZINHERIT;
+			ip->i_d.di_extsize = pip->i_d.di_extsize;
+		}
+		if (pip->i_d.di_flags & XFS_DIFLAG_PROJINHERIT)
+			di_flags |= XFS_DIFLAG_PROJINHERIT;
+	} else if (S_ISREG(mode)) {
+		if ((pip->i_d.di_flags & XFS_DIFLAG_RTINHERIT) &&
+		    xfs_sb_version_hasrealtime(&ip->i_mount->m_sb))
+			di_flags |= XFS_DIFLAG_REALTIME;
+		if (pip->i_d.di_flags & XFS_DIFLAG_EXTSZINHERIT) {
+			di_flags |= XFS_DIFLAG_EXTSIZE;
+			ip->i_d.di_extsize = pip->i_d.di_extsize;
+		}
+	}
+	if ((pip->i_d.di_flags & XFS_DIFLAG_NOATIME) &&
+	    xfs_inherit_noatime)
+		di_flags |= XFS_DIFLAG_NOATIME;
+	if ((pip->i_d.di_flags & XFS_DIFLAG_NODUMP) &&
+	    xfs_inherit_nodump)
+		di_flags |= XFS_DIFLAG_NODUMP;
+	if ((pip->i_d.di_flags & XFS_DIFLAG_SYNC) &&
+	    xfs_inherit_sync)
+		di_flags |= XFS_DIFLAG_SYNC;
+	if ((pip->i_d.di_flags & XFS_DIFLAG_NOSYMLINKS) &&
+	    xfs_inherit_nosymlinks)
+		di_flags |= XFS_DIFLAG_NOSYMLINKS;
+	if ((pip->i_d.di_flags & XFS_DIFLAG_NODEFRAG) &&
+	    xfs_inherit_nodefrag)
+		di_flags |= XFS_DIFLAG_NODEFRAG;
+	if (pip->i_d.di_flags & XFS_DIFLAG_FILESTREAM)
+		di_flags |= XFS_DIFLAG_FILESTREAM;
+
+	ip->i_d.di_flags |= di_flags;
+}
+
+/* Propagate di_flags2 from a parent inode to a child inode. */
+static void
+xfs_inode_inherit_flags2(
+	struct xfs_inode	*ip,
+	const struct xfs_inode	*pip)
+{
+	if (pip->i_d.di_flags2 & XFS_DIFLAG2_COWEXTSIZE) {
+		ip->i_d.di_flags2 |= XFS_DIFLAG2_COWEXTSIZE;
+		ip->i_d.di_cowextsize = pip->i_d.di_cowextsize;
+	}
+	if (pip->i_d.di_flags2 & XFS_DIFLAG2_DAX)
+		ip->i_d.di_flags2 |= XFS_DIFLAG2_DAX;
+}
+
+/* Initialise an inode's attributes. */
+void
+xfs_inode_init(
+	struct xfs_trans	*tp,
+	const struct xfs_ialloc_args *args,
+	struct xfs_inode	*ip)
+{
+	struct xfs_mount	*mp = tp->t_mountp;
+	struct xfs_inode	*pip = args->pip;
+	struct inode		*inode = VFS_I(ip);
+	unsigned int		flags;
+	int			times = XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG |
+					XFS_ICHGTIME_ACCESS;
+
+	inode->i_mode = args->mode;
+	set_nlink(inode, args->nlink);
+	inode->i_uid = args->uid;
+	inode->i_rdev = args->rdev;
+	ip->i_d.di_projid = args->prid;
+
+	if (pip && XFS_INHERIT_GID(pip)) {
+		inode->i_gid = VFS_I(pip)->i_gid;
+		if ((VFS_I(pip)->i_mode & S_ISGID) && S_ISDIR(args->mode))
+			inode->i_mode |= S_ISGID;
+	} else {
+		inode->i_gid = args->gid;
+	}
+
+	/*
+	 * If the group ID of the new file does not match the effective group
+	 * ID or one of the supplementary group IDs, the S_ISGID bit is cleared
+	 * (and only if the irix_sgid_inherit compatibility variable is set).
+	 */
+	if (irix_sgid_inherit &&
+	    (inode->i_mode & S_ISGID) && !in_group_p(inode->i_gid))
+		inode->i_mode &= ~S_ISGID;
+
+	ip->i_d.di_size = 0;
+	ip->i_df.if_nextents = 0;
+	ASSERT(ip->i_d.di_nblocks == 0);
+
+	ip->i_d.di_extsize = 0;
+	ip->i_d.di_dmevmask = 0;
+	ip->i_d.di_dmstate = 0;
+	ip->i_d.di_flags = 0;
+
+	if (xfs_sb_version_has_v3inode(&mp->m_sb)) {
+		inode_set_iversion(inode, 1);
+		ip->i_d.di_flags2 = mp->m_ino_geo.new_diflags2;
+		ip->i_d.di_cowextsize = 0;
+		times |= XFS_ICHGTIME_CREATE;
+	}
+
+	xfs_trans_ichgtime(tp, ip, times);
+
+	flags = XFS_ILOG_CORE;
+	switch (args->mode & S_IFMT) {
+	case S_IFIFO:
+	case S_IFCHR:
+	case S_IFBLK:
+	case S_IFSOCK:
+		ip->i_df.if_format = XFS_DINODE_FMT_DEV;
+		ip->i_df.if_flags = 0;
+		flags |= XFS_ILOG_DEV;
+		break;
+	case S_IFREG:
+	case S_IFDIR:
+		if (pip && (pip->i_d.di_flags & XFS_DIFLAG_ANY))
+			xfs_inode_inherit_flags(ip, pip);
+		if (pip && (pip->i_d.di_flags2 & XFS_DIFLAG2_ANY))
+			xfs_inode_inherit_flags2(ip, pip);
+		/* FALLTHROUGH */
+	case S_IFLNK:
+		ip->i_df.if_format = XFS_DINODE_FMT_EXTENTS;
+		ip->i_df.if_flags = XFS_IFEXTENTS;
+		ip->i_df.if_bytes = 0;
+		ip->i_df.if_u1.if_root = NULL;
+		break;
+	default:
+		ASSERT(0);
+	}
+
+	/*
+	 * Log the new values stuffed into the inode.
+	 */
+	xfs_trans_ijoin(tp, ip, XFS_ILOCK_EXCL);
+	xfs_trans_log_inode(tp, ip, flags);
+
+	/* now that we have an i_mode we can setup the inode structure */
+	xfs_setup_inode(ip);
 }
