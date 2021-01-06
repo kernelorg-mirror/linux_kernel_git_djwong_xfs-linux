@@ -23,6 +23,7 @@
 #include "xfs_refcount.h"
 #include "xfs_rmap.h"
 #include "xfs_health.h"
+#include "xfs_rtalloc.h"
 
 /* Allowable refcount adjustment amounts. */
 enum xfs_refc_adjust_op {
@@ -1003,6 +1004,25 @@ xfs_refcount_still_have_space(
 		xrefc_btree_state(cur)->nr_ops * XFS_REFCOUNT_ITEM_OVERHEAD;
 }
 
+/* Schedule an extent free. */
+static void
+xrefc_free_extent(
+	struct xfs_btree_cur		*cur,
+	struct xfs_refcount_irec	*rec)
+{
+	bool				isrt;
+	xfs_fsblock_t			fsbno;
+
+	isrt = cur->bc_btnum == XFS_BTNUM_RTREFC;
+	if (isrt)
+		fsbno = rec->rc_startblock;
+	else
+		fsbno = XFS_AGB_TO_FSB(cur->bc_mp, cur->bc_ag.agno,
+				rec->rc_startblock);
+
+	xfs_bmap_add_free(cur->bc_tp, isrt, fsbno, rec->rc_blockcount, NULL);
+}
+
 /*
  * Adjust the refcounts of middle extents.  At this point we should have
  * split extents that crossed the adjustment range; merged with adjacent
@@ -1019,7 +1039,6 @@ xfs_refcount_adjust_extents(
 	struct xfs_refcount_irec	ext, tmp;
 	int				error;
 	int				found_rec, found_tmp;
-	xfs_fsblock_t			fsbno;
 
 	/* Merging did all the work already. */
 	if (*len == 0)
@@ -1069,11 +1088,7 @@ xfs_refcount_adjust_extents(
 					goto out_error;
 				}
 			} else {
-				fsbno = XFS_AGB_TO_FSB(cur->bc_mp,
-						xrefc_cur_agno(cur),
-						tmp.rc_startblock);
-				xfs_bmap_add_free(cur->bc_tp, false, fsbno,
-						  tmp.rc_blockcount, NULL);
+				xrefc_free_extent(cur, &tmp);
 			}
 
 			(*bno) += tmp.rc_blockcount;
@@ -1114,11 +1129,7 @@ xfs_refcount_adjust_extents(
 			}
 			goto advloop;
 		} else {
-			fsbno = XFS_AGB_TO_FSB(cur->bc_mp,
-					xrefc_cur_agno(cur),
-					ext.rc_startblock);
-			xfs_bmap_add_free(cur->bc_tp, false, fsbno,
-					ext.rc_blockcount, NULL);
+			xrefc_free_extent(cur, &ext);
 		}
 
 skip:
@@ -1208,13 +1219,14 @@ xfs_refcount_finish_one_cleanup(
 	struct xfs_btree_cur	*rcur,
 	int			error)
 {
-	struct xfs_buf		*agbp;
+	struct xfs_buf		*agbp = NULL;
 
 	if (rcur == NULL)
 		return;
-	agbp = rcur->bc_ag.agbp;
+	if (rcur->bc_btnum == XFS_BTNUM_REFC)
+		agbp = rcur->bc_ag.agbp;
 	xfs_btree_del_cursor(rcur, error);
-	if (error)
+	if (agbp)
 		xfs_trans_brelse(tp, agbp);
 }
 
@@ -1229,6 +1241,7 @@ int
 xfs_refcount_finish_one(
 	struct xfs_trans		*tp,
 	enum xfs_refcount_intent_type	type,
+	bool				isrt,
 	xfs_fsblock_t			startblock,
 	xfs_filblks_t			blockcount,
 	xfs_fsblock_t			*new_fsb,
@@ -1245,13 +1258,16 @@ xfs_refcount_finish_one(
 	unsigned long			nr_ops = 0;
 	int				shape_changes = 0;
 
-	agno = XFS_FSB_TO_AGNO(mp, startblock);
-	ASSERT(agno != NULLAGNUMBER);
-	bno = XFS_FSB_TO_AGBNO(mp, startblock);
+	if (isrt) {
+		agno = NULLAGNUMBER;
+		bno = startblock;
+	} else {
+		agno = XFS_FSB_TO_AGNO(mp, startblock);
+		ASSERT(agno != NULLAGNUMBER);
+		bno = XFS_FSB_TO_AGBNO(mp, startblock);
+	}
 
-	trace_xfs_refcount_deferred(mp, XFS_FSB_TO_AGNO(mp, startblock),
-			type, XFS_FSB_TO_AGBNO(mp, startblock),
-			blockcount);
+	trace_xfs_refcount_deferred(mp, agno, type, bno, blockcount);
 
 	if (XFS_TEST_ERROR(false, mp,
 			XFS_ERRTAG_REFCOUNT_FINISH_ONE))
@@ -1270,12 +1286,17 @@ xfs_refcount_finish_one(
 		*pcur = NULL;
 	}
 	if (rcur == NULL) {
-		error = xfs_alloc_read_agf(tp->t_mountp, tp, agno,
-				XFS_ALLOC_FLAG_FREEING, &agbp);
-		if (error)
-			return error;
+		if (isrt) {
+			ASSERT(0);
+			return -EFSCORRUPTED;
+		} else {
+			error = xfs_alloc_read_agf(tp->t_mountp, tp, agno,
+					XFS_ALLOC_FLAG_FREEING, &agbp);
+			if (error)
+				return error;
 
-		rcur = xfs_refcountbt_init_cursor(mp, tp, agbp, agno);
+			rcur = xfs_refcountbt_init_cursor(mp, tp, agbp, agno);
+		}
 		xrefc_btree_state(rcur)->nr_ops = nr_ops;
 		xrefc_btree_state(rcur)->shape_changes = shape_changes;
 	}
@@ -1285,12 +1306,12 @@ xfs_refcount_finish_one(
 	case XFS_REFCOUNT_INCREASE:
 		error = xfs_refcount_adjust(rcur, bno, blockcount, &new_bno,
 				new_len, XFS_REFCOUNT_ADJUST_INCREASE);
-		*new_fsb = XFS_AGB_TO_FSB(mp, agno, new_bno);
+		*new_fsb = isrt ? new_bno : XFS_AGB_TO_FSB(mp, agno, new_bno);
 		break;
 	case XFS_REFCOUNT_DECREASE:
 		error = xfs_refcount_adjust(rcur, bno, blockcount, &new_bno,
 				new_len, XFS_REFCOUNT_ADJUST_DECREASE);
-		*new_fsb = XFS_AGB_TO_FSB(mp, agno, new_bno);
+		*new_fsb = isrt ? new_bno : XFS_AGB_TO_FSB(mp, agno, new_bno);
 		break;
 	case XFS_REFCOUNT_ALLOC_COW:
 		*new_fsb = startblock + blockcount;
@@ -1319,15 +1340,21 @@ static void
 __xfs_refcount_add(
 	struct xfs_trans		*tp,
 	enum xfs_refcount_intent_type	type,
+	bool				isrt,
 	xfs_fsblock_t			startblock,
 	xfs_filblks_t			blockcount)
 {
 	struct xfs_refcount_intent	*ri;
 
-	trace_xfs_refcount_defer(tp->t_mountp,
-			XFS_FSB_TO_AGNO(tp->t_mountp, startblock),
-			type, XFS_FSB_TO_AGBNO(tp->t_mountp, startblock),
-			blockcount);
+	if (isrt)
+		trace_xfs_refcount_defer(tp->t_mountp, NULLAGNUMBER, type,
+				startblock, blockcount);
+	else
+		trace_xfs_refcount_defer(tp->t_mountp,
+				XFS_FSB_TO_AGNO(tp->t_mountp, startblock),
+				type,
+				XFS_FSB_TO_AGBNO(tp->t_mountp, startblock),
+				blockcount);
 
 	ri = kmem_alloc(sizeof(struct xfs_refcount_intent),
 			KM_NOFS);
@@ -1335,6 +1362,7 @@ __xfs_refcount_add(
 	ri->ri_type = type;
 	ri->ri_startblock = startblock;
 	ri->ri_blockcount = blockcount;
+	ri->ri_realtime = isrt;
 
 	xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_REFCOUNT, &ri->ri_list);
 }
@@ -1345,12 +1373,13 @@ __xfs_refcount_add(
 void
 xfs_refcount_increase_extent(
 	struct xfs_trans		*tp,
+	bool				isrt,
 	struct xfs_bmbt_irec		*PREV)
 {
 	if (!xfs_sb_version_hasreflink(&tp->t_mountp->m_sb))
 		return;
 
-	__xfs_refcount_add(tp, XFS_REFCOUNT_INCREASE, PREV->br_startblock,
+	__xfs_refcount_add(tp, XFS_REFCOUNT_INCREASE, isrt, PREV->br_startblock,
 			PREV->br_blockcount);
 }
 
@@ -1360,12 +1389,13 @@ xfs_refcount_increase_extent(
 void
 xfs_refcount_decrease_extent(
 	struct xfs_trans		*tp,
+	bool				isrt,
 	struct xfs_bmbt_irec		*PREV)
 {
 	if (!xfs_sb_version_hasreflink(&tp->t_mountp->m_sb))
 		return;
 
-	__xfs_refcount_add(tp, XFS_REFCOUNT_DECREASE, PREV->br_startblock,
+	__xfs_refcount_add(tp, XFS_REFCOUNT_DECREASE, isrt, PREV->br_startblock,
 			PREV->br_blockcount);
 }
 
@@ -1715,6 +1745,7 @@ __xfs_refcount_cow_free(
 void
 xfs_refcount_alloc_cow_extent(
 	struct xfs_trans		*tp,
+	bool				isrt,
 	xfs_fsblock_t			fsb,
 	xfs_filblks_t			len)
 {
@@ -1723,16 +1754,17 @@ xfs_refcount_alloc_cow_extent(
 	if (!xfs_sb_version_hasreflink(&mp->m_sb))
 		return;
 
-	__xfs_refcount_add(tp, XFS_REFCOUNT_ALLOC_COW, fsb, len);
+	__xfs_refcount_add(tp, XFS_REFCOUNT_ALLOC_COW, isrt, fsb, len);
 
 	/* Add rmap entry */
-	xfs_rmap_alloc_extent(tp, false, fsb, len, XFS_RMAP_OWN_COW);
+	xfs_rmap_alloc_extent(tp, isrt, fsb, len, XFS_RMAP_OWN_COW);
 }
 
 /* Forget a CoW staging event in the refcount btree. */
 void
 xfs_refcount_free_cow_extent(
 	struct xfs_trans		*tp,
+	bool				isrt,
 	xfs_fsblock_t			fsb,
 	xfs_filblks_t			len)
 {
@@ -1742,8 +1774,8 @@ xfs_refcount_free_cow_extent(
 		return;
 
 	/* Remove rmap entry */
-	xfs_rmap_free_extent(tp, false, fsb, len, XFS_RMAP_OWN_COW);
-	__xfs_refcount_add(tp, XFS_REFCOUNT_FREE_COW, fsb, len);
+	xfs_rmap_free_extent(tp, isrt, fsb, len, XFS_RMAP_OWN_COW);
+	__xfs_refcount_add(tp, XFS_REFCOUNT_FREE_COW, isrt, fsb, len);
 }
 
 struct xfs_refcount_recovery {
@@ -1845,7 +1877,7 @@ xfs_refcount_recover_cow_leftovers(
 		/* Free the orphan record */
 		bno = rr->rr_rrec.rc_startblock - XFS_REFC_COW_START;
 		fsb = XFS_AGB_TO_FSB(mp, agno, bno);
-		xfs_refcount_free_cow_extent(tp, fsb,
+		xfs_refcount_free_cow_extent(tp, false, fsb,
 				rr->rr_rrec.rc_blockcount);
 
 		/* Free the block. */
