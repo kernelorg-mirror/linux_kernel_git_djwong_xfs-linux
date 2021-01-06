@@ -476,3 +476,48 @@ xfs_rtrmapbt_compute_maxlevels(
 	/* Add one level to handle the inode root level. */
 	return min(d_maxlevels, r_maxlevels) + 1;
 }
+
+/* Calculate the rtrmap btree size for some records. */
+static unsigned long long
+xfs_rtrmapbt_calc_size(
+	struct xfs_mount	*mp,
+	unsigned long long	len)
+{
+	return xfs_btree_calc_size(mp->m_rtrmap_mnr, len);
+}
+
+/*
+ * Calculate the maximum rmap btree size.
+ */
+static unsigned long long
+xfs_rtrmapbt_max_size(
+	struct xfs_mount	*mp,
+	xfs_rtblock_t		rtblocks)
+{
+	/* Bail out if we're uninitialized, which can happen in mkfs. */
+	if (mp->m_rtrmap_mxr[0] == 0)
+		return 0;
+
+	return xfs_rtrmapbt_calc_size(mp, rtblocks);
+}
+
+/*
+ * Figure out how many blocks to reserve and how many are used by this btree.
+ */
+int
+xfs_rtrmapbt_calc_reserves(
+	struct xfs_mount	*mp,
+	struct xfs_trans	*tp,
+	xfs_filblks_t		*ask,
+	xfs_filblks_t		*used)
+{
+	if (!xfs_sb_version_hasrtrmapbt(&mp->m_sb))
+		return 0;
+
+	/* Reserve 1/128th of the fs or enough for 1 block per record. */
+	*ask += max(mp->m_sb.sb_rblocks >> 7,
+			xfs_rtrmapbt_max_size(mp, mp->m_sb.sb_rblocks));
+	*used += mp->m_rrmapip->i_d.di_nblocks;
+
+	return 0;
+}
