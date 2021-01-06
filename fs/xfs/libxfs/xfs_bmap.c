@@ -4611,7 +4611,8 @@ xfs_bmapi_write(
 			 */
 			if (whichfork == XFS_COW_FORK)
 				xfs_refcount_alloc_cow_extent(tp, bma.blkno,
-						bma.length);
+						bma.length,
+						XFS_IS_REALTIME_INODE(ip));
 		}
 
 		/* Deal with the allocated space we found.  */
@@ -4772,7 +4773,8 @@ xfs_bmapi_convert_delalloc(
 	*seq = READ_ONCE(ifp->if_seq);
 
 	if (whichfork == XFS_COW_FORK)
-		xfs_refcount_alloc_cow_extent(tp, bma.blkno, bma.length);
+		xfs_refcount_alloc_cow_extent(tp, bma.blkno, bma.length,
+				XFS_IS_REALTIME_INODE(ip));
 
 	error = xfs_bmap_btree_to_extents(tp, ip, bma.cur, &bma.logflags,
 			whichfork);
@@ -5228,9 +5230,13 @@ xfs_bmap_del_extent_real(
 		 * the same order of operations as the data device, which is:
 		 * Remove the file mapping, remove the reverse mapping, and
 		 * then free the blocks.  This means that we must delay the
-		 * freeing until after we've scheduled the rmap update.
+		 * freeing until after we've scheduled the rmap update.  If
+		 * realtime reflink is enabled, use deferred refcount and free
+		 * intent items to deal with the extent, just like we do for
+		 * the data device.
 		 */
-		if (want_free && !xfs_sb_version_hasrtrmapbt(&mp->m_sb)) {
+		if (want_free && !xfs_sb_version_hasrtrmapbt(&mp->m_sb) &&
+				 !xfs_sb_version_hasrtreflink(&mp->m_sb)) {
 			error = xfs_rtfree_blocks(tp, del->br_startblock,
 					del->br_blockcount);
 			if (error)
@@ -5415,7 +5421,7 @@ xfs_bmap_del_extent_real(
 	 */
 	if (want_free) {
 		if (xfs_is_reflink_inode(ip) && whichfork == XFS_DATA_FORK) {
-			xfs_refcount_decrease_extent(tp, del);
+			xfs_refcount_decrease_extent(tp, del, isrt);
 		} else {
 			__xfs_bmap_add_free(tp, del->br_startblock,
 					del->br_blockcount, NULL, isrt,
