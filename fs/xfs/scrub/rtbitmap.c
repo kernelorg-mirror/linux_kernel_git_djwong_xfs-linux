@@ -89,6 +89,7 @@ xchk_rtbitmap_xref(
 		return;
 
 	xchk_xref_has_no_rt_owner(sc, startblock, blockcount);
+	xchk_xref_is_not_shared_rt(sc, startblock, blockcount);
 }
 
 /* Scrub a free extent record from the realtime bitmap. */
