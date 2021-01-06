@@ -590,6 +590,12 @@ xfs_fs_reserve_ag_blocks(
 			error = err2;
 	}
 
+	if (xfs_sb_version_hasrealtime(&mp->m_sb)) {
+		err2 = xfs_rt_resv_init(mp, NULL);
+		if (err2 && !error)
+			error = err2;
+	}
+
 	if (error && error != -ENOSPC) {
 		xfs_warn(mp,
 	"Error %d reserving per-AG metadata reserve pool.", error);
@@ -610,6 +616,9 @@ xfs_fs_unreserve_ag_blocks(
 	struct xfs_perag	*pag;
 	int			error = 0;
 	int			err2;
+
+	if (xfs_sb_version_hasrealtime(&mp->m_sb))
+		error = xfs_rt_resv_free(mp);
 
 	for (agno = 0; agno < mp->m_sb.sb_agcount; agno++) {
 		pag = xfs_perag_get(mp, agno);
