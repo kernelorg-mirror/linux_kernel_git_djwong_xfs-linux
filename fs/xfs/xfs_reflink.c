@@ -1364,6 +1364,113 @@ xfs_reflink_zero_posteof(
 }
 
 /*
+ * Decide if this is an unwritten extent that isn't aligned to a rt extent
+ * boundary.  If it is, shorten the mapping so that we're ready to convert
+ * everything up to the next rt extent to a zeroed written extent.  If not,
+ * return false.
+ */
+static inline bool
+xfs_reflink_prep_conversion(
+	struct xfs_mount	*mp,
+	struct xfs_bmbt_irec	*irec)
+{
+	xfs_fileoff_t		rext_next;
+	u32			modoff, modcnt;
+
+	if (irec->br_state != XFS_EXT_UNWRITTEN)
+		return false;
+
+	div_u64_rem(irec->br_startoff, mp->m_sb.sb_rextsize, &modoff);
+	div_u64_rem(irec->br_blockcount, mp->m_sb.sb_rextsize, &modcnt);
+	if (modoff == 0 && modcnt == 0)
+		return false;
+
+	rext_next = (irec->br_startoff - modoff) + mp->m_sb.sb_rextsize;
+	xfs_trim_extent(irec, irec->br_startoff, rext_next - irec->br_startoff);
+	return true;
+}
+
+/*
+ * Convert all unwritten extents to written so that we can share them.  The
+ * reflink prep function already flushed all dirty pages to disk, so we can
+ * take care of this without going back to the VFS.
+ */
+static int
+xfs_reflink_convert_unwritten(
+	struct xfs_inode	*src,
+	loff_t			pos,
+	loff_t			len)
+{
+	struct xfs_bmbt_irec	irec;
+	struct xfs_trans	*tp;
+	struct xfs_mount	*mp = src->i_mount;
+	xfs_fileoff_t		off = XFS_B_TO_FSBT(mp, pos);
+	xfs_fileoff_t		endoff;
+	unsigned int		resblks;
+	int			ret;
+
+	off = rounddown_64(XFS_B_TO_FSBT(mp, pos), mp->m_sb.sb_rextsize);
+	endoff = roundup_64(XFS_B_TO_FSB(mp, pos + len), mp->m_sb.sb_rextsize);
+	while (off < endoff) {
+		int		nmap = 1;
+
+		if (fatal_signal_pending(current))
+			return -EINTR;
+
+		resblks = XFS_DIOSTRAT_SPACE_RES(mp, 1);
+		ret = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, 0, 0,
+				&tp);
+		if (ret)
+			return ret;
+
+		xfs_ilock(src, XFS_ILOCK_EXCL);
+		xfs_trans_ijoin(tp, src, XFS_ILOCK_EXCL);
+
+		/*
+		 * Read the mapping.  If we find an unwritten extent that isn't
+		 * aligned to an rt extent boundary...
+		 */
+		ret = xfs_bmapi_read(src, off, endoff - off, &irec, &nmap, 0);
+		if (ret)
+			goto err;
+		ASSERT(nmap == 1);
+		ASSERT(irec.br_startoff == off);
+		if (!xfs_reflink_prep_conversion(mp, &irec)) {
+			xfs_trans_cancel(tp);
+			off += irec.br_blockcount;
+			continue;
+		}
+
+		/*
+		 * ...make sure this partially unwritten rt extent gets
+		 * converted to a zeroed written extent that we can remap.
+		 */
+		nmap = 1;
+		ret = xfs_bmapi_write(tp, src, off, irec.br_blockcount,
+				XFS_BMAPI_CONVERT | XFS_BMAPI_ZERO, 0, &irec,
+				&nmap);
+		if (ret)
+			goto err;
+		ASSERT(nmap == 1);
+		if (irec.br_state != XFS_EXT_NORM) {
+			ASSERT(0);
+			ret = -EIO;
+			goto err;
+		}
+		ret = xfs_trans_commit(tp);
+		if (ret)
+			return ret;
+
+		off += irec.br_blockcount;
+	}
+
+	return 0;
+err:
+	xfs_trans_cancel(tp);
+	return ret;
+}
+
+/*
  * Prepare two files for range cloning.  Upon a successful return both inodes
  * will have the iolock and mmaplock held, the page cache of the out file will
  * be truncated, and any leases on the out file will have been broken.  This
@@ -1444,6 +1551,25 @@ xfs_reflink_remap_prep(
 	ret = xfs_reflink_set_inode_flag(src, dest);
 	if (ret)
 		goto out_unlock;
+
+	/*
+	 * Now that we've marked both inodes for reflink, make sure that all
+	 * possible rt extents in both files' ranges are either wholly written,
+	 * wholly unwritten, or holes.  The bmap code requires that we align
+	 * all unmap and remap requests to a rt extent boundary.  We've already
+	 * flushed the page cache and finished directio, so we can convert the
+	 * extents directly.
+	 */
+	if (xfs_reflink_need_unshare_around(src)) {
+		ret = xfs_reflink_convert_unwritten(src, pos_in, *len);
+		if (ret)
+			return ret;
+	}
+	if (xfs_reflink_need_unshare_around(dest)) {
+		ret = xfs_reflink_convert_unwritten(dest, pos_out, *len);
+		if (ret)
+			return ret;
+	}
 
 	/*
 	 * If pos_out > EOF, we may have dirtied blocks between EOF and
