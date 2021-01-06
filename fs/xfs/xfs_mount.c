@@ -34,6 +34,7 @@
 #include "xfs_trace.h"
 #include "xfs_imeta.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_rtrefcount_btree.h"
 
 static DEFINE_MUTEX(xfs_uuid_table_mutex);
 static int xfs_uuid_table_size;
@@ -801,6 +802,8 @@ xfs_mountfs(
 	mp->m_rtrmap_maxlevels = xfs_rtrmapbt_compute_maxlevels(mp,
 			mp->m_sb.sb_dblocks, mp->m_sb.sb_rblocks);
 	xfs_refcountbt_compute_maxlevels(mp);
+	mp->m_rtrefc_maxlevels = xfs_rtrefcountbt_compute_maxlevels(mp,
+			mp->m_sb.sb_dblocks, mp->m_sb.sb_rblocks);
 
 	/*
 	 * Check if sb_agblocks is aligned at stripe boundary.  If sb_agblocks
