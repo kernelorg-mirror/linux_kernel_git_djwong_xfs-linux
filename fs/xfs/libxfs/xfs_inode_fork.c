@@ -26,6 +26,7 @@
 #include "xfs_types.h"
 #include "xfs_errortag.h"
 #include "xfs_health.h"
+#include "xfs_rtrmap_btree.h"
 
 kmem_zone_t *xfs_ifork_zone;
 
@@ -264,8 +265,7 @@ xfs_iformat_data_fork(
 		case XFS_DINODE_FMT_RMAP:
 			if (!xfs_sb_version_hasrtrmapbt(&ip->i_mount->m_sb))
 				return -EFSCORRUPTED;
-			ASSERT(0); /* to be implemented later */
-			return -EFSCORRUPTED;
+			return xfs_iformat_rtrmap(ip, dip);
 		default:
 			xfs_inode_verifier_error(ip, -EFSCORRUPTED, __func__,
 					dip, sizeof(*dip), __this_address);
@@ -643,7 +643,9 @@ xfs_iflush_fork(
 		break;
 
 	case XFS_DINODE_FMT_RMAP:
-		ASSERT(0); /* to be implemented later */
+		ASSERT(whichfork == XFS_DATA_FORK);
+		if (iip->ili_fields & brootflag[whichfork])
+			xfs_iflush_rtrmap(ip, dip);
 		break;
 
 	default:
