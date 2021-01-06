@@ -76,6 +76,13 @@ xfs_ag_resv_critical(
 	xfs_filblks_t			orig;
 	xfs_extlen_t			btree_maxlevels;
 
+	/*
+	 * Pretend we're critically low on reservations in this AG to scare
+	 * everyone else away.
+	 */
+	if (pag->pagf_noalloc)
+		return true;
+
 	switch (type) {
 	case XFS_AG_RESV_RTMETADATA:
 		avail = percpu_counter_sum(&pag->pag_mount->m_fdblocks);
@@ -123,7 +130,12 @@ xfs_ag_resv_needed(
 		len -= xfs_perag_resv(pag, type)->ar_reserved;
 		break;
 	case XFS_AG_RESV_NONE:
-		/* empty */
+		/*
+		 * In noalloc mode, we pretend that all the free blocks in this
+		 * AG have been allocated.  Make this AG look full.
+		 */
+		if (pag->pagf_noalloc)
+			len += xfs_ag_fdblocks(pag);
 		break;
 	default:
 		ASSERT(0);
@@ -418,6 +430,8 @@ xfs_ag_resv_alloc_extent(
 	xfs_filblks_t			len;
 	uint				field;
 
+	ASSERT(type != XFS_AG_RESV_NONE || !pag->pagf_noalloc);
+
 	trace_xfs_ag_resv_alloc_extent(pag, type, args->len);
 
 	switch (type) {
@@ -475,7 +489,13 @@ xfs_ag_resv_free_extent(
 		ASSERT(0);
 		/* fall through */
 	case XFS_AG_RESV_NONE:
-		xfs_trans_mod_sb(tp, XFS_TRANS_SB_FDBLOCKS, (int64_t)len);
+		/*
+		 * If the AG is in noalloc mode, we don't give back to fdblocks
+		 * until we lift noalloc mode.
+		 */
+		if (!pag->pagf_noalloc)
+			xfs_trans_mod_sb(tp, XFS_TRANS_SB_FDBLOCKS,
+					(int64_t)len);
 		/* fall through */
 	case XFS_AG_RESV_IGNORE:
 		return;
@@ -488,6 +508,6 @@ xfs_ag_resv_free_extent(
 	/* Freeing into the reserved pool only requires on-disk update... */
 	xfs_trans_mod_sb(tp, XFS_TRANS_SB_RES_FDBLOCKS, len);
 	/* ...but freeing beyond that requires in-core and on-disk update. */
-	if (len > leftover)
+	if (len > leftover && !pag->pagf_noalloc)
 		xfs_trans_mod_sb(tp, XFS_TRANS_SB_FDBLOCKS, len - leftover);
 }
