@@ -29,10 +29,8 @@ xchk_setup_rtbitmap(
 	if (error)
 		return error;
 
-	sc->ilock_flags = XFS_ILOCK_EXCL | XFS_ILOCK_RTBITMAP;
+	xchk_rt_init(sc, &sc->sr);
 	sc->ip = sc->mp->m_rbmip;
-	xfs_ilock(sc->ip, sc->ilock_flags);
-
 	return 0;
 }
 
@@ -144,13 +142,10 @@ xchk_xref_is_used_rt_space(
 	do_div(startext, sc->mp->m_sb.sb_rextsize);
 	do_div(endext, sc->mp->m_sb.sb_rextsize);
 	extcount = endext - startext + 1;
-	xfs_ilock(sc->mp->m_rbmip, XFS_ILOCK_SHARED | XFS_ILOCK_RTBITMAP);
 	error = xfs_rtalloc_extent_is_free(sc->mp, sc->tp, startext, extcount,
 			&is_free);
 	if (!xchk_should_check_xref(sc, &error, NULL))
-		goto out_unlock;
+		return;
 	if (is_free)
 		xchk_ino_xref_set_corrupt(sc, sc->mp->m_rbmip->i_ino);
-out_unlock:
-	xfs_iunlock(sc->mp->m_rbmip, XFS_ILOCK_SHARED | XFS_ILOCK_RTBITMAP);
 }
