@@ -43,6 +43,7 @@
 #include "xfs_icache.h"
 #include "xfs_rtrmap_btree.h"
 #include "xfs_rtalloc.h"
+#include "xfs_imeta.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -1037,7 +1038,20 @@ xrep_reap_ag_extent(
 		 */
 		error = xfs_free_extent(sc->tp, fsbno, aglen, rb->oinfo,
 				rb->resv);
+	} else if (rb->resv == XFS_AG_RESV_IMETA) {
+		/*
+		 * For metadata inodes with reserved space, we must call the
+		 * imeta-specific code to refill the reservation or return the
+		 * block to the global free count, and free the block directly
+		 * from this function.  This comes at a slight risk of leaking
+		 * blocks if the system goes down, though a re-repair will find
+		 * and free the leaks.
+		 */
+		xfs_imeta_resv_free_extent(sc->ip, sc->tp, aglen);
+		error = __xfs_free_extent(sc->tp, fsbno, aglen, rb->oinfo,
+				rb->resv, true);
 	} else {
+
 		/*
 		 * Use deferred frees to get rid of the old btree blocks to try
 		 * to minimize the window in which we could crash and lose the
@@ -2366,4 +2380,77 @@ xrep_is_rtmeta_ino(
 	return ino == sc->mp->m_rbmip->i_ino ||
 	       ino == sc->mp->m_rsumip->i_ino ||
 	       ino == sc->mp->m_rrmapip->i_ino;
+}
+
+/* Check the sanity of a rmap record for a metadata btree inode. */
+int
+xrep_check_ino_btree_mapping(
+	struct xfs_scrub	*sc,
+	const struct xfs_rmap_irec *rec)
+{
+	bool			is_freesp;
+	int			error;
+
+	/*
+	 * Metadata btree inodes never have extended attributes, and all blocks
+	 * should have the bmbt block flag set.
+	 */
+	if ((rec->rm_flags & XFS_RMAP_ATTR_FORK) ||
+	    !(rec->rm_flags & XFS_RMAP_BMBT_BLOCK))
+		return -EFSCORRUPTED;
+
+	/* Make sure the block is within the AG. */
+	if (!xfs_verify_agbext(sc->mp, sc->sa.agno, rec->rm_startblock,
+				rec->rm_blockcount))
+		return -EFSCORRUPTED;
+
+	/* Make sure this isn't free space. */
+	error = xfs_alloc_has_record(sc->sa.bno_cur, rec->rm_startblock,
+			rec->rm_blockcount, &is_freesp);
+	if (error)
+		return error;
+	if (is_freesp)
+		return -EFSCORRUPTED;
+
+	return 0;
+}
+
+/* Reset the block reservation for a metadata inode. */
+int
+xrep_reset_imeta_reservation(
+	struct xfs_scrub	*sc)
+{
+	struct xfs_inode	*ip = sc->ip;
+	int64_t			delta;
+	int			error;
+       
+	delta = ip->i_d.di_nblocks + ip->i_delayed_blks - ip->i_meta_resv_asked;
+	if (delta == 0)
+		return 0;
+
+	if (delta > 0) {
+		int64_t		give_back;
+	       
+		/* Too many blocks, free from the incore reservation. */
+		give_back = min_t(uint64_t, delta, ip->i_delayed_blks);
+		if (give_back > 0) {
+			xfs_mod_delalloc(ip->i_mount, -give_back);
+			xfs_mod_fdblocks(ip->i_mount, give_back, true);
+			ip->i_delayed_blks -= give_back;
+		}
+
+		return 0;
+	}
+
+	/* Not enough blocks, try to add more.  @delta is negative here. */
+	error = xfs_mod_fdblocks(sc->mp, delta, true);
+	if (error) {
+		xfs_warn(sc->mp,
+	"Cannot replenish metadata inode reservation!");
+		return error;
+	}
+
+	xfs_mod_delalloc(sc->mp, -delta);
+	ip->i_delayed_blks += -delta;
+	return 0;
 }
