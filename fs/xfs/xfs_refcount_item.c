@@ -241,6 +241,7 @@ xfs_trans_log_finish_refcount_update(
 	struct xfs_trans		*tp,
 	struct xfs_cud_log_item		*cudp,
 	enum xfs_refcount_intent_type	type,
+	bool				isrt,
 	xfs_fsblock_t			startblock,
 	xfs_filblks_t			blockcount,
 	xfs_fsblock_t			*new_fsb,
@@ -249,7 +250,7 @@ xfs_trans_log_finish_refcount_update(
 {
 	int				error;
 
-	error = xfs_refcount_finish_one(tp, type, startblock,
+	error = xfs_refcount_finish_one(tp, type, isrt, startblock,
 			blockcount, new_fsb, new_len, pcur);
 
 	/*
@@ -275,18 +276,27 @@ xfs_refcount_update_diff_items(
 	struct xfs_mount		*mp = priv;
 	struct xfs_refcount_intent	*ra;
 	struct xfs_refcount_intent	*rb;
+	xfs_agnumber_t			a_ag, b_ag;
 
 	ra = container_of(a, struct xfs_refcount_intent, ri_list);
 	rb = container_of(b, struct xfs_refcount_intent, ri_list);
-	return  XFS_FSB_TO_AGNO(mp, ra->ri_startblock) -
-		XFS_FSB_TO_AGNO(mp, rb->ri_startblock);
+	if (ra->ri_realtime)
+		a_ag = NULLAGNUMBER;
+	else
+		a_ag = XFS_FSB_TO_AGNO(mp, ra->ri_startblock);
+	if (rb->ri_realtime)
+		b_ag = NULLAGNUMBER;
+	else
+		b_ag = XFS_FSB_TO_AGNO(mp, rb->ri_startblock);
+	return a_ag - b_ag;
 }
 
 /* Set the phys extent flags for this reverse mapping. */
 static void
 xfs_trans_set_refcount_flags(
 	struct xfs_phys_extent		*refc,
-	enum xfs_refcount_intent_type	type)
+	enum xfs_refcount_intent_type	type,
+	bool				isrt)
 {
 	refc->pe_flags = 0;
 	switch (type) {
@@ -299,6 +309,9 @@ xfs_trans_set_refcount_flags(
 	default:
 		ASSERT(0);
 	}
+
+	if (isrt)
+		refc->pe_flags |= XFS_REFCOUNT_EXTENT_REALTIME;
 }
 
 /* Log refcount updates in the intent item. */
@@ -324,7 +337,7 @@ xfs_refcount_update_log_item(
 	ext = &cuip->cui_format.cui_extents[next_extent];
 	ext->pe_startblock = refc->ri_startblock;
 	ext->pe_len = refc->ri_blockcount;
-	xfs_trans_set_refcount_flags(ext, refc->ri_type);
+	xfs_trans_set_refcount_flags(ext, refc->ri_type, refc->ri_realtime);
 }
 
 static struct xfs_log_item *
@@ -373,8 +386,8 @@ xfs_refcount_update_finish_item(
 
 	refc = container_of(item, struct xfs_refcount_intent, ri_list);
 	error = xfs_trans_log_finish_refcount_update(tp, CUD_ITEM(done),
-			refc->ri_type, refc->ri_startblock, refc->ri_blockcount,
-			&new_fsb, &new_aglen, state);
+			refc->ri_type, refc->ri_realtime, refc->ri_startblock,
+			refc->ri_blockcount, &new_fsb, &new_aglen, state);
 
 	/* Did we run out of reservation?  Requeue what we didn't finish. */
 	if (!error && new_aglen > 0) {
@@ -462,6 +475,7 @@ xfs_cui_item_recover(
 	xfs_filblks_t			new_len;
 	unsigned int			refc_type;
 	bool				requeue_only = false;
+	bool				isrt;
 	enum xfs_refcount_intent_type	type;
 	int				i;
 	int				error = 0;
@@ -503,6 +517,7 @@ xfs_cui_item_recover(
 	for (i = 0; i < cuip->cui_format.cui_nextents; i++) {
 		refc = &cuip->cui_format.cui_extents[i];
 		refc_type = refc->pe_flags & XFS_REFCOUNT_EXTENT_TYPE_MASK;
+		isrt = refc->pe_flags & XFS_REFCOUNT_EXTENT_REALTIME;
 		switch (refc_type) {
 		case XFS_REFCOUNT_INCREASE:
 		case XFS_REFCOUNT_DECREASE:
@@ -520,7 +535,7 @@ xfs_cui_item_recover(
 			new_len = refc->pe_len;
 		} else
 			error = xfs_trans_log_finish_refcount_update(tp, cudp,
-				type, refc->pe_startblock, refc->pe_len,
+				type, isrt, refc->pe_startblock, refc->pe_len,
 				&new_fsb, &new_len, &rcur);
 		if (error == -EFSCORRUPTED)
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
@@ -534,18 +549,18 @@ xfs_cui_item_recover(
 			irec.br_blockcount = new_len;
 			switch (type) {
 			case XFS_REFCOUNT_INCREASE:
-				xfs_refcount_increase_extent(tp, &irec);
+				xfs_refcount_increase_extent(tp, isrt, &irec);
 				break;
 			case XFS_REFCOUNT_DECREASE:
-				xfs_refcount_decrease_extent(tp, &irec);
+				xfs_refcount_decrease_extent(tp, isrt, &irec);
 				break;
 			case XFS_REFCOUNT_ALLOC_COW:
-				xfs_refcount_alloc_cow_extent(tp,
+				xfs_refcount_alloc_cow_extent(tp, isrt,
 						irec.br_startblock,
 						irec.br_blockcount);
 				break;
 			case XFS_REFCOUNT_FREE_COW:
-				xfs_refcount_free_cow_extent(tp,
+				xfs_refcount_free_cow_extent(tp, isrt,
 						irec.br_startblock,
 						irec.br_blockcount);
 				break;
