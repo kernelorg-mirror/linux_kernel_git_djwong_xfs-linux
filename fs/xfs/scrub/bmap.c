@@ -341,6 +341,18 @@ xchk_bmap_rt_iextent_xref(
 	xchk_xref_is_used_rt_space(info->sc, irec->br_startblock,
 			irec->br_blockcount);
 	xchk_bmap_xref_rmap(info, irec, irec->br_startblock);
+	switch (info->whichfork) {
+	case XFS_DATA_FORK:
+		if (xfs_is_reflink_inode(info->sc->ip))
+			break;
+		xchk_xref_is_not_shared_rt(info->sc, irec->br_startblock,
+				irec->br_blockcount);
+		break;
+	case XFS_COW_FORK:
+		xchk_xref_is_rt_cow_staging(info->sc, irec->br_startblock,
+				irec->br_blockcount);
+		break;
+	}
 
 	xchk_rt_btcur_free(&info->sc->sr);
 	xchk_rt_unlock(info->sc, &info->sc->sr);
