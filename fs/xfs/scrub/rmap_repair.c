@@ -455,14 +455,6 @@ out:
 	return error;
 }
 
-static inline bool
-is_rt_data_fork(
-	struct xfs_inode	*ip,
-	int			whichfork)
-{
-	return XFS_IS_REALTIME_INODE(ip) && whichfork == XFS_DATA_FORK;
-}
-
 /*
  * Iterate the block mapping btree to collect rmap records for anything in this
  * fork that matches the AG.  Sets @mappings_done to true if we've scanned the
@@ -483,7 +475,7 @@ xrep_rmap_scan_bmbt(
 	ifp = XFS_IFORK_PTR(ip, rf->whichfork);
 	cur = xfs_bmbt_init_cursor(rr->sc->mp, rr->sc->tp, ip, rf->whichfork);
 
-	if (is_rt_data_fork(ip, rf->whichfork)) {
+	if (xfs_ifork_is_realtime(ip, rf->whichfork)) {
 		/* Ignore mappings on the realtime device. */
 		*mappings_done = true;
 	} else if (!(ifp->if_flags & XFS_IFEXTENTS)) {
@@ -562,7 +554,7 @@ xrep_rmap_scan_ifork(
 		return 0;
 	}
 
-	if (is_rt_data_fork(ip, whichfork))
+	if (xfs_ifork_is_realtime(ip, whichfork))
 		return 0;
 
 	/* Scan incore extent cache. */
