@@ -24,6 +24,8 @@
 #include "xfs_inode.h"
 #include "xfs_ag.h"
 #include "xfs_health.h"
+#include "xfs_rtrmap_btree.h"
+#include "xfs_rtalloc.h"
 
 /* By convention, the rtrmapbt's "AG" number is NULLAGNUMBER. */
 static xfs_agnumber_t
@@ -2497,13 +2499,14 @@ xfs_rmap_finish_one_cleanup(
 	struct xfs_btree_cur	*rcur,
 	int			error)
 {
-	struct xfs_buf		*agbp;
+	struct xfs_buf		*agbp = NULL;
 
 	if (rcur == NULL)
 		return;
-	agbp = rcur->bc_ag.agbp;
+	if (rcur->bc_btnum == XFS_BTNUM_RMAP)
+		agbp = rcur->bc_ag.agbp;
 	xfs_btree_del_cursor(rcur, error);
-	if (error)
+	if (error && agbp)
 		xfs_trans_brelse(tp, agbp);
 }
 
@@ -2524,21 +2527,30 @@ xfs_rmap_finish_one(
 	xfs_fsblock_t			startblock,
 	xfs_filblks_t			blockcount,
 	xfs_exntst_t			state,
+	bool				realtime,
 	struct xfs_btree_cur		**pcur)
 {
+	struct xfs_owner_info		oinfo;
 	struct xfs_mount		*mp = tp->t_mountp;
 	struct xfs_perag		*pag;
 	struct xfs_btree_cur		*rcur;
 	struct xfs_buf			*agbp = NULL;
-	int				error = 0;
-	struct xfs_owner_info		oinfo;
 	xfs_fsblock_t			bno;
+	xfs_agnumber_t			agno;
 	bool				unwritten;
+	int				error = 0;
 
-	pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, startblock));
-	bno = XFS_FSB_TO_AGBNO(mp, startblock);
+	if (realtime) {
+		agno = NULLAGNUMBER;
+		pag = NULL;
+		bno = startblock;
+	} else {
+		agno = XFS_FSB_TO_AGNO(mp, startblock);
+		pag = xfs_perag_get(mp, agno);
+		bno = XFS_FSB_TO_AGBNO(mp, startblock);
+	}
 
-	trace_xfs_rmap_deferred(mp, pag->pag_agno, type, bno, owner, whichfork,
+	trace_xfs_rmap_deferred(mp, agno, type, bno, owner, whichfork,
 			startoff, blockcount, state);
 
 	if (XFS_TEST_ERROR(false, mp, XFS_ERRTAG_RMAP_FINISH_ONE)) {
@@ -2551,32 +2563,37 @@ xfs_rmap_finish_one(
 	 * the startblock, get one now.
 	 */
 	rcur = *pcur;
-	if (rcur != NULL && xfs_rmap_cur_agno(rcur) != pag->pag_agno) {
+	if (rcur != NULL && xfs_rmap_cur_agno(rcur) != agno) {
 		xfs_rmap_finish_one_cleanup(tp, rcur, 0);
 		rcur = NULL;
 		*pcur = NULL;
 	}
 	if (rcur == NULL) {
-		/*
-		 * Refresh the freelist before we start changing the
-		 * rmapbt, because a shape change could cause us to
-		 * allocate blocks.
-		 */
-		error = xfs_free_extent_fix_freelist(tp, pag, &agbp);
-		if (error)
-			goto out_drop;
-		if (XFS_IS_CORRUPT(tp->t_mountp, !agbp)) {
-			error = -EFSCORRUPTED;
-			goto out_drop;
-		}
+		if (realtime) {
+			xfs_rtlock(tp, mp, XFS_RTLOCK_RMAP);
+			rcur = xfs_rtrmapbt_init_cursor(mp, tp, mp->m_rrmapip);
+			rcur->bc_ino.flags = 0;
+		} else {
+			/*
+			 * Refresh the freelist before we start changing the
+			 * rmapbt, because a shape change could cause us to
+			 * allocate blocks.
+			 */
+			error = xfs_free_extent_fix_freelist(tp, pag, &agbp);
+			if (error)
+				goto out_drop;
+			if (XFS_IS_CORRUPT(tp->t_mountp, !agbp)) {
+				error = -EFSCORRUPTED;
+				goto out_drop;
+			}
 
-		rcur = xfs_rmapbt_init_cursor(mp, tp, agbp, pag);
+			rcur = xfs_rmapbt_init_cursor(mp, tp, agbp, pag);
+		}
 	}
 	*pcur = rcur;
 
 	xfs_rmap_ino_owner(&oinfo, owner, whichfork, startoff);
 	unwritten = state == XFS_EXT_UNWRITTEN;
-	bno = XFS_FSB_TO_AGBNO(rcur->bc_mp, startblock);
 
 	switch (type) {
 	case XFS_RMAP_ALLOC:
@@ -2609,7 +2626,8 @@ xfs_rmap_finish_one(
 		error = -EFSCORRUPTED;
 	}
 out_drop:
-	xfs_perag_put(pag);
+	if (pag)
+		xfs_perag_put(pag);
 	return error;
 }
 
