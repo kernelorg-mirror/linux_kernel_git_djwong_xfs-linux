@@ -1042,6 +1042,12 @@ xfs_mountfs(
 			if (error)
 				goto out_agresv;
 		}
+
+		if (xfs_sb_version_hasrtreflink(&mp->m_sb)) {
+			error = xfs_qm_dqattach(mp->m_rrefcountip);
+			if (error)
+				goto out_agresv;
+		}
 	}
 
 	return 0;
