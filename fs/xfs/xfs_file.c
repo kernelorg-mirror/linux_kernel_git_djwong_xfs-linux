@@ -1243,7 +1243,8 @@ xfs_want_reflink_copy_range(
 	unsigned int		src_off,
 	struct xfs_inode	*dst,
 	unsigned int		dst_off,
-	size_t			len)
+	size_t			len,
+	unsigned int		blocksize)
 {
 	struct xfs_mount	*mp = src->i_mount;
 
@@ -1255,7 +1256,14 @@ xfs_want_reflink_copy_range(
 		return false;
 	if (XFS_IS_REALTIME_INODE(src) != XFS_IS_REALTIME_INODE(dst))
 		return false;
-	return (src_off & mp->m_blockmask) == (dst_off & mp->m_blockmask);
+	if (!is_power_of_2(blocksize)) {
+		uint32_t	mod1, mod2;
+
+		div_u64_rem(src_off, blocksize, &mod1);
+		div_u64_rem(dst_off, blocksize, &mod2);
+		return mod1 == mod2;
+	}
+	return (src_off & (blocksize - 1)) == (dst_off & (blocksize - 1));
 }
 
 STATIC ssize_t
@@ -1271,18 +1279,21 @@ xfs_file_copy_range(
 	struct xfs_inode	*src = XFS_I(inode_src);
 	struct inode		*inode_dst = file_inode(dst_file);
 	struct xfs_inode	*dst = XFS_I(inode_dst);
-	struct xfs_mount	*mp = src->i_mount;
 	loff_t			copy_ret;
 	loff_t			next_block;
 	size_t			copy_len;
 	ssize_t			total_copied = 0;
+	unsigned int		blocksize;
+
+	blocksize = xfs_inode_alloc_unitsize(dst);
 
 	/* Bypass all this if no copy acceleration is possible. */
-	if (!xfs_want_reflink_copy_range(src, src_off, dst, dst_off, len))
+	if (!xfs_want_reflink_copy_range(src, src_off, dst, dst_off, len,
+				blocksize))
 		goto use_generic;
 
 	/* Use the regular copy until we're block aligned at the start. */
-	next_block = round_up(src_off + 1, mp->m_sb.sb_blocksize);
+	next_block = roundup_64(src_off + 1, blocksize);
 	copy_len = min_t(size_t, len, next_block - src_off);
 	if (copy_len > 0) {
 		copy_ret = generic_copy_file_range(src_file, src_off, dst_file,
@@ -1303,7 +1314,7 @@ xfs_file_copy_range(
 	 * copy request wasn't block-aligned or the reflink fails, we'll just
 	 * fall into the generic copy to do the rest.
 	 */
-	copy_len = round_down(len, mp->m_sb.sb_blocksize);
+	copy_len = rounddown_64(len, blocksize);
 	if (copy_len > 0) {
 		copy_ret = xfs_file_remap_range(src_file, src_off, dst_file,
 				dst_off, copy_len, REMAP_FILE_CAN_SHORTEN);
