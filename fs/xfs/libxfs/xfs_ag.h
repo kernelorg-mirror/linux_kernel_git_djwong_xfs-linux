@@ -31,4 +31,8 @@ int xfs_ag_extend_space(struct xfs_mount *mp, struct xfs_trans *tp,
 int xfs_ag_get_geometry(struct xfs_mount *mp, xfs_agnumber_t agno,
 			struct xfs_ag_geometry *ageo);
 
+xfs_extlen_t xfs_ag_fdblocks(struct xfs_perag *pag);
+int xfs_ag_set_noalloc(struct xfs_perag *pag);
+int xfs_ag_clear_noalloc(struct xfs_perag *pag);
+
 #endif /* __LIBXFS_AG_H */

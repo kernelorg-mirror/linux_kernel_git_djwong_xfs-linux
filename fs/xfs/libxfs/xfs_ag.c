@@ -27,6 +27,7 @@
 #include "xfs_defer.h"
 #include "xfs_log_format.h"
 #include "xfs_trans.h"
+#include "xfs_trace.h"
 
 static int
 xfs_get_aghdr_buf(
@@ -708,4 +709,68 @@ xfs_ag_get_geometry(
 out_agi:
 	xfs_buf_relse(agi_bp);
 	return error;
+}
+
+/* How many blocks does this AG contribute to fdblocks? */
+xfs_extlen_t
+xfs_ag_fdblocks(
+	struct xfs_perag		*pag)
+{
+	xfs_extlen_t			ret;
+
+	ASSERT(pag->pagf_init != 0);
+
+	ret = pag->pagf_freeblks + pag->pagf_flcount + pag->pagf_btreeblks;
+	ret -= pag->pag_meta_resv.ar_reserved;
+	ret -= pag->pag_rmapbt_resv.ar_orig_reserved;
+	return ret;
+}
+
+/*
+ * Hide all the free space in this AG.  Caller must hold both the AGI and the
+ * AGF buffers or have otherwise prevented concurrent access.
+ */
+int
+xfs_ag_set_noalloc(
+	struct xfs_perag	*pag)
+{
+	struct xfs_mount	*mp = pag->pag_mount;
+	int			error;
+
+	ASSERT(pag->pagf_init);
+	ASSERT(pag->pagi_init);
+
+	if (pag->pagf_noalloc)
+		return 0;
+
+	error = xfs_mod_fdblocks(mp, -(int64_t)xfs_ag_fdblocks(pag), false);
+	if (error)
+		return error;
+
+	trace_xfs_ag_set_noalloc(pag);
+	pag->pagf_noalloc = 1;
+	return 0;
+}
+
+/*
+ * Unhide all the free space in this AG.  Caller must hold both the AGI and
+ * the AGF buffers or have otherwise prevented concurrent access.
+ */
+int
+xfs_ag_clear_noalloc(
+	struct xfs_perag	*pag)
+{
+	struct xfs_mount	*mp = pag->pag_mount;
+	int			error;
+
+	if (!pag->pagf_noalloc)
+		return 0;
+
+	error = xfs_mod_fdblocks(mp, xfs_ag_fdblocks(pag), false);
+	if (error)
+		return error;
+
+	trace_xfs_ag_clear_noalloc(pag);
+	pag->pagf_noalloc = 0;
+	return 0;
 }
