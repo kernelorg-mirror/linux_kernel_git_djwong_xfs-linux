@@ -22,6 +22,7 @@
 #include "xfs_log_recover.h"
 #include "xfs_icache.h"
 #include "xfs_bmap_btree.h"
+#include "xfs_rtrmap_btree.h"
 
 STATIC void
 xlog_recover_inode_ra_pass2(
@@ -189,6 +190,31 @@ xfs_log_dinode_to_disk(
 	} else {
 		to->di_flushiter = cpu_to_be16(from->di_flushiter);
 	}
+}
+
+static inline int
+xlog_recover_inode_dbroot(
+	struct xfs_mount	*mp,
+	void			*src,
+	unsigned int		len,
+	struct xfs_dinode	*dip)
+{
+	void			*dfork = XFS_DFORK_DPTR(dip);
+	unsigned int		dsize = XFS_DFORK_DSIZE(dip, mp);
+
+	switch (dip->di_format) {
+	case XFS_DINODE_FMT_BTREE:
+		xfs_bmbt_to_bmdr(mp, src, len, dfork, dsize);
+		break;
+	case XFS_DINODE_FMT_RMAP:
+		xfs_rtrmapbt_to_disk(mp, src, len, dfork, dsize);
+		break;
+	default:
+		ASSERT(0);
+		return -EFSCORRUPTED;
+	}
+
+	return 0;
 }
 
 STATIC int
@@ -392,9 +418,9 @@ xlog_recover_inode_commit_pass2(
 		break;
 
 	case XFS_ILOG_DBROOT:
-		xfs_bmbt_to_bmdr(mp, (struct xfs_btree_block *)src, len,
-				 (struct xfs_bmdr_block *)XFS_DFORK_DPTR(dip),
-				 XFS_DFORK_DSIZE(dip, mp));
+		error = xlog_recover_inode_dbroot(mp, src, len, dip);
+		if (error)
+			goto out_release;
 		break;
 
 	default:
