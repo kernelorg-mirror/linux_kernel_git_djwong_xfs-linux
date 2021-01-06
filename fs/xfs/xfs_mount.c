@@ -1032,6 +1032,13 @@ xfs_mountfs(
 		error = xfs_fs_reserve_ag_blocks(mp);
 		if (error && error != -ENOSPC)
 			goto out_agresv;
+
+		/* Attach dquots for realtime metadata. */
+		if (xfs_sb_version_hasrtrmapbt(&mp->m_sb)) {
+			error = xfs_qm_dqattach(mp->m_rrmapip);
+			if (error)
+				goto out_agresv;
+		}
 	}
 
 	return 0;
