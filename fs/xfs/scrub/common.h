@@ -100,6 +100,7 @@ int xchk_setup_parent(struct xfs_scrub *sc,
 #ifdef CONFIG_XFS_RT
 int xchk_setup_rtbitmap(struct xfs_scrub *sc, struct xfs_inode *ip);
 int xchk_setup_rtsummary(struct xfs_scrub *sc, struct xfs_inode *ip);
+int xchk_setup_rtrmapbt(struct xfs_scrub *sc, struct xfs_inode *ip);
 #else
 static inline int
 xchk_setup_rtbitmap(struct xfs_scrub *sc, struct xfs_inode *ip)
@@ -108,6 +109,11 @@ xchk_setup_rtbitmap(struct xfs_scrub *sc, struct xfs_inode *ip)
 }
 static inline int
 xchk_setup_rtsummary(struct xfs_scrub *sc, struct xfs_inode *ip)
+{
+	return -ENOENT;
+}
+static inline int
+xchk_setup_rtrmapbt(struct xfs_scrub *sc, struct xfs_inode *ip)
 {
 	return -ENOENT;
 }
@@ -132,7 +138,9 @@ int xchk_setup_fscounters(struct xfs_scrub *sc, struct xfs_inode *ip);
 void xchk_ag_free(struct xfs_scrub *sc, struct xchk_ag *sa);
 int xchk_ag_init(struct xfs_scrub *sc, xfs_agnumber_t agno,
 		struct xchk_ag *sa);
+void xchk_rt_lock(struct xfs_scrub *sc, struct xchk_rt *sr);
 void xchk_rt_init(struct xfs_scrub *sc, struct xchk_rt *sr);
+void xchk_rt_btcur_free(struct xchk_rt *sr);
 void xchk_rt_unlock(struct xfs_scrub *sc, struct xchk_rt *sr);
 void xchk_perag_get(struct xfs_mount *mp, struct xchk_ag *sa);
 int xchk_ag_read_headers(struct xfs_scrub *sc, xfs_agnumber_t agno,
