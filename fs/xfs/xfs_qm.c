@@ -766,6 +766,12 @@ xfs_qm_qino_alloc(
 	struct xfs_inode	**ipp,
 	unsigned int		flags)
 {
+	struct xfs_ialloc_args	args = {
+		.nlink		= 1,
+		.mode		= S_IFREG,
+		.flags		= XFS_IALLOC_ARGS_FORCE_UID |
+				  XFS_IALLOC_ARGS_FORCE_GID,
+	};
 	struct xfs_trans	*tp;
 	int			error;
 	bool			need_alloc = true;
@@ -816,7 +822,7 @@ xfs_qm_qino_alloc(
 		return error;
 
 	if (need_alloc) {
-		error = xfs_dir_ialloc(&tp, NULL, S_IFREG, 1, 0, 0, ipp);
+		error = xfs_dir_ialloc(&tp, &args, ipp);
 		if (error) {
 			xfs_trans_cancel(tp);
 			return error;

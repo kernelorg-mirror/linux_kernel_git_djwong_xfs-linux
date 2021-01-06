@@ -1581,6 +1581,12 @@ xrep_setup_tempfile(
 	struct xfs_scrub	*sc,
 	uint16_t		mode)
 {
+	struct xfs_ialloc_args	args = {
+		.pip		= sc->mp->m_rootip,
+		.mode		= mode,
+		.flags		= XFS_IALLOC_ARGS_FORCE_UID |
+				  XFS_IALLOC_ARGS_FORCE_GID,
+	};
 	struct xfs_mount	*mp = sc->mp;
 	struct xfs_trans	*tp = NULL;
 	struct xfs_dquot	*udqp = NULL;
@@ -1612,9 +1618,8 @@ xrep_setup_tempfile(
 	 * inode should be completely root owned, but we'll still go through
 	 * the motions to keep the quota accounting accurate.
 	 */
-	error = xfs_qm_vop_dqalloc(sc->mp->m_rootip, GLOBAL_ROOT_UID,
-			GLOBAL_ROOT_GID, 0,
-			XFS_QMOPT_QUOTALL | XFS_QMOPT_INHERIT,
+	error = xfs_qm_vop_dqalloc(sc->mp->m_rootip, args.uid, args.gid,
+			args.prid, XFS_QMOPT_QUOTALL | XFS_QMOPT_INHERIT,
 			&udqp, &gdqp, &pdqp);
 	if (error)
 		return error;
@@ -1633,15 +1638,9 @@ xrep_setup_tempfile(
 		goto out_release_dquots;
 
 	/* Allocate inode, set up directory. */
-	error = xfs_dir_ialloc(&tp, sc->mp->m_rootip, mode, 0, 0, 0,
-			&sc->tempip);
+	error = xfs_dir_ialloc(&tp, &args, &sc->tempip);
 	if (error)
 		goto out_trans_cancel;
-
-	/* Change the ownership of the inode to root. */
-	VFS_I(sc->tempip)->i_uid = GLOBAL_ROOT_UID;
-	VFS_I(sc->tempip)->i_gid = GLOBAL_ROOT_GID;
-	xfs_trans_log_inode(tp, sc->tempip, XFS_ILOG_CORE);
 
 	/*
 	 * Mark our temporary file as private so that LSMs and the ACL code
