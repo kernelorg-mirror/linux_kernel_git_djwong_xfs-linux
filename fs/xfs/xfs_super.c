@@ -775,6 +775,10 @@ xfs_mount_free(
 {
 	kfree(mp->m_rtname);
 	kfree(mp->m_logname);
+
+	ASSERT(!mutex_is_locked(&mp->m_scrub_freeze));
+	mutex_destroy(&mp->m_scrub_freeze);
+
 	kmem_free(mp);
 }
 
@@ -957,6 +961,7 @@ xfs_fs_freeze_super(
 	struct super_block	*sb)
 {
 	struct xfs_mount	*mp = XFS_M(sb);
+	int			error;
 
 	/*
 	 * Before we take s_umount to get to FREEZE_WRITE, flush all the
@@ -965,7 +970,45 @@ xfs_fs_freeze_super(
 	 */
 	xfs_inodegc_flush(mp);
 
-	return freeze_super(sb);
+	/*
+	 * Don't let userspace freeze while scrub has the filesystem frozen.
+	 * Take our own private reference to the vfs superblock so that we
+	 * don't lose the xfs superblock while frozen or trying to freeze.
+	 */
+	atomic_inc(&sb->s_active);
+	mutex_lock(&XFS_M(sb)->m_scrub_freeze);
+
+	/* XXX can we move the FREEZE_PAGEFAULTS inodegc_stop here? */
+
+	error = freeze_super(sb);
+	mutex_unlock(&XFS_M(sb)->m_scrub_freeze);
+	deactivate_super(sb);
+
+	return error;
+}
+
+STATIC int
+xfs_fs_thaw_super(
+	struct super_block	*sb)
+{
+	int			error;
+
+	/*
+	 * Freeze takes an s_active reference to the filesystem and fs thaw
+	 * drops it.  If a filesystem on a frozen (dm) block device is
+	 * unmounted before the block device is thawed, the freezer state could
+	 * contain the one remaining s_active reference to the vfs superblock.
+	 * Since thaw_super drops that reference (which frees the xfs_mount)
+	 * and we still have to unlock the scrub freeze mutex, we must take our
+	 * own private s_active reference to avoid a use-after-free.
+	 */
+	atomic_inc(&sb->s_active);
+	mutex_lock(&XFS_M(sb)->m_scrub_freeze);
+	error = thaw_super(sb);
+	mutex_unlock(&XFS_M(sb)->m_scrub_freeze);
+	deactivate_super(sb);
+
+	return error;
 }
 
 /*
@@ -1147,6 +1190,7 @@ static const struct super_operations xfs_super_operations = {
 	.nr_cached_objects	= xfs_fs_nr_cached_objects,
 	.free_cached_objects	= xfs_fs_free_cached_objects,
 	.freeze_super		= xfs_fs_freeze_super,
+	.thaw_super		= xfs_fs_thaw_super,
 };
 
 static int
@@ -1906,6 +1950,7 @@ static int xfs_init_fs_context(
 	INIT_RADIX_TREE(&mp->m_perag_tree, GFP_ATOMIC);
 	spin_lock_init(&mp->m_perag_lock);
 	mutex_init(&mp->m_growlock);
+	mutex_init(&mp->m_scrub_freeze);
 	INIT_WORK(&mp->m_flush_inodes_work, xfs_flush_inodes_worker);
 	INIT_DELAYED_WORK(&mp->m_reclaim_work, xfs_reclaim_worker);
 	mp->m_kobj.kobject.kset = xfs_kset;
