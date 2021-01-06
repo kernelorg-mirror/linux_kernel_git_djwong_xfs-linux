@@ -133,7 +133,8 @@ xrep_rtrmap_check_mapping(
 		return -EFSCORRUPTED;
 
 	/* Make sure this isn't free space. */
-	return xrep_rtext_is_free(sc, rec->rm_startblock, rec->rm_blockcount);
+	return xrep_rtext_is_free(sc, rec->rm_startblock, rec->rm_blockcount,
+			false);
 }
 
 /* Store a reverse-mapping record. */
