@@ -455,6 +455,9 @@ xfs_iget_check_free_state(
 			xfs_warn(ip->i_mount,
 "Corruption detected! Free inode 0x%llx not marked free! (mode 0x%x)",
 				ip->i_ino, VFS_I(ip)->i_mode);
+			xfs_agno_mark_sick(ip->i_mount,
+					XFS_INO_TO_AGNO(ip->i_mount, ip->i_ino),
+					XFS_SICK_AG_INOBT);
 			return -EFSCORRUPTED;
 		}
 
@@ -462,6 +465,9 @@ xfs_iget_check_free_state(
 			xfs_warn(ip->i_mount,
 "Corruption detected! Free inode 0x%llx has blocks allocated!",
 				ip->i_ino);
+			xfs_agno_mark_sick(ip->i_mount,
+					XFS_INO_TO_AGNO(ip->i_mount, ip->i_ino),
+					XFS_SICK_AG_INOBT);
 			return -EFSCORRUPTED;
 		}
 		return 0;
@@ -642,6 +648,8 @@ xfs_iget_cache_miss(
 				xfs_buf_offset(bp, ip->i_imap.im_boffset));
 		if (!error)
 			xfs_buf_set_ref(bp, XFS_INO_REF);
+		else
+			xfs_inode_mark_sick(ip, XFS_SICK_INO_CORE);
 		xfs_trans_brelse(tp, bp);
 
 		if (error)
