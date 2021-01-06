@@ -2219,3 +2219,36 @@ xrep_is_rtmeta_ino(
 	       ino == sc->mp->m_rsumip->i_ino ||
 	       ino == sc->mp->m_rrmapip->i_ino;
 }
+
+/* Check the sanity of a rmap record for a metadata btree inode. */
+int
+xrep_check_ino_btree_mapping(
+	struct xfs_scrub	*sc,
+	const struct xfs_rmap_irec *rec)
+{
+	bool			is_freesp;
+	int			error;
+
+	/*
+	 * Metadata btree inodes never have extended attributes, and all blocks
+	 * should have the bmbt block flag set.
+	 */
+	if ((rec->rm_flags & XFS_RMAP_ATTR_FORK) ||
+	    !(rec->rm_flags & XFS_RMAP_BMBT_BLOCK))
+		return -EFSCORRUPTED;
+
+	/* Make sure the block is within the AG. */
+	if (!xfs_verify_agbext(sc->mp, sc->sa.agno, rec->rm_startblock,
+				rec->rm_blockcount))
+		return -EFSCORRUPTED;
+
+	/* Make sure this isn't free space. */
+	error = xfs_alloc_has_record(sc->sa.bno_cur, rec->rm_startblock,
+			rec->rm_blockcount, &is_freesp);
+	if (error)
+		return error;
+	if (is_freesp)
+		return -EFSCORRUPTED;
+
+	return 0;
+}
