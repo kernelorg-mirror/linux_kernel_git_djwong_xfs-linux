@@ -562,9 +562,17 @@ xfs_rtrmapbt_compute_maxlevels(
 	 * The realtime rmapbt lives on the data device, which means that its
 	 * maximum height is constrained by the size of the data device and
 	 * the height required to store one rmap record for each rt block.
+	 *
+	 * On a reflink filesystem, each rt block can have up to 2^32 (per the
+	 * refcount record format) owners, which means that theoretically we
+	 * could face up to 2^96 rmap records.  This makes the computation of
+	 * maxlevels based on record count meaningless, so we only consider the
+	 * size of the data device.
 	 */
 	d_maxlevels = xfs_btree_compute_maxlevels_size(dblocks,
 			mp->m_rtrmap_mnr[1]);
+	if (xfs_sb_version_hasrtreflink(&mp->m_sb))
+		return d_maxlevels + 1;
 	r_maxlevels = xfs_btree_compute_maxlevels(mp->m_rtrmap_mnr, rblocks);
 
 	/* Add one level to handle the inode root level. */
