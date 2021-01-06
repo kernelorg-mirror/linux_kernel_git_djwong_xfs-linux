@@ -2868,8 +2868,8 @@ DECLARE_EVENT_CLASS(xfs_refcount_extent_class,
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_agnumber_t, agno)
-		__field(xfs_agblock_t, startblock)
-		__field(xfs_extlen_t, blockcount)
+		__field(xfs_fsblock_t, startblock)
+		__field(xfs_filblks_t, blockcount)
 		__field(xfs_nlink_t, refcount)
 	),
 	TP_fast_assign(
@@ -2879,7 +2879,7 @@ DECLARE_EVENT_CLASS(xfs_refcount_extent_class,
 		__entry->blockcount = irec->rc_blockcount;
 		__entry->refcount = irec->rc_refcount;
 	),
-	TP_printk("dev %d:%d agno %u agbno %u len %u refcount %u",
+	TP_printk("dev %d:%d agno %u bno %llu len %llu refcount %u",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->agno,
 		  __entry->startblock,
@@ -2896,15 +2896,15 @@ DEFINE_EVENT(xfs_refcount_extent_class, name, \
 /* single-rcext and an agbno tracepoint class */
 DECLARE_EVENT_CLASS(xfs_refcount_extent_at_class,
 	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno,
-		 struct xfs_refcount_irec *irec, xfs_agblock_t agbno),
-	TP_ARGS(mp, agno, irec, agbno),
+		 struct xfs_refcount_irec *irec, xfs_fsblock_t bno),
+	TP_ARGS(mp, agno, irec, bno),
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_agnumber_t, agno)
-		__field(xfs_agblock_t, startblock)
-		__field(xfs_extlen_t, blockcount)
+		__field(xfs_fsblock_t, startblock)
+		__field(xfs_filblks_t, blockcount)
 		__field(xfs_nlink_t, refcount)
-		__field(xfs_agblock_t, agbno)
+		__field(xfs_fsblock_t, bno)
 	),
 	TP_fast_assign(
 		__entry->dev = mp->m_super->s_dev;
@@ -2912,22 +2912,22 @@ DECLARE_EVENT_CLASS(xfs_refcount_extent_at_class,
 		__entry->startblock = irec->rc_startblock;
 		__entry->blockcount = irec->rc_blockcount;
 		__entry->refcount = irec->rc_refcount;
-		__entry->agbno = agbno;
+		__entry->bno = bno;
 	),
-	TP_printk("dev %d:%d agno %u agbno %u len %u refcount %u @ agbno %u",
+	TP_printk("dev %d:%d agno %u bno %llu len %llu refcount %u @ bno %llu",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->agno,
 		  __entry->startblock,
 		  __entry->blockcount,
 		  __entry->refcount,
-		  __entry->agbno)
+		  __entry->bno)
 )
 
 #define DEFINE_REFCOUNT_EXTENT_AT_EVENT(name) \
 DEFINE_EVENT(xfs_refcount_extent_at_class, name, \
 	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno, \
-		 struct xfs_refcount_irec *irec, xfs_agblock_t agbno), \
-	TP_ARGS(mp, agno, irec, agbno))
+		 struct xfs_refcount_irec *irec, xfs_fsblock_t bno), \
+	TP_ARGS(mp, agno, irec, bno))
 
 /* double-rcext tracepoint class */
 DECLARE_EVENT_CLASS(xfs_refcount_double_extent_class,
@@ -2937,11 +2937,11 @@ DECLARE_EVENT_CLASS(xfs_refcount_double_extent_class,
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_agnumber_t, agno)
-		__field(xfs_agblock_t, i1_startblock)
-		__field(xfs_extlen_t, i1_blockcount)
+		__field(xfs_fsblock_t, i1_startblock)
+		__field(xfs_filblks_t, i1_blockcount)
 		__field(xfs_nlink_t, i1_refcount)
-		__field(xfs_agblock_t, i2_startblock)
-		__field(xfs_extlen_t, i2_blockcount)
+		__field(xfs_fsblock_t, i2_startblock)
+		__field(xfs_filblks_t, i2_blockcount)
 		__field(xfs_nlink_t, i2_refcount)
 	),
 	TP_fast_assign(
@@ -2954,8 +2954,8 @@ DECLARE_EVENT_CLASS(xfs_refcount_double_extent_class,
 		__entry->i2_blockcount = i2->rc_blockcount;
 		__entry->i2_refcount = i2->rc_refcount;
 	),
-	TP_printk("dev %d:%d agno %u agbno %u len %u refcount %u -- "
-		  "agbno %u len %u refcount %u",
+	TP_printk("dev %d:%d agno %u bno %llu len %llu refcount %u -- "
+		  "bno %llu len %llu refcount %u",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->agno,
 		  __entry->i1_startblock,
@@ -2976,18 +2976,18 @@ DEFINE_EVENT(xfs_refcount_double_extent_class, name, \
 DECLARE_EVENT_CLASS(xfs_refcount_double_extent_at_class,
 	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno,
 		 struct xfs_refcount_irec *i1, struct xfs_refcount_irec *i2,
-		 xfs_agblock_t agbno),
-	TP_ARGS(mp, agno, i1, i2, agbno),
+		 xfs_fsblock_t bno),
+	TP_ARGS(mp, agno, i1, i2, bno),
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_agnumber_t, agno)
-		__field(xfs_agblock_t, i1_startblock)
-		__field(xfs_extlen_t, i1_blockcount)
+		__field(xfs_fsblock_t, i1_startblock)
+		__field(xfs_filblks_t, i1_blockcount)
 		__field(xfs_nlink_t, i1_refcount)
-		__field(xfs_agblock_t, i2_startblock)
-		__field(xfs_extlen_t, i2_blockcount)
+		__field(xfs_fsblock_t, i2_startblock)
+		__field(xfs_filblks_t, i2_blockcount)
 		__field(xfs_nlink_t, i2_refcount)
-		__field(xfs_agblock_t, agbno)
+		__field(xfs_fsblock_t, bno)
 	),
 	TP_fast_assign(
 		__entry->dev = mp->m_super->s_dev;
@@ -2998,10 +2998,10 @@ DECLARE_EVENT_CLASS(xfs_refcount_double_extent_at_class,
 		__entry->i2_startblock = i2->rc_startblock;
 		__entry->i2_blockcount = i2->rc_blockcount;
 		__entry->i2_refcount = i2->rc_refcount;
-		__entry->agbno = agbno;
+		__entry->bno = bno;
 	),
-	TP_printk("dev %d:%d agno %u agbno %u len %u refcount %u -- "
-		  "agbno %u len %u refcount %u @ agbno %u",
+	TP_printk("dev %d:%d agno %u bno %llu len %llu refcount %u -- "
+		  "bno %llu len %llu refcount %u @ bno %llu",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->agno,
 		  __entry->i1_startblock,
@@ -3010,15 +3010,15 @@ DECLARE_EVENT_CLASS(xfs_refcount_double_extent_at_class,
 		  __entry->i2_startblock,
 		  __entry->i2_blockcount,
 		  __entry->i2_refcount,
-		  __entry->agbno)
+		  __entry->bno)
 )
 
 #define DEFINE_REFCOUNT_DOUBLE_EXTENT_AT_EVENT(name) \
 DEFINE_EVENT(xfs_refcount_double_extent_at_class, name, \
 	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno, \
 		 struct xfs_refcount_irec *i1, struct xfs_refcount_irec *i2, \
-		 xfs_agblock_t agbno), \
-	TP_ARGS(mp, agno, i1, i2, agbno))
+		 xfs_fsblock_t bno), \
+	TP_ARGS(mp, agno, i1, i2, bno))
 
 /* triple-rcext tracepoint class */
 DECLARE_EVENT_CLASS(xfs_refcount_triple_extent_class,
@@ -3029,14 +3029,14 @@ DECLARE_EVENT_CLASS(xfs_refcount_triple_extent_class,
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_agnumber_t, agno)
-		__field(xfs_agblock_t, i1_startblock)
-		__field(xfs_extlen_t, i1_blockcount)
+		__field(xfs_fsblock_t, i1_startblock)
+		__field(xfs_filblks_t, i1_blockcount)
 		__field(xfs_nlink_t, i1_refcount)
-		__field(xfs_agblock_t, i2_startblock)
-		__field(xfs_extlen_t, i2_blockcount)
+		__field(xfs_fsblock_t, i2_startblock)
+		__field(xfs_filblks_t, i2_blockcount)
 		__field(xfs_nlink_t, i2_refcount)
-		__field(xfs_agblock_t, i3_startblock)
-		__field(xfs_extlen_t, i3_blockcount)
+		__field(xfs_fsblock_t, i3_startblock)
+		__field(xfs_filblks_t, i3_blockcount)
 		__field(xfs_nlink_t, i3_refcount)
 	),
 	TP_fast_assign(
@@ -3052,9 +3052,9 @@ DECLARE_EVENT_CLASS(xfs_refcount_triple_extent_class,
 		__entry->i3_blockcount = i3->rc_blockcount;
 		__entry->i3_refcount = i3->rc_refcount;
 	),
-	TP_printk("dev %d:%d agno %u agbno %u len %u refcount %u -- "
-		  "agbno %u len %u refcount %u -- "
-		  "agbno %u len %u refcount %u",
+	TP_printk("dev %d:%d agno %u bno %llu len %llu refcount %u -- "
+		  "bno %llu len %llu refcount %u -- "
+		  "bno %llu len %llu refcount %u",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->agno,
 		  __entry->i1_startblock,
@@ -3120,34 +3120,34 @@ DEFINE_REFCOUNT_DEFERRED_EVENT(xfs_refcount_deferred);
 
 TRACE_EVENT(xfs_refcount_finish_one_leftover,
 	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno,
-		 int type, xfs_agblock_t agbno, xfs_extlen_t len,
-		 xfs_agblock_t new_agbno, xfs_extlen_t new_len),
-	TP_ARGS(mp, agno, type, agbno, len, new_agbno, new_len),
+		 int type, xfs_fsblock_t bno, xfs_extlen_t len,
+		 xfs_fsblock_t new_bno, xfs_extlen_t new_len),
+	TP_ARGS(mp, agno, type, bno, len, new_bno, new_len),
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_agnumber_t, agno)
 		__field(int, type)
-		__field(xfs_agblock_t, agbno)
-		__field(xfs_extlen_t, len)
-		__field(xfs_agblock_t, new_agbno)
-		__field(xfs_extlen_t, new_len)
+		__field(xfs_fsblock_t, bno)
+		__field(xfs_filblks_t, len)
+		__field(xfs_fsblock_t, new_bno)
+		__field(xfs_filblks_t, new_len)
 	),
 	TP_fast_assign(
 		__entry->dev = mp->m_super->s_dev;
 		__entry->agno = agno;
 		__entry->type = type;
-		__entry->agbno = agbno;
+		__entry->bno = bno;
 		__entry->len = len;
-		__entry->new_agbno = new_agbno;
+		__entry->new_bno = new_bno;
 		__entry->new_len = new_len;
 	),
-	TP_printk("dev %d:%d type %d agno %u agbno %u len %u new_agbno %u new_len %u",
+	TP_printk("dev %d:%d type %d agno %u bno %llu len %llu new_bno %llu new_len %llu",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->type,
 		  __entry->agno,
-		  __entry->agbno,
+		  __entry->bno,
 		  __entry->len,
-		  __entry->new_agbno,
+		  __entry->new_bno,
 		  __entry->new_len)
 );
 
