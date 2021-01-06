@@ -668,14 +668,11 @@ xfs_inode_inherit_flags2(
 static int
 xfs_init_new_inode(
 	struct xfs_trans	*tp,
-	struct xfs_inode	*pip,
 	xfs_ino_t		ino,
-	umode_t			mode,
-	xfs_nlink_t		nlink,
-	dev_t			rdev,
-	prid_t			prid,
+	const struct xfs_ialloc_args *args,
 	struct xfs_inode	**ipp)
 {
+	struct xfs_inode	*pip = args->pip;
 	struct inode		*dir = pip ? VFS_I(pip) : NULL;
 	struct xfs_mount	*mp = tp->t_mountp;
 	struct xfs_inode	*ip;
@@ -708,18 +705,24 @@ xfs_init_new_inode(
 
 	ASSERT(ip != NULL);
 	inode = VFS_I(ip);
-	set_nlink(inode, nlink);
-	inode->i_rdev = rdev;
-	ip->i_d.di_projid = prid;
+	set_nlink(inode, args->nlink);
+	inode->i_rdev = args->rdev;
+	ip->i_d.di_projid = args->prid;
 
 	if (dir && !(dir->i_mode & S_ISGID) &&
 	    (mp->m_flags & XFS_MOUNT_GRPID)) {
-		inode->i_uid = current_fsuid();
+		inode->i_uid = args->uid;
 		inode->i_gid = dir->i_gid;
-		inode->i_mode = mode;
+		inode->i_mode = args->mode;
 	} else {
-		inode_init_owner(inode, dir, mode);
+		inode_init_owner(inode, dir, args->mode);
 	}
+
+	/* struct copies */
+	if (args->flags & XFS_IALLOC_ARGS_FORCE_UID)
+		inode->i_uid = args->uid;
+	if (args->flags & XFS_IALLOC_ARGS_FORCE_GID)
+		inode->i_gid = args->gid;
 
 	/*
 	 * If the group ID of the new file does not match the effective group
@@ -752,7 +755,7 @@ xfs_init_new_inode(
 	}
 
 	flags = XFS_ILOG_CORE;
-	switch (mode & S_IFMT) {
+	switch (args->mode & S_IFMT) {
 	case S_IFIFO:
 	case S_IFCHR:
 	case S_IFBLK:
@@ -812,6 +815,15 @@ xfs_dir_ialloc(
 	prid_t			prid,
 	struct xfs_inode	**ipp)
 {
+	struct xfs_ialloc_args	args = {
+		.pip		= dp,
+		.uid		= current_fsuid(),
+		.gid		= current_fsgid(),
+		.prid		= prid,
+		.nlink		= nlink,
+		.rdev		= rdev,
+		.mode		= mode,
+	};
 	struct xfs_buf		*agibp;
 	xfs_ino_t		parent_ino = dp ? dp->i_ino : 0;
 	xfs_ino_t		ino;
@@ -836,7 +848,7 @@ xfs_dir_ialloc(
 		return error;
 	ASSERT(ino != NULLFSINO);
 
-	return xfs_init_new_inode(*tpp, dp, ino, mode, nlink, rdev, prid, ipp);
+	return xfs_init_new_inode(*tpp, ino, &args, ipp);
 }
 
 /*
