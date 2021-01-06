@@ -246,12 +246,12 @@ xfs_inode_clear_reclaim_tag(
 /* Queue a new inode inactivation pass if there are reclaimable inodes. */
 static void
 xfs_inactive_work_queue(
-	struct xfs_mount        *mp)
+	struct xfs_perag	*pag)
 {
 	rcu_read_lock();
-	if (radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_INACTIVE_TAG))
-		queue_delayed_work(mp->m_inactive_workqueue,
-				&mp->m_inactive_work,
+	if (radix_tree_tagged(&pag->pag_ici_root, XFS_ICI_INACTIVE_TAG))
+		queue_delayed_work(pag->pag_mount->m_inactive_workqueue,
+				&pag->pag_inactive_work,
 				xfs_inodegc_secs * HZ);
 	rcu_read_unlock();
 }
@@ -274,7 +274,7 @@ xfs_perag_set_inactive_tag(
 	spin_unlock(&mp->m_perag_lock);
 
 	/* schedule periodic background inode inactivation */
-	xfs_inactive_work_queue(mp);
+	xfs_inactive_work_queue(pag);
 
 	trace_xfs_perag_set_inactive(mp, pag->pag_agno, -1, _RET_IP_);
 }
@@ -2080,8 +2080,9 @@ void
 xfs_inactive_worker(
 	struct work_struct	*work)
 {
-	struct xfs_mount	*mp = container_of(to_delayed_work(work),
-					struct xfs_mount, m_inactive_work);
+	struct xfs_perag	*pag = container_of(to_delayed_work(work),
+					struct xfs_perag, pag_inactive_work);
+	struct xfs_mount	*mp = pag->pag_mount;
 	int			error;
 
 	/*
@@ -2096,12 +2097,32 @@ xfs_inactive_worker(
 	if (!sb_start_write_trylock(mp->m_super))
 		return;
 
-	error = xfs_inactive_inodes(mp, NULL);
+	error = xfs_inode_walk_ag(pag, XFS_INODE_WALK_INACTIVE,
+			xfs_inactive_inode, NULL, XFS_ICI_INACTIVE_TAG);
 	if (error && error != -EAGAIN)
 		xfs_err(mp, "inode inactivation failed, error %d", error);
 
 	sb_end_write(mp->m_super);
-	xfs_inactive_work_queue(mp);
+	xfs_inactive_work_queue(pag);
+}
+
+/* Wait for all background inactivation work to finish. */
+static void
+xfs_inactive_flush(
+	struct xfs_mount	*mp)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+
+	for_each_perag_tag(mp, agno, pag, XFS_ICI_INACTIVE_TAG) {
+		bool		flush;
+
+		spin_lock(&pag->pag_ici_lock);
+		flush = pag->pag_ici_inactive > 0;
+		spin_unlock(&pag->pag_ici_lock);
+		if (flush)
+			flush_delayed_work(&pag->pag_inactive_work);
+	}
 }
 
 /* Flush all inode inactivation work that might be queued. */
@@ -2109,8 +2130,8 @@ void
 xfs_inactive_force(
 	struct xfs_mount	*mp)
 {
-	queue_delayed_work(mp->m_inactive_workqueue, &mp->m_inactive_work, 0);
-	flush_delayed_work(&mp->m_inactive_work);
+	xfs_inactive_schedule_now(mp);
+	xfs_inactive_flush(mp);
 }
 
 /*
@@ -2122,9 +2143,64 @@ void
 xfs_inactive_shutdown(
 	struct xfs_mount	*mp)
 {
-	cancel_delayed_work_sync(&mp->m_inactive_work);
-	flush_workqueue(mp->m_inactive_workqueue);
+	xfs_inactive_cancel_work(mp);
 	xfs_inactive_inodes(mp, NULL);
 	cancel_delayed_work_sync(&mp->m_reclaim_work);
 	xfs_reclaim_inodes(mp);
+}
+
+/* Force the background inactivation of this inode. */
+void
+xfs_inactive_force_ino(
+	struct xfs_mount	*mp,
+	xfs_ino_t		ino)
+{
+	struct xfs_perag	*pag;
+	bool			flush;
+
+	pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, ino));
+	spin_lock(&pag->pag_ici_lock);
+	flush = radix_tree_tag_get(&pag->pag_ici_root,
+			XFS_INO_TO_AGINO(mp, ino), XFS_ICI_INACTIVE_TAG);
+	if (flush) {
+		cancel_delayed_work(&pag->pag_inactive_work);
+		queue_delayed_work(mp->m_inactive_workqueue,
+				&pag->pag_inactive_work, 0);
+	}
+	spin_unlock(&pag->pag_ici_lock);
+	if (flush)
+		flush_delayed_work(&pag->pag_inactive_work);
+	xfs_perag_put(pag);
+}
+
+/* Cancel all queued inactivation work. */
+void
+xfs_inactive_cancel_work(
+	struct xfs_mount	*mp)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+
+	for_each_perag_tag(mp, agno, pag, XFS_ICI_INACTIVE_TAG)
+		cancel_delayed_work_sync(&pag->pag_inactive_work);
+	flush_workqueue(mp->m_inactive_workqueue);
+}
+
+/* Cancel all pending deferred inactivation work and reschedule it now. */
+void
+xfs_inactive_schedule_now(
+	struct xfs_mount	*mp)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+
+	for_each_perag_tag(mp, agno, pag, XFS_ICI_INACTIVE_TAG) {
+		spin_lock(&pag->pag_ici_lock);
+		if (pag->pag_ici_inactive) {
+			cancel_delayed_work(&pag->pag_inactive_work);
+			queue_delayed_work(mp->m_inactive_workqueue,
+					&pag->pag_inactive_work, 0);
+		}
+		spin_unlock(&pag->pag_ici_lock);
+	}
 }
