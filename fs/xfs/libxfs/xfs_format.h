@@ -656,6 +656,12 @@ static inline bool xfs_sb_version_hasrtrmapbt(struct xfs_sb *sbp)
 	       xfs_sb_version_hasrmapbt(sbp);
 }
 
+static inline bool xfs_sb_version_hasrtreflink(struct xfs_sb *sbp)
+{
+	return xfs_sb_version_hasmetadir(sbp) && sbp->sb_rblocks > 0 &&
+	       xfs_sb_version_hasreflink(sbp);
+}
+
 /*
  * end of superblock version macros
  */
@@ -1107,6 +1113,7 @@ enum xfs_dinode_fmt {
 	XFS_DINODE_FMT_BTREE,		/* struct xfs_bmdr_block */
 	XFS_DINODE_FMT_UUID,		/* added long ago, but never used */
 	XFS_DINODE_FMT_RMAP,		/* reverse mapping btree */
+	XFS_DINODE_FMT_REFCOUNT,	/* reference count btree */
 };
 
 #define XFS_INODE_FORMAT_STR \
@@ -1115,7 +1122,8 @@ enum xfs_dinode_fmt {
 	{ XFS_DINODE_FMT_EXTENTS,	"extent" }, \
 	{ XFS_DINODE_FMT_BTREE,		"btree" }, \
 	{ XFS_DINODE_FMT_UUID,		"uuid" }, \
-	{ XFS_DINODE_FMT_RMAP,		"rmap" }
+	{ XFS_DINODE_FMT_RMAP,		"rmap" }, \
+	{ XFS_DINODE_FMT_REFCOUNT,	"refcount" }
 
 /*
  * Inode minimum and maximum sizes.
