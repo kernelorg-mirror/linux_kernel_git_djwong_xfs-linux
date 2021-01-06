@@ -670,7 +670,8 @@ xrep_newbt_destroy_reservation(
 			XFS_FSB_TO_AGBNO(sc->mp, resv->fsbno),
 			resv->len, xnr->oinfo.oi_owner);
 
-	__xfs_bmap_add_free(sc->tp, resv->fsbno, resv->len, &xnr->oinfo, true);
+	__xfs_bmap_add_free(sc->tp, resv->fsbno, resv->len, &xnr->oinfo, false,
+			true);
 
 	return 0;
 }
@@ -1041,7 +1042,8 @@ xrep_reap_ag_extent(
 		 * every 100 or so EFIs so that we don't exceed the log
 		 * reservation.
 		 */
-		__xfs_bmap_add_free(sc->tp, fsbno, aglen, rb->oinfo, false);
+		__xfs_bmap_add_free(sc->tp, fsbno, aglen, rb->oinfo, false,
+				false);
 		rb->deferred++;
 		need_roll = rb->deferred > 100;
 	}

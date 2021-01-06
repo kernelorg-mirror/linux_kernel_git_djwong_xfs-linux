@@ -1001,7 +1001,8 @@ xfs_refcount_adjust_extents(
 						cur->bc_ag.agno,
 						tmp.rc_startblock);
 				xfs_bmap_add_free(cur->bc_tp, fsbno,
-						  tmp.rc_blockcount, oinfo);
+						  tmp.rc_blockcount, oinfo,
+						  false);
 			}
 
 			(*agbno) += tmp.rc_blockcount;
@@ -1046,7 +1047,7 @@ xfs_refcount_adjust_extents(
 					cur->bc_ag.agno,
 					ext.rc_startblock);
 			xfs_bmap_add_free(cur->bc_tp, fsbno, ext.rc_blockcount,
-					  oinfo);
+					  oinfo, false);
 		}
 
 skip:
@@ -1776,7 +1777,8 @@ xfs_refcount_recover_cow_leftovers(
 				rr->rr_rrec.rc_blockcount);
 
 		/* Free the block. */
-		xfs_bmap_add_free(tp, fsb, rr->rr_rrec.rc_blockcount, NULL);
+		xfs_bmap_add_free(tp, fsb, rr->rr_rrec.rc_blockcount, NULL,
+				false);
 
 		error = xfs_trans_commit(tp);
 		if (error)
