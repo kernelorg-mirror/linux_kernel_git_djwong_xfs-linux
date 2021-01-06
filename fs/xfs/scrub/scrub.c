@@ -19,6 +19,7 @@
 #include "xfs_scrub.h"
 #include "xfs_btree.h"
 #include "xfs_btree_staging.h"
+#include "xfs_log.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -171,6 +172,10 @@ xchk_teardown(
 		xfs_irele(sc->ip);
 		sc->ip = NULL;
 	}
+	if (sc->flags & XREP_ATOMIC_SWAPEXT) {
+		xlog_drop_incompat_feat(sc->mp->m_log);
+		sc->flags &= ~XREP_ATOMIC_SWAPEXT;
+	}
 	if (sc->flags & XCHK_FS_FROZEN) {
 		err2 = xchk_fs_thaw(sc);
 		if (!error && err2)
@@ -194,6 +199,12 @@ xchk_teardown(
 		kmem_free(sc->buf);
 		sc->buf_cleanup = NULL;
 		sc->buf = NULL;
+	}
+	if (sc->tempip) {
+		if (sc->temp_ilock_flags)
+			xfs_iunlock(sc->tempip, sc->temp_ilock_flags);
+		xfs_irele(sc->tempip);
+		sc->tempip = NULL;
 	}
 	return error;
 }
