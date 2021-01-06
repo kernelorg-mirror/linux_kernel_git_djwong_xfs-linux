@@ -1030,10 +1030,10 @@ xfs_growfs_rt(
 		if (error)
 			break;
 		/*
-		 * Lock out other callers by grabbing the bitmap inode lock.
+		 * Lock out other callers by grabbing the bitmap and summary
+		 * inode locks and joining them to the transaction.
 		 */
-		xfs_ilock(mp->m_rbmip, XFS_ILOCK_EXCL | XFS_ILOCK_RTBITMAP);
-		xfs_trans_ijoin(tp, mp->m_rbmip, XFS_ILOCK_EXCL);
+		xfs_rtlock(tp, mp, XFS_RTLOCK_ALLOC);
 		/*
 		 * Update the bitmap inode's size ondisk and incore.  We need
 		 * to update the incore size so that inode inactivation won't
@@ -1043,11 +1043,6 @@ xfs_growfs_rt(
 			nsbp->sb_rbmblocks * nsbp->sb_blocksize;
 		i_size_write(VFS_I(mp->m_rbmip), mp->m_rbmip->i_d.di_size);
 		xfs_trans_log_inode(tp, mp->m_rbmip, XFS_ILOG_CORE);
-		/*
-		 * Get the summary inode into the transaction.
-		 */
-		xfs_ilock(mp->m_rsumip, XFS_ILOCK_EXCL | XFS_ILOCK_RTSUM);
-		xfs_trans_ijoin(tp, mp->m_rsumip, XFS_ILOCK_EXCL);
 		/*
 		 * Update the summary inode's size.  We need to update the
 		 * incore size so that inode inactivation won't punch what it
@@ -1347,4 +1342,42 @@ xfs_rtpick_extent(
 	xfs_trans_log_inode(tp, mp->m_rbmip, XFS_ILOG_CORE);
 	*pick = b;
 	return 0;
+}
+
+/*
+ * Lock the metadata inodes for the realtime volume.  If a transaction is
+ * given, the rt metadata inode will be joined to the transaction and the lock
+ * will be released on transaction commit.
+ */
+void
+xfs_rtlock(
+	struct xfs_trans	*tp,
+	struct xfs_mount	*mp,
+	unsigned int		lock_flags)
+{
+	ASSERT(!(lock_flags & ~XFS_RTLOCK_ALL));
+
+	xfs_ilock(mp->m_rbmip, XFS_ILOCK_EXCL | XFS_ILOCK_RTBITMAP);
+	if (tp)
+		xfs_trans_ijoin(tp, mp->m_rbmip, XFS_ILOCK_EXCL);
+
+	if (lock_flags & XFS_RTLOCK_ALLOC) {
+		xfs_ilock(mp->m_rsumip, XFS_ILOCK_EXCL | XFS_ILOCK_RTSUM);
+		if (tp)
+			xfs_trans_ijoin(tp, mp->m_rsumip, XFS_ILOCK_EXCL);
+	}
+}
+
+/* Unlock the realtime metadata inodes. */
+void
+xfs_rtunlock(
+	struct xfs_mount	*mp,
+	unsigned int		lock_flags)
+{
+	ASSERT(!(lock_flags & ~XFS_RTLOCK_ALL));
+
+	if (lock_flags & XFS_RTLOCK_ALLOC)
+		xfs_iunlock(mp->m_rsumip, XFS_ILOCK_EXCL | XFS_ILOCK_RTSUM);
+
+	xfs_iunlock(mp->m_rbmip, XFS_ILOCK_EXCL | XFS_ILOCK_RTBITMAP);
 }
