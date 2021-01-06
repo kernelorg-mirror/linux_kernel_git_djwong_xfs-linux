@@ -566,7 +566,7 @@ xqcheck_iwalk(
 			 * links but hasn't yet been inactivated.  Try to push
 			 * it towards inactivation.
 			 */
-			xfs_inactive_inodes(xqc->sc->mp, NULL);
+			xfs_inactive_force_ino(xqc->sc->mp, ino);
 			/* fall through */
 		case -EINVAL:
 			/*
