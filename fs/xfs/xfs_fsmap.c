@@ -25,6 +25,7 @@
 #include "xfs_alloc_btree.h"
 #include "xfs_rtalloc.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_rtrefcount_btree.h"
 
 /* Convert an xfs_fsmap to an fsmap. */
 static void
@@ -204,14 +205,17 @@ xfs_getfsmap_is_shared(
 	*stat = false;
 	if (!xfs_sb_version_hasreflink(&mp->m_sb))
 		return 0;
+
 	/* rt files will have agno set to NULLAGNUMBER */
-	if (info->agno == NULLAGNUMBER)
-		return 0;
+	if (info->agno == NULLAGNUMBER) {
+		cur = xfs_rtrefcountbt_init_cursor(mp, tp, mp->m_rrefcountip);
+	} else {
+		cur = xfs_refcountbt_init_cursor(mp, tp, info->agf_bp,
+				info->agno);
+	}
 
 	/* Are there any shared blocks here? */
 	flen = 0;
-	cur = xfs_refcountbt_init_cursor(mp, tp, info->agf_bp,
-			info->agno);
 
 	error = xfs_refcount_find_shared(cur, rec->rm_startblock,
 			rec->rm_blockcount, &fbno, &flen, false);
