@@ -728,7 +728,8 @@ xfs_swapext_estimate_overhead(
 			rmapbt_overhead = XFS_NRMAPADD_SPACE_RES(mp,
 							res->nr_exchanges);
 		else
-			rmapbt_overhead = 0;
+			rmapbt_overhead = XFS_NRTRMAPADD_SPACE_RES(mp,
+							res->nr_exchanges);
 		res->resblks += 2 * rmapbt_overhead;
 	}
 
