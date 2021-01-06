@@ -13,4 +13,18 @@ uint32_t	xfs_dic2xflags(uint16_t di_flags, uint64_t di_flags2,
 
 prid_t		xfs_get_initial_prid(struct xfs_inode *dp);
 
+/* Initial ids, link count, device number, and mode of a new inode. */
+struct xfs_ialloc_args {
+	struct xfs_inode	*pip;	/* parent inode or null */
+
+	kuid_t			uid;
+	kgid_t			gid;
+	prid_t			prid;
+
+	xfs_nlink_t		nlink;
+	dev_t			rdev;
+
+	umode_t			mode;
+};
+
 #endif /* __XFS_INODE_UTIL_H__ */
