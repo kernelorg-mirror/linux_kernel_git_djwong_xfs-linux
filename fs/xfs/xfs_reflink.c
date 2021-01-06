@@ -486,7 +486,8 @@ xfs_reflink_cancel_cow_blocks(
 
 			/* Free the CoW orphan record. */
 			xfs_refcount_free_cow_extent(*tpp, del.br_startblock,
-					del.br_blockcount);
+					del.br_blockcount,
+					XFS_IS_REALTIME_INODE(ip));
 
 			xfs_bmap_add_free(*tpp, del.br_startblock,
 					  del.br_blockcount, NULL, false);
@@ -667,7 +668,8 @@ xfs_reflink_end_cow_extent(
 	trace_xfs_reflink_cow_remap(ip, &del);
 
 	/* Free the CoW orphan record. */
-	xfs_refcount_free_cow_extent(tp, del.br_startblock, del.br_blockcount);
+	xfs_refcount_free_cow_extent(tp, del.br_startblock, del.br_blockcount,
+			XFS_IS_REALTIME_INODE(ip));
 
 	/* Map the new blocks into the data fork. */
 	xfs_bmap_map_extent(tp, ip, XFS_DATA_FORK, &del);
@@ -1125,7 +1127,8 @@ xfs_reflink_remap_extent(
 		 * or not), unmap the extent and drop its refcount.
 		 */
 		xfs_bmap_unmap_extent(tp, ip, XFS_DATA_FORK, &smap);
-		xfs_refcount_decrease_extent(tp, &smap);
+		xfs_refcount_decrease_extent(tp, &smap,
+				XFS_IS_REALTIME_INODE(ip));
 		qdelta -= smap.br_blockcount;
 	} else if (smap.br_startblock == DELAYSTARTBLOCK) {
 		int		done;
@@ -1148,7 +1151,8 @@ xfs_reflink_remap_extent(
 	 * its refcount and map it into the file.
 	 */
 	if (dmap_written) {
-		xfs_refcount_increase_extent(tp, dmap);
+		xfs_refcount_increase_extent(tp, dmap,
+				XFS_IS_REALTIME_INODE(ip));
 		xfs_bmap_map_extent(tp, ip, XFS_DATA_FORK, dmap);
 		qdelta += dmap->br_blockcount;
 	}
