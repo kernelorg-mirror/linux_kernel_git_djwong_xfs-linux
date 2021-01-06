@@ -287,7 +287,8 @@ xrep_bmap_check_rtfork_rmap(
 		return -EFSCORRUPTED;
 
 	/* Make sure this isn't free space. */
-	return xrep_rtext_is_free(sc, rec->rm_startblock, rec->rm_blockcount);
+	return xrep_rtext_is_free(sc, rec->rm_startblock, rec->rm_blockcount,
+			false);
 }
 
 /* Record realtime extents that belong to this inode's fork. */

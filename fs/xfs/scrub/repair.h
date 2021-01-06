@@ -88,7 +88,7 @@ int xrep_check_ino_btree_mapping(struct xfs_scrub *sc,
 		const struct xfs_rmap_irec *rec);
 
 int xrep_rtext_is_free(struct xfs_scrub *sc, xfs_rtblock_t rtbno,
-		xfs_filblks_t len);
+		xfs_filblks_t len, bool must_align);
 bool xrep_is_rtmeta_ino(struct xfs_scrub *sc, xfs_ino_t ino);
 
 static inline int
@@ -144,10 +144,12 @@ int xrep_quotacheck(struct xfs_scrub *sc);
 int xrep_rtsummary(struct xfs_scrub *sc);
 int xrep_rtbitmap(struct xfs_scrub *sc);
 int xrep_rtrmapbt(struct xfs_scrub *sc);
+int xrep_rtrefcountbt(struct xfs_scrub *sc);
 #else
 # define xrep_rtsummary			xrep_notsupported
 # define xrep_rtbitmap			xrep_notsupported
 # define xrep_rtrmapbt			xrep_notsupported
+# define xrep_rtrefcountbt		xrep_notsupported
 #endif /* CONFIG_XFS_RT */
 
 struct xrep_newbt_resv {
@@ -274,6 +276,7 @@ xrep_rmapbt_setup(
 #define xrep_parent			xrep_notsupported
 #define xrep_rtbitmap			xrep_notsupported
 #define xrep_rtrmapbt			xrep_notsupported
+#define xrep_rtrefcountbt		xrep_notsupported
 
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
