@@ -40,6 +40,7 @@
 #include "xfs_icache.h"
 #include "xfs_rtrmap_btree.h"
 #include "xfs_rtalloc.h"
+#include "xfs_rtrefcount_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -1473,6 +1474,11 @@ xrep_rt_btcur_init(
 	    xfs_sb_version_hasrtrmapbt(&mp->m_sb))
 		sr->rmap_cur = xfs_rtrmapbt_init_cursor(mp, sc->tp,
 				mp->m_rrmapip);
+
+	if (sc->sm->sm_type != XFS_SCRUB_TYPE_RTREFCBT &&
+	    xfs_sb_version_hasrtreflink(&mp->m_sb))
+		sr->refc_cur = xfs_rtrefcountbt_init_cursor(mp, sc->tp,
+				mp->m_rrefcountip);
 }
 
 /* Reinitialize the per-AG block reservation for the AG we just fixed. */
