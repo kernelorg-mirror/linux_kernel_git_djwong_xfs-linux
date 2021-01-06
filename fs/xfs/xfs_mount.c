@@ -34,6 +34,7 @@
 #include "xfs_trace.h"
 #include "xfs_ag.h"
 #include "xfs_imeta.h"
+#include "xfs_rtrmap_btree.h"
 
 static DEFINE_MUTEX(xfs_uuid_table_mutex);
 static int xfs_uuid_table_size;
@@ -682,6 +683,8 @@ xfs_mountfs(
 	xfs_bmap_compute_maxlevels(mp, XFS_ATTR_FORK);
 	xfs_mount_setup_inode_geom(mp);
 	mp->m_rmap_maxlevels = xfs_rmapbt_compute_maxlevels(mp);
+	mp->m_rtrmap_maxlevels = xfs_rtrmapbt_compute_maxlevels(mp,
+			mp->m_sb.sb_dblocks, mp->m_sb.sb_rblocks);
 	xfs_refcountbt_compute_maxlevels(mp);
 
 	/*
