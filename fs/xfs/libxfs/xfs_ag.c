@@ -659,6 +659,55 @@ xfs_ag_extend_space(
 				XFS_AG_RESV_NONE);
 }
 
+/* Compute the AG geometry flags. */
+static inline uint32_t
+xfs_ag_calc_geoflags(
+	struct xfs_perag	*pag)
+{
+	uint32_t		ret = 0;
+
+	if (pag->pagf_noalloc)
+		ret |= XFS_AG_FLAG_NOALLOC;
+
+	return ret;
+}
+
+/*
+ * Compare the current AG geometry flags against the flags in the AG geometry
+ * structure and update the AG state to reflect any changes, then update the
+ * struct to reflect the current status.
+ */
+static inline int
+xfs_ag_update_geoflags(
+	struct xfs_perag	*pag,
+	struct xfs_ag_geometry	*ageo,
+	uint32_t		new_flags)
+{
+	uint32_t		old_flags = xfs_ag_calc_geoflags(pag);
+	int			error;
+
+	if (!(new_flags & XFS_AG_FLAG_UPDATE)) {
+		ageo->ag_flags = old_flags;
+		return 0;
+	}
+
+	if ((old_flags & XFS_AG_FLAG_NOALLOC) &&
+	    !(new_flags & XFS_AG_FLAG_NOALLOC)) {
+		error = xfs_ag_clear_noalloc(pag);
+		if (error)
+			return error;
+	}
+	if (!(old_flags & XFS_AG_FLAG_NOALLOC) &&
+	    (new_flags & XFS_AG_FLAG_NOALLOC)) {
+		error = xfs_ag_set_noalloc(pag);
+		if (error)
+			return error;
+	}
+
+	ageo->ag_flags = xfs_ag_calc_geoflags(pag);
+	return 0;
+}
+
 /* Retrieve AG geometry. */
 int
 xfs_ag_get_geometry(
@@ -672,6 +721,7 @@ xfs_ag_get_geometry(
 	struct xfs_agf		*agf;
 	struct xfs_perag	*pag;
 	unsigned int		freeblks;
+	uint32_t		inflags = ageo->ag_flags;
 	int			error;
 
 	if (agno >= mp->m_sb.sb_agcount)
@@ -686,6 +736,10 @@ xfs_ag_get_geometry(
 		goto out_agi;
 
 	pag = agi_bp->b_pag;
+
+	error = xfs_ag_update_geoflags(pag, ageo, inflags);
+	if (error)
+		goto out;
 
 	/* Fill out form. */
 	memset(ageo, 0, sizeof(*ageo));
@@ -704,6 +758,7 @@ xfs_ag_get_geometry(
 	ageo->ag_freeblks = freeblks;
 	xfs_ag_geom_health(pag, ageo);
 
+out:
 	/* Release resources. */
 	xfs_buf_relse(agf_bp);
 out_agi:
