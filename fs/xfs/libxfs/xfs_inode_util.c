@@ -124,3 +124,15 @@ xfs_dic2xflags(
 
 	return flags;
 }
+
+#define XFS_PROJID_DEFAULT	0
+
+prid_t
+xfs_get_initial_prid(
+	struct xfs_inode	*dp)
+{
+	if (dp->i_d.di_flags & XFS_DIFLAG_PROJINHERIT)
+		return dp->i_d.di_projid;
+
+	return XFS_PROJID_DEFAULT;
+}
