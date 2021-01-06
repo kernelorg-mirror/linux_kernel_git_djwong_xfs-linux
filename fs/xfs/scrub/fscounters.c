@@ -234,6 +234,9 @@ retry:
 	delayed = percpu_counter_sum(&mp->m_delalloc_blks);
 	fsc->fdblocks -= delayed;
 
+	/* Account blocks reserved for rt metadata btrees. */
+	fsc->fdblocks -= mp->m_rtmeta_resv.ar_reserved;
+
 	trace_xchk_fscounters_calc(mp, fsc->icount, fsc->ifree, fsc->fdblocks,
 			delayed);
 
