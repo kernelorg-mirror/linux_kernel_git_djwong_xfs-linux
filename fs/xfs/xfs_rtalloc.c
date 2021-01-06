@@ -1394,6 +1394,7 @@ xfs_rtmount_inodes(
 		if (XFS_IS_CORRUPT(mp,
 				   mp->m_rrefcountip->i_df.if_format !=
 				   XFS_DINODE_FMT_REFCOUNT)) {
+			xfs_rt_mark_sick(mp, XFS_SICK_RT_REFCNTBT);
 			error = -EFSCORRUPTED;
 			goto out_rrefcount;
 		}
