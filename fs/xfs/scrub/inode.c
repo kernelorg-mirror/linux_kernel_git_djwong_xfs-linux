@@ -180,8 +180,10 @@ xchk_inode_flags2(
 	if ((flags2 & XFS_DIFLAG2_REFLINK) && !S_ISREG(mode))
 		goto bad;
 
-	/* realtime and reflink make no sense, currently */
-	if ((flags & XFS_DIFLAG_REALTIME) && (flags2 & XFS_DIFLAG2_REFLINK))
+	/* realtime and reflink don't always go together */
+	if ((flags2 & XFS_DIFLAG2_REFLINK) &&
+	    !xfs_sb_version_hasrtreflink(&mp->m_sb) &&
+	    (flags & XFS_DIFLAG_REALTIME))
 		goto bad;
 
 	/* no bigtime iflag without the bigtime feature */
