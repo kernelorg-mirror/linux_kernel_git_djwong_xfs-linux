@@ -532,11 +532,7 @@ xrep_refc_build_new_tree(
 	if (error)
 		goto err_cur;
 
-	/*
-	 * Reserve the space we'll need for the new btree.  Drop the cursor
-	 * while we do this because that can roll the transaction and cursors
-	 * can't handle that.
-	 */
+	/* Reserve the space we'll need for the new btree. */
 	error = xrep_newbt_alloc_blocks(&rr->new_btree_info,
 			rr->refc_bload.nr_blocks);
 	if (error)
