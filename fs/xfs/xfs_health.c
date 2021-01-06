@@ -359,6 +359,7 @@ static const struct ioctl_sick_map rt_map[] = {
 	{ XFS_SICK_RT_BITMAP,	XFS_FSOP_GEOM_SICK_RT_BITMAP },
 	{ XFS_SICK_RT_SUMMARY,	XFS_FSOP_GEOM_SICK_RT_SUMMARY },
 	{ XFS_SICK_RT_RMAPBT,	XFS_FSOP_GEOM_SICK_RT_RMAPBT },
+	{ XFS_SICK_RT_REFCNTBT,	XFS_FSOP_GEOM_SICK_RT_REFCNTBT },
 	{ 0, 0 },
 };
 
@@ -507,6 +508,9 @@ xfs_btree_mark_sick(
 		return;
 	case XFS_BTNUM_RTRMAP:
 		xfs_rt_mark_sick(cur->bc_mp, XFS_SICK_RT_RMAPBT);
+		return;
+	case XFS_BTNUM_RTREFC:
+		xfs_rt_mark_sick(cur->bc_mp, XFS_SICK_RT_REFCNTBT);
 		return;
 	case XFS_BTNUM_BNO:
 		mask = XFS_SICK_AG_BNOBT;
