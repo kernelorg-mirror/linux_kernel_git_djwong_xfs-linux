@@ -204,6 +204,8 @@ xfs_inode_inherit_flags2(
 	}
 	if (pip->i_d.di_flags2 & XFS_DIFLAG2_DAX)
 		ip->i_d.di_flags2 |= XFS_DIFLAG2_DAX;
+	if (pip->i_d.di_flags2 & XFS_DIFLAG2_METADATA)
+		ip->i_d.di_flags2 |= XFS_DIFLAG2_METADATA;
 }
 
 /* Initialise an inode's attributes. */
