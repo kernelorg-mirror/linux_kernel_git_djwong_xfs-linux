@@ -525,7 +525,7 @@ xfs_getfsmap_rtdev_rtbitmap_query(
 	struct xfs_rtalloc_rec		ahigh = { 0 };
 	int				error;
 
-	xfs_ilock(tp->t_mountp->m_rbmip, XFS_ILOCK_SHARED);
+	xfs_rtlock(NULL, tp->t_mountp, XFS_RTLOCK_ALL);
 
 	alow.ar_startext = info->low.rm_startblock;
 	ahigh.ar_startext = info->high.rm_startblock;
@@ -543,7 +543,7 @@ xfs_getfsmap_rtdev_rtbitmap_query(
 	if (error)
 		goto err;
 err:
-	xfs_iunlock(tp->t_mountp->m_rbmip, XFS_ILOCK_SHARED);
+	xfs_rtunlock(tp->t_mountp, XFS_RTLOCK_ALL);
 	return error;
 }
 
