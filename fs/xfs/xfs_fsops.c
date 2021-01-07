@@ -102,6 +102,9 @@ xfs_growfs_data_private(
 	error = xfs_sb_validate_fsb_count(&mp->m_sb, nb);
 	if (error)
 		return error;
+	error = xfs_growfs_check_rt_maxlevels(mp, nb, mp->m_sb.sb_rblocks);
+	if (error)
+		return error;
 
 	if (nb > mp->m_sb.sb_dblocks) {
 		error = xfs_buf_read_uncached(mp->m_ddev_targp,

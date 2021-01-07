@@ -98,6 +98,9 @@ xfs_rtpick_extent(
 	xfs_extlen_t		len,	/* allocation length (rtextents) */
 	xfs_rtblock_t		*pick);	/* result rt extent */
 
+int xfs_growfs_check_rt_maxlevels(struct xfs_mount *mp, xfs_rfsblock_t dblocks,
+		xfs_rfsblock_t rblocks);
+
 /*
  * Grow the realtime area of the filesystem.
  */
@@ -158,6 +161,7 @@ void xfs_rtunlock(struct xfs_mount *mp, unsigned int lock_flags);
 # define xfs_rtfree_extent(t,b,l)                       (ENOSYS)
 # define xfs_rtfree_blocks(t,rb,rl)			(ENOSYS)
 # define xfs_rtpick_extent(m,t,l,rb)                    (ENOSYS)
+# define xfs_growfs_check_rt_maxlevels(m,d,r)		(0)
 # define xfs_growfs_rt(mp,in)                           (ENOSYS)
 # define xfs_rtalloc_query_range(t,l,h,f,p)             (ENOSYS)
 # define xfs_rtalloc_query_all(t,f,p)                   (ENOSYS)
