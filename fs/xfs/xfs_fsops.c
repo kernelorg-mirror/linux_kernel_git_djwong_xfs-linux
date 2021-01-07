@@ -21,6 +21,7 @@
 #include "xfs_ag_resv.h"
 #include "xfs_inode.h"
 #include "xfs_icache.h"
+#include "xfs_rtalloc.h"
 
 /*
  * Write new AG headers to disk. Non-transactional, but need to be
@@ -101,6 +102,9 @@ xfs_growfs_data_private(
 
 	nb = in->newblocks;
 	error = xfs_sb_validate_fsb_count(&mp->m_sb, nb);
+	if (error)
+		return error;
+	error = xfs_growfs_check_rt_maxlevels(mp, nb, mp->m_sb.sb_rblocks);
 	if (error)
 		return error;
 
