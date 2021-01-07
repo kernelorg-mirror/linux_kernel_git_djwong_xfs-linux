@@ -25,6 +25,7 @@
 #include "xfs_rt_resv.h"
 #include "xfs_quota.h"
 #include "xfs_error.h"
+#include "xfs_rtrmap_btree.h"
 
 /*
  * Read and return the summary information for a given extent size,
@@ -903,6 +904,29 @@ xfs_alloc_rsum_cache(
  */
 
 /*
+ * Transaction reservation sizes depend on the realtime btree maxlevels, which
+ * is in turn computed from the size of the data device (where the btrees live)
+ * and the size of the rt volume.  Make sure they don't increase, which could
+ * cause us to fail minimum log size checks at the next mount.
+ */
+int
+xfs_growfs_check_rt_maxlevels(
+	struct xfs_mount	*mp,
+	xfs_rfsblock_t		dblocks,
+	xfs_rfsblock_t		rblocks)
+{
+	unsigned int		new;
+
+	if (xfs_sb_version_hasrtrmapbt(&mp->m_sb)) {
+		new = xfs_rtrmapbt_compute_maxlevels(mp, dblocks, rblocks);
+		if (new > mp->m_rtrmap_maxlevels)
+			return -EINVAL;
+	}
+
+	return 0;
+}
+
+/*
  * Grow the realtime area of the filesystem.
  */
 int
@@ -938,7 +962,12 @@ xfs_growfs_rt(
 	    (nrblocks = in->newblocks) <= sbp->sb_rblocks ||
 	    (sbp->sb_rblocks && (in->extsize != sbp->sb_rextsize)))
 		return -EINVAL;
-	if ((error = xfs_sb_validate_fsb_count(sbp, nrblocks)))
+	error = xfs_sb_validate_fsb_count(sbp, nrblocks);
+	if (error)
+		return error;
+	error = xfs_growfs_check_rt_maxlevels(mp, mp->m_sb.sb_dblocks,
+			nrblocks);
+	if (error)
 		return error;
 	/*
 	 * Read in the last block of the device, make sure it exists.
