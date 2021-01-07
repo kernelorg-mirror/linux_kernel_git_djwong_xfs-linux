@@ -21,6 +21,7 @@
 #include "xfs_ag_resv.h"
 #include "xfs_inode.h"
 #include "xfs_icache.h"
+#include "xfs_rtalloc.h"
 
 /*
  * growfs operations
@@ -43,7 +44,11 @@ xfs_growfs_data_private(
 	nb = in->newblocks;
 	if (nb < mp->m_sb.sb_dblocks)
 		return -EINVAL;
-	if ((error = xfs_sb_validate_fsb_count(&mp->m_sb, nb)))
+	error = xfs_sb_validate_fsb_count(&mp->m_sb, nb);
+	if (error)
+		return error;
+	error = xfs_growfs_check_rt_maxlevels(mp, nb, mp->m_sb.sb_rblocks);
+	if (error)
 		return error;
 	error = xfs_buf_read_uncached(mp->m_ddev_targp,
 				XFS_FSB_TO_BB(mp, nb) - XFS_FSS_TO_BB(mp, 1),
