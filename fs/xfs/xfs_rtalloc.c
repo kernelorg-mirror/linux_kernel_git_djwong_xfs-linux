@@ -28,6 +28,7 @@
 #include "xfs_error.h"
 #include "xfs_quota.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_rtrefcount_btree.h"
 
 /*
  * Read and return the summary information for a given extent size,
@@ -922,6 +923,12 @@ xfs_growfs_check_rt_maxlevels(
 	if (xfs_sb_version_hasrtrmapbt(&mp->m_sb)) {
 		new = xfs_rtrmapbt_compute_maxlevels(mp, dblocks, rblocks);
 		if (new > mp->m_rtrmap_maxlevels)
+			return -EINVAL;
+	}
+
+	if (xfs_sb_version_hasrtreflink(&mp->m_sb)) {
+		new = xfs_rtrefcountbt_compute_maxlevels(mp, dblocks, rblocks);
+		if (new > mp->m_rtrefc_maxlevels)
 			return -EINVAL;
 	}
 
