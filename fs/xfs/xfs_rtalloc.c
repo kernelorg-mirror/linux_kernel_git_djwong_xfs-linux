@@ -923,6 +923,12 @@ xfs_growfs_check_rt_maxlevels(
 			return -EINVAL;
 	}
 
+	if (xfs_sb_version_hasrtreflink(&mp->m_sb)) {
+		new = xfs_rtrefcountbt_compute_maxlevels(mp, dblocks, rblocks);
+		if (new > mp->m_rtrefc_maxlevels)
+			return -EINVAL;
+	}
+
 	return 0;
 }
 
