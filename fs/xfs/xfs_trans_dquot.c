@@ -16,6 +16,7 @@
 #include "xfs_quota.h"
 #include "xfs_qm.h"
 #include "xfs_trace.h"
+#include "xfs_icache.h"
 
 STATIC void	xfs_trans_alloc_dqinfo(xfs_trans_t *);
 
@@ -770,21 +771,40 @@ unwind_usr:
 	return error;
 }
 
-
 /*
- * Lock the dquot and change the reservation if we can.
- * This doesn't change the actual usage, just the reservation.
- * The inode sent in is locked.
+ * Lock the dquot and change the reservation if we can.  This doesn't change
+ * the actual usage, just the reservation.  The caller must hold ILOCK_EXCL on
+ * the inode.  If @retry is not a NULL pointer, the caller must ensure that
+ * *retry is set to false before the first time this function is called.
+ *
+ * If the quota reservation fails because we hit a quota limit (and retry is
+ * not a NULL pointer, and *retry is true), this function will try to invoke
+ * the speculative preallocation gc scanner to reduce quota usage.  In order to
+ * do that, we cancel the transaction, NULL out tpp, and drop the ILOCK.  If we
+ * actually do some freeing work, *retry will be set to true.
+ *
+ * This function ends one of four ways:
+ *  a) if retry is NULL, returns the result of trying to change the quota
+ *     reservation, with *tpp still set and the inode still locked;
+ *  b) returns an error code with *tpp cancelled and set to NULL, and the inode
+ *     unlocked;
+ *  c) returns zero with *tpp cancelled and set to NULL, the inode unlocked,
+ *     and *retry is true, which means we cleared space and the caller should
+ *     try again with a new transaction;
+ *  d) returns zero with *tpp still set, the inode still locked, and *retry
+ *     is false, which means the reservation succeeded.
  */
 int
 xfs_trans_reserve_quota_nblks(
-	struct xfs_trans	*tp,
+	struct xfs_trans	**tpp,
 	struct xfs_inode	*ip,
 	int64_t			nblks,
 	long			ninos,
-	uint			flags)
+	unsigned int		flags,
+	bool			*retry)
 {
 	struct xfs_mount	*mp = ip->i_mount;
+	int			error, err2;
 
 	if (!XFS_IS_QUOTA_RUNNING(mp) || !XFS_IS_QUOTA_ON(mp))
 		return 0;
@@ -795,13 +815,35 @@ xfs_trans_reserve_quota_nblks(
 	ASSERT((flags & ~(XFS_QMOPT_FORCE_RES)) == XFS_TRANS_DQ_RES_RTBLKS ||
 	       (flags & ~(XFS_QMOPT_FORCE_RES)) == XFS_TRANS_DQ_RES_BLKS);
 
+	/* Reserve nblks against these dquots, with trans as the mediator. */
+	error = xfs_trans_reserve_quota_bydquots(*tpp, mp, ip->i_udquot,
+			ip->i_gdquot, ip->i_pdquot, nblks, ninos, flags);
+
+	/* Exit immediately if the caller did not want retries. */
+	if (retry == NULL)
+		return error;
+
 	/*
-	 * Reserve nblks against these dquots, with trans as the mediator.
+	 * If the caller /can/ handle retries, we always cancel the transaction
+	 * on error, even if we aren't going to attempt a gc scan.
 	 */
-	return xfs_trans_reserve_quota_bydquots(tp, mp,
-						ip->i_udquot, ip->i_gdquot,
-						ip->i_pdquot,
-						nblks, ninos, flags);
+	if (error) {
+		xfs_trans_cancel(*tpp);
+		*tpp = NULL;
+		xfs_iunlock(ip, XFS_ILOCK_EXCL);
+	}
+
+	/* We only allow one retry for EDQUOT/ENOSPC. */
+	if (*retry || (error != -EDQUOT && error != -ENOSPC)) {
+		*retry = false;
+		return error;
+	}
+
+	/* Try to free some quota for this file's dquots. */
+	err2 = xfs_blockgc_free_quota(ip, 0, retry);
+	if (err2)
+		return err2;
+	return *retry ? 0 : error;
 }
 
 /* Change the quota reservations for an inode creation activity. */

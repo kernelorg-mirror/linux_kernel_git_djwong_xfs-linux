@@ -395,6 +395,7 @@ xfs_attr_set(
 	struct xfs_mount	*mp = dp->i_mount;
 	struct xfs_trans_res	tres;
 	bool			rsvd = (args->attr_filter & XFS_ATTR_ROOT);
+	bool			quota_retry = false;
 	int			error, local;
 	unsigned int		total;
 
@@ -453,6 +454,7 @@ xfs_attr_set(
 	 * Root fork attributes can use reserved data blocks for this
 	 * operation if necessary
 	 */
+retry:
 	error = xfs_trans_alloc(mp, &tres, total, 0,
 			rsvd ? XFS_TRANS_RESERVE : 0, &args->trans);
 	if (error)
@@ -465,10 +467,12 @@ xfs_attr_set(
 
 		if (rsvd)
 			quota_flags |= XFS_QMOPT_FORCE_RES;
-		error = xfs_trans_reserve_quota_nblks(args->trans, dp,
-				args->total, 0, quota_flags);
+		error = xfs_trans_reserve_quota_nblks(&args->trans, dp,
+				args->total, 0, quota_flags, &quota_retry);
 		if (error)
-			goto out_trans_cancel;
+			return error;
+		if (quota_retry)
+			goto retry;
 
 		error = xfs_has_attr(args);
 		if (error == -EEXIST && (args->attr_flags & XATTR_CREATE))
