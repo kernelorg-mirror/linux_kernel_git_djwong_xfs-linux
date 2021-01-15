@@ -159,6 +159,7 @@ xfs_symlink(
 	struct xfs_dquot	*udqp = NULL;
 	struct xfs_dquot	*gdqp = NULL;
 	struct xfs_dquot	*pdqp = NULL;
+	bool			quota_retry = false;
 	uint			resblks;
 
 	*ipp = NULL;
@@ -197,6 +198,7 @@ xfs_symlink(
 		fs_blocks = xfs_symlink_blocks(mp, pathlen);
 	resblks = XFS_SYMLINK_SPACE_RES(mp, link_name->len, fs_blocks);
 
+retry:
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_symlink, resblks, 0, 0, &tp);
 	if (error)
 		goto out_release_inode;
@@ -215,10 +217,12 @@ xfs_symlink(
 	/*
 	 * Reserve disk quota : blocks and inode.
 	 */
-	error = xfs_trans_reserve_quota_icreate(tp, dp, udqp, gdqp, pdqp,
-			resblks);
+	error = xfs_trans_reserve_quota_icreate(&tp, dp, &unlock_dp_on_error,
+			udqp, gdqp, pdqp, resblks, &quota_retry);
 	if (error)
-		goto out_trans_cancel;
+		goto out_release_dquots;
+	if (quota_retry)
+		goto retry;
 
 	/*
 	 * Allocate an inode for the symlink.
@@ -342,7 +346,7 @@ out_release_inode:
 		xfs_finish_inode_setup(ip);
 		xfs_irele(ip);
 	}
-
+out_release_dquots:
 	xfs_qm_dqrele(udqp);
 	xfs_qm_dqrele(gdqp);
 	xfs_qm_dqrele(pdqp);
