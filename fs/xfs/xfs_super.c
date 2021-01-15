@@ -35,6 +35,7 @@
 #include "xfs_refcount_item.h"
 #include "xfs_bmap_item.h"
 #include "xfs_reflink.h"
+#include "xfs_pwork.h"
 
 #include <linux/magic.h>
 #include <linux/fs_context.h>
@@ -516,7 +517,8 @@ xfs_init_mount_workqueues(
 		goto out_destroy_cil;
 
 	mp->m_blockgc_workqueue = alloc_workqueue("xfs-blockgc/%s",
-			WQ_MEM_RECLAIM|WQ_FREEZABLE, 0, mp->m_super->s_id);
+			WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_FREEZABLE | WQ_SYSFS,
+			0, mp->m_super->s_id);
 	if (!mp->m_blockgc_workqueue)
 		goto out_destroy_reclaim;
 
@@ -1387,6 +1389,31 @@ xfs_fs_validate_params(
 	return 0;
 }
 
+/*
+ * Constrain the number of threads that we start for background work.  This
+ * is the estimated parallelism of the filesystem capped to the unbound work
+ * queue maximum.
+ *
+ * We can't set this when we allocate the workqueues because the thread count
+ * derives from AG count, and we can't know that until we're far enough through
+ * setup to read the superblock, which requires functioning workqueues.
+ */
+static inline void
+xfs_configure_background_workqueues(
+	struct xfs_mount	*mp)
+{
+	unsigned int		threads = xfs_pwork_guess_metadata_threads(mp);
+	unsigned int		max_active;
+
+	/*
+	 * Background garbage collection of speculative preallocations are done
+	 * per-AG, so don't allow more threads than the AG count, the number of
+	 * CPUs, and the estimated parallelism of the storage device.
+	 */
+	max_active = min_t(unsigned int, threads, WQ_UNBOUND_MAX_ACTIVE);
+	workqueue_set_max_active(mp->m_blockgc_workqueue, max_active);
+}
+
 static int
 xfs_fs_fill_super(
 	struct super_block	*sb,
@@ -1451,6 +1478,8 @@ xfs_fs_fill_super(
 	error = xfs_finish_flags(mp);
 	if (error)
 		goto out_free_sb;
+
+	xfs_configure_background_workqueues(mp);
 
 	error = xfs_setup_devices(mp);
 	if (error)
@@ -1872,7 +1901,6 @@ static int xfs_init_fs_context(
 	mutex_init(&mp->m_growlock);
 	INIT_WORK(&mp->m_flush_inodes_work, xfs_flush_inodes_worker);
 	INIT_DELAYED_WORK(&mp->m_reclaim_work, xfs_reclaim_worker);
-	INIT_DELAYED_WORK(&mp->m_blockgc_work, xfs_blockgc_worker);
 	mp->m_kobj.kobject.kset = xfs_kset;
 	/*
 	 * We don't create the finobt per-ag space reservation until after log
