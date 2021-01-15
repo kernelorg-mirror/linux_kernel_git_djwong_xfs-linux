@@ -685,8 +685,13 @@ write_retry:
 	 * running at the same time.
 	 */
 	if (ret == -EDQUOT && !cleared_space) {
+		int	ret2;
+
 		xfs_iunlock(ip, iolock);
-		cleared_space = xfs_blockgc_free_quota(ip);
+		ret2 = xfs_blockgc_free_quota(ip, XFS_EOF_FLAGS_SYNC,
+				&cleared_space);
+		if (ret2)
+			return ret2;
 		if (cleared_space)
 			goto write_retry;
 		iolock = 0;
