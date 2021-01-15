@@ -81,8 +81,9 @@ extern void xfs_trans_mod_dquot_byino(struct xfs_trans *, struct xfs_inode *,
 		uint, int64_t);
 extern void xfs_trans_apply_dquot_deltas(struct xfs_trans *);
 extern void xfs_trans_unreserve_and_mod_dquots(struct xfs_trans *);
-extern int xfs_trans_reserve_quota_nblks(struct xfs_trans *,
-		struct xfs_inode *, int64_t, long, uint);
+int xfs_trans_reserve_quota_nblks(struct xfs_trans **tpp, struct xfs_inode *ip,
+		int64_t nblocks, long ninos, unsigned int flags,
+		bool *retry);
 extern int xfs_trans_reserve_quota_bydquots(struct xfs_trans *,
 		struct xfs_mount *, struct xfs_dquot *,
 		struct xfs_dquot *, struct xfs_dquot *, int64_t, long, uint);
@@ -128,7 +129,8 @@ xfs_qm_vop_dqalloc(struct xfs_inode *ip, kuid_t kuid, kgid_t kgid,
 #define xfs_trans_apply_dquot_deltas(tp)
 #define xfs_trans_unreserve_and_mod_dquots(tp)
 static inline int xfs_trans_reserve_quota_nblks(struct xfs_trans *tp,
-		struct xfs_inode *ip, int64_t nblks, long ninos, uint flags)
+		struct xfs_inode *ip, int64_t nblks, long ninos,
+		unsigned int flags, bool *retry)
 {
 	return 0;
 }
@@ -170,14 +172,17 @@ static inline int
 xfs_trans_unreserve_quota_nblks(struct xfs_trans *tp, struct xfs_inode *ip,
 		int64_t nblks, long ninos, unsigned int flags)
 {
-	return xfs_trans_reserve_quota_nblks(tp, ip, -nblks, -ninos, flags);
+	return xfs_trans_reserve_quota_nblks(&tp, ip, -nblks, -ninos, flags,
+			NULL);
 }
 
 static inline int
 xfs_quota_reserve_blkres(struct xfs_inode *ip, int64_t nblks,
 		unsigned int flags)
 {
-	return xfs_trans_reserve_quota_nblks(NULL, ip, nblks, 0, flags);
+	struct xfs_trans	*tp = NULL;
+
+	return xfs_trans_reserve_quota_nblks(&tp, ip, nblks, 0, flags, NULL);
 }
 
 static inline int

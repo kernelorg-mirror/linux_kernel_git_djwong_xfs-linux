@@ -761,6 +761,7 @@ xfs_alloc_file_space(
 	 */
 	while (allocatesize_fsb && !error) {
 		xfs_fileoff_t	s, e;
+		bool		quota_retry = false;
 
 		/*
 		 * Determine space reservations for data/realtime.
@@ -803,6 +804,7 @@ xfs_alloc_file_space(
 		/*
 		 * Allocate and setup the transaction.
 		 */
+retry:
 		error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks,
 				resrtextents, 0, &tp);
 
@@ -817,10 +819,12 @@ xfs_alloc_file_space(
 			break;
 		}
 		xfs_ilock(ip, XFS_ILOCK_EXCL);
-		error = xfs_trans_reserve_quota_nblks(tp, ip, qblocks,
-						      0, quota_flag);
+		error = xfs_trans_reserve_quota_nblks(&tp, ip, qblocks, 0,
+				quota_flag, &quota_retry);
 		if (error)
-			goto error1;
+			return error;
+		if (quota_retry)
+			goto retry;
 
 		xfs_trans_ijoin(tp, ip, 0);
 
@@ -853,8 +857,6 @@ xfs_alloc_file_space(
 
 error0:	/* unlock inode, unreserve quota blocks, cancel trans */
 	xfs_trans_unreserve_quota_nblks(tp, ip, (long)qblocks, 0, quota_flag);
-
-error1:	/* Just cancel transaction */
 	xfs_trans_cancel(tp);
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	return error;
@@ -870,8 +872,10 @@ xfs_unmap_extent(
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_trans	*tp;
 	uint			resblks = XFS_DIOSTRAT_SPACE_RES(mp, 0);
+	bool			quota_retry = false;
 	int			error;
 
+retry:
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, 0, 0, &tp);
 	if (error) {
 		ASSERT(error == -ENOSPC || XFS_FORCED_SHUTDOWN(mp));
@@ -879,10 +883,12 @@ xfs_unmap_extent(
 	}
 
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
-	error = xfs_trans_reserve_quota_nblks(tp, ip, resblks, 0,
-			XFS_QMOPT_RES_REGBLKS);
+	error = xfs_trans_reserve_quota_nblks(&tp, ip, resblks, 0,
+			XFS_QMOPT_RES_REGBLKS, &quota_retry);
 	if (error)
-		goto out_trans_cancel;
+		return error;
+	if (quota_retry)
+		goto retry;
 
 	xfs_trans_ijoin(tp, ip, 0);
 

@@ -27,7 +27,7 @@
 #include "xfs_dquot_item.h"
 #include "xfs_dquot.h"
 #include "xfs_reflink.h"
-
+#include "xfs_icache.h"
 
 #define XFS_ALLOC_ALIGN(mp, off) \
 	(((off) >> mp->m_allocsize_log) << mp->m_allocsize_log)
@@ -197,6 +197,7 @@ xfs_iomap_write_direct(
 	int			quota_flag;
 	uint			qblocks, resblks;
 	unsigned int		resrtextents = 0;
+	bool			quota_retry = false;
 	int			error;
 	int			bmapi_flags = XFS_BMAPI_PREALLOC;
 	uint			tflags = 0;
@@ -239,6 +240,7 @@ xfs_iomap_write_direct(
 			resblks = XFS_DIOSTRAT_SPACE_RES(mp, 0) << 1;
 		}
 	}
+retry:
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, resrtextents,
 			tflags, &tp);
 	if (error)
@@ -246,9 +248,12 @@ xfs_iomap_write_direct(
 
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
 
-	error = xfs_trans_reserve_quota_nblks(tp, ip, qblocks, 0, quota_flag);
+	error = xfs_trans_reserve_quota_nblks(&tp, ip, qblocks, 0, quota_flag,
+			&quota_retry);
 	if (error)
-		goto out_trans_cancel;
+		return error;
+	if (quota_retry)
+		goto retry;
 
 	xfs_trans_ijoin(tp, ip, 0);
 
@@ -286,7 +291,6 @@ out_unlock:
 
 out_res_cancel:
 	xfs_trans_unreserve_quota_nblks(tp, ip, (long)qblocks, 0, quota_flag);
-out_trans_cancel:
 	xfs_trans_cancel(tp);
 	goto out_unlock;
 }
@@ -539,6 +543,8 @@ xfs_iomap_write_unwritten(
 		return error;
 
 	do {
+		bool	quota_retry = false;
+
 		/*
 		 * Set up a transaction to convert the range of extents
 		 * from unwritten to real. Do allocations in a loop until
@@ -548,6 +554,7 @@ xfs_iomap_write_unwritten(
 		 * here as we might be asked to write out the same inode that we
 		 * complete here and might deadlock on the iolock.
 		 */
+retry:
 		error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, 0,
 				XFS_TRANS_RESERVE, &tp);
 		if (error)
@@ -556,10 +563,13 @@ xfs_iomap_write_unwritten(
 		xfs_ilock(ip, XFS_ILOCK_EXCL);
 		xfs_trans_ijoin(tp, ip, 0);
 
-		error = xfs_trans_reserve_quota_nblks(tp, ip, resblks, 0,
-				XFS_QMOPT_RES_REGBLKS | XFS_QMOPT_FORCE_RES);
+		error = xfs_trans_reserve_quota_nblks(&tp, ip, resblks, 0,
+				XFS_QMOPT_RES_REGBLKS | XFS_QMOPT_FORCE_RES,
+				&quota_retry);
 		if (error)
-			goto error_on_bmapi_transaction;
+			return error;
+		if (quota_retry)
+			goto retry;
 
 		/*
 		 * Modify the unwritten extent state of the buffer.

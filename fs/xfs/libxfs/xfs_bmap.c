@@ -1070,6 +1070,7 @@ xfs_bmap_add_attrfork(
 	int			blks;		/* space reservation */
 	int			version = 1;	/* superblock attr version */
 	int			logflags;	/* logging flags */
+	bool			quota_retry = false;
 	int			error;		/* error return value */
 
 	ASSERT(XFS_IFORK_Q(ip) == 0);
@@ -1079,17 +1080,20 @@ xfs_bmap_add_attrfork(
 
 	blks = XFS_ADDAFORK_SPACE_RES(mp);
 
+retry:
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_addafork, blks, 0,
 			rsvd ? XFS_TRANS_RESERVE : 0, &tp);
 	if (error)
 		return error;
 
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
-	error = xfs_trans_reserve_quota_nblks(tp, ip, blks, 0, rsvd ?
+	error = xfs_trans_reserve_quota_nblks(&tp, ip, blks, 0, rsvd ?
 			XFS_QMOPT_RES_REGBLKS | XFS_QMOPT_FORCE_RES :
-			XFS_QMOPT_RES_REGBLKS);
+			XFS_QMOPT_RES_REGBLKS, &quota_retry);
 	if (error)
-		goto trans_cancel;
+		return error;
+	if (quota_retry)
+		goto retry;
 	if (XFS_IFORK_Q(ip))
 		goto trans_cancel;
 
