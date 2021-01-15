@@ -846,25 +846,61 @@ xfs_trans_reserve_quota_nblks(
 	return *retry ? 0 : error;
 }
 
-/* Change the quota reservations for an inode creation activity. */
+/*
+ * Change the quota reservations for an inode creation activity.  This function
+ * has the same return behavior as xfs_trans_reserve_quota_nblks but with the
+ * added twist that we update *dp_locked so that the caller can track the ILOCK
+ * state of the parent directory.
+ */
 int
 xfs_trans_reserve_quota_icreate(
-	struct xfs_trans	*tp,
+	struct xfs_trans	**tpp,
 	struct xfs_inode	*dp,
+	bool			*dp_locked,
 	struct xfs_dquot	*udqp,
 	struct xfs_dquot	*gdqp,
 	struct xfs_dquot	*pdqp,
-	int64_t			nblks)
+	int64_t			nblks,
+	bool			*retry)
 {
 	struct xfs_mount	*mp = dp->i_mount;
+	int			error, err2;
 
 	if (!XFS_IS_QUOTA_RUNNING(mp) || !XFS_IS_QUOTA_ON(mp))
 		return 0;
 
 	ASSERT(!xfs_is_quota_inode(&mp->m_sb, dp->i_ino));
 
-	return xfs_trans_reserve_quota_bydquots(tp, dp->i_mount, udqp, gdqp,
+	error = xfs_trans_reserve_quota_bydquots(*tpp, dp->i_mount, udqp, gdqp,
 			pdqp, nblks, 1, XFS_QMOPT_RES_REGBLKS);
+
+	/* Exit immediately if the caller did not want retries. */
+	if (retry == NULL)
+		return error;
+
+	/*
+	 * If the caller /can/ handle retries, we always cancel the transaction
+	 * on error, even if we aren't going to attempt a gc scan.
+	 */
+	if (error) {
+		xfs_trans_cancel(*tpp);
+		*tpp = NULL;
+		if (dp_locked && *dp_locked) {
+			xfs_iunlock(dp, XFS_ILOCK_EXCL);
+			*dp_locked = false;
+		}
+	}
+	/* We only allow one retry for EDQUOT/ENOSPC. */
+	if (*retry || (error != -EDQUOT && error != -ENOSPC)) {
+		*retry = false;
+		return error;
+	}
+
+	/* Try to free some quota for the new file's dquots. */
+	err2 = xfs_blockgc_free_dquots(udqp, gdqp, pdqp, 0, retry);
+	if (err2)
+		return err2;
+	return *retry ? 0 : error;
 }
 
 /*
