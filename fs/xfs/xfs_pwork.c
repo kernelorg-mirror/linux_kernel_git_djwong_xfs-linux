@@ -118,19 +118,85 @@ xfs_pwork_poll(
 		touch_softlockup_watchdog();
 }
 
-/*
- * Return the amount of parallelism that the data device can handle, or 0 for
- * no limit.
- */
-unsigned int
-xfs_pwork_guess_datadev_parallelism(
-	struct xfs_mount	*mp)
+/* Estimate the amount of parallelism available for a storage device. */
+static unsigned int
+xfs_guess_buftarg_parallelism(
+	struct xfs_buftarg	*btp)
 {
-	struct xfs_buftarg	*btp = mp->m_ddev_targp;
+	int			iomin;
+	int			ioopt;
 
 	/*
-	 * For now we'll go with the most conservative setting possible,
-	 * which is two threads for an SSD and 1 thread everywhere else.
+	 * The device tells us that it is non-rotational, and we take that to
+	 * mean there are no moving parts and that the device can handle all
+	 * the CPUs throwing IO requests at it.
 	 */
-	return blk_queue_nonrot(btp->bt_bdev->bd_disk->queue) ? 2 : 1;
+	if (blk_queue_nonrot(btp->bt_bdev->bd_disk->queue))
+		return num_online_cpus();
+
+	/*
+	 * The device has a preferred and minimum IO size that suggest a RAID
+	 * setup, so infer the number of disks and assume that the parallelism
+	 * is equal to the disk count.
+	 */
+	iomin = bdev_io_min(btp->bt_bdev);
+	ioopt = bdev_io_opt(btp->bt_bdev);
+	if (iomin > 0 && ioopt > iomin)
+		return ioopt / iomin;
+
+	/*
+	 * The device did not indicate that it has any capabilities beyond that
+	 * of a rotating disk with a single drive head, so we estimate no
+	 * parallelism at all.
+	 */
+	return 1;
+}
+
+/*
+ * Estimate the amount of parallelism that is available for metadata operations
+ * on this filesystem.
+ */
+unsigned int
+xfs_pwork_guess_metadata_threads(
+	struct xfs_mount	*mp)
+{
+	unsigned int		threads;
+
+	/*
+	 * Estimate the amount of parallelism for metadata operations from the
+	 * least capable of the two devices that handle metadata.  Cap that
+	 * estimate to the number of AGs to avoid unnecessary lock contention.
+	 */
+	threads = xfs_guess_buftarg_parallelism(mp->m_ddev_targp);
+	if (mp->m_logdev_targp != mp->m_ddev_targp)
+		threads = min(xfs_guess_buftarg_parallelism(mp->m_logdev_targp),
+			      threads);
+	threads = min(mp->m_sb.sb_agcount, threads);
+
+	/* If the storage told us it has fancy capabilities, we're done. */
+	if (threads > 1)
+		goto clamp;
+
+	/*
+	 * Metadata storage did not even hint that it has any parallel
+	 * capability.  If the filesystem was formatted with a stripe unit and
+	 * width, we'll treat that as evidence of a RAID setup and estimate
+	 * the number of disks.
+	 */
+	if (mp->m_sb.sb_unit > 0 && mp->m_sb.sb_width > mp->m_sb.sb_unit)
+		threads = mp->m_sb.sb_width / mp->m_sb.sb_unit;
+
+clamp:
+	/* Don't return an estimate larger than the CPU count. */
+	return min(num_online_cpus(), threads);
+}
+
+/* Estimate how many threads we need for a parallel work queue. */
+unsigned int
+xfs_pwork_guess_workqueue_threads(
+	struct xfs_mount	*mp)
+{
+	/* pwork queues are not unbounded, so we have to abide WQ_MAX_ACTIVE. */
+	return min_t(unsigned int, xfs_pwork_guess_metadata_threads(mp),
+			WQ_MAX_ACTIVE);
 }
