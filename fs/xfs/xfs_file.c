@@ -697,14 +697,16 @@ write_retry:
 		iolock = 0;
 	} else if (ret == -ENOSPC && !cleared_space) {
 		struct xfs_eofblocks eofb = {0};
+		int	ret2;
 
 		cleared_space = true;
 		xfs_flush_inodes(ip->i_mount);
 
 		xfs_iunlock(ip, iolock);
 		eofb.eof_flags = XFS_EOF_FLAGS_SYNC;
-		xfs_icache_free_eofblocks(ip->i_mount, &eofb);
-		xfs_icache_free_cowblocks(ip->i_mount, &eofb);
+		ret2 = xfs_blockgc_free_space(ip->i_mount, &eofb);
+		if (ret2)
+			return ret2;
 		goto write_retry;
 	}
 
