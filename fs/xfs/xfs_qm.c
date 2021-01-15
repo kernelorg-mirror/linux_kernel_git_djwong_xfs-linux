@@ -1795,27 +1795,29 @@ xfs_qm_vop_chown(
 }
 
 /*
- * Quota reservations for setattr(AT_UID|AT_GID|AT_PROJID).
+ * Quota reservations for setattr(AT_UID|AT_GID|AT_PROJID).  This function has
+ * the same return behavior as xfs_trans_reserve_quota_nblks.
  */
 int
 xfs_qm_vop_chown_reserve(
-	struct xfs_trans	*tp,
+	struct xfs_trans	**tpp,
 	struct xfs_inode	*ip,
 	struct xfs_dquot	*udqp,
 	struct xfs_dquot	*gdqp,
 	struct xfs_dquot	*pdqp,
-	uint			flags)
+	unsigned int		flags,
+	bool			*retry)
 {
 	struct xfs_mount	*mp = ip->i_mount;
 	uint64_t		delblks;
 	unsigned int		blkflags;
-	struct xfs_dquot	*udq_unres = NULL;
+	struct xfs_dquot	*udq_unres = NULL; /* old dquots */
 	struct xfs_dquot	*gdq_unres = NULL;
 	struct xfs_dquot	*pdq_unres = NULL;
-	struct xfs_dquot	*udq_delblks = NULL;
+	struct xfs_dquot	*udq_delblks = NULL; /* new dquots */
 	struct xfs_dquot	*gdq_delblks = NULL;
 	struct xfs_dquot	*pdq_delblks = NULL;
-	int			error;
+	int			error, err2;
 
 
 	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL|XFS_ILOCK_SHARED));
@@ -1856,11 +1858,11 @@ xfs_qm_vop_chown_reserve(
 		}
 	}
 
-	error = xfs_trans_reserve_quota_bydquots(tp, ip->i_mount,
+	error = xfs_trans_reserve_quota_bydquots(*tpp, ip->i_mount,
 				udq_delblks, gdq_delblks, pdq_delblks,
 				ip->i_d.di_nblocks, 1, flags | blkflags);
 	if (error)
-		return error;
+		goto err;
 
 	/*
 	 * Do the delayed blks reservations/unreservations now. Since, these
@@ -1878,13 +1880,29 @@ xfs_qm_vop_chown_reserve(
 			    udq_delblks, gdq_delblks, pdq_delblks,
 			    (xfs_qcnt_t)delblks, 0, flags | blkflags);
 		if (error)
-			return error;
+			goto err;
 		xfs_trans_reserve_quota_bydquots(NULL, ip->i_mount,
 				udq_unres, gdq_unres, pdq_unres,
 				-((xfs_qcnt_t)delblks), 0, blkflags);
 	}
 
 	return 0;
+err:
+	xfs_trans_cancel(*tpp);
+	*tpp = NULL;
+	xfs_iunlock(ip, XFS_ILOCK_EXCL);
+	/* We only allow one retry for EDQUOT/ENOSPC. */
+	if (*retry || (error != -EDQUOT && error != -ENOSPC)) {
+		*retry = false;
+		return error;
+	}
+
+	/* Try to free some quota in the new dquots. */
+	err2 = xfs_blockgc_free_dquots(udq_delblks, gdq_delblks, pdq_delblks,
+			0, retry);
+	if (err2)
+		return err2;
+	return *retry ? 0 : error;
 }
 
 int
