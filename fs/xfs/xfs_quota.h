@@ -82,7 +82,8 @@ extern void xfs_trans_mod_dquot_byino(struct xfs_trans *, struct xfs_inode *,
 extern void xfs_trans_apply_dquot_deltas(struct xfs_trans *);
 extern void xfs_trans_unreserve_and_mod_dquots(struct xfs_trans *);
 int xfs_trans_reserve_quota_nblks(struct xfs_trans *tp, struct xfs_inode *ip,
-		int64_t dblocks, int64_t rblocks, bool force);
+		int64_t dblocks, int64_t rblocks, bool force,
+		unsigned int *retry);
 extern int xfs_trans_reserve_quota_bydquots(struct xfs_trans *,
 		struct xfs_mount *, struct xfs_dquot *,
 		struct xfs_dquot *, struct xfs_dquot *, int64_t, long, uint);
@@ -114,7 +115,7 @@ extern void xfs_qm_unmount_quotas(struct xfs_mount *);
 static inline int
 xfs_quota_reserve_blkres(struct xfs_inode *ip, int64_t blocks)
 {
-	return xfs_trans_reserve_quota_nblks(NULL, ip, blocks, 0, false);
+	return xfs_trans_reserve_quota_nblks(NULL, ip, blocks, 0, false, NULL);
 }
 #else
 static inline int
@@ -134,7 +135,7 @@ xfs_qm_vop_dqalloc(struct xfs_inode *ip, kuid_t kuid, kgid_t kgid,
 #define xfs_trans_unreserve_and_mod_dquots(tp)
 static inline int xfs_trans_reserve_quota_nblks(struct xfs_trans *tp,
 		struct xfs_inode *ip, int64_t dblocks, int64_t rblocks,
-		bool force)
+		bool force, unsigned int *retry)
 {
 	return 0;
 }

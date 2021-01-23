@@ -770,11 +770,67 @@ unwind_usr:
 	return error;
 }
 
+/*
+ * Decide what to do after an attempt to reserve some quota.  This will set
+ * the retry and error parameters as needed, and returns true if the quota
+ * reservation succeeded.
+ */
+static inline bool
+reservation_success(
+	unsigned int		qflag,
+	unsigned int		*retry,
+	int			*error)
+{
+	/*
+	 * The caller is not interested in retries.  Return whether or not we
+	 * got an error code.
+	 */
+	if (retry == NULL)
+		return *error == 0;
+
+	if (*error == -EDQUOT || *error == -ENOSPC) {
+		/*
+		 * There isn't enough quota left to allow the reservation.
+		 *
+		 * If none of the retry bits are set, this is the first time
+		 * that we failed a quota reservation.  Zero the error code and
+		 * set the appropriate quota flag in *retry to encourage the
+		 * xfs_trans_reserve_quota_nblks caller to clear some space and
+		 * call back.
+		 *
+		 * If any of the retry bits are set, this means that we failed
+		 * the quota reservation once before, tried to free some quota,
+		 * and have now failed the second quota reservation attempt.
+		 * Pass the error back to the caller; we're done.
+		 */
+		if (!(*retry))
+			*error = 0;
+
+		*retry |= qflag;
+		return false;
+	}
+
+	/* A non-quota error occurred; there is no retry. */
+	if (*error)
+		return false;
+
+	/*
+	 * The reservation succeeded.  Clear the quota flag from the retry
+	 * state because there is nothing to retry.
+	 */
+	*retry &= ~qflag;
+	return true;
+}
 
 /*
- * Lock the dquot and change the reservation if we can.
- * This doesn't change the actual usage, just the reservation.
- * The inode sent in is locked.
+ * Lock the dquot and change the reservation if we can.  This doesn't change
+ * the actual usage, just the reservation.  The caller must hold ILOCK_EXCL on
+ * the inode.  If @retry is not a NULL pointer, the caller must ensure that
+ * *retry is set to 0 before the first time this function is called.
+ *
+ * If the quota reservation fails because we hit a quota limit (and retry is
+ * not a NULL pointer, and *retry is zero), this function will set *retry to
+ * nonzero and return zero.
  */
 int
 xfs_trans_reserve_quota_nblks(
@@ -782,7 +838,8 @@ xfs_trans_reserve_quota_nblks(
 	struct xfs_inode	*ip,
 	int64_t			dblocks,
 	int64_t			rblocks,
-	bool			force)
+	bool			force,
+	unsigned int		*retry)
 {
 	struct xfs_mount	*mp = ip->i_mount;
 	unsigned int		qflags = 0;
@@ -801,14 +858,14 @@ xfs_trans_reserve_quota_nblks(
 	error = xfs_trans_reserve_quota_bydquots(tp, mp, ip->i_udquot,
 			ip->i_gdquot, ip->i_pdquot, dblocks, 0,
 			XFS_QMOPT_RES_REGBLKS | qflags);
-	if (error)
+	if (!reservation_success(XFS_QMOPT_RES_REGBLKS, retry, &error))
 		return error;
 
 	/* Do the same but for realtime blocks. */
 	error = xfs_trans_reserve_quota_bydquots(tp, mp, ip->i_udquot,
 			ip->i_gdquot, ip->i_pdquot, rblocks, 0,
 			XFS_QMOPT_RES_RTBLKS | qflags);
-	if (error) {
+	if (!reservation_success(XFS_QMOPT_RES_RTBLKS, retry, &error)) {
 		xfs_trans_reserve_quota_bydquots(tp, mp, ip->i_udquot,
 				ip->i_gdquot, ip->i_pdquot, -dblocks, 0,
 				XFS_QMOPT_RES_REGBLKS);
