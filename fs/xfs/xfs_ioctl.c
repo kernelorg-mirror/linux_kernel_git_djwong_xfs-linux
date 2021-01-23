@@ -1436,6 +1436,7 @@ xfs_ioctl_setattr(
 	struct xfs_trans	*tp;
 	struct xfs_dquot	*pdqp = NULL;
 	struct xfs_dquot	*olddquot = NULL;
+	unsigned int		quota_retry = 0;
 	int			code;
 
 	trace_xfs_ioctl_setattr(ip);
@@ -1462,6 +1463,7 @@ xfs_ioctl_setattr(
 
 	xfs_ioctl_setattr_prepare_dax(ip, fa);
 
+retry:
 	tp = xfs_ioctl_setattr_get_trans(ip);
 	if (IS_ERR(tp)) {
 		code = PTR_ERR(tp);
@@ -1471,9 +1473,14 @@ xfs_ioctl_setattr(
 	if (XFS_IS_QUOTA_RUNNING(mp) && XFS_IS_PQUOTA_ON(mp) &&
 	    ip->i_d.di_projid != fa->fsx_projid) {
 		code = xfs_trans_reserve_quota_chown(tp, ip, NULL, NULL, pdqp,
-				capable(CAP_FOWNER));
+				capable(CAP_FOWNER), &quota_retry);
 		if (code)	/* out of quota */
 			goto error_trans_cancel;
+		if (quota_retry) {
+			xfs_trans_cancel_qretry_chown(tp, ip, NULL, NULL,
+					pdqp);
+			goto retry;
+		}
 	}
 
 	xfs_fill_fsxattr(ip, false, &old_fa);
