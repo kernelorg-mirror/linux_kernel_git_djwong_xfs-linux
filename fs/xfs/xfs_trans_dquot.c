@@ -804,6 +804,27 @@ xfs_trans_reserve_quota_nblks(
 						nblks, ninos, flags);
 }
 
+/* Change the quota reservations for an inode creation activity. */
+int
+xfs_trans_reserve_quota_icreate(
+	struct xfs_trans	*tp,
+	struct xfs_inode	*dp,
+	struct xfs_dquot	*udqp,
+	struct xfs_dquot	*gdqp,
+	struct xfs_dquot	*pdqp,
+	int64_t			nblks)
+{
+	struct xfs_mount	*mp = dp->i_mount;
+
+	if (!XFS_IS_QUOTA_RUNNING(mp) || !XFS_IS_QUOTA_ON(mp))
+		return 0;
+
+	ASSERT(!xfs_is_quota_inode(&mp->m_sb, dp->i_ino));
+
+	return xfs_trans_reserve_quota_bydquots(tp, dp->i_mount, udqp, gdqp,
+			pdqp, nblks, 1, XFS_QMOPT_RES_REGBLKS);
+}
+
 /*
  * This routine is called to allocate a quotaoff log item.
  */
