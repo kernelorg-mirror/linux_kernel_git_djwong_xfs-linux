@@ -70,8 +70,8 @@ xfs_pwork_init(
 #endif
 	trace_xfs_pwork_init(mp, nr_threads, current->pid);
 
-	pctl->wq = alloc_workqueue("%s-%d", WQ_FREEZABLE, nr_threads, tag,
-			current->pid);
+	pctl->wq = alloc_workqueue("%s-%d", WQ_UNBOUND | WQ_SYSFS | WQ_FREEZABLE,
+			nr_threads, tag, current->pid);
 	if (!pctl->wq)
 		return -ENOMEM;
 	pctl->work_fn = work_fn;
