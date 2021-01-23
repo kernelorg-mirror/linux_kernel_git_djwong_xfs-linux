@@ -835,25 +835,69 @@ xfs_trans_reserve_quota_nblks(
 	return 0;
 }
 
-/* Change the quota reservations for an inode creation activity. */
+/*
+ * Change the quota reservations for an inode creation activity.  This doesn't
+ * change the actual usage, just the reservation.  The caller may hold
+ * ILOCK_EXCL on the inode.  If @retry is not a NULL pointer, the caller must
+ * ensure that *retry is set to false before the first time this function is
+ * called.
+ *
+ * If the quota reservation fails because we hit a quota limit (and retry is
+ * not a NULL pointer, and *retry is false), this function will try to invoke
+ * the speculative preallocation gc scanner to reduce quota usage.  In order to
+ * do that, we cancel the transaction, NULL out tpp, drop the ILOCK and update
+ * *dp_locked if dp_locked is not NULL, and set *retry to true.
+ *
+ * This function ends one of two ways:
+ *
+ *  1) To signal the caller to try again, *retry is set to true; *tpp is
+ *     cancelled and set to NULL; if *dp_locked is true, the inode is unlocked
+ *     and *dp_locked is set to false; and the return value is zero.
+ *
+ *  2) Otherwise, *tpp is still set; the inode is still locked; and the return
+ *     value is zero or the usual negative error code.
+ */
 int
 xfs_trans_reserve_quota_icreate(
-	struct xfs_trans	*tp,
+	struct xfs_trans	**tpp,
 	struct xfs_inode	*dp,
+	bool			*dp_locked,
 	struct xfs_dquot	*udqp,
 	struct xfs_dquot	*gdqp,
 	struct xfs_dquot	*pdqp,
-	int64_t			nblks)
+	int64_t			nblks,
+	bool			*retry)
 {
 	struct xfs_mount	*mp = dp->i_mount;
+	int			error;
 
 	if (!XFS_IS_QUOTA_RUNNING(mp) || !XFS_IS_QUOTA_ON(mp))
 		return 0;
 
 	ASSERT(!xfs_is_quota_inode(&mp->m_sb, dp->i_ino));
 
-	return xfs_trans_reserve_quota_bydquots(tp, dp->i_mount, udqp, gdqp,
+	error = xfs_trans_reserve_quota_bydquots(*tpp, dp->i_mount, udqp, gdqp,
 			pdqp, nblks, 1, XFS_QMOPT_RES_REGBLKS);
+	if (retry == NULL)
+		return error;
+	/* We only allow one retry for EDQUOT/ENOSPC. */
+	if (*retry || (error != -EDQUOT && error != -ENOSPC)) {
+		*retry = false;
+		return error;
+	}
+
+	/* Release resources, prepare for scan. */
+	xfs_trans_cancel(*tpp);
+	*tpp = NULL;
+	if (*dp_locked) {
+		xfs_iunlock(dp, XFS_ILOCK_EXCL);
+		*dp_locked = false;
+	}
+
+	/* Try to free some quota for the supplied dquots. */
+	*retry = true;
+	xfs_blockgc_free_dquots(udqp, gdqp, pdqp, 0);
+	return 0;
 }
 
 /*

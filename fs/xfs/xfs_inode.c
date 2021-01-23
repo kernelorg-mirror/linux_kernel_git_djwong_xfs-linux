@@ -990,6 +990,7 @@ xfs_create(
 	struct xfs_dquot	*gdqp = NULL;
 	struct xfs_dquot	*pdqp = NULL;
 	struct xfs_trans_res	*tres;
+	bool			quota_retry = false;
 	uint			resblks;
 
 	trace_xfs_create(dp, name);
@@ -1022,6 +1023,7 @@ xfs_create(
 	 * the case we'll drop the one we have and get a more
 	 * appropriate transaction later.
 	 */
+retry:
 	error = xfs_trans_alloc(mp, tres, resblks, 0, 0, &tp);
 	if (error == -ENOSPC) {
 		/* flush outstanding delalloc blocks and retry */
@@ -1037,10 +1039,12 @@ xfs_create(
 	/*
 	 * Reserve disk quota and the inode.
 	 */
-	error = xfs_trans_reserve_quota_icreate(tp, dp, udqp, gdqp, pdqp,
-			resblks);
+	error = xfs_trans_reserve_quota_icreate(&tp, dp, &unlock_dp_on_error,
+			udqp, gdqp, pdqp, resblks, &quota_retry);
 	if (error)
 		goto out_trans_cancel;
+	if (quota_retry)
+		goto retry;
 
 	error = xfs_iext_count_may_overflow(dp, XFS_DATA_FORK,
 			XFS_IEXT_DIR_MANIP_CNT(mp));
@@ -1146,6 +1150,8 @@ xfs_create_tmpfile(
 	struct xfs_dquot	*gdqp = NULL;
 	struct xfs_dquot	*pdqp = NULL;
 	struct xfs_trans_res	*tres;
+	bool			locked = false;
+	bool			quota_retry = false;
 	uint			resblks;
 
 	if (XFS_FORCED_SHUTDOWN(mp))
@@ -1165,14 +1171,17 @@ xfs_create_tmpfile(
 	resblks = XFS_IALLOC_SPACE_RES(mp);
 	tres = &M_RES(mp)->tr_create_tmpfile;
 
+retry:
 	error = xfs_trans_alloc(mp, tres, resblks, 0, 0, &tp);
 	if (error)
 		goto out_release_inode;
 
-	error = xfs_trans_reserve_quota_icreate(tp, dp, udqp, gdqp, pdqp,
-			resblks);
+	error = xfs_trans_reserve_quota_icreate(&tp, dp, &locked, udqp, gdqp,
+			pdqp, resblks, &quota_retry);
 	if (error)
 		goto out_trans_cancel;
+	if (quota_retry)
+		goto retry;
 
 	error = xfs_dir_ialloc(&tp, dp, mode, 0, 0, prid, &ip);
 	if (error)
