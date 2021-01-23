@@ -907,7 +907,15 @@ xfs_trans_reserve_quota_icreate(
 }
 
 /*
- * Quota reservations for setattr(AT_UID|AT_GID|AT_PROJID).
+ * Chagnge quota reservations for setattr(AT_UID|AT_GID|AT_PROJID).  This
+ * doesn't change the actual usage, just the reservation.  The caller must hold
+ * ILOCK_EXCL on the inode.  If @retry is not a NULL pointer, the caller must
+ * ensure that *retry is set to zero before the first time this function is
+ * called.
+ *
+ * If the quota reservation fails because we hit a quota limit (and retry is
+ * not a NULL pointer, and *retry is zero), this function will set *retry to
+ * nonzero and return zero.
  */
 int
 xfs_trans_reserve_quota_chown(
@@ -916,7 +924,8 @@ xfs_trans_reserve_quota_chown(
 	struct xfs_dquot	*udqp,
 	struct xfs_dquot	*gdqp,
 	struct xfs_dquot	*pdqp,
-	bool			force)
+	bool			force,
+	unsigned int		*retry)
 {
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_dquot	*udq_unres = NULL;	/* old dquots */
@@ -976,7 +985,7 @@ xfs_trans_reserve_quota_chown(
 			gdq_delblks, pdq_delblks, ip->i_d.di_nblocks, 1,
 			qflags);
 	if (error)
-		return error;
+		goto err;
 
 	/*
 	 * Do the delayed blks reservations/unreservations now. Since, these
@@ -994,13 +1003,24 @@ xfs_trans_reserve_quota_chown(
 				udq_delblks, gdq_delblks, pdq_delblks,
 				(xfs_qcnt_t)delblks, 0, qflags);
 		if (error)
-			return error;
+			goto err;
 		xfs_trans_reserve_quota_bydquots(NULL, ip->i_mount, udq_unres,
 				gdq_unres, pdq_unres, -((xfs_qcnt_t)delblks),
 				0, qflags);
 	}
 
 	return 0;
+err:
+	/*
+	 * Handle all quota reservation failures in the same place because we
+	 * don't want reservation_success() to clear REGBLKS from the retry
+	 * flags after we _reserve_quota for the ondisk blocks but before we
+	 * _reserve_quota for the delalloc blocks.  If we were called with a
+	 * nonzero *retry, that means we failed to get the quota reservation
+	 * once before and do not want to schedule a retry on a second error.
+	 */
+	reservation_success(XFS_QMOPT_RES_REGBLKS, retry, &error);
+	return error;
 }
 
 /*
