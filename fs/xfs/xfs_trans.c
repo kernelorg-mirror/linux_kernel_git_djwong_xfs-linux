@@ -1149,8 +1149,10 @@ xfs_trans_alloc_ichange(
 	struct xfs_dquot	*new_udqp;
 	struct xfs_dquot	*new_gdqp;
 	struct xfs_dquot	*new_pdqp;
+	bool			retried = false;
 	int			error;
 
+retry:
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_ichange, 0, 0, 0, &tp);
 	if (error)
 		return error;
@@ -1175,6 +1177,13 @@ xfs_trans_alloc_ichange(
 	if (new_udqp || new_gdqp || new_pdqp) {
 		error = xfs_trans_reserve_quota_chown(tp, ip, new_udqp,
 				new_gdqp, new_pdqp, force);
+		if (!retried && (error == -EDQUOT || error == -ENOSPC)) {
+			xfs_trans_cancel(tp);
+			xfs_blockgc_free_dquots(new_udqp, new_gdqp, new_pdqp,
+					0);
+			retried = true;
+			goto retry;
+		}
 		if (error)
 			goto out_cancel;
 	}
