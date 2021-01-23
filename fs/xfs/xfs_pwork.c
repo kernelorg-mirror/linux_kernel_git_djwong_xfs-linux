@@ -117,20 +117,3 @@ xfs_pwork_poll(
 				atomic_read(&pctl->nr_work) == 0, HZ) == 0)
 		touch_softlockup_watchdog();
 }
-
-/*
- * Return the amount of parallelism that the data device can handle, or 0 for
- * no limit.
- */
-unsigned int
-xfs_pwork_guess_datadev_parallelism(
-	struct xfs_mount	*mp)
-{
-	struct xfs_buftarg	*btp = mp->m_ddev_targp;
-
-	/*
-	 * For now we'll go with the most conservative setting possible,
-	 * which is two threads for an SSD and 1 thread everywhere else.
-	 */
-	return blk_queue_nonrot(btp->bt_bdev->bd_disk->queue) ? 2 : 1;
-}
