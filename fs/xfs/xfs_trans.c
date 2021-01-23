@@ -1046,8 +1046,10 @@ xfs_trans_alloc_inode(
 {
 	struct xfs_trans	*tp;
 	struct xfs_mount	*mp = ip->i_mount;
+	unsigned int		qretry = 0;
 	int			error;
 
+retry:
 	error = xfs_trans_alloc(mp, resv, dblocks,
 			rblocks / mp->m_sb.sb_rextsize,
 			force ? XFS_TRANS_RESERVE : 0, &tp);
@@ -1064,9 +1066,14 @@ xfs_trans_alloc_inode(
 		goto out_cancel;
 	}
 
-	error = xfs_trans_reserve_quota_nblks(tp, ip, dblocks, rblocks, force);
+	error = xfs_trans_reserve_quota_nblks(tp, ip, dblocks, rblocks, force,
+			&qretry);
 	if (error)
 		goto out_cancel;
+	if (qretry) {
+		xfs_trans_cancel_qretry_nblks(tp, ip);
+		goto retry;
+	}
 
 	*tpp = tp;
 	return 0;
