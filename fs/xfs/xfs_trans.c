@@ -1102,16 +1102,24 @@ xfs_trans_alloc_icreate(
 	struct xfs_trans	**tpp)
 {
 	struct xfs_trans	*tp;
+	unsigned int		qretry = 0;
 	int			error;
 
+retry:
 	error = xfs_trans_alloc(mp, resv, dblocks, 0, 0, &tp);
 	if (error)
 		return error;
 
-	error = xfs_trans_reserve_quota_icreate(tp, udqp, gdqp, pdqp, dblocks);
+	error = xfs_trans_reserve_quota_icreate(tp, udqp, gdqp, pdqp, dblocks,
+			&qretry);
 	if (error) {
 		xfs_trans_cancel(tp);
 		return error;
+	}
+	if (qretry) {
+		xfs_trans_cancel(tp);
+		xfs_blockgc_free_dquots(udqp, gdqp, pdqp, 0);
+		goto retry;
 	}
 
 	*tpp = tp;

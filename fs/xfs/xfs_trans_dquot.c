@@ -875,22 +875,35 @@ xfs_trans_reserve_quota_nblks(
 	return 0;
 }
 
-/* Change the quota reservations for an inode creation activity. */
+/*
+ * Change the quota reservations for an inode creation activity.  This doesn't
+ * change the actual usage, just the reservation.  If @retry is not a NULL
+ * pointer, the caller must ensure that *retry is set to zero before the first
+ * time this function is called.
+ *
+ * If the quota reservation fails because we hit a quota limit (and retry is
+ * not a NULL pointer, and *retry is zero), this function will set *retry to
+ * nonzero and return zero.
+ */
 int
 xfs_trans_reserve_quota_icreate(
 	struct xfs_trans	*tp,
 	struct xfs_dquot	*udqp,
 	struct xfs_dquot	*gdqp,
 	struct xfs_dquot	*pdqp,
-	int64_t			dblocks)
+	int64_t			dblocks,
+	unsigned int		*retry)
 {
 	struct xfs_mount	*mp = tp->t_mountp;
+	int			error;
 
 	if (!XFS_IS_QUOTA_RUNNING(mp) || !XFS_IS_QUOTA_ON(mp))
 		return 0;
 
-	return xfs_trans_reserve_quota_bydquots(tp, mp, udqp, gdqp, pdqp,
+	error = xfs_trans_reserve_quota_bydquots(tp, mp, udqp, gdqp, pdqp,
 			dblocks, 1, XFS_QMOPT_RES_REGBLKS);
+	reservation_success(XFS_QMOPT_RES_REGBLKS, retry, &error);
+	return error;
 }
 
 /*

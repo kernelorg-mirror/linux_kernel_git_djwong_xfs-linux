@@ -89,7 +89,7 @@ extern int xfs_trans_reserve_quota_bydquots(struct xfs_trans *,
 		struct xfs_dquot *, struct xfs_dquot *, int64_t, long, uint);
 int xfs_trans_reserve_quota_icreate(struct xfs_trans *tp,
 		struct xfs_dquot *udqp, struct xfs_dquot *gdqp,
-		struct xfs_dquot *pdqp, int64_t dblocks);
+		struct xfs_dquot *pdqp, int64_t dblocks, unsigned int *retry);
 
 extern int xfs_qm_vop_dqalloc(struct xfs_inode *, kuid_t, kgid_t,
 		prid_t, uint, struct xfs_dquot **, struct xfs_dquot **,
@@ -155,7 +155,8 @@ xfs_quota_reserve_blkres(struct xfs_inode *ip, int64_t blocks)
 
 static inline int
 xfs_trans_reserve_quota_icreate(struct xfs_trans *tp, struct xfs_dquot *udqp,
-		struct xfs_dquot *gdqp, struct xfs_dquot *pdqp, int64_t dblocks)
+		struct xfs_dquot *gdqp, struct xfs_dquot *pdqp, int64_t dblocks,
+		unsigned int *retry)
 {
 	return 0;
 }
