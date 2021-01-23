@@ -355,6 +355,7 @@ xfs_reflink_allocate_cow(
 	xfs_filblks_t		count_fsb = imap->br_blockcount;
 	struct xfs_trans	*tp;
 	int			nimaps, error = 0;
+	bool			quota_retry = false;
 	bool			found;
 	xfs_filblks_t		resaligned;
 	xfs_extlen_t		resblks = 0;
@@ -376,6 +377,7 @@ xfs_reflink_allocate_cow(
 	resblks = XFS_DIOSTRAT_SPACE_RES(mp, resaligned);
 
 	xfs_iunlock(ip, *lockmode);
+retry:
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, 0, 0, &tp);
 	*lockmode = XFS_ILOCK_EXCL;
 	xfs_ilock(ip, *lockmode);
@@ -398,10 +400,12 @@ xfs_reflink_allocate_cow(
 		goto convert;
 	}
 
-	error = xfs_trans_reserve_quota_nblks(tp, ip, resblks, 0,
-			XFS_QMOPT_RES_REGBLKS);
+	error = xfs_trans_reserve_quota_nblks(&tp, ip, resblks, 0,
+			XFS_QMOPT_RES_REGBLKS, &quota_retry);
 	if (error)
 		goto out_trans_cancel;
+	if (quota_retry)
+		goto retry;
 
 	xfs_trans_ijoin(tp, ip, 0);
 
@@ -1006,10 +1010,12 @@ xfs_reflink_remap_extent(
 	unsigned int		resblks;
 	bool			smap_real;
 	bool			dmap_written = xfs_bmap_is_written_extent(dmap);
+	bool			quota_retry = false;
 	int			iext_delta = 0;
 	int			nimaps;
 	int			error;
 
+retry:
 	/* Start a rolling transaction to switch the mappings */
 	resblks = XFS_EXTENTADD_SPACE_RES(mp, XFS_DATA_FORK);
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, 0, 0, &tp);
@@ -1094,10 +1100,12 @@ xfs_reflink_remap_extent(
 	if (!smap_real && dmap_written)
 		qres += dmap->br_blockcount;
 	if (qres > 0) {
-		error = xfs_trans_reserve_quota_nblks(tp, ip, qres, 0,
-				XFS_QMOPT_RES_REGBLKS);
+		error = xfs_trans_reserve_quota_nblks(&tp, ip, qres, 0,
+				XFS_QMOPT_RES_REGBLKS, &quota_retry);
 		if (error)
 			goto out_cancel;
+		if (quota_retry)
+			goto retry;
 	}
 
 	if (smap_real)
