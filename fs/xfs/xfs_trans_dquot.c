@@ -846,26 +846,30 @@ xfs_trans_reserve_quota_chown(
 	struct xfs_dquot	*udqp,
 	struct xfs_dquot	*gdqp,
 	struct xfs_dquot	*pdqp,
-	unsigned int		flags)
+	bool			force)
 {
 	struct xfs_mount	*mp = ip->i_mount;
-	uint64_t		delblks;
-	unsigned int		blkflags;
-	struct xfs_dquot	*udq_unres = NULL;
+	struct xfs_dquot	*udq_unres = NULL;	/* old dquots */
 	struct xfs_dquot	*gdq_unres = NULL;
 	struct xfs_dquot	*pdq_unres = NULL;
-	struct xfs_dquot	*udq_delblks = NULL;
+	struct xfs_dquot	*udq_delblks = NULL;	/* new dquots */
 	struct xfs_dquot	*gdq_delblks = NULL;
 	struct xfs_dquot	*pdq_delblks = NULL;
+	uint64_t		delblks;
+	unsigned int		qflags = XFS_QMOPT_RES_REGBLKS;
 	int			error;
 
-
-	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL|XFS_ILOCK_SHARED));
+	/*
+	 * XXX: This function doesn't handle rt quota counts correctly.  We
+	 * don't support mounting with rt+quota so leave this breadcrumb.
+	 */
+	ASSERT(!XFS_IS_REALTIME_INODE(ip));
+	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL));
 	ASSERT(XFS_IS_QUOTA_RUNNING(mp));
 
 	delblks = ip->i_delayed_blks;
-	blkflags = XFS_IS_REALTIME_INODE(ip) ?
-			XFS_QMOPT_RES_RTBLKS : XFS_QMOPT_RES_REGBLKS;
+	if (force)
+		qflags |= XFS_QMOPT_FORCE_RES;
 
 	if (XFS_IS_UQUOTA_ON(mp) && udqp &&
 	    i_uid_read(VFS_I(ip)) != udqp->q_id) {
@@ -898,9 +902,9 @@ xfs_trans_reserve_quota_chown(
 		}
 	}
 
-	error = xfs_trans_reserve_quota_bydquots(tp, ip->i_mount,
-				udq_delblks, gdq_delblks, pdq_delblks,
-				ip->i_d.di_nblocks, 1, flags | blkflags);
+	error = xfs_trans_reserve_quota_bydquots(tp, ip->i_mount, udq_delblks,
+			gdq_delblks, pdq_delblks, ip->i_d.di_nblocks, 1,
+			qflags);
 	if (error)
 		return error;
 
@@ -917,13 +921,13 @@ xfs_trans_reserve_quota_chown(
 		ASSERT(udq_delblks || gdq_delblks || pdq_delblks);
 		ASSERT(udq_unres || gdq_unres || pdq_unres);
 		error = xfs_trans_reserve_quota_bydquots(NULL, ip->i_mount,
-			    udq_delblks, gdq_delblks, pdq_delblks,
-			    (xfs_qcnt_t)delblks, 0, flags | blkflags);
+				udq_delblks, gdq_delblks, pdq_delblks,
+				(xfs_qcnt_t)delblks, 0, qflags);
 		if (error)
 			return error;
-		xfs_trans_reserve_quota_bydquots(NULL, ip->i_mount,
-				udq_unres, gdq_unres, pdq_unres,
-				-((xfs_qcnt_t)delblks), 0, blkflags);
+		xfs_trans_reserve_quota_bydquots(NULL, ip->i_mount, udq_unres,
+				gdq_unres, pdq_unres, -((xfs_qcnt_t)delblks),
+				0, qflags);
 	}
 
 	return 0;
