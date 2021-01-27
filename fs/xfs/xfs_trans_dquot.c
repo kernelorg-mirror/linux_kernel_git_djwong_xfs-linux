@@ -836,9 +836,7 @@ xfs_trans_reserve_quota_icreate(
 			dblocks, 1, XFS_QMOPT_RES_REGBLKS);
 }
 
-/*
- * Quota reservations for setattr(AT_UID|AT_GID|AT_PROJID).
- */
+/* Change quota reservations for a change in user, group, or project id. */
 int
 xfs_trans_reserve_quota_chown(
 	struct xfs_trans	*tp,
@@ -846,31 +844,36 @@ xfs_trans_reserve_quota_chown(
 	struct xfs_dquot	*udqp,
 	struct xfs_dquot	*gdqp,
 	struct xfs_dquot	*pdqp,
-	uint			flags)
+	bool			force)
 {
 	struct xfs_mount	*mp = ip->i_mount;
-	unsigned int		blkflags;
-	struct xfs_dquot	*udq_delblks = NULL;
-	struct xfs_dquot	*gdq_delblks = NULL;
-	struct xfs_dquot	*pdq_delblks = NULL;
+	struct xfs_dquot	*new_udqp = NULL;
+	struct xfs_dquot	*new_gdqp = NULL;
+	struct xfs_dquot	*new_pdqp = NULL;
+	unsigned int		qflags = XFS_QMOPT_RES_REGBLKS;
 
-	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL|XFS_ILOCK_SHARED));
+	/*
+	 * XXX: This function doesn't handle rt quota counts correctly.  We
+	 * don't support mounting with rt+quota so leave this breadcrumb.
+	 */
+	ASSERT(!XFS_IS_REALTIME_INODE(ip));
+	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL));
 	ASSERT(XFS_IS_QUOTA_RUNNING(mp));
 
-	blkflags = XFS_IS_REALTIME_INODE(ip) ?
-			XFS_QMOPT_RES_RTBLKS : XFS_QMOPT_RES_REGBLKS;
+	if (force)
+		qflags |= XFS_QMOPT_FORCE_RES;
 
 	if (XFS_IS_UQUOTA_ON(mp) && udqp &&
 	    i_uid_read(VFS_I(ip)) != udqp->q_id)
-		udq_delblks = udqp;
+		new_udqp = udqp;
 
 	if (XFS_IS_GQUOTA_ON(ip->i_mount) && gdqp &&
 	    i_gid_read(VFS_I(ip)) != gdqp->q_id)
-		gdq_delblks = gdqp;
+		new_gdqp = gdqp;
 
 	if (XFS_IS_PQUOTA_ON(ip->i_mount) && pdqp &&
 	    ip->i_d.di_projid != pdqp->q_id)
-		pdq_delblks = pdqp;
+		new_pdqp = pdqp;
 
 	/*
 	 * Reserve enough quota to handle blocks on disk and reserved for a
@@ -878,10 +881,10 @@ xfs_trans_reserve_quota_chown(
 	 * reservation between dquots at chown time, even though that part is
 	 * only semi-transactional.
 	 */
-	return xfs_trans_reserve_quota_bydquots(tp, ip->i_mount, udq_delblks,
-			gdq_delblks, pdq_delblks,
+	return xfs_trans_reserve_quota_bydquots(tp, ip->i_mount, new_udqp,
+			new_gdqp, new_pdqp,
 			ip->i_d.di_nblocks + ip->i_delayed_blks,
-			1, blkflags | flags);
+			1, qflags);
 }
 
 /*
