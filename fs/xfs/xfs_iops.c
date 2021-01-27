@@ -731,8 +731,7 @@ xfs_setattr_nonsize(
 		     (XFS_IS_GQUOTA_ON(mp) && !gid_eq(igid, gid)))) {
 			ASSERT(tp);
 			error = xfs_trans_reserve_quota_chown(tp, ip, udqp,
-					gdqp, NULL, capable(CAP_FOWNER) ?
-					XFS_QMOPT_FORCE_RES : 0);
+					gdqp, NULL, capable(CAP_FOWNER));
 			if (error)	/* out of quota */
 				goto out_cancel;
 		}
