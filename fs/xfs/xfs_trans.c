@@ -71,6 +71,9 @@ xfs_trans_free(
 	xfs_extent_busy_sort(&tp->t_busy);
 	xfs_extent_busy_clear(tp->t_mountp, &tp->t_busy, false);
 
+	if (tp->t_flags & XFS_TRANS_LOG_INCOMPAT)
+		xlog_drop_incompat_feat(tp->t_mountp->m_log);
+
 	trace_xfs_trans_free(tp, _RET_IP_);
 	if (!(tp->t_flags & XFS_TRANS_NO_WRITECOUNT))
 		sb_end_intwrite(tp->t_mountp->m_super);
@@ -109,10 +112,13 @@ xfs_trans_dup(
 	ASSERT(tp->t_flags & XFS_TRANS_PERM_LOG_RES);
 	ASSERT(tp->t_ticket != NULL);
 
-	ntp->t_flags = XFS_TRANS_PERM_LOG_RES |
-		       (tp->t_flags & XFS_TRANS_RESERVE) |
-		       (tp->t_flags & XFS_TRANS_NO_WRITECOUNT) |
-		       (tp->t_flags & XFS_TRANS_RES_FDBLKS);
+	ntp->t_flags = tp->t_flags & (XFS_TRANS_PERM_LOG_RES |
+				      XFS_TRANS_RESERVE |
+				      XFS_TRANS_NO_WRITECOUNT |
+				      XFS_TRANS_RES_FDBLKS |
+				      XFS_TRANS_LOG_INCOMPAT);
+	/* Give our LOG_INCOMPAT reference to the new transaction. */
+	tp->t_flags &= ~XFS_TRANS_LOG_INCOMPAT;
 	/* We gave our writer reference to the new transaction */
 	tp->t_flags |= XFS_TRANS_NO_WRITECOUNT;
 	ntp->t_ticket = xfs_log_ticket_get(tp->t_ticket);

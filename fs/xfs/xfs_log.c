@@ -1274,6 +1274,17 @@ xfs_log_worker(
 
 	/* dgc: errors ignored - not fatal and nowhere to report them */
 	if (xfs_log_need_covered(mp)) {
+		if (log->l_covered_state == XLOG_STATE_COVER_DONE2 &&
+		    down_write_trylock(&log->l_incompat_users)) {
+			/*
+			 * Clear log incompat features since we're about to log
+			 * the second dummy transaction as part of covering the
+			 * log.
+			 */
+			xfs_clear_incompat_log_features(mp);
+			up_write(&log->l_incompat_users);
+		}
+
 		/*
 		 * Dump a transaction into the log that contains no real change.
 		 * This is needed to stamp the current tail LSN into the log
@@ -1366,6 +1377,8 @@ xlog_alloc_log(
 		}
 	}
 	log->l_sectBBsize = 1 << log2_size;
+
+	init_rwsem(&log->l_incompat_users);
 
 	xlog_get_iclog_buffer_size(mp, log);
 
@@ -3853,4 +3866,24 @@ xfs_log_in_recovery(
 	struct xlog		*log = mp->m_log;
 
 	return log->l_flags & XLOG_ACTIVE_RECOVERY;
+}
+
+/*
+ * Notify the log that we're about to start using a feature that is protected
+ * by a log incompat feature flag.  This will prevent log covering from
+ * clearing those flags.
+ */
+void
+xlog_use_incompat_feat(
+	struct xlog		*log)
+{
+	down_read(&log->l_incompat_users);
+}
+
+/* Notify the log that we've finished using log incompat features. */
+void
+xlog_drop_incompat_feat(
+	struct xlog		*log)
+{
+	up_read(&log->l_incompat_users);
 }
