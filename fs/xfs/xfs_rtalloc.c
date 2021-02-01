@@ -29,6 +29,7 @@
 #include "xfs_quota.h"
 #include "xfs_rtrmap_btree.h"
 #include "xfs_rtrefcount_btree.h"
+#include "xfs_quota.h"
 
 /*
  * Read and return the summary information for a given extent size,
@@ -804,15 +805,10 @@ xfs_growfs_rt_alloc(
 		/*
 		 * Reserve space & log for one extent added to the file.
 		 */
-		error = xfs_trans_alloc(mp, &M_RES(mp)->tr_growrtalloc, resblks,
-				0, 0, &tp);
+		error = xfs_trans_alloc_inode(ip, &M_RES(mp)->tr_growrtalloc,
+				resblks, 0, false, &tp);
 		if (error)
 			return error;
-		/*
-		 * Lock the inode.
-		 */
-		xfs_ilock(ip, XFS_ILOCK_EXCL);
-		xfs_trans_ijoin(tp, ip, XFS_ILOCK_EXCL);
 
 		/*
 		 * Allocate blocks to the bitmap file.
@@ -828,6 +824,7 @@ xfs_growfs_rt_alloc(
 		 * Free any blocks freed up in the transaction, then commit.
 		 */
 		error = xfs_trans_commit(tp);
+		xfs_iunlock(ip, XFS_ILOCK_EXCL);
 		if (error)
 			return error;
 		/*
@@ -840,15 +837,12 @@ xfs_growfs_rt_alloc(
 			/*
 			 * Reserve log for one block zeroing.
 			 */
-			error = xfs_trans_alloc(mp, &M_RES(mp)->tr_growrtzero,
-					0, 0, 0, &tp);
+			error = xfs_trans_alloc_inode(ip,
+					&M_RES(mp)->tr_growrtzero, 0, 0, false,
+					&tp);
 			if (error)
 				return error;
-			/*
-			 * Lock the bitmap inode.
-			 */
-			xfs_ilock(ip, XFS_ILOCK_EXCL);
-			xfs_trans_ijoin(tp, ip, XFS_ILOCK_EXCL);
+
 			/*
 			 * Get a buffer for the block.
 			 */
@@ -866,6 +860,7 @@ xfs_growfs_rt_alloc(
 			 * Commit the transaction.
 			 */
 			error = xfs_trans_commit(tp);
+			xfs_iunlock(ip, XFS_ILOCK_EXCL);
 			if (error)
 				return error;
 		}
@@ -879,6 +874,7 @@ xfs_growfs_rt_alloc(
 
 out_trans_cancel:
 	xfs_trans_cancel(tp);
+	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	return error;
 }
 
