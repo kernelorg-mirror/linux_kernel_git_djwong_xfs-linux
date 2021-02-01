@@ -62,6 +62,12 @@ void	xfs_log_get_max_trans_res(struct xfs_mount *mp,
 #define	XFS_TRANS_SB_DIRTY	0x02	/* superblock is modified */
 #define	XFS_TRANS_PERM_LOG_RES	0x04	/* xact took a permanent log res */
 #define	XFS_TRANS_SYNC		0x08	/* make commit synchronous */
+/*
+ * This transaction uses a log incompat feature, which means that we must tell
+ * the log that we've finished using it at the transaction commit or cancel.
+ * Callers must call xlog_use_incompat_feat before setting this flag.
+ */
+#define XFS_TRANS_LOG_INCOMPAT	0x10
 #define XFS_TRANS_RESERVE	0x20    /* OK to use reserved data blocks */
 #define XFS_TRANS_NO_WRITECOUNT 0x40	/* do not elevate SB writecount */
 #define XFS_TRANS_RES_FDBLKS	0x80	/* reserve newly freed blocks */
