@@ -1171,6 +1171,8 @@ xfs_fs_geometry(
 		geo->flags |= XFS_FSOP_GEOM_FLAGS_BIGTIME;
 	if (xfs_sb_version_canatomicswap(sbp))
 		geo->flags |= XFS_FSOP_GEOM_FLAGS_ATOMIC_SWAP;
+	if (xfs_sb_version_hasmetadir(sbp))
+		geo->flags |= XFS_FSOP_GEOM_FLAGS_METADIR;
 	if (xfs_sb_version_hassector(sbp))
 		geo->logsectsize = sbp->sb_logsectsize;
 	else
