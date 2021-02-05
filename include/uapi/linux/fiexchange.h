@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later WITH Linux-syscall-note */
 /*
- * FIEXCHANGE ioctl definitions, to facilitate exchanging parts of files.
+ * FIEXCHANGE_RANGE ioctl definitions, to facilitate exchanging parts of files.
  *
  * Copyright (C) 2021 Oracle.  All Rights Reserved.
  *
