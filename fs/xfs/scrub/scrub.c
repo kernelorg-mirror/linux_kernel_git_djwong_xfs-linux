@@ -165,9 +165,7 @@ xchk_teardown(
 	if (sc->ip) {
 		if (sc->ilock_flags)
 			xfs_iunlock(sc->ip, sc->ilock_flags);
-		if (sc->ip != ip_in &&
-		    !xfs_internal_inum(sc->mp, sc->ip->i_ino))
-			xfs_irele(sc->ip);
+		xfs_irele(sc->ip);
 		sc->ip = NULL;
 	}
 	sb_end_write(sc->mp->m_super);

@@ -128,6 +128,7 @@ int xchk_count_rmap_ownedby_ag(struct xfs_scrub *sc, struct xfs_btree_cur *cur,
 
 int xchk_setup_ag_btree(struct xfs_scrub *sc, struct xfs_inode *ip,
 		bool force_log);
+int xchk_scan_this_inode(struct xfs_scrub *sc, struct xfs_inode *ip);
 int xchk_get_inode(struct xfs_scrub *sc, struct xfs_inode *ip_in);
 int xchk_setup_inode_contents(struct xfs_scrub *sc, struct xfs_inode *ip,
 		unsigned int resblks);
