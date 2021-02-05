@@ -67,6 +67,8 @@ void
 xfs_rtunmount_inodes(
 	struct xfs_mount	*mp);
 
+int xfs_rtmount_dqattach(struct xfs_mount *mp);
+
 /*
  * Get the bitmap and summary inodes into the mount structure
  * at mount time.
@@ -163,6 +165,7 @@ xfs_rtmount_init(
 	return -ENOSYS;
 }
 # define xfs_rtmount_inodes(m)  (((mp)->m_sb.sb_rblocks == 0)? 0 : (ENOSYS))
+# define xfs_rtmount_dqattach(mp)	(0)
 # define xfs_rtunmount_inodes(m)
 # define xfs_rtlock(tp, mp, lock_flags)	do { } while (0)
 # define xfs_rtunlock(mp, lock_flags)	do { } while (0)
