@@ -25,6 +25,8 @@
 #include "xfs_sb.h"
 #include "xfs_alloc.h"
 #include "xfs_ag_resv.h"
+#include "xfs_error.h"
+#include "xfs_quota.h"
 
 /*
  * Read and return the summary information for a given extent size,
@@ -1298,6 +1300,24 @@ xfs_rtmount_inodes(
 	}
 	ASSERT(mp->m_rsumip != NULL);
 	xfs_alloc_rsum_cache(mp, sbp->sb_rbmblocks);
+	return 0;
+}
+
+/* Attach dquots for realtime metadata files. */
+int
+xfs_rtmount_dqattach(
+	struct xfs_mount	*mp)
+{
+	int			error;
+
+	error = xfs_qm_dqattach(mp->m_rbmip);
+	if (error)
+		return error;
+
+	error = xfs_qm_dqattach(mp->m_rsumip);
+	if (error)
+		return error;
+
 	return 0;
 }
 
