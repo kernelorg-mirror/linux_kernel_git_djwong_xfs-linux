@@ -1007,6 +1007,16 @@ xfs_mountfs(
 	xfs_irele(rip);
 	/* Clean out dquots that might be in memory after quotacheck. */
 	xfs_qm_unmount(mp);
+
+	/*
+	 * It's possible that we modified some inodes as part of setting up
+	 * quotas or initializing filesystem metadata.  These inodes could be
+	 * pinned in the log, so force the log and push the AIL to unpin them
+	 * so that we can reclaim them.
+	 */
+	xfs_log_force(mp, XFS_LOG_SYNC);
+	xfs_ail_push_all_sync(mp->m_ail);
+
 	/*
 	 * Cancel all delayed reclaim work and reclaim the inodes directly.
 	 * We have to do this /after/ rtunmount and qm_unmount because those
