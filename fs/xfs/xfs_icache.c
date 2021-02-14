@@ -251,7 +251,8 @@ xfs_inactive_work_queue(
 	rcu_read_lock();
 	if (radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_INACTIVE_TAG))
 		queue_delayed_work(mp->m_inactive_workqueue,
-				&mp->m_inactive_work, 0);
+				&mp->m_inactive_work,
+				xfs_inodegc_secs * HZ);
 	rcu_read_unlock();
 }
 
