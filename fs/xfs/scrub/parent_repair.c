@@ -188,7 +188,7 @@ findparent_walk_directory(
 out_unlock:
 	xfs_iunlock(dp, XFS_IOLOCK_SHARED);
 out_rele:
-	xfs_irele(dp);
+	xchk_irele(fpi->sc, dp);
 	return error;
 }
 
@@ -275,7 +275,7 @@ findparent_from_dcache(
 		ret = XFS_I(pip)->i_ino;
 	}
 
-	xfs_irele(XFS_I(pip));
+	xchk_irele(sc, XFS_I(pip));
 
 out_dput:
 	dput(dentry);
