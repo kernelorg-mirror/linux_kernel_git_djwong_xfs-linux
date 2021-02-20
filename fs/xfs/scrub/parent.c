@@ -285,11 +285,11 @@ xchk_parent_validate(
 
 	/* Drat, parent changed.  Try again! */
 	if (dnum != dp->i_ino) {
-		xfs_irele(dp);
+		xchk_irele(sc, dp);
 		*try_again = true;
 		return 0;
 	}
-	xfs_irele(dp);
+	xchk_irele(sc, dp);
 
 	/*
 	 * '..' didn't change, so check that there was only one entry
@@ -302,7 +302,7 @@ xchk_parent_validate(
 out_unlock:
 	xfs_iunlock(dp, XFS_IOLOCK_SHARED);
 out_rele:
-	xfs_irele(dp);
+	xchk_irele(sc, dp);
 out:
 	return error;
 }

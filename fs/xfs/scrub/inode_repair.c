@@ -1178,8 +1178,7 @@ xrep_dinode_core(
 	sc->tp = NULL;
 
 	/* ...and reload it? */
-	error = xfs_iget(sc->mp, sc->tp, ino,
-			XFS_IGET_UNTRUSTED | XFS_IGET_DONTCACHE, 0, &sc->ip);
+	error = xfs_iget(sc->mp, sc->tp, ino, XFS_IGET_UNTRUSTED, 0, &sc->ip);
 	if (error)
 		return error;
 	sc->ilock_flags = XFS_IOLOCK_EXCL | XFS_MMAPLOCK_EXCL;
