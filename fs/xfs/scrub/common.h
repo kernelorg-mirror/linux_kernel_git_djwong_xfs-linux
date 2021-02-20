@@ -165,6 +165,9 @@ int xchk_setup_inode_contents(struct xfs_scrub *sc, struct xfs_inode *ip,
 void xchk_buffer_recheck(struct xfs_scrub *sc, struct xfs_buf *bp);
 void xchk_whine(const struct xfs_mount *mp, const char *fmt, ...);
 
+void __xchk_irele(struct xfs_inode *ip, bool set_dontcache);
+void xchk_irele(struct xfs_scrub *sc, struct xfs_inode *ip);
+
 /*
  * Don't bother cross-referencing if we already found corruption or cross
  * referencing discrepancies.
