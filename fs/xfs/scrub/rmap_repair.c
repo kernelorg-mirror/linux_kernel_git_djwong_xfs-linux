@@ -616,8 +616,7 @@ xrep_rmap_scan_inode(
 	int				error;
 
 	/* Grab inode and lock it so we can scan it. */
-	error = xfs_iget(mp, rr->sc->tp, ino,
-			XFS_IGET_DONTCACHE | XFS_IGET_UNLINKED, 0, &ip);
+	error = xfs_iget(mp, rr->sc->tp, ino, XFS_IGET_UNLINKED, 0, &ip);
 	if (error)
 		return error;
 
@@ -637,7 +636,7 @@ xrep_rmap_scan_inode(
 
 out_unlock:
 	xfs_iunlock(ip, lock_mode);
-	xfs_irele(ip);
+	xchk_irele(rr->sc, ip);
 	return error;
 }
 

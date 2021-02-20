@@ -493,7 +493,7 @@ xqcheck_collect_counts(
 	struct xfs_scrub	*sc = xqc->sc;
 	struct xfs_inode	*ip;
 	xfs_ino_t		ino = 0;
-	int			flags = XFS_IGET_UNTRUSTED | XFS_IGET_DONTCACHE;
+	int			flags = XFS_IGET_UNTRUSTED;
 	unsigned int		retries = 20;
 	int			error;
 
@@ -505,7 +505,7 @@ xqcheck_collect_counts(
 		switch (error) {
 		case 0:
 			error = xqcheck_inode(xqc, ip);
-			xfs_irele(ip);
+			xchk_irele(sc, ip);
 			if (error)
 				return error;
 			retries = 20;
