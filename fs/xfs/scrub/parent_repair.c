@@ -179,7 +179,7 @@ xrep_parents_iwalk(
 out_unlock:
 	xfs_iunlock(dp, XFS_IOLOCK_SHARED);
 out_rele:
-	xfs_irele(dp);
+	xchk_irele(rps->sc, dp);
 	return error;
 }
 
@@ -221,8 +221,9 @@ xrep_parents_walk(
 /* Check the dentry cache to see if it thinks it knows of a parent. */
 STATIC xfs_ino_t
 xrep_parent_check_dcache(
-	struct xfs_inode	*dp)
+	struct xfs_scrub	*sc)
 {
+	struct xfs_inode	*dp = sc->ip;
 	struct inode		*pip = NULL;
 	struct dentry		*dentry, *parent;
 	xfs_ino_t		ret = NULLFSINO;
@@ -248,7 +249,7 @@ xrep_parent_check_dcache(
 	if (S_ISDIR(pip->i_mode))
 		ret = XFS_I(pip)->i_ino;
 
-	xfs_irele(XFS_I(pip));
+	xchk_irele(sc, XFS_I(pip));
 
 out_dput:
 	dput(dentry);
@@ -377,7 +378,7 @@ xrep_dir_parent_find(
 	}
 
 	/* Maybe the dcache will supply us with a parent? */
-	suggestion = xrep_parent_check_dcache(sc->ip);
+	suggestion = xrep_parent_check_dcache(sc);
 	if (!xfs_verify_dir_ino(sc->mp, suggestion)) {
 		error = xrep_dir_parent_check(sc, suggestion, &is_parent);
 		if (error)
