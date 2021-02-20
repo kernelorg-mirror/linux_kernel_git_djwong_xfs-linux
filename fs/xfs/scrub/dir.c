@@ -142,7 +142,7 @@ xchk_dir_check_ftype(
 	if (xfs_is_metadata_inode(ip) ^ xfs_is_metadata_inode(sdc->sc->ip))
 		xchk_fblock_set_corrupt(sdc->sc, XFS_DATA_FORK, 0);
 
-	xfs_irele(ip);
+	xchk_irele(sdc->sc, ip);
 out:
 	return error;
 }

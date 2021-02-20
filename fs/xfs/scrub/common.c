@@ -847,8 +847,7 @@ xchk_get_inode(
 	/* Look up the inode, see if the generation number matches. */
 	if (xfs_internal_inum(mp, sc->sm->sm_ino))
 		return -ENOENT;
-	error = xfs_iget(mp, NULL, sc->sm->sm_ino,
-			XFS_IGET_UNTRUSTED | XFS_IGET_DONTCACHE, 0, &ip);
+	error = xfs_iget(mp, NULL, sc->sm->sm_ino, XFS_IGET_UNTRUSTED, 0, &ip);
 	switch (error) {
 	case -ENOENT:
 		/* Inode doesn't exist, just bail out. */
@@ -870,7 +869,7 @@ xchk_get_inode(
 		 * that it no longer exists.
 		 */
 		error = xfs_imap(sc->mp, sc->tp, sc->sm->sm_ino, &imap,
-				XFS_IGET_UNTRUSTED | XFS_IGET_DONTCACHE);
+				XFS_IGET_UNTRUSTED);
 		if (error)
 			return -ENOENT;
 		error = -EFSCORRUPTED;
@@ -895,12 +894,30 @@ xchk_get_inode(
 	 */
 	if (VFS_I(ip)->i_generation != sc->sm->sm_gen ||
 	    (xfs_is_metadata_inode(ip) && !S_ISDIR(VFS_I(ip)->i_mode))) {
-		xfs_irele(ip);
+		xchk_irele(sc, ip);
 		return -ENOENT;
 	}
 
 	sc->ip = ip;
 	return 0;
+}
+
+void
+__xchk_irele(
+	struct xfs_inode	*ip,
+	bool			set_dontcache)
+{
+	if (set_dontcache && atomic_read(&VFS_I(ip)->i_count) == 1)
+		d_mark_dontcache(VFS_I(ip));
+	xfs_irele(ip);
+}
+
+void
+xchk_irele(
+	struct xfs_scrub	*sc,
+	struct xfs_inode	*ip)
+{
+	__xchk_irele(ip, !(sc->sm->sm_flags & XFS_SCRUB_IFLAG_RETAIN_INODES));
 }
 
 /* Set us up to scrub a file's contents. */
