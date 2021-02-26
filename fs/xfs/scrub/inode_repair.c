@@ -387,6 +387,52 @@ xrep_dinode_count_ag_rmaps(
 	return error;
 }
 
+/* Count extents and blocks for an inode given an rt rmap. */
+STATIC int
+xrep_dinode_walk_rtrmap(
+	struct xfs_btree_cur		*cur,
+	struct xfs_rmap_irec		*rec,
+	void				*priv)
+{
+	struct xrep_dinode_stats	*dis = priv;
+	int				error = 0;
+
+	if (xchk_should_terminate(dis->sc, &error))
+		return error;
+
+	/* We only care about this inode. */
+	if (rec->rm_owner != dis->sc->sm->sm_ino)
+		return 0;
+
+	if (rec->rm_flags & (XFS_RMAP_ATTR_FORK | XFS_RMAP_BMBT_BLOCK))
+		return -EFSCORRUPTED;
+
+	dis->rt_blocks += rec->rm_blockcount;
+	dis->rt_extents++;
+	return 0;
+}
+
+/* Count extents and blocks for an inode from all realtime rmap data. */
+STATIC int
+xrep_dinode_count_rt_rmaps(
+	struct xrep_dinode_stats	*dis)
+{
+	struct xfs_scrub		*sc = dis->sc;
+	int				error;
+
+	if (!xfs_sb_version_hasrealtime(&sc->mp->m_sb) ||
+	    xrep_is_rtmeta_ino(sc, sc->ip->i_ino))
+		return 0;
+
+	xchk_rt_lock(sc, &sc->sr);
+	xrep_rt_btcur_init(sc, &sc->sr);
+	error = xfs_rmap_query_all(sc->sr.rmap_cur, xrep_dinode_walk_rtrmap,
+			dis);
+	xchk_rt_btcur_free(&sc->sr);
+	xchk_rt_unlock(sc, &sc->sr);
+	return error;
+}
+
 /* Count extents and blocks for a given inode from all rmap data. */
 STATIC int
 xrep_dinode_count_rmaps(
@@ -395,9 +441,12 @@ xrep_dinode_count_rmaps(
 	xfs_agnumber_t			agno;
 	int				error;
 
-	if (!xfs_sb_version_hasrmapbt(&dis->sc->mp->m_sb) ||
-	    xfs_sb_version_hasrealtime(&dis->sc->mp->m_sb))
+	if (!xfs_sb_version_hasrmapbt(&dis->sc->mp->m_sb))
 		return -EOPNOTSUPP;
+
+	error = xrep_dinode_count_rt_rmaps(dis);
+	if (error)
+		return error;
 
 	for (agno = 0; agno < dis->sc->mp->m_sb.sb_agcount; agno++) {
 		error = xrep_dinode_count_ag_rmaps(dis, agno);
