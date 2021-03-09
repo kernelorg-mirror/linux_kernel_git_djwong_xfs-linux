@@ -511,6 +511,13 @@ xqcheck_collect_counts(
 			retries = 20;
 			break;
 		case -ENOENT:
+			/*¬
+			 * It's possible that this inode has lost all of its
+			 * links but hasn't yet been inactivated.  Try to push
+			 * it towards inactivation.
+			 */
+			xfs_inodegc_flush_ino(xqc->sc->mp, ino);
+			/* fall through */
 		case -EINVAL:
 			/*
 			 * We thought the inode was allocated, but iget failed

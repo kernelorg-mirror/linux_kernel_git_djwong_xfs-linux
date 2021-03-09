@@ -75,6 +75,7 @@ void xfs_inew_wait(struct xfs_inode *ip);
 void xfs_inodegc_worker(struct work_struct *work);
 void xfs_inodegc_flush(struct xfs_mount *mp);
 void xfs_inodegc_flush_poll(struct xfs_mount *mp);
+void xfs_inodegc_flush_ino(struct xfs_mount *mp, xfs_ino_t ino);
 void xfs_inodegc_stop(struct xfs_mount *mp);
 void xfs_inodegc_start(struct xfs_mount *mp);
 int xfs_inodegc_free_space(struct xfs_mount *mp, struct xfs_eofblocks *eofb);
