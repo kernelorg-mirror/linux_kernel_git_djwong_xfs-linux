@@ -2010,6 +2010,23 @@ clear:
 	clear_bit(XFS_OPFLAG_INACTIVATE_NOW_BIT, &mp->m_opflags);
 }
 
+/* Flush inactivation work for all inodes in the same AGs as this inode. */
+void
+xfs_inodegc_flush_ino(
+	struct xfs_mount	*mp,
+	xfs_ino_t		ino)
+{
+	struct xfs_perag	*pag;
+
+	if (!xfs_inodegc_running(mp))
+		return;
+
+	pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, ino));
+	mod_delayed_work(mp->m_gc_workqueue, &pag->pag_inodegc_work, 0);
+	flush_delayed_work(&pag->pag_inodegc_work);
+	xfs_perag_put(pag);
+}
+
 /* Stop all queued inactivation work. */
 void
 xfs_inodegc_stop(
