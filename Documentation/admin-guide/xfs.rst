@@ -277,6 +277,15 @@ The following sysctls are available for the XFS filesystem:
 	references and returns timed-out AGs back to the free stream
 	pool.
 
+  fs.xfs.inode_gc_delay
+	(Units: centiseconds   Min: 1  Default: 200  Max: 360000)
+	The amount of time to delay garbage collection of inodes that
+	have been closed or have been unlinked from the directory tree.
+	Garbage collection here means clearing speculative preallocations
+	from linked files and freeing unlinked inodes.  A higher value
+	here enables more batching at a cost of delayed reclamation of
+	incore inodes.
+
   fs.xfs.speculative_prealloc_lifetime
 	(Units: seconds   Min: 1  Default: 300  Max: 86400)
 	The interval at which the background scanning for inodes
