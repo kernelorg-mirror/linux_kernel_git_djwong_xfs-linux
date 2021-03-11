@@ -858,8 +858,20 @@ restart:
 			if ((iter_flags & XFS_INODE_WALK_INEW_WAIT) &&
 			    xfs_iflags_test(batch[i], XFS_INEW))
 				xfs_inew_wait(batch[i]);
-			error = execute(batch[i], args);
-			xfs_irele(batch[i]);
+			switch (tag) {
+			case XFS_ICI_BLOCKGC_TAG:
+				error = xfs_blockgc_scan_inode(batch[i], args);
+				xfs_irele(batch[i]);
+				break;
+			case XFS_ICI_NO_TAG:
+				error = execute(batch[i], args);
+				xfs_irele(batch[i]);
+				break;
+			default:
+				ASSERT(0);
+				error = -EFSCORRUPTED;
+				break;
+			}
 			if (error == -EAGAIN) {
 				skipped++;
 				continue;
