@@ -640,6 +640,10 @@ xfs_check_summary_counts(
  * so we need to unpin them, write them back and/or reclaim them before unmount
  * can proceed.
  *
+ * Start the process by pushing all inodes through the inactivation process
+ * so that all file updates to on-disk metadata can be flushed with the log.
+ * After the AIL push, all inodes should be ready for reclamation.
+ *
  * An inode cluster that has been freed can have its buffer still pinned in
  * memory because the transaction is still sitting in a iclog. The stale inodes
  * on that buffer will be pinned to the buffer until the transaction hits the
@@ -663,6 +667,7 @@ static void
 xfs_unmount_flush_inodes(
 	struct xfs_mount	*mp)
 {
+	xfs_inodegc_force(mp);
 	xfs_log_force(mp, XFS_LOG_SYNC);
 	xfs_extent_busy_wait_all(mp);
 	flush_workqueue(xfs_discard_wq);
@@ -670,6 +675,7 @@ xfs_unmount_flush_inodes(
 	mp->m_flags |= XFS_MOUNT_UNMOUNTING;
 
 	xfs_ail_push_all_sync(mp->m_ail);
+	xfs_inodegc_stop(mp);
 	cancel_delayed_work_sync(&mp->m_reclaim_work);
 	xfs_reclaim_inodes(mp);
 	xfs_health_unmount(mp);
@@ -1094,6 +1100,13 @@ xfs_unmountfs(
 {
 	uint64_t		resblks;
 	int			error;
+
+	/*
+	 * Perform all on-disk metadata updates required to inactivate inodes.
+	 * Since this can involve finobt updates, do it now before we lose the
+	 * per-AG space reservations.
+	 */
+	xfs_inodegc_force(mp);
 
 	xfs_blockgc_stop(mp);
 	xfs_fs_unreserve_ag_blocks(mp);
