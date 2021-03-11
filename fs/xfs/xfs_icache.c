@@ -249,11 +249,13 @@ xfs_inode_clear_reclaim_tag(
 /* Queue a new inode gc pass if there are inodes needing inactivation. */
 static void
 xfs_inodegc_queue(
-	struct xfs_mount        *mp)
+	struct xfs_perag	*pag)
 {
+	struct xfs_mount	*mp = pag->pag_mount;
+
 	rcu_read_lock();
 	if (radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_INODEGC_TAG))
-		queue_delayed_work(mp->m_gc_workqueue, &mp->m_inodegc_work,
+		queue_delayed_work(mp->m_gc_workqueue, &pag->pag_inodegc_work,
 				msecs_to_jiffies(xfs_inodegc_centisecs * 10));
 	rcu_read_unlock();
 }
@@ -276,7 +278,7 @@ xfs_perag_set_inactive_tag(
 	spin_unlock(&mp->m_perag_lock);
 
 	/* schedule periodic background inode inactivation */
-	xfs_inodegc_queue(mp);
+	xfs_inodegc_queue(pag);
 
 	trace_xfs_perag_set_inactive(mp, pag->pag_agno, -1, _RET_IP_);
 }
@@ -2072,8 +2074,9 @@ void
 xfs_inodegc_worker(
 	struct work_struct	*work)
 {
-	struct xfs_mount	*mp = container_of(to_delayed_work(work),
-					struct xfs_mount, m_inodegc_work);
+	struct xfs_perag	*pag = container_of(to_delayed_work(work),
+					struct xfs_perag, pag_inodegc_work);
+	struct xfs_mount	*mp = pag->pag_mount;
 	int			error;
 
 	/*
@@ -2088,21 +2091,20 @@ xfs_inodegc_worker(
 	if (!sb_start_write_trylock(mp->m_super))
 		return;
 
-	error = xfs_inodegc_free_space(mp, NULL);
+	error = xfs_inode_walk_ag(pag, xfs_inodegc_inactivate, NULL);
 	if (error && error != -EAGAIN)
 		xfs_err(mp, "inode inactivation failed, error %d", error);
 
 	sb_end_write(mp->m_super);
-	xfs_inodegc_queue(mp);
+	xfs_inodegc_queue(pag);
 }
 
-/* Force all currently queued inode inactivation work to run immediately. */
-void
-xfs_inodegc_force(
-	struct xfs_mount	*mp)
+/* Force all currently queued AG inode inactivation work to run immediately. */
+static inline void
+xfs_inodegc_force_pag(
+	struct xfs_perag	*pag)
 {
-	if (!radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_INODEGC_TAG))
-		return;
+	struct xfs_mount	*mp = pag->pag_mount;
 
 	/*
 	 * In order to reset the delayed work to run immediately, we have to
@@ -2111,9 +2113,27 @@ xfs_inodegc_force(
 	 * will iterate the radix tree one extra time and find no inodes to
 	 * inactivate.
 	 */
-	cancel_delayed_work(&mp->m_inodegc_work);
-	queue_delayed_work(mp->m_gc_workqueue, &mp->m_inodegc_work, 0);
-	flush_delayed_work(&mp->m_inodegc_work);
+	cancel_delayed_work(&pag->pag_inodegc_work);
+	queue_delayed_work(mp->m_gc_workqueue, &pag->pag_inodegc_work, 0);
+}
+
+/* Force all queued inode inactivation work to run immediately. */
+void
+xfs_inodegc_force(
+	struct xfs_mount	*mp)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+	bool			queued = false;
+
+	for_each_perag_tag(mp, agno, pag, XFS_ICI_INODEGC_TAG) {
+		xfs_inodegc_force_pag(pag);
+		queued = true;
+	}
+	if (!queued)
+		return;
+
+	flush_workqueue(mp->m_gc_workqueue);
 }
 
 /* Stop all queued inactivation work. */
@@ -2121,7 +2141,11 @@ void
 xfs_inodegc_stop(
 	struct xfs_mount	*mp)
 {
-	cancel_delayed_work_sync(&mp->m_inodegc_work);
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+
+	for_each_perag_tag(mp, agno, pag, XFS_ICI_INODEGC_TAG)
+		cancel_delayed_work_sync(&pag->pag_inodegc_work);
 }
 
 /* Schedule deferred inode inactivation work. */
@@ -2129,5 +2153,9 @@ void
 xfs_inodegc_start(
 	struct xfs_mount	*mp)
 {
-	xfs_inodegc_queue(mp);
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+
+	for_each_perag_tag(mp, agno, pag, XFS_ICI_INODEGC_TAG)
+		xfs_inodegc_queue(pag);
 }
