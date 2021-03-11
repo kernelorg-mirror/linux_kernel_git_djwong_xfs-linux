@@ -26,6 +26,9 @@
 
 #include <linux/iversion.h>
 
+/* Forward declarations to reduce indirect calls in xfs_inode_walk_ag */
+static int xfs_blockgc_scan_inode(struct xfs_inode *ip, void *args);
+
 /*
  * Allocate and initialise an xfs_inode.
  */
@@ -763,6 +766,14 @@ out_unlock_noent:
 	return false;
 }
 
+static inline int
+inode_walk_fn_to_tag(int (*execute)(struct xfs_inode *ip, void *args))
+{
+	if (execute == xfs_blockgc_scan_inode)
+		return XFS_ICI_BLOCKGC_TAG;
+	return XFS_ICI_NO_TAG;
+}
+
 /*
  * For a given per-AG structure @pag, grab, @execute, and rele all incore
  * inodes with the given radix tree @tag.
@@ -772,14 +783,14 @@ xfs_inode_walk_ag(
 	struct xfs_perag	*pag,
 	int			iter_flags,
 	int			(*execute)(struct xfs_inode *ip, void *args),
-	void			*args,
-	int			tag)
+	void			*args)
 {
 	struct xfs_mount	*mp = pag->pag_mount;
 	uint32_t		first_index;
 	int			last_error = 0;
 	int			skipped;
 	bool			done;
+	int			tag = inode_walk_fn_to_tag(execute);
 	int			nr_found;
 
 restart:
@@ -893,18 +904,18 @@ xfs_inode_walk(
 	struct xfs_mount	*mp,
 	int			iter_flags,
 	int			(*execute)(struct xfs_inode *ip, void *args),
-	void			*args,
-	int			tag)
+	void			*args)
 {
 	struct xfs_perag	*pag;
 	int			error = 0;
 	int			last_error = 0;
+	int			tag = inode_walk_fn_to_tag(execute);
 	xfs_agnumber_t		ag;
 
 	ag = 0;
 	while ((pag = xfs_inode_walk_get_perag(mp, ag, tag))) {
 		ag = pag->pag_agno + 1;
-		error = xfs_inode_walk_ag(pag, iter_flags, execute, args, tag);
+		error = xfs_inode_walk_ag(pag, iter_flags, execute, args);
 		xfs_perag_put(pag);
 		if (error) {
 			last_error = error;
@@ -1613,8 +1624,7 @@ xfs_blockgc_worker(
 
 	if (!sb_start_write_trylock(mp->m_super))
 		return;
-	error = xfs_inode_walk_ag(pag, 0, xfs_blockgc_scan_inode, NULL,
-			XFS_ICI_BLOCKGC_TAG);
+	error = xfs_inode_walk_ag(pag, 0, xfs_blockgc_scan_inode, NULL);
 	if (error)
 		xfs_info(mp, "AG %u preallocation gc worker failed, err=%d",
 				pag->pag_agno, error);
@@ -1632,8 +1642,7 @@ xfs_blockgc_free_space(
 {
 	trace_xfs_blockgc_free_space(mp, eofb, _RET_IP_);
 
-	return xfs_inode_walk(mp, 0, xfs_blockgc_scan_inode, eofb,
-			XFS_ICI_BLOCKGC_TAG);
+	return xfs_inode_walk(mp, 0, xfs_blockgc_scan_inode, eofb);
 }
 
 /*
