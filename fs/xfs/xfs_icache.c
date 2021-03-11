@@ -25,6 +25,7 @@
 #include "xfs_ialloc.h"
 
 #include <linux/iversion.h>
+#include <linux/nmi.h>
 
 /* Forward declarations to reduce indirect calls in xfs_inode_walk_ag */
 static int xfs_blockgc_scan_inode(struct xfs_inode *ip, void *args);
@@ -2064,9 +2065,13 @@ xfs_inodegc_free_space(
 	struct xfs_mount	*mp,
 	struct xfs_eofblocks	*eofb)
 {
+	int			error;
+
 	trace_xfs_inodegc_free_space(mp, eofb, _RET_IP_);
 
-	return xfs_inode_walk(mp, xfs_inodegc_inactivate, eofb);
+	error = xfs_inode_walk(mp, xfs_inodegc_inactivate, eofb);
+	wake_up(&mp->m_inactive_wait);
+	return error;
 }
 
 /* Background inode inactivation worker. */
@@ -2134,6 +2139,39 @@ xfs_inodegc_force(
 		return;
 
 	flush_workqueue(mp->m_gc_workqueue);
+}
+
+/*
+ * Force all inode inactivation work to run immediately, and poll until the
+ * work is complete.  Callers should only use this function if they must
+ * inactivate inodes while holding VFS locks, and must ensure that no new
+ * inodes will be queued for inactivation.
+ */
+void
+xfs_inodegc_force_poll(
+	struct xfs_mount	*mp)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+	bool			queued = false;
+
+	for_each_perag_tag(mp, agno, pag, XFS_ICI_INODEGC_TAG) {
+		xfs_inodegc_force_pag(pag);
+		queued = true;
+	}
+	if (!queued)
+		return;
+
+	/*
+	 * Touch the softlockup watchdog every 1/10th of a second while there
+	 * are still inactivation-tagged inodes in the filesystem.
+	 */
+	while (!wait_event_timeout(mp->m_inactive_wait,
+				   !radix_tree_tagged(&mp->m_perag_tree,
+						      XFS_ICI_INODEGC_TAG),
+				   HZ / 10)) {
+		touch_softlockup_watchdog();
+	}
 }
 
 /* Stop all queued inactivation work. */
