@@ -33,6 +33,7 @@
 #include "xfs_quota_defs.h"
 #include "xfs_attr_leaf.h"
 #include "libxfs/xfs_rtrmap_btree.h"
+#include "libxfs/xfs_rtrefcount_btree.h"
 #include "xfs_log_priv.h"
 #include "xfs_ag.h"
 #include "scrub/xfs_scrub.h"
@@ -885,6 +886,7 @@ xrep_dinode_ensure_forkoff(
 {
 	struct xfs_bmdr_block		*bmdr;
 	struct xfs_rtrmap_root		*rmdr;
+	struct xfs_rtrefcount_root	*rcdr;
 	size_t				bmdr_minsz = xfs_bmdr_space_calc(1);
 	unsigned int			lit_sz = XFS_LITINO(sc->mp);
 	unsigned int			afork_min, dfork_min;
@@ -992,6 +994,10 @@ xrep_dinode_ensure_forkoff(
 	case XFS_DINODE_FMT_RMAP:
 		rmdr = XFS_DFORK_PTR(dip, XFS_DATA_FORK);
 		dfork_min = xfs_rtrmap_broot_space(sc->mp, rmdr);
+		break;
+	case XFS_DINODE_FMT_REFCOUNT:
+		rcdr = XFS_DFORK_PTR(dip, XFS_DATA_FORK);
+		dfork_min = xfs_rtrefcount_broot_space(sc->mp, rcdr);
 		break;
 	default:
 		dfork_min = 0;
