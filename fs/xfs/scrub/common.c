@@ -596,8 +596,7 @@ xchk_trans_alloc(
 /* Set us up with a transaction and an empty context. */
 int
 xchk_setup_fs(
-	struct xfs_scrub	*sc,
-	struct xfs_inode	*ip)
+	struct xfs_scrub	*sc)
 {
 	uint			resblks;
 
@@ -609,7 +608,6 @@ xchk_setup_fs(
 int
 xchk_setup_ag_btree(
 	struct xfs_scrub	*sc,
-	struct xfs_inode	*ip,
 	bool			force_log)
 {
 	struct xfs_mount	*mp = sc->mp;
@@ -627,7 +625,7 @@ xchk_setup_ag_btree(
 			return error;
 	}
 
-	error = xchk_setup_fs(sc, ip);
+	error = xchk_setup_fs(sc);
 	if (error)
 		return error;
 
@@ -655,11 +653,11 @@ xchk_checkpoint_log(
  */
 int
 xchk_get_inode(
-	struct xfs_scrub	*sc,
-	struct xfs_inode	*ip_in)
+	struct xfs_scrub	*sc)
 {
 	struct xfs_imap		imap;
 	struct xfs_mount	*mp = sc->mp;
+	struct xfs_inode	*ip_in = XFS_I(file_inode(sc->filp));
 	struct xfs_inode	*ip = NULL;
 	int			error;
 
@@ -720,12 +718,11 @@ xchk_get_inode(
 int
 xchk_setup_inode_contents(
 	struct xfs_scrub	*sc,
-	struct xfs_inode	*ip,
 	unsigned int		resblks)
 {
 	int			error;
 
-	error = xchk_get_inode(sc, ip);
+	error = xchk_get_inode(sc);
 	if (error)
 		return error;
 
