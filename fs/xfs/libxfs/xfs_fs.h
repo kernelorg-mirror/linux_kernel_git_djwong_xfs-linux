@@ -741,9 +741,10 @@ struct xfs_scrub_metadata {
 #define XFS_SCRUB_TYPE_HEALTHY	26	/* everything checked out ok */
 #define XFS_SCRUB_TYPE_RTRMAPBT	27	/* realtime reverse mapping btree */
 #define XFS_SCRUB_TYPE_RTREFCBT	28	/* realtime reference count btree */
+#define XFS_SCRUB_TYPE_NLINKS	29	/* inode link counts */
 
 /* Number of scrub subcommands. */
-#define XFS_SCRUB_TYPE_NR	29
+#define XFS_SCRUB_TYPE_NR	30
 
 /*
  * This special type code only applies to the vectored scrub implementation.
