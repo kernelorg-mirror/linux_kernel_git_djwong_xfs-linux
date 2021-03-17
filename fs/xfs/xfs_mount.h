@@ -254,7 +254,19 @@ typedef struct xfs_mount {
 
 	/* Blocks reserved for all kinds of inode-based (rt) metadata. */
 	struct xfs_ag_resv	m_rtmeta_resv;
+
+#if IS_ENABLED(CONFIG_XFS_ONLINE_SCRUB)
+	/* online nlink check stuff */
+	struct xfs_hook_chain	m_nlink_mod_hooks;
+#endif
 } xfs_mount_t;
+
+/* Parameters for xfs_bumplink/droplink hook. */
+struct xfs_nlink_mod_params {
+	xfs_ino_t		dir;
+	xfs_ino_t		ino;
+	int32_t			delta;
+};
 
 #define M_IGEO(mp)		(&(mp)->m_ino_geo)
 
