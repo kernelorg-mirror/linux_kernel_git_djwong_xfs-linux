@@ -405,6 +405,12 @@ static const struct xchk_meta_ops meta_scrub_ops[] = {
 		.has	= xfs_sb_version_hasrtreflink,
 		.repair	= xrep_rtrefcountbt,
 	},
+	[XFS_SCRUB_TYPE_NLINKS] = {	/* inode link counts */
+		.type	= ST_FS,
+		.setup	= xchk_setup_nlinks,
+		.scrub	= xchk_nlinks,
+		.repair	= xrep_notsupported,
+	},
 };
 
 /* This isn't a stable feature, warn once per day. */
