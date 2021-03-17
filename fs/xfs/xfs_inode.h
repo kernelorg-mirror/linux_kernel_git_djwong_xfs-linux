@@ -504,4 +504,11 @@ int xfs_icreate_dqalloc(const struct xfs_ialloc_args *args,
 		struct xfs_dquot **udqpp, struct xfs_dquot **gdqpp,
 		struct xfs_dquot **pdqpp);
 
+#if IS_ENABLED(CONFIG_XFS_ONLINE_SCRUB)
+void xfs_inode_nlink_delta(struct xfs_inode *dp, struct xfs_inode *ip,
+		int32_t delta);
+#else
+# define xfs_inode_nlink_delta(dp, ip, delta)	((void)0)
+#endif
+
 #endif	/* __XFS_INODE_H__ */

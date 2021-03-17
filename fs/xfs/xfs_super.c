@@ -2012,6 +2012,10 @@ static int xfs_init_fs_context(
 	mp->m_logbsize = -1;
 	mp->m_allocsize_log = 16; /* 64k */
 
+#if IS_ENABLED(CONFIG_XFS_ONLINE_SCRUB)
+	xfs_hook_init(&mp->m_nlink_mod_hooks);
+#endif
+
 	/*
 	 * Copy binary VFS mount flags we are interested in.
 	 */
