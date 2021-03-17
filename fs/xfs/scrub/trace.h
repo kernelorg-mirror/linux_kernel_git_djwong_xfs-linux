@@ -1774,6 +1774,9 @@ TRACE_EVENT(xrep_rtrefc_found,
 		  __entry->refcount)
 )
 
+DEFINE_SCRUB_NLINK_DIFF_EVENT(xrep_nlinks_commit_inode);
+DEFINE_SCRUB_NLINK_DIFF_EVENT(xrep_nlinks_unfixable_inode);
+
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
 
 #endif /* _TRACE_XFS_SCRUB_TRACE_H */
