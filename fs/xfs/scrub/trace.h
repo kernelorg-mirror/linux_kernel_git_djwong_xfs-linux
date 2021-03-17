@@ -894,6 +894,56 @@ TRACE_EVENT(xchk_rtsum_record_free,
 		  __entry->v)
 )
 
+TRACE_EVENT(xchk_nlinks_update_incore,
+	TP_PROTO(struct xfs_mount *mp, xfs_ino_t dir, xfs_ino_t ino, int delta,
+		 void *ret_ip),
+	TP_ARGS(mp, dir, ino, delta, ret_ip),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, dir)
+		__field(xfs_ino_t, ino)
+		__field(int, delta)
+		__field(void *, ret_ip)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->dir = dir;
+		__entry->ino = ino;
+		__entry->delta = delta;
+		__entry->ret_ip = ret_ip;
+	),
+	TP_printk("dev %d:%d dir 0x%llx ino 0x%llx nlink_delta %d ret %pS",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->dir, __entry->ino, __entry->delta, __entry->ret_ip)
+)
+
+DECLARE_EVENT_CLASS(xchk_nlink_diff_class,
+	TP_PROTO(struct xfs_mount *mp, xfs_ino_t ino, xfs_nlink_t ondisk,
+		 xfs_nlink_t saw),
+	TP_ARGS(mp, ino, ondisk, saw),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(xfs_nlink_t, ondisk)
+		__field(xfs_nlink_t, saw)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->ino = ino;
+		__entry->ondisk = ondisk;
+		__entry->saw = saw;
+	),
+	TP_printk("dev %d:%d ino 0x%llx nlink %u saw_nlink %u",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino, __entry->ondisk, __entry->saw)
+);
+#define DEFINE_SCRUB_NLINK_DIFF_EVENT(name) \
+DEFINE_EVENT(xchk_nlink_diff_class, name, \
+	TP_PROTO(struct xfs_mount *mp, xfs_ino_t ino, xfs_nlink_t ondisk, \
+		 xfs_nlink_t saw), \
+	TP_ARGS(mp, ino, ondisk, saw))
+DEFINE_SCRUB_NLINK_DIFF_EVENT(xchk_nlinks_compare_inode);
+
 /* repair tracepoints */
 #if IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR)
 
