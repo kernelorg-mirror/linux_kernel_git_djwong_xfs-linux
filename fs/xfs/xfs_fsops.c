@@ -22,7 +22,8 @@
 #include "xfs_inode.h"
 #include "xfs_icache.h"
 #include "xfs_rtalloc.h"
-#include "xfs_reflink.h"
+#include "xfs_refcount.h"
+#include "xfs_pwork.h"
 
 /*
  * growfs operations
@@ -556,21 +557,87 @@ xfs_fs_reserve_ag_blocks(
 	return error;
 }
 
+struct xfs_make_writable {
+	struct xfs_pwork	pwork;
+	xfs_agnumber_t		agno;
+};
+
+static int
+xfs_fs_make_ag_writable(
+	struct xfs_mount	*mp,
+	struct xfs_pwork	*pwork)
+{
+	struct xfs_make_writable	*mw;
+	struct xfs_perag	*pag;
+	int			error;
+
+	mw = container_of(pwork, struct xfs_make_writable, pwork);
+
+	if (xfs_pwork_want_abort(pwork))
+		goto out;
+
+	if (xfs_sb_version_hasreflink(&mp->m_sb)) {
+		error = xfs_refcount_recover_cow_leftovers(mp, mw->agno);
+		if (error) {
+			xfs_warn(mp,
+	"Error %d recovering AG %u leftover CoW staging.", error, mw->agno);
+			xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_INCORE);
+			goto out;
+		}
+	}
+
+	if (mw->agno == NULLAGNUMBER) {
+		error = xfs_rt_resv_init(mp, NULL);
+	} else {
+		pag = xfs_perag_get(mp, mw->agno);
+		error = xfs_ag_resv_init(pag, NULL);
+		xfs_perag_put(pag);
+	}
+
+	if (error == -ENOSPC)
+		error = 0;
+	if (error) {
+		xfs_warn(mp,
+	"Error %d reserving AG %u metadata reserve pool.", error, mw->agno);
+		xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_INCORE);
+	}
+
+out:
+	kmem_free(mw);
+	return error;
+}
+
 /* Do all the work required to make the filesystem writable. */
 int
 xfs_fs_make_writable(
 	struct xfs_mount	*mp)
 {
+	struct xfs_pwork_ctl	pctl;
+	struct xfs_make_writable *mw;
+	xfs_agnumber_t		agno;
 	int			error;
 
-	error = xfs_reflink_recover_cow(mp);
+	error = xfs_pwork_init(mp, &pctl, xfs_fs_make_ag_writable,
+			"xfs-mount-rw");
 	if (error)
 		return error;
 
-	error = xfs_fs_reserve_ag_blocks(mp);
-	if (error == -ENOSPC)
-		return 0;
-	return error;
+	if (xfs_sb_version_hasrealtime(&mp->m_sb)) {
+		mw = kmem_zalloc(sizeof(struct xfs_make_writable), 0);
+		mw->agno = NULLAGNUMBER;
+		xfs_pwork_queue(&pctl, &mw->pwork);
+	}
+
+	for (agno = 0; agno < mp->m_sb.sb_agcount; agno++) {
+		if (xfs_pwork_ctl_want_abort(&pctl))
+			break;
+
+		mw = kmem_zalloc(sizeof(struct xfs_make_writable), 0);
+		mw->agno = agno;
+		xfs_pwork_queue(&pctl, &mw->pwork);
+	}
+
+	return xfs_pwork_destroy(&pctl);
 }
 
 /*

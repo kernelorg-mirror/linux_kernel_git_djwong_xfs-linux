@@ -831,30 +831,6 @@ xfs_reflink_end_cow(
 }
 
 /*
- * Free leftover CoW reservations that didn't get cleaned out.
- */
-int
-xfs_reflink_recover_cow(
-	struct xfs_mount	*mp)
-{
-	xfs_agnumber_t		agno;
-	int			error = 0;
-
-	if (!xfs_sb_version_hasreflink(&mp->m_sb))
-		return 0;
-
-	for (agno = 0; agno < mp->m_sb.sb_agcount; agno++) {
-		error = xfs_refcount_recover_cow_leftovers(mp, agno);
-		if (error)
-			return error;
-	}
-
-	if (xfs_sb_version_hasrealtime(&mp->m_sb))
-		return xfs_refcount_recover_cow_leftovers(mp, NULLAGNUMBER);
-	return 0;
-}
-
-/*
  * Reflinking (Block) Ranges of Two Files Together
  *
  * First, ensure that the reflink flag is set on both inodes.  The flag is an
