@@ -15,5 +15,6 @@ extern int xfs_fs_goingdown(xfs_mount_t *mp, uint32_t inflags);
 
 extern int xfs_fs_reserve_ag_blocks(struct xfs_mount *mp);
 extern int xfs_fs_unreserve_ag_blocks(struct xfs_mount *mp);
+int xfs_fs_make_writable(struct xfs_mount *mp);
 
 #endif	/* __XFS_FSOPS_H__ */

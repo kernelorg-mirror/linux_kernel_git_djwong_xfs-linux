@@ -22,6 +22,7 @@
 #include "xfs_inode.h"
 #include "xfs_icache.h"
 #include "xfs_rtalloc.h"
+#include "xfs_reflink.h"
 
 /*
  * growfs operations
@@ -552,6 +553,23 @@ xfs_fs_reserve_ag_blocks(
 		xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_INCORE);
 	}
 
+	return error;
+}
+
+/* Do all the work required to make the filesystem writable. */
+int
+xfs_fs_make_writable(
+	struct xfs_mount	*mp)
+{
+	int			error;
+
+	error = xfs_reflink_recover_cow(mp);
+	if (error)
+		return error;
+
+	error = xfs_fs_reserve_ag_blocks(mp);
+	if (error == -ENOSPC)
+		return 0;
 	return error;
 }
 
