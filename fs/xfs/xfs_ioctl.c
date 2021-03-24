@@ -1121,7 +1121,11 @@ xfs_fill_fsxattr(
 
 	simple_fill_fsxattr(fa, xfs_ip2xflags(ip));
 	fa->fsx_extsize = ip->i_extsize << ip->i_mount->m_sb.sb_blocklog;
-	fa->fsx_cowextsize = ip->i_cowextsize << ip->i_mount->m_sb.sb_blocklog;
+	if (xfs_sb_version_has_v3inode(&ip->i_mount->m_sb) &&
+	    (ip->i_d.di_flags2 & XFS_DIFLAG2_COWEXTSIZE)) {
+		fa->fsx_cowextsize =
+			ip->i_cowextsize << ip->i_mount->m_sb.sb_blocklog;
+	}
 	fa->fsx_projid = ip->i_projid;
 	if (ifp && (ifp->if_flags & XFS_IFEXTENTS))
 		fa->fsx_nextents = xfs_iext_count(ifp);
@@ -1521,11 +1525,12 @@ xfs_ioctl_setattr(
 		ip->i_extsize = fa->fsx_extsize >> mp->m_sb.sb_blocklog;
 	else
 		ip->i_extsize = 0;
-	if (xfs_sb_version_has_v3inode(&mp->m_sb) &&
-	    (ip->i_d.di_flags2 & XFS_DIFLAG2_COWEXTSIZE))
-		ip->i_cowextsize = fa->fsx_cowextsize >> mp->m_sb.sb_blocklog;
-	else
-		ip->i_cowextsize = 0;
+	if (xfs_sb_version_has_v3inode(&mp->m_sb)) {
+		if (ip->i_d.di_flags2 & XFS_DIFLAG2_COWEXTSIZE)
+			ip->i_cowextsize = XFS_B_TO_FSBT(mp, fa->fsx_cowextsize);
+		else
+			ip->i_cowextsize = 0;
+	}
 
 	error = xfs_trans_commit(tp);
 
