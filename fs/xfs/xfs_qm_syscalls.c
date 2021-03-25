@@ -748,40 +748,26 @@ xfs_qm_scall_getquota_next(
 	return error;
 }
 
-STATIC int
+static void
 xfs_dqrele_inode(
 	struct xfs_inode	*ip,
-	void			*args)
+	uint			flags)
 {
-	uint			*flags = args;
-
-	/* skip quota inodes */
-	if (ip == ip->i_mount->m_quotainfo->qi_uquotaip ||
-	    ip == ip->i_mount->m_quotainfo->qi_gquotaip ||
-	    ip == ip->i_mount->m_quotainfo->qi_pquotaip) {
-		ASSERT(ip->i_udquot == NULL);
-		ASSERT(ip->i_gdquot == NULL);
-		ASSERT(ip->i_pdquot == NULL);
-		return 0;
-	}
-
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
-	if ((*flags & XFS_UQUOTA_ACCT) && ip->i_udquot) {
+	if ((flags & XFS_UQUOTA_ACCT) && ip->i_udquot) {
 		xfs_qm_dqrele(ip->i_udquot);
 		ip->i_udquot = NULL;
 	}
-	if ((*flags & XFS_GQUOTA_ACCT) && ip->i_gdquot) {
+	if ((flags & XFS_GQUOTA_ACCT) && ip->i_gdquot) {
 		xfs_qm_dqrele(ip->i_gdquot);
 		ip->i_gdquot = NULL;
 	}
-	if ((*flags & XFS_PQUOTA_ACCT) && ip->i_pdquot) {
+	if ((flags & XFS_PQUOTA_ACCT) && ip->i_pdquot) {
 		xfs_qm_dqrele(ip->i_pdquot);
 		ip->i_pdquot = NULL;
 	}
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
-	return 0;
 }
-
 
 /*
  * Go thru all the inodes in the file system, releasing their dquots.
@@ -794,7 +780,35 @@ xfs_qm_dqrele_all_inodes(
 	struct xfs_mount	*mp,
 	uint			flags)
 {
+	struct super_block	*sb = mp->m_super;
+	struct inode		*inode, *old_inode = NULL;
+
 	ASSERT(mp->m_quotainfo);
-	xfs_inode_walk(mp, XFS_INODE_WALK_INEW_WAIT, xfs_dqrele_inode,
-			&flags, XFS_ICI_NO_TAG);
+
+	spin_lock(&sb->s_inode_list_lock);
+	list_for_each_entry(inode, &sb->s_inodes, i_sb_list) {
+		struct xfs_inode	*ip = XFS_I(inode);
+
+		if (XFS_FORCED_SHUTDOWN(mp))
+			break;
+		if (xfs_is_quota_inode(&mp->m_sb, ip->i_ino))
+			continue;
+		if (xfs_iflags_test(ip, XFS_IRECLAIMABLE | XFS_IRECLAIM))
+			continue;
+		if (!igrab(inode))
+			continue;
+		spin_unlock(&sb->s_inode_list_lock);
+
+		iput(old_inode);
+		old_inode = inode;
+
+		if (xfs_iflags_test(ip, XFS_INEW))
+			xfs_inew_wait(ip);
+		xfs_dqrele_inode(ip, flags);
+
+		spin_lock(&sb->s_inode_list_lock);
+	}
+	spin_unlock(&sb->s_inode_list_lock);
+
+	iput(old_inode);
 }
