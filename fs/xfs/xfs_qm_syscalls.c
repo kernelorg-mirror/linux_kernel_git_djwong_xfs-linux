@@ -113,6 +113,12 @@ xfs_qm_scall_quotaoff(
 		return -EEXIST;
 	error = 0;
 
+	/*
+	 * Flush the inactive list before we turn quota off to reduce the
+	 * amount of quotaoff work we have to do with the quotaoff mutex held.
+	 */
+	xfs_inodegc_flush(mp);
+
 	flags &= (XFS_ALL_QUOTA_ACCT | XFS_ALL_QUOTA_ENFD);
 
 	/*
@@ -179,6 +185,15 @@ xfs_qm_scall_quotaoff(
 		goto out_unlock;
 
 	/*
+	 * Force inactivations to be done in the foreground and flush any
+	 * background inactivations that may have been scheduled since the
+	 * previous flush.  Once this is done, there won't be any inodes with
+	 * dquots attached.
+	 */
+	set_bit(XFS_OPFLAG_INACTIVATE_NOW_BIT, &mp->m_opflags);
+	xfs_inodegc_flush(mp);
+
+	/*
 	 * Next we clear the XFS_MOUNT_*DQ_ACTIVE bit(s) in the mount struct
 	 * to take care of the race between dqget and quotaoff. We don't take
 	 * any special locks to reset these bits. All processes need to check
@@ -215,6 +230,9 @@ xfs_qm_scall_quotaoff(
 	 * according to what was turned off.
 	 */
 	xfs_qm_dqpurge_all(mp, dqtype);
+
+	/* Restart background inactivation now that all the dquots are gone. */
+	clear_bit(XFS_OPFLAG_INACTIVATE_NOW_BIT, &mp->m_opflags);
 
 	/*
 	 * Transactions that had started before ACTIVE state bit was cleared
@@ -697,6 +715,8 @@ xfs_qm_scall_getquota(
 	struct xfs_dquot	*dqp;
 	int			error;
 
+	xfs_inodegc_summary_flush(mp);
+
 	/*
 	 * Try to get the dquot. We don't want it allocated on disk, so don't
 	 * set doalloc. If it doesn't exist, we'll get ENOENT back.
@@ -734,6 +754,8 @@ xfs_qm_scall_getquota_next(
 {
 	struct xfs_dquot	*dqp;
 	int			error;
+
+	xfs_inodegc_summary_flush(mp);
 
 	error = xfs_qm_dqget_next(mp, *id, type, &dqp);
 	if (error)
