@@ -1054,7 +1054,7 @@ restart:
 			break;
 
 		cond_resched();
-		if (tag == XFS_ICI_RECLAIM_TAG && eofb) {
+		if (eofb && (eofb->eof_flags & XFS_EOF_FLAGS_LIMIT)) {
 			eofb->nr_to_scan -= XFS_LOOKUP_BATCH;
 			if (eofb->nr_to_scan < 0)
 				break;
@@ -1256,7 +1256,10 @@ xfs_reclaim_inodes_nr(
 	struct xfs_mount	*mp,
 	int			nr_to_scan)
 {
-	struct xfs_eofblocks	eofb = { .nr_to_scan = nr_to_scan };
+	struct xfs_eofblocks	eofb = {
+		.eof_flags	= XFS_EOF_FLAGS_LIMIT,
+		.nr_to_scan	= nr_to_scan
+	};
 
 	/* kick background reclaimer and push the AIL */
 	xfs_reclaim_work_queue(mp);

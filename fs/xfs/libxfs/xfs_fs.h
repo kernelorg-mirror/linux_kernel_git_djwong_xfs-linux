@@ -524,7 +524,7 @@ struct xfs_fs_eofblocks {
 	uid_t		eof_uid;
 	gid_t		eof_gid;
 	prid_t		eof_prid;
-	__u32		pad32;
+	__u32		eof_limit;
 	__u64		eof_min_file_size;
 	__u64		pad64[12];
 };
@@ -538,12 +538,15 @@ struct xfs_fs_eofblocks {
 #define XFS_EOF_FLAGS_UNION		(1 << 5) /* union filter algorithm;
 						  * kernel only, not included in
 						  * valid mask */
+#define XFS_EOF_FLAGS_LIMIT		(1 << 6) /* scan this many inodes */
+
 #define XFS_EOF_FLAGS_VALID	\
 	(XFS_EOF_FLAGS_SYNC |	\
 	 XFS_EOF_FLAGS_UID |	\
 	 XFS_EOF_FLAGS_GID |	\
 	 XFS_EOF_FLAGS_PRID |	\
-	 XFS_EOF_FLAGS_MINFILESIZE)
+	 XFS_EOF_FLAGS_MINFILESIZE | \
+	 XFS_EOF_FLAGS_LIMIT)
 
 
 /*
