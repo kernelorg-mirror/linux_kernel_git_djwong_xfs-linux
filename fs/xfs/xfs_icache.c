@@ -234,7 +234,7 @@ xfs_inode_clear_reclaim_tag(
 	xfs_perag_clear_reclaim_tag(pag);
 }
 
-static void
+void
 xfs_inew_wait(
 	struct xfs_inode	*ip)
 {
