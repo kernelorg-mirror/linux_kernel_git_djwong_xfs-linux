@@ -15,6 +15,9 @@ struct xfs_eofblocks {
 	kgid_t		eof_gid;
 	prid_t		eof_prid;
 	__u64		eof_min_file_size;
+
+	/* Number of inodes to scan, currently limited to reclaim */
+	int		nr_to_scan;
 };
 
 /*
