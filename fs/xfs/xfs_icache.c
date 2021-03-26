@@ -1422,6 +1422,12 @@ xfs_inode_free_eofblocks(
 	return 0;
 }
 
+static inline bool
+xfs_blockgc_running(struct xfs_mount *mp)
+{
+	return test_bit(XFS_OPFLAG_BLOCKGC_RUNNING_BIT, &mp->m_opflags);
+}
+
 /*
  * Background scanning to trim preallocated space. This is queued based on the
  * 'speculative_prealloc_lifetime' tunable (5m by default).
@@ -1430,6 +1436,9 @@ static inline void
 xfs_blockgc_queue(
 	struct xfs_perag	*pag)
 {
+	if (!xfs_blockgc_running(pag->pag_mount))
+		return;
+
 	rcu_read_lock();
 	if (radix_tree_tagged(&pag->pag_ici_root, XFS_ICI_BLOCKGC_TAG))
 		queue_delayed_work(pag->pag_mount->m_gc_workqueue,
@@ -1634,11 +1643,15 @@ void
 xfs_blockgc_stop(
 	struct xfs_mount	*mp)
 {
-	struct xfs_perag	*pag;
 	xfs_agnumber_t		agno;
 
-	for_each_perag_tag(mp, agno, pag, XFS_ICI_BLOCKGC_TAG)
+	clear_bit(XFS_OPFLAG_BLOCKGC_RUNNING_BIT, &mp->m_opflags);
+	for (agno = 0; agno < mp->m_sb.sb_agcount; agno++) {
+		struct xfs_perag	*pag = xfs_perag_get(mp, agno);
+
 		cancel_delayed_work_sync(&pag->pag_blockgc_work);
+		xfs_perag_put(pag);
+	}
 }
 
 /* Enable post-EOF and CoW block auto-reclamation. */
@@ -1649,6 +1662,7 @@ xfs_blockgc_start(
 	struct xfs_perag	*pag;
 	xfs_agnumber_t		agno;
 
+	set_bit(XFS_OPFLAG_BLOCKGC_RUNNING_BIT, &mp->m_opflags);
 	for_each_perag_tag(mp, agno, pag, XFS_ICI_BLOCKGC_TAG)
 		xfs_blockgc_queue(pag);
 }
@@ -1661,6 +1675,13 @@ xfs_blockgc_scan_inode(
 {
 	unsigned int		lockflags = 0;
 	int			error;
+
+	/*
+	 * Speculative preallocation gc isn't supposed to run when the fs is
+	 * frozen because we don't want kernel threads to block on transaction
+	 * allocation.
+	 */
+	ASSERT(ip->i_mount->m_super->s_writers.frozen < SB_FREEZE_FS);
 
 	error = xfs_inode_free_eofblocks(ip, eofb, &lockflags);
 	if (error)
@@ -1684,13 +1705,10 @@ xfs_blockgc_worker(
 	struct xfs_mount	*mp = pag->pag_mount;
 	int			error;
 
-	if (!sb_start_write_trylock(mp->m_super))
-		return;
 	error = xfs_inode_walk_ag(pag, XFS_ICI_BLOCKGC_TAG, NULL);
 	if (error)
 		xfs_info(mp, "AG %u preallocation gc worker failed, err=%d",
 				pag->pag_agno, error);
-	sb_end_write(mp->m_super);
 	xfs_blockgc_queue(pag);
 }
 
