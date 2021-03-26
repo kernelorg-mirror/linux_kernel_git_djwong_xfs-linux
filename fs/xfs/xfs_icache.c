@@ -27,7 +27,8 @@
 
 #include <linux/iversion.h>
 
-static int xfs_blockgc_scan_inode(struct xfs_inode *ip, void *args);
+static int xfs_blockgc_scan_inode(struct xfs_inode *ip,
+		struct xfs_eofblocks *eofb);
 
 /*
  * Allocate and initialise an xfs_inode.
@@ -782,7 +783,7 @@ STATIC int
 xfs_inode_walk_ag(
 	struct xfs_perag	*pag,
 	unsigned int		tag,
-	void			*args)
+	struct xfs_eofblocks	*eofb)
 {
 	struct xfs_mount	*mp = pag->pag_mount;
 	uint32_t		first_index;
@@ -848,7 +849,7 @@ restart:
 		for (i = 0; i < nr_found; i++) {
 			if (!batch[i])
 				continue;
-			error = xfs_blockgc_scan_inode(batch[i], args);
+			error = xfs_blockgc_scan_inode(batch[i], eofb);
 			xfs_irele(batch[i]);
 			if (error == -EAGAIN) {
 				skipped++;
@@ -881,7 +882,7 @@ static int
 xfs_inode_walk(
 	struct xfs_mount	*mp,
 	unsigned int		tag,
-	void			*args)
+	struct xfs_eofblocks	*eofb)
 {
 	struct xfs_perag	*pag;
 	int			error = 0;
@@ -893,7 +894,7 @@ xfs_inode_walk(
 	ag = 0;
 	while ((pag = xfs_perag_get_tag(mp, ag, tag))) {
 		ag = pag->pag_agno + 1;
-		error = xfs_inode_walk_ag(pag, tag, args);
+		error = xfs_inode_walk_ag(pag, tag, eofb);
 		xfs_perag_put(pag);
 		if (error) {
 			last_error = error;
@@ -1272,10 +1273,9 @@ xfs_reclaim_worker(
 STATIC int
 xfs_inode_free_eofblocks(
 	struct xfs_inode	*ip,
-	void			*args,
+	struct xfs_eofblocks	*eofb,
 	unsigned int		*lockflags)
 {
-	struct xfs_eofblocks	*eofb = args;
 	bool			wait;
 
 	wait = eofb && (eofb->eof_flags & XFS_EOF_FLAGS_SYNC);
@@ -1479,10 +1479,9 @@ xfs_prep_free_cowblocks(
 STATIC int
 xfs_inode_free_cowblocks(
 	struct xfs_inode	*ip,
-	void			*args,
+	struct xfs_eofblocks	*eofb,
 	unsigned int		*lockflags)
 {
-	struct xfs_eofblocks	*eofb = args;
 	bool			wait;
 	int			ret = 0;
 
@@ -1577,16 +1576,16 @@ xfs_blockgc_start(
 static int
 xfs_blockgc_scan_inode(
 	struct xfs_inode	*ip,
-	void			*args)
+	struct xfs_eofblocks	*eofb)
 {
 	unsigned int		lockflags = 0;
 	int			error;
 
-	error = xfs_inode_free_eofblocks(ip, args, &lockflags);
+	error = xfs_inode_free_eofblocks(ip, eofb, &lockflags);
 	if (error)
 		goto unlock;
 
-	error = xfs_inode_free_cowblocks(ip, args, &lockflags);
+	error = xfs_inode_free_cowblocks(ip, eofb, &lockflags);
 unlock:
 	if (lockflags)
 		xfs_iunlock(ip, lockflags);
