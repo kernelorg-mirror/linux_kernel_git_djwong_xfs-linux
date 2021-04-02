@@ -1294,13 +1294,6 @@ xfs_inode_free_eofblocks(
 	if (!xfs_iflags_test(ip, XFS_IEOFBLOCKS))
 		return 0;
 
-	if (!xfs_can_free_eofblocks(ip, false)) {
-		/* inode could be preallocated or append-only */
-		trace_xfs_inode_free_eofblocks_invalid(ip);
-		xfs_inode_clear_eofblocks_tag(ip);
-		return 0;
-	}
-
 	/*
 	 * If the mapping is dirty the operation can block and wait for some
 	 * time. Unless we are waiting, skip it.
@@ -1322,7 +1315,13 @@ xfs_inode_free_eofblocks(
 	}
 	*lockflags |= XFS_IOLOCK_EXCL;
 
-	return xfs_free_eofblocks(ip);
+	if (xfs_can_free_eofblocks(ip, false))
+		return xfs_free_eofblocks(ip);
+
+	/* inode could be preallocated or append-only */
+	trace_xfs_inode_free_eofblocks_invalid(ip);
+	xfs_inode_clear_eofblocks_tag(ip);
+	return 0;
 }
 
 /*
