@@ -216,6 +216,11 @@ typedef struct xfs_mount {
 	struct xfs_kobj		m_errortag_kobj;
 #endif
 	struct ratelimit_state	m_inodegc_ratelimit;
+	/*
+	 * Use this to wait for the inode inactivation workqueue to finish
+	 * inactivating all the inodes.
+	 */
+	struct wait_queue_head	m_inactive_wait;
 } xfs_mount_t;
 
 #define M_IGEO(mp)		(&(mp)->m_ino_geo)
@@ -256,6 +261,8 @@ typedef struct xfs_mount {
 
 #define XFS_OPFLAG_INODEGC_RUNNING_BIT	(0)	/* are we allowed to start the
 						   inode inactivation worker? */
+#define XFS_OPFLAG_INACTIVATE_NOW_BIT	(1)	/* force foreground inactivation
+						   of unlinked inodes */
 
 /*
  * Max and min values for mount-option defined I/O
