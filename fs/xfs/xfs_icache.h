@@ -29,7 +29,7 @@ struct xfs_eofblocks {
 /*
  * tags for inode radix tree
  */
-#define XFS_ICI_DQRELE_NONTAG	(-1)	/* quotaoff dqdetach inode walk uses
+#define XFS_ICI_DQRELE_NONTAG	(-1U)	/* quotaoff dqdetach inode walk uses
 					   untagged lookups */
 #define XFS_ICI_RECLAIM_TAG	0	/* inode is to be reclaimed */
 /* Inode has speculative preallocations (posteof or cow) to clean. */
