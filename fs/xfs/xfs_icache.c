@@ -23,6 +23,7 @@
 #include "xfs_dquot.h"
 #include "xfs_reflink.h"
 #include "xfs_ialloc.h"
+#include "xfs_health.h"
 
 #include <linux/iversion.h>
 
@@ -588,7 +589,7 @@ xfs_iget_cache_miss(
 	 * time.
 	 */
 	iflags = XFS_INEW;
-	if (flags & XFS_IGET_DONTCACHE)
+	if ((flags & XFS_IGET_DONTCACHE) && xfs_inode_is_healthy(ip))
 		d_mark_dontcache(VFS_I(ip));
 	ip->i_udquot = NULL;
 	ip->i_gdquot = NULL;
