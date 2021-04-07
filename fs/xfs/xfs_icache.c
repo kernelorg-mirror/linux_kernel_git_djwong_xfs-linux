@@ -915,6 +915,56 @@ xfs_inode_walk(
 	return last_error;
 }
 
+/* Drop this inode's dquots. */
+static int
+xfs_dqrele_inode(
+	struct xfs_inode	*ip,
+	void			*priv)
+{
+	struct xfs_eofblocks	*eofb = priv;
+
+	xfs_ilock(ip, XFS_ILOCK_EXCL);
+	if (eofb->eof_flags & XFS_EOFB_DROP_UDQUOT) {
+		xfs_qm_dqrele(ip->i_udquot);
+		ip->i_udquot = NULL;
+	}
+	if (eofb->eof_flags & XFS_EOFB_DROP_GDQUOT) {
+		xfs_qm_dqrele(ip->i_gdquot);
+		ip->i_gdquot = NULL;
+	}
+	if (eofb->eof_flags & XFS_EOFB_DROP_PDQUOT) {
+		xfs_qm_dqrele(ip->i_pdquot);
+		ip->i_pdquot = NULL;
+	}
+	xfs_iunlock(ip, XFS_ILOCK_EXCL);
+	return 0;
+}
+
+/*
+ * Detach all dquots from incore inodes if we can.  The caller must already
+ * have dropped the relevant XFS_[UGP]QUOTA_ACTIVE flags so that dquots will
+ * not get reattached.
+ */
+int
+xfs_dqrele_all_inodes(
+	struct xfs_mount	*mp,
+	unsigned int		qflags)
+{
+	struct xfs_eofblocks	eofb = { .eof_flags = 0 };
+
+	BUILD_BUG_ON(XFS_EOFB_PRIVATE_FLAGS & XFS_EOF_FLAGS_VALID);
+
+	if (qflags & XFS_UQUOTA_ACCT)
+		eofb.eof_flags |= XFS_EOFB_DROP_UDQUOT;
+	if (qflags & XFS_GQUOTA_ACCT)
+		eofb.eof_flags |= XFS_EOFB_DROP_GDQUOT;
+	if (qflags & XFS_PQUOTA_ACCT)
+		eofb.eof_flags |= XFS_EOFB_DROP_PDQUOT;
+
+	return xfs_inode_walk(mp, XFS_INODE_WALK_INEW_WAIT, xfs_dqrele_inode,
+			&eofb, XFS_ICI_NO_TAG);
+}
+
 /*
  * Grab the inode for reclaim exclusively.
  *
