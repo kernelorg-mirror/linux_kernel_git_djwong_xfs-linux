@@ -28,6 +28,7 @@
 #include "xfs_icache.h"
 #include "xfs_iomap.h"
 #include "xfs_reflink.h"
+#include "xfs_sb.h"
 
 /* Kernel only BMAP related definitions and functions */
 
@@ -727,6 +728,47 @@ out_unlock:
 	return error;
 }
 
+/*
+ * If the target device (or some part of it) is full enough that it won't to be
+ * able to satisfy the entire request, try to free inactive files to free up
+ * space.  While it's perfectly fine to fill a preallocation request with a
+ * bunch of short extents, we prefer to slow down preallocation requests to
+ * combat long term fragmentation in new file data.
+ */
+static int
+xfs_alloc_reclaim_inactive_space(
+	struct xfs_mount	*mp,
+	bool			is_rt,
+	xfs_filblks_t		allocatesize_fsb)
+{
+	struct xfs_perag	*pag;
+	struct xfs_sb		*sbp = &mp->m_sb;
+	xfs_agnumber_t		agno;
+
+	if (!radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_INODEGC_TAG))
+		return 0;
+
+	if (is_rt) {
+		if (sbp->sb_frextents * sbp->sb_rextsize >= allocatesize_fsb)
+			return 0;
+		goto free_space;
+	}
+
+	for (agno = 0; agno < mp->m_sb.sb_agcount; agno++) {
+		bool		ok;
+
+		pag = xfs_perag_get(mp, agno);
+		ok = pag->pagf_freeblks >= allocatesize_fsb;
+		xfs_perag_put(pag);
+
+		if (ok)
+			return 0;
+	}
+
+free_space:
+	return xfs_inodegc_free_space(mp, NULL);
+}
+
 int
 xfs_alloc_file_space(
 	struct xfs_inode	*ip,
@@ -810,6 +852,11 @@ xfs_alloc_file_space(
 			dblocks = XFS_DIOSTRAT_SPACE_RES(mp, resblks);
 			rblocks = 0;
 		}
+
+		error = xfs_alloc_reclaim_inactive_space(mp, rt,
+				allocatesize_fsb);
+		if (error)
+			break;
 
 		/*
 		 * Allocate and setup the transaction.
