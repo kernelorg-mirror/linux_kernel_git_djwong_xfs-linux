@@ -769,7 +769,7 @@ out_unlock_noent:
 
 static inline bool
 xfs_grabbed_for_walk(
-	int			tag,
+	unsigned int		tag,
 	struct xfs_inode	*ip)
 {
 	switch (tag) {
@@ -789,7 +789,7 @@ xfs_grabbed_for_walk(
 STATIC int
 xfs_inode_walk_ag(
 	struct xfs_perag	*pag,
-	int			tag,
+	unsigned int		tag,
 	void			*args)
 {
 	struct xfs_mount	*mp = pag->pag_mount;
@@ -911,7 +911,7 @@ xfs_inode_walk_get_perag(
 static int
 xfs_inode_walk(
 	struct xfs_mount	*mp,
-	int			tag,
+	unsigned int		tag,
 	void			*args)
 {
 	struct xfs_perag	*pag;
