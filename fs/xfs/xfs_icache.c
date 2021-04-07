@@ -26,6 +26,8 @@
 
 #include <linux/iversion.h>
 
+static bool xfs_dqrele_inode_grab(struct xfs_inode *ip);
+
 /*
  * Allocate and initialise an xfs_inode.
  */
@@ -763,6 +765,22 @@ out_unlock_noent:
 	return false;
 }
 
+static inline bool
+xfs_grabbed_for_walk(
+	int			tag,
+	struct xfs_inode	*ip,
+	int			iter_flags)
+{
+	switch (tag) {
+	case XFS_ICI_BLOCKGC_TAG:
+		return xfs_inode_walk_ag_grab(ip, iter_flags);
+	case XFS_ICI_DQRELE_NONTAG:
+		return xfs_dqrele_inode_grab(ip);
+	default:
+		return false;
+	}
+}
+
 /*
  * For a given per-AG structure @pag, grab, @execute, and rele all incore
  * inodes with the given radix tree @tag.
@@ -794,7 +812,7 @@ restart:
 
 		rcu_read_lock();
 
-		if (tag == XFS_ICI_NO_TAG)
+		if (tag == XFS_ICI_DQRELE_NONTAG)
 			nr_found = radix_tree_gang_lookup(&pag->pag_ici_root,
 					(void **)batch, first_index,
 					XFS_LOOKUP_BATCH);
@@ -816,7 +834,7 @@ restart:
 		for (i = 0; i < nr_found; i++) {
 			struct xfs_inode *ip = batch[i];
 
-			if (done || !xfs_inode_walk_ag_grab(ip, iter_flags))
+			if (done || !xfs_grabbed_for_walk(tag, ip, iter_flags))
 				batch[i] = NULL;
 
 			/*
@@ -879,7 +897,7 @@ xfs_inode_walk_get_perag(
 	xfs_agnumber_t		agno,
 	int			tag)
 {
-	if (tag == XFS_ICI_NO_TAG)
+	if (tag == XFS_ICI_DQRELE_NONTAG)
 		return xfs_perag_get(mp, agno);
 	return xfs_perag_get_tag(mp, agno, tag);
 }
@@ -913,6 +931,44 @@ xfs_inode_walk(
 		}
 	}
 	return last_error;
+}
+
+/* Decide if we want to grab this inode to drop its dquots. */
+static bool
+xfs_dqrele_inode_grab(
+	struct xfs_inode	*ip)
+{
+	bool			ret = false;
+
+	ASSERT(rcu_read_lock_held());
+
+	/* Check for stale RCU freed inode */
+	spin_lock(&ip->i_flags_lock);
+	if (!ip->i_ino)
+		goto out_unlock;
+
+	/*
+	 * Skip inodes that are anywhere in the reclaim machinery because we
+	 * drop dquots before tagging an inode for reclamation.
+	 */
+	if (ip->i_flags & (XFS_IRECLAIM | XFS_IRECLAIMABLE))
+		goto out_unlock;
+
+	/*
+	 * The inode looks alive; try to grab a VFS reference so that it won't
+	 * get destroyed.  If we got the reference, return true to say that
+	 * we grabbed the inode.
+	 *
+	 * If we can't get the reference, then we know the inode had its VFS
+	 * state torn down and hasn't yet entered the reclaim machinery.  Since
+	 * we also know that dquots are detached from an inode before it enters
+	 * reclaim, we can skip the inode.
+	 */
+	ret = igrab(VFS_I(ip)) != NULL;
+
+out_unlock:
+	spin_unlock(&ip->i_flags_lock);
+	return ret;
 }
 
 /* Drop this inode's dquots. */
@@ -962,7 +1018,7 @@ xfs_dqrele_all_inodes(
 		eofb.eof_flags |= XFS_EOFB_DROP_PDQUOT;
 
 	return xfs_inode_walk(mp, XFS_INODE_WALK_INEW_WAIT, xfs_dqrele_inode,
-			&eofb, XFS_ICI_NO_TAG);
+			&eofb, XFS_ICI_DQRELE_NONTAG);
 }
 
 /*
