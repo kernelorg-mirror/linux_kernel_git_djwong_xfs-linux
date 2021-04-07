@@ -732,11 +732,9 @@ xfs_icache_inode_is_allocated(
  */
 STATIC bool
 xfs_inode_walk_ag_grab(
-	struct xfs_inode	*ip,
-	int			flags)
+	struct xfs_inode	*ip)
 {
 	struct inode		*inode = VFS_I(ip);
-	bool			newinos = !!(flags & XFS_INODE_WALK_INEW_WAIT);
 
 	ASSERT(rcu_read_lock_held());
 
@@ -746,8 +744,7 @@ xfs_inode_walk_ag_grab(
 		goto out_unlock_noent;
 
 	/* avoid new or reclaimable inodes. Leave for reclaim code to flush */
-	if ((!newinos && __xfs_iflags_test(ip, XFS_INEW)) ||
-	    __xfs_iflags_test(ip, XFS_IRECLAIMABLE | XFS_IRECLAIM))
+	if (__xfs_iflags_test(ip, XFS_INEW | XFS_IRECLAIMABLE | XFS_IRECLAIM))
 		goto out_unlock_noent;
 	spin_unlock(&ip->i_flags_lock);
 
@@ -770,12 +767,11 @@ out_unlock_noent:
 static inline bool
 xfs_grabbed_for_walk(
 	int			tag,
-	struct xfs_inode	*ip,
-	int			iter_flags)
+	struct xfs_inode	*ip)
 {
 	switch (tag) {
 	case XFS_ICI_BLOCKGC_TAG:
-		return xfs_inode_walk_ag_grab(ip, iter_flags);
+		return xfs_inode_walk_ag_grab(ip);
 	case XFS_ICI_DQRELE_NONTAG:
 		return xfs_dqrele_inode_grab(ip);
 	default:
@@ -790,7 +786,6 @@ xfs_grabbed_for_walk(
 STATIC int
 xfs_inode_walk_ag(
 	struct xfs_perag	*pag,
-	int			iter_flags,
 	int			(*execute)(struct xfs_inode *ip, void *args),
 	void			*args,
 	int			tag)
@@ -836,7 +831,7 @@ restart:
 		for (i = 0; i < nr_found; i++) {
 			struct xfs_inode *ip = batch[i];
 
-			if (done || !xfs_grabbed_for_walk(tag, ip, iter_flags))
+			if (done || !xfs_grabbed_for_walk(tag, ip))
 				batch[i] = NULL;
 
 			/*
@@ -864,9 +859,6 @@ restart:
 		for (i = 0; i < nr_found; i++) {
 			if (!batch[i])
 				continue;
-			if ((iter_flags & XFS_INODE_WALK_INEW_WAIT) &&
-			    xfs_iflags_test(batch[i], XFS_INEW))
-				xfs_inew_wait(batch[i]);
 			error = execute(batch[i], args);
 			xfs_irele(batch[i]);
 			if (error == -EAGAIN) {
@@ -911,7 +903,6 @@ xfs_inode_walk_get_perag(
 static int
 xfs_inode_walk(
 	struct xfs_mount	*mp,
-	int			iter_flags,
 	int			(*execute)(struct xfs_inode *ip, void *args),
 	void			*args,
 	int			tag)
@@ -924,7 +915,7 @@ xfs_inode_walk(
 	ag = 0;
 	while ((pag = xfs_inode_walk_get_perag(mp, ag, tag))) {
 		ag = pag->pag_agno + 1;
-		error = xfs_inode_walk_ag(pag, iter_flags, execute, args, tag);
+		error = xfs_inode_walk_ag(pag, execute, args, tag);
 		xfs_perag_put(pag);
 		if (error) {
 			last_error = error;
@@ -1022,7 +1013,7 @@ xfs_dqrele_all_inodes(
 	if (qflags & XFS_PQUOTA_ACCT)
 		eofb.eof_flags |= XFS_EOFB_DROP_PDQUOT;
 
-	return xfs_inode_walk(mp, 0, xfs_dqrele_inode, &eofb,
+	return xfs_inode_walk(mp, xfs_dqrele_inode, &eofb,
 			XFS_ICI_DQRELE_NONTAG);
 }
 
@@ -1727,7 +1718,7 @@ xfs_blockgc_worker(
 
 	if (!sb_start_write_trylock(mp->m_super))
 		return;
-	error = xfs_inode_walk_ag(pag, 0, xfs_blockgc_scan_inode, NULL,
+	error = xfs_inode_walk_ag(pag, xfs_blockgc_scan_inode, NULL,
 			XFS_ICI_BLOCKGC_TAG);
 	if (error)
 		xfs_info(mp, "AG %u preallocation gc worker failed, err=%d",
@@ -1746,7 +1737,7 @@ xfs_blockgc_free_space(
 {
 	trace_xfs_blockgc_free_space(mp, eofb, _RET_IP_);
 
-	return xfs_inode_walk(mp, 0, xfs_blockgc_scan_inode, eofb,
+	return xfs_inode_walk(mp, xfs_blockgc_scan_inode, eofb,
 			XFS_ICI_BLOCKGC_TAG);
 }
 
