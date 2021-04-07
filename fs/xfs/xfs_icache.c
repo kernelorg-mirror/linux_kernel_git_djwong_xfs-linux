@@ -27,6 +27,8 @@
 #include <linux/iversion.h>
 
 static bool xfs_dqrele_inode_grab(struct xfs_inode *ip);
+static int xfs_dqrele_inode(struct xfs_inode *ip, void *priv);
+static int xfs_blockgc_scan_inode(struct xfs_inode *ip, void *args);
 
 /*
  * Allocate and initialise an xfs_inode.
@@ -778,15 +780,14 @@ xfs_grabbed_for_walk(
 }
 
 /*
- * For a given per-AG structure @pag, grab, @execute, and rele all incore
- * inodes with the given radix tree @tag.
+ * For a given per-AG structure @pag, grab, execute a tag specific function,
+ * and release all incore inodes with the given radix tree @tag.
  */
 STATIC int
 xfs_inode_walk_ag(
 	struct xfs_perag	*pag,
-	int			(*execute)(struct xfs_inode *ip, void *args),
-	void			*args,
-	int			tag)
+	int			tag,
+	void			*args)
 {
 	struct xfs_mount	*mp = pag->pag_mount;
 	uint32_t		first_index;
@@ -857,7 +858,14 @@ restart:
 		for (i = 0; i < nr_found; i++) {
 			if (!batch[i])
 				continue;
-			error = execute(batch[i], args);
+			switch (tag) {
+			case XFS_ICI_DQRELE_NONTAG:
+				error = xfs_dqrele_inode(batch[i], args);
+				break;
+			case XFS_ICI_BLOCKGC_TAG:
+				error = xfs_blockgc_scan_inode(batch[i], args);
+				break;
+			}
 			xfs_irele(batch[i]);
 			if (error == -EAGAIN) {
 				skipped++;
@@ -895,15 +903,14 @@ xfs_inode_walk_get_perag(
 }
 
 /*
- * Call the @execute function on all incore inodes matching the radix tree
+ * Call a tag-specific function on all incore inodes matching the radix tree
  * @tag.
  */
 static int
 xfs_inode_walk(
 	struct xfs_mount	*mp,
-	int			(*execute)(struct xfs_inode *ip, void *args),
-	void			*args,
-	int			tag)
+	int			tag,
+	void			*args)
 {
 	struct xfs_perag	*pag;
 	int			error = 0;
@@ -913,7 +920,7 @@ xfs_inode_walk(
 	ag = 0;
 	while ((pag = xfs_inode_walk_get_perag(mp, ag, tag))) {
 		ag = pag->pag_agno + 1;
-		error = xfs_inode_walk_ag(pag, execute, args, tag);
+		error = xfs_inode_walk_ag(pag, tag, args);
 		xfs_perag_put(pag);
 		if (error) {
 			last_error = error;
@@ -1011,8 +1018,7 @@ xfs_dqrele_all_inodes(
 	if (qflags & XFS_PQUOTA_ACCT)
 		eofb.eof_flags |= XFS_EOFB_DROP_PDQUOT;
 
-	return xfs_inode_walk(mp, xfs_dqrele_inode, &eofb,
-			XFS_ICI_DQRELE_NONTAG);
+	return xfs_inode_walk(mp, XFS_ICI_DQRELE_NONTAG, &eofb);
 }
 
 /*
@@ -1716,8 +1722,7 @@ xfs_blockgc_worker(
 
 	if (!sb_start_write_trylock(mp->m_super))
 		return;
-	error = xfs_inode_walk_ag(pag, xfs_blockgc_scan_inode, NULL,
-			XFS_ICI_BLOCKGC_TAG);
+	error = xfs_inode_walk_ag(pag, XFS_ICI_BLOCKGC_TAG, NULL);
 	if (error)
 		xfs_info(mp, "AG %u preallocation gc worker failed, err=%d",
 				pag->pag_agno, error);
@@ -1735,8 +1740,7 @@ xfs_blockgc_free_space(
 {
 	trace_xfs_blockgc_free_space(mp, eofb, _RET_IP_);
 
-	return xfs_inode_walk(mp, xfs_blockgc_scan_inode, eofb,
-			XFS_ICI_BLOCKGC_TAG);
+	return xfs_inode_walk(mp, XFS_ICI_BLOCKGC_TAG, eofb);
 }
 
 /*
