@@ -114,6 +114,15 @@ struct xfs_perag {
 	 * or have some other means to control concurrency.
 	 */
 	struct rhashtable	pagi_unlinked_hash;
+
+	/*
+	 * Counter of live intents.  We track the number of log intent items
+	 * that have been queued (but not yet processed) so that scrub can
+	 * detect the presence of other threads that are in the middle of
+	 * processing a chain of deferred items.
+	 */
+	atomic_t		pag_intents;
+	wait_queue_head_t	pag_intents_wq;
 };
 
 int xfs_initialize_perag(struct xfs_mount *mp, xfs_agnumber_t agcount,
