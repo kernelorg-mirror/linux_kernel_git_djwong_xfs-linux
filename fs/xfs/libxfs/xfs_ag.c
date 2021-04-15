@@ -195,6 +195,7 @@ xfs_free_perag(
 		ASSERT(pag);
 		ASSERT(atomic_read(&pag->pag_ref) == 0);
 		ASSERT(pag->pag_ici_needs_inactive == 0);
+		ASSERT(atomic_read(&pag->pag_intents) == 0);
 
 		unregister_shrinker(&pag->pag_inodegc_shrink);
 		cancel_delayed_work_sync(&pag->pag_blockgc_work);
@@ -259,6 +260,7 @@ xfs_initialize_perag(
 		INIT_DELAYED_WORK(&pag->pag_blockgc_work, xfs_blockgc_worker);
 		INIT_DELAYED_WORK(&pag->pag_inodegc_work, xfs_inodegc_worker);
 		INIT_RADIX_TREE(&pag->pag_ici_root, GFP_ATOMIC);
+		init_waitqueue_head(&pag->pag_intents_wq);
 		init_waitqueue_head(&pag->pagb_wait);
 		pag->pagb_count = 0;
 		pag->pagb_tree = RB_ROOT;

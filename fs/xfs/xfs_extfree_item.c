@@ -490,6 +490,7 @@ xfs_extent_free_finish_item(
 	struct list_head		*item,
 	struct xfs_btree_cur		**state)
 {
+	struct xfs_mount		*mp = tp->t_mountp;
 	struct xfs_extent_free_item	*free;
 	int				error;
 
@@ -500,7 +501,7 @@ xfs_extent_free_finish_item(
 	 * haven't locked the rt inodes yet.
 	 */
 	if (*state == NULL && free->xefi_realtime) {
-		xfs_rtlock(tp, tp->t_mountp, XFS_RTLOCK_ALLOC);
+		xfs_rtlock(tp, mp, XFS_RTLOCK_ALLOC);
 		*state = (struct xfs_btree_cur *)1;
 	}
 
@@ -508,6 +509,8 @@ xfs_extent_free_finish_item(
 			free->xefi_startblock,
 			free->xefi_blockcount, free->xefi_realtime,
 			&free->xefi_oinfo, free->xefi_skip_discard);
+
+	xfs_fs_drop_intents(mp, free->xefi_realtime, free->xefi_startblock);
 	kmem_free(free);
 	return error;
 }
@@ -523,12 +526,26 @@ xfs_extent_free_abort_intent(
 /* Cancel a free extent. */
 STATIC void
 xfs_extent_free_cancel_item(
+	struct xfs_mount		*mp,
 	struct list_head		*item)
 {
 	struct xfs_extent_free_item	*free;
 
 	free = container_of(item, struct xfs_extent_free_item, xefi_list);
+	xfs_fs_drop_intents(mp, free->xefi_realtime, free->xefi_startblock);
 	kmem_free(free);
+}
+
+/* Add a deferred free extent. */
+STATIC void
+xfs_extent_free_add_item(
+	struct xfs_mount		*mp,
+	const struct list_head		*item)
+{
+	const struct xfs_extent_free_item *free;
+
+	free = container_of(item, struct xfs_extent_free_item, xefi_list);
+	xfs_fs_bump_intents(mp, free->xefi_realtime, free->xefi_startblock);
 }
 
 const struct xfs_defer_op_type xfs_extent_free_defer_type = {
@@ -538,6 +555,7 @@ const struct xfs_defer_op_type xfs_extent_free_defer_type = {
 	.create_done	= xfs_extent_free_create_done,
 	.finish_item	= xfs_extent_free_finish_item,
 	.cancel_item	= xfs_extent_free_cancel_item,
+	.add_item	= xfs_extent_free_add_item,
 };
 
 /*
@@ -591,6 +609,7 @@ xfs_agfl_free_finish_item(
 	extp->ext_len = free->xefi_blockcount;
 	efdp->efd_next_extent++;
 
+	xfs_fs_drop_intents(mp, free->xefi_realtime, free->xefi_startblock);
 	kmem_free(free);
 	return error;
 }
@@ -603,6 +622,7 @@ const struct xfs_defer_op_type xfs_agfl_free_defer_type = {
 	.create_done	= xfs_extent_free_create_done,
 	.finish_item	= xfs_agfl_free_finish_item,
 	.cancel_item	= xfs_extent_free_cancel_item,
+	.add_item	= xfs_extent_free_add_item,
 };
 
 /* Is this recovered EFI ok? */
