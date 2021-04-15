@@ -162,6 +162,9 @@ DEFINE_PERAG_REF_EVENT(xfs_inodegc_queue);
 DEFINE_PERAG_REF_EVENT(xfs_inodegc_worker);
 DEFINE_PERAG_REF_EVENT(xfs_blockgc_worker);
 DEFINE_PERAG_REF_EVENT(xfs_blockgc_queue);
+DEFINE_PERAG_REF_EVENT(xfs_fs_bump_intents);
+DEFINE_PERAG_REF_EVENT(xfs_fs_drop_intents);
+DEFINE_PERAG_REF_EVENT(xfs_fs_wait_intents);
 
 DECLARE_EVENT_CLASS(xfs_fs_class,
 	TP_PROTO(struct xfs_mount *mp, int data, unsigned long caller_ip),

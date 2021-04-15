@@ -389,6 +389,8 @@ xfs_rmap_update_log_item(
 	map->me_len = rmap->ri_bmap.br_blockcount;
 	xfs_trans_set_rmap_flags(map, rmap->ri_type, rmap->ri_whichfork,
 			rmap->ri_bmap.br_state, rmap->ri_realtime);
+	xfs_fs_bump_intents(tp->t_mountp, rmap->ri_realtime,
+			rmap->ri_bmap.br_startblock);
 }
 
 static struct xfs_log_item *
@@ -422,6 +424,15 @@ xfs_rmap_update_create_done(
 	return &xfs_trans_get_rud(tp, RUI_ITEM(intent))->rud_item;
 }
 
+static inline void
+xfs_rmap_free_item(
+	struct xfs_mount	*mp,
+	struct xfs_rmap_intent	*rmap)
+{
+	xfs_fs_drop_intents(mp, rmap->ri_realtime, rmap->ri_bmap.br_startblock);
+	kmem_free(rmap);
+}
+
 /* Process a deferred rmap update. */
 STATIC int
 xfs_rmap_update_finish_item(
@@ -439,7 +450,8 @@ xfs_rmap_update_finish_item(
 			rmap->ri_bmap.br_startoff, rmap->ri_bmap.br_startblock,
 			rmap->ri_bmap.br_blockcount, rmap->ri_bmap.br_state,
 			rmap->ri_realtime, state);
-	kmem_free(rmap);
+
+	xfs_rmap_free_item(tp->t_mountp, rmap);
 	return error;
 }
 
@@ -454,12 +466,13 @@ xfs_rmap_update_abort_intent(
 /* Cancel a deferred rmap update. */
 STATIC void
 xfs_rmap_update_cancel_item(
+	struct xfs_mount		*mp,
 	struct list_head		*item)
 {
 	struct xfs_rmap_intent		*rmap;
 
 	rmap = container_of(item, struct xfs_rmap_intent, ri_list);
-	kmem_free(rmap);
+	xfs_rmap_free_item(mp, rmap);
 }
 
 const struct xfs_defer_op_type xfs_rmap_update_defer_type = {

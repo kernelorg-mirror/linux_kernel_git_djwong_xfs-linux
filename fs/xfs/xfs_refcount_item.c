@@ -338,6 +338,8 @@ xfs_refcount_update_log_item(
 	ext->pe_startblock = refc->ri_startblock;
 	ext->pe_len = refc->ri_blockcount;
 	xfs_trans_set_refcount_flags(ext, refc->ri_type, refc->ri_realtime);
+	xfs_fs_bump_intents(tp->t_mountp, refc->ri_realtime,
+			refc->ri_startblock);
 }
 
 static struct xfs_log_item *
@@ -371,6 +373,14 @@ xfs_refcount_update_create_done(
 	return &xfs_trans_get_cud(tp, CUI_ITEM(intent))->cud_item;
 }
 
+static inline void
+xfs_refcount_drop_intents(
+	struct xfs_mount		*mp,
+	struct xfs_refcount_intent	*refc)
+{
+	xfs_fs_drop_intents(mp, refc->ri_realtime, refc->ri_startblock);
+}
+
 /* Process a deferred refcount update. */
 STATIC int
 xfs_refcount_update_finish_item(
@@ -395,8 +405,11 @@ xfs_refcount_update_finish_item(
 		       refc->ri_type == XFS_REFCOUNT_DECREASE);
 		refc->ri_startblock = new_fsb;
 		refc->ri_blockcount = new_aglen;
+		xfs_refcount_drop_intents(tp->t_mountp, refc);
 		return -EAGAIN;
 	}
+
+	xfs_refcount_drop_intents(tp->t_mountp, refc);
 	kmem_free(refc);
 	return error;
 }
@@ -412,11 +425,13 @@ xfs_refcount_update_abort_intent(
 /* Cancel a deferred refcount update. */
 STATIC void
 xfs_refcount_update_cancel_item(
+	struct xfs_mount		*mp,
 	struct list_head		*item)
 {
 	struct xfs_refcount_intent	*refc;
 
 	refc = container_of(item, struct xfs_refcount_intent, ri_list);
+	xfs_refcount_drop_intents(mp, refc);
 	kmem_free(refc);
 }
 
