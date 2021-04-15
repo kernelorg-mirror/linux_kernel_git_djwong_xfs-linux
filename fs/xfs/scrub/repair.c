@@ -704,6 +704,7 @@ xrep_newbt_destroy(
 			goto junkit;
 
 		list_del(&resv->list);
+		xfs_fs_drop_intents(sc->mp, false, resv->fsbno);
 		kmem_free(resv);
 	}
 
@@ -716,6 +717,7 @@ junkit:
 	list_for_each_entry_safe(resv, n, &xnr->resv_list, list) {
 		xfs_extent_free_defer_type.abort_intent(resv->efi);
 		list_del(&resv->list);
+		xfs_fs_drop_intents(sc->mp, false, resv->fsbno);
 		kmem_free(resv);
 	}
 

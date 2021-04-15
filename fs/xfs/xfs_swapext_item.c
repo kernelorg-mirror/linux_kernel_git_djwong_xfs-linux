@@ -346,6 +346,7 @@ xfs_swapext_abort_intent(
 /* Cancel a deferred swapext update. */
 STATIC void
 xfs_swapext_cancel_item(
+	struct xfs_mount		*mp,
 	struct list_head		*item)
 {
 	struct xfs_swapext_intent	*sxi;
