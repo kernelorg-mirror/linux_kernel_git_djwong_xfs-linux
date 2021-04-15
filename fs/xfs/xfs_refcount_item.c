@@ -379,6 +379,7 @@ xfs_refcount_update_finish_item(
 	struct list_head		*item,
 	struct xfs_btree_cur		**state)
 {
+	struct xfs_mount		*mp = tp->t_mountp;
 	struct xfs_refcount_intent	*refc;
 	xfs_fsblock_t			new_fsb;
 	xfs_filblks_t			new_aglen;
@@ -397,6 +398,8 @@ xfs_refcount_update_finish_item(
 		refc->ri_blockcount = new_aglen;
 		return -EAGAIN;
 	}
+
+	xfs_fs_drop_intents(mp, refc->ri_realtime, refc->ri_startblock);
 	kmem_free(refc);
 	return error;
 }
@@ -412,12 +415,26 @@ xfs_refcount_update_abort_intent(
 /* Cancel a deferred refcount update. */
 STATIC void
 xfs_refcount_update_cancel_item(
+	struct xfs_mount		*mp,
 	struct list_head		*item)
 {
 	struct xfs_refcount_intent	*refc;
 
 	refc = container_of(item, struct xfs_refcount_intent, ri_list);
+	xfs_fs_drop_intents(mp, refc->ri_realtime, refc->ri_startblock);
 	kmem_free(refc);
+}
+
+/* Add a deferred refcount update. */
+STATIC void
+xfs_refcount_update_add_item(
+	struct xfs_mount		*mp,
+	const struct list_head		*item)
+{
+	const struct xfs_refcount_intent *refc;
+
+	refc = container_of(item, struct xfs_refcount_intent, ri_list);
+	xfs_fs_bump_intents(mp, refc->ri_realtime, refc->ri_startblock);
 }
 
 const struct xfs_defer_op_type xfs_refcount_update_defer_type = {
@@ -428,6 +445,7 @@ const struct xfs_defer_op_type xfs_refcount_update_defer_type = {
 	.finish_item	= xfs_refcount_update_finish_item,
 	.finish_cleanup = xfs_refcount_finish_one_cleanup,
 	.cancel_item	= xfs_refcount_update_cancel_item,
+	.add_item	= xfs_refcount_update_add_item,
 };
 
 /* Is this recovered CUI ok? */
