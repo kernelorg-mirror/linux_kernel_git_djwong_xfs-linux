@@ -158,6 +158,9 @@ DEFINE_PERAG_REF_EVENT(xfs_perag_get_tag);
 DEFINE_PERAG_REF_EVENT(xfs_perag_put);
 DEFINE_PERAG_REF_EVENT(xfs_perag_set_ici_tag);
 DEFINE_PERAG_REF_EVENT(xfs_perag_clear_ici_tag);
+DEFINE_PERAG_REF_EVENT(xfs_fs_bump_intents);
+DEFINE_PERAG_REF_EVENT(xfs_fs_drop_intents);
+DEFINE_PERAG_REF_EVENT(xfs_fs_wait_intents);
 
 DECLARE_EVENT_CLASS(xfs_ag_class,
 	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno),

@@ -329,6 +329,16 @@ xfs_bmap_update_log_item(
 	xfs_trans_set_bmap_flags(map, bmap->bi_type, bmap->bi_whichfork,
 			bmap->bi_bmap.br_state,
 			XFS_IS_REALTIME_INODE(bmap->bi_owner));
+
+	/*
+	 * Decide if it's necessary to bump the live intent counter on behalf
+	 * of the deferred rmap intent item we will queue when we finish this
+	 * bmap work.
+	 */
+	if (xfs_sb_version_hasrmapbt(&tp->t_mountp->m_sb))
+		xfs_fs_bump_intents(tp->t_mountp,
+				XFS_IS_REALTIME_INODE(bmap->bi_owner),
+				bmap->bi_bmap.br_startblock);
 }
 
 static struct xfs_log_item *
@@ -362,6 +372,16 @@ xfs_bmap_update_create_done(
 	return &xfs_trans_get_bud(tp, BUI_ITEM(intent))->bud_item;
 }
 
+static inline void
+xfs_bmap_drop_intents(
+	struct xfs_mount	*mp,
+	struct xfs_bmap_intent	*bmap)
+{
+	if (xfs_sb_version_hasrmapbt(&mp->m_sb))
+		xfs_fs_drop_intents(mp, XFS_IS_REALTIME_INODE(bmap->bi_owner),
+				bmap->bi_bmap.br_startblock);
+}
+
 /* Process a deferred rmap update. */
 STATIC int
 xfs_bmap_update_finish_item(
@@ -386,8 +406,11 @@ xfs_bmap_update_finish_item(
 	if (!error && count > 0) {
 		ASSERT(bmap->bi_type == XFS_BMAP_UNMAP);
 		bmap->bi_bmap.br_blockcount = count;
+		xfs_bmap_drop_intents(tp->t_mountp, bmap);
 		return -EAGAIN;
 	}
+
+	xfs_bmap_drop_intents(tp->t_mountp, bmap);
 	kmem_free(bmap);
 	return error;
 }
@@ -403,11 +426,13 @@ xfs_bmap_update_abort_intent(
 /* Cancel a deferred rmap update. */
 STATIC void
 xfs_bmap_update_cancel_item(
+	struct xfs_mount		*mp,
 	struct list_head		*item)
 {
 	struct xfs_bmap_intent		*bmap;
 
 	bmap = container_of(item, struct xfs_bmap_intent, bi_list);
+	xfs_bmap_drop_intents(mp, bmap);
 	kmem_free(bmap);
 }
 

@@ -340,7 +340,7 @@ xfs_defer_cancel_list(
 		list_for_each_safe(pwi, n, &dfp->dfp_work) {
 			list_del(pwi);
 			dfp->dfp_count--;
-			ops->cancel_item(pwi);
+			ops->cancel_item(mp, pwi);
 		}
 		ASSERT(dfp->dfp_count == 0);
 		kmem_free(dfp);
