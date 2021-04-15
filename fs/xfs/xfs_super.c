@@ -804,6 +804,9 @@ xfs_mount_free(
 
 	ASSERT(!mutex_is_locked(&mp->m_scrub_freeze));
 	mutex_destroy(&mp->m_scrub_freeze);
+#if IS_ENABLED(CONFIG_XFS_ONLINE_SCRUB) && IS_ENABLED(CONFIG_XFS_RT)
+	ASSERT(atomic_read(&mp->m_rt_intents) == 0);
+#endif
 
 	kmem_free(mp);
 }
@@ -1997,6 +2000,10 @@ static int xfs_init_fs_context(
 	INIT_DELAYED_WORK(&mp->m_reclaim_work, xfs_reclaim_worker);
 	mp->m_kobj.kobject.kset = xfs_kset;
 	init_waitqueue_head(&mp->m_inactive_wait);
+#if IS_ENABLED(CONFIG_XFS_ONLINE_SCRUB) && IS_ENABLED(CONFIG_XFS_RT)
+	init_waitqueue_head(&mp->m_rt_intents_wq);
+	atomic_set(&mp->m_rt_intents, 0);
+#endif
 	/*
 	 * We don't create the finobt per-ag space reservation until after log
 	 * recovery, so we must set this to true so that an ifree transaction

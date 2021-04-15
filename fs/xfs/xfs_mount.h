@@ -246,6 +246,17 @@ typedef struct xfs_mount {
 	/* online nlink check stuff */
 	struct xfs_hook_chain	m_nlink_mod_hooks;
 #endif
+
+#if IS_ENABLED(CONFIG_XFS_ONLINE_SCRUB) && IS_ENABLED(CONFIG_XFS_RT)
+	/*
+	 * Counter of live intents.  We track the number of log intent items
+	 * that have been queued (but not yet processed) so that scrub can
+	 * detect the presence of other threads that are in the middle of
+	 * processing a chain of deferred items.
+	 */
+	atomic_t		m_rt_intents;
+	wait_queue_head_t	m_rt_intents_wq;
+#endif
 } xfs_mount_t;
 
 /* Parameters for xfs_bumplink/droplink hook. */
@@ -429,7 +440,34 @@ typedef struct xfs_perag {
 	 * or have some other means to control concurrency.
 	 */
 	struct rhashtable	pagi_unlinked_hash;
+
+#if IS_ENABLED(CONFIG_XFS_ONLINE_SCRUB)
+	/*
+	 * Counter of live intents.  We track the number of log intent items
+	 * that have been queued (but not yet processed) so that scrub can
+	 * detect the presence of other threads that are in the middle of
+	 * processing a chain of deferred items.
+	 */
+	atomic_t		pag_intents;
+	wait_queue_head_t	pag_intents_wq;
+#endif
 } xfs_perag_t;
+
+#if IS_ENABLED(CONFIG_XFS_ONLINE_SCRUB)
+void xfs_fs_bump_intents(struct xfs_mount *mp, bool is_rt, xfs_fsblock_t fsbno);
+void xfs_fs_drop_intents(struct xfs_mount *mp, bool is_rt, xfs_fsblock_t fsbno);
+# if IS_ENABLED(CONFIG_XFS_RT)
+int xfs_rt_wait_intents(struct xfs_mount *mp);
+# else
+#  define xfs_rt_wait_intents(mp)		(-ENOSYS)
+# endif
+int xfs_perag_wait_intents(struct xfs_perag *pag);
+#else
+# define xfs_fs_bump_intents(mp, is_rt, fsbno)	((void)0)
+# define xfs_fs_drop_intents(mp, is_rt, fsbno)	((void)0)
+# define xfs_rt_wait_intents(mp)		(-ENOSYS)
+# define xfs_perag_wait_intents(pag)		(-ENOSYS)
+#endif
 
 static inline struct xfs_ag_resv *
 xfs_perag_resv(

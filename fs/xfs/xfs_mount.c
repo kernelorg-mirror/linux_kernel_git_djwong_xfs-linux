@@ -148,6 +148,9 @@ xfs_free_perag(
 	for (agno = 0; agno < mp->m_sb.sb_agcount; agno++) {
 		spin_lock(&mp->m_perag_lock);
 		pag = radix_tree_delete(&mp->m_perag_tree, agno);
+#if IS_ENABLED(CONFIG_XFS_ONLINE_SCRUB)
+		ASSERT(atomic_read(&pag->pag_intents) == 0);
+#endif
 		spin_unlock(&mp->m_perag_lock);
 		ASSERT(pag);
 		ASSERT(atomic_read(&pag->pag_ref) == 0);
@@ -215,6 +218,10 @@ xfs_initialize_perag(
 		error = xfs_buf_hash_init(pag);
 		if (error)
 			goto out_free_pag;
+#if IS_ENABLED(CONFIG_XFS_ONLINE_SCRUB)
+		init_waitqueue_head(&pag->pag_intents_wq);
+		atomic_set(&pag->pag_intents, 0);
+#endif
 		init_waitqueue_head(&pag->pagb_wait);
 		spin_lock_init(&pag->pagb_lock);
 		pag->pagb_count = 0;
@@ -1556,3 +1563,104 @@ xfs_hook_call(
 {
 	return srcu_notifier_call_chain(&chain->head, val, priv);
 }
+
+#if IS_ENABLED(CONFIG_XFS_ONLINE_SCRUB)
+
+#if IS_ENABLED(CONFIG_XFS_RT)
+static inline void
+xfs_fs_bump_rt_intents(
+	struct xfs_mount	*mp)
+{
+	trace_xfs_fs_bump_intents(mp, -1U, atomic_read(&mp->m_rt_intents),
+			_RET_IP_);
+	atomic_inc(&mp->m_rt_intents);
+}
+
+static inline void
+xfs_fs_drop_rt_intents(
+	struct xfs_mount	*mp)
+{
+	ASSERT(atomic_read(&mp->m_rt_intents) > 0);
+	trace_xfs_fs_drop_intents(mp, -1U, atomic_read(&mp->m_rt_intents),
+			_RET_IP_);
+
+	if (atomic_dec_and_test(&mp->m_rt_intents))
+		wake_up(&mp->m_rt_intents_wq);
+}
+
+int
+xfs_rt_wait_intents(
+	struct xfs_mount	*mp)
+{
+	trace_xfs_fs_wait_intents(mp, -1U, atomic_read(&mp->m_rt_intents),
+			_RET_IP_);
+
+	return wait_event_killable(mp->m_rt_intents_wq,
+			atomic_read(&mp->m_rt_intents) == 0);
+}
+#else
+# define xfs_fs_bump_rt_intents(mp)	((void)0)
+# define xfs_fs_drop_rt_intents(mp)	((void)0)
+#endif
+
+void
+xfs_fs_bump_intents(
+	struct xfs_mount	*mp,
+	bool			is_rt,
+	xfs_fsblock_t		fsbno)
+{
+	xfs_agnumber_t		agno;
+	struct xfs_perag	*pag;
+
+	if (is_rt) {
+		xfs_fs_bump_rt_intents(mp);
+		return;
+	}
+
+	agno = XFS_FSB_TO_AGNO(mp, fsbno);
+	pag = xfs_perag_get(mp, agno);
+
+	trace_xfs_fs_bump_intents(mp, agno, atomic_read(&pag->pag_intents),
+			_RET_IP_);
+
+	atomic_inc(&pag->pag_intents);
+	xfs_perag_put(pag);
+}
+
+void
+xfs_fs_drop_intents(
+	struct xfs_mount	*mp,
+	bool			is_rt,
+	xfs_fsblock_t		fsbno)
+{
+	xfs_agnumber_t		agno;
+	struct xfs_perag	*pag;
+
+	if (is_rt) {
+		xfs_fs_drop_rt_intents(mp);
+		return;
+	}
+
+	agno = XFS_FSB_TO_AGNO(mp, fsbno);
+	pag = xfs_perag_get(mp, agno);
+
+	ASSERT(atomic_read(&pag->pag_intents) > 0);
+	trace_xfs_fs_drop_intents(mp, agno, atomic_read(&pag->pag_intents),
+			_RET_IP_);
+
+	if (atomic_dec_and_test(&pag->pag_intents))
+		wake_up(&pag->pag_intents_wq);
+	xfs_perag_put(pag);
+}
+
+int
+xfs_perag_wait_intents(
+	struct xfs_perag	*pag)
+{
+	trace_xfs_fs_wait_intents(pag->pag_mount, pag->pag_agno,
+			atomic_read(&pag->pag_intents), _RET_IP_);
+
+	return wait_event_killable(pag->pag_intents_wq,
+			atomic_read(&pag->pag_intents) == 0);
+}
+#endif

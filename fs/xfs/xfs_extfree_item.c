@@ -447,6 +447,8 @@ xfs_extent_free_log_item(
 	extp->ext_len = free->xefi_blockcount;
 	if (free->xefi_realtime)
 		extp->ext_len |= XFS_EFI_REALTIME_EXT;
+	xfs_fs_bump_intents(tp->t_mountp, free->xefi_realtime,
+			free->xefi_startblock);
 }
 
 static struct xfs_log_item *
@@ -480,6 +482,15 @@ xfs_extent_free_create_done(
 	return &xfs_trans_get_efd(tp, EFI_ITEM(intent), count)->efd_item;
 }
 
+static inline void
+xfs_efi_free_item(
+	struct xfs_mount		*mp,
+	struct xfs_extent_free_item	*free)
+{
+	xfs_fs_drop_intents(mp, free->xefi_realtime, free->xefi_startblock);
+	kmem_free(free);
+}
+
 /* Process a free extent. */
 STATIC int
 xfs_extent_free_finish_item(
@@ -506,7 +517,8 @@ xfs_extent_free_finish_item(
 			free->xefi_startblock,
 			free->xefi_blockcount, free->xefi_realtime,
 			&free->xefi_oinfo, free->xefi_skip_discard);
-	kmem_free(free);
+
+	xfs_efi_free_item(tp->t_mountp, free);
 	return error;
 }
 
@@ -521,12 +533,13 @@ xfs_extent_free_abort_intent(
 /* Cancel a free extent. */
 STATIC void
 xfs_extent_free_cancel_item(
+	struct xfs_mount		*mp,
 	struct list_head		*item)
 {
 	struct xfs_extent_free_item	*free;
 
 	free = container_of(item, struct xfs_extent_free_item, xefi_list);
-	kmem_free(free);
+	xfs_efi_free_item(mp, free);
 }
 
 const struct xfs_defer_op_type xfs_extent_free_defer_type = {
@@ -589,7 +602,7 @@ xfs_agfl_free_finish_item(
 	extp->ext_len = free->xefi_blockcount;
 	efdp->efd_next_extent++;
 
-	kmem_free(free);
+	xfs_efi_free_item(mp, free);
 	return error;
 }
 

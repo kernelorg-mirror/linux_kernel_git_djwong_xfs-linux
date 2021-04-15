@@ -483,8 +483,8 @@ want_ag_read_header_failure(
  * safe we attach all the buffers we grab to the scrub transaction so
  * they'll all be freed when we cancel it.
  */
-int
-xchk_ag_read_headers(
+static inline int
+__xchk_ag_read_headers(
 	struct xfs_scrub	*sc,
 	xfs_agnumber_t		agno,
 	struct xchk_ag		*sa)
@@ -496,17 +496,94 @@ xchk_ag_read_headers(
 
 	error = xfs_ialloc_read_agi(mp, sc->tp, agno, &sa->agi_bp);
 	if (error && want_ag_read_header_failure(sc, XFS_SCRUB_TYPE_AGI))
-		goto out;
+		return error;
 
 	error = xfs_alloc_read_agf(mp, sc->tp, agno, 0, &sa->agf_bp);
 	if (error && want_ag_read_header_failure(sc, XFS_SCRUB_TYPE_AGF))
-		goto out;
+		return error;
 
 	error = xfs_alloc_read_agfl(mp, sc->tp, agno, &sa->agfl_bp);
 	if (error && want_ag_read_header_failure(sc, XFS_SCRUB_TYPE_AGFL))
-		goto out;
-	error = 0;
-out:
+		return error;
+
+	return 0;
+}
+
+static inline bool
+xchk_ag_intents_pending(
+	struct xfs_perag	*pag)
+{
+	int			intents = atomic_read(&pag->pag_intents);
+
+	trace_xchk_ag_read_headers(pag->pag_mount, pag->pag_agno, intents,
+			_RET_IP_);
+
+	return intents > 0;
+}
+
+/*
+ * Grab all the headers for an AG, and wait until there aren't any pending
+ * intents.
+ */
+int
+xchk_ag_read_headers(
+	struct xfs_scrub	*sc,
+	xfs_agnumber_t		agno,
+	struct xchk_ag		*sa)
+{
+	struct xfs_mount	*mp = sc->mp;
+	struct xfs_perag	*pag = xfs_perag_get(mp, agno);
+	int			error;
+
+	do {
+		error = __xchk_ag_read_headers(sc, agno, sa);
+		if (error)
+			break;
+
+		/*
+		 * Decide if this AG is quiet enough for all metadata to be
+		 * consistent with each other.  XFS allows the AG header buffer
+		 * locks to cycle across transaction rolls while processing
+		 * chains of deferred ops, which means that there could be
+		 * other threads in the middle of processing a chain of
+		 * deferred ops.  For regular operations we are careful about
+		 * ordering operations to prevent collisions between threads
+		 * (which is why we don't need a per-AG lock), but scrub and
+		 * repair have to serialize against chained operations.
+		 *
+		 * We just locked all the AG headers buffers; now take a look
+		 * to see if there are any intents in progress.  If there are,
+		 * drop the AG headers and wait for the intents to drain.
+		 * Since we hold all the AG header locks for the duration of
+		 * the scrub, this is the only time we have to sample the
+		 * intents counter; any threads increasing it after this point
+		 * can't possibly be in the middle of a chain of AG metadata
+		 * updates.
+		 */
+		if (!xchk_ag_intents_pending(pag)) {
+			error = 0;
+			break;
+		}
+
+		if (sa->agfl_bp) {
+			xfs_trans_brelse(sc->tp, sa->agfl_bp);
+			sa->agfl_bp = NULL;
+		}
+
+		if (sa->agf_bp) {
+			xfs_trans_brelse(sc->tp, sa->agf_bp);
+			sa->agf_bp = NULL;
+		}
+
+		if (sa->agi_bp) {
+			xfs_trans_brelse(sc->tp, sa->agi_bp);
+			sa->agi_bp = NULL;
+		}
+
+		error = xfs_perag_wait_intents(pag);
+	} while (!error);
+
+	xfs_perag_put(pag);
 	return error;
 }
 
@@ -652,14 +729,59 @@ xchk_perag_get(
 		sa->pag = xfs_perag_get(mp, sa->agno);
 }
 
-/* Lock everything we need to work on realtime metadata. */
-void
+#if IS_ENABLED(CONFIG_XFS_RT)
+static inline bool
+xchk_rt_intents_pending(
+	struct xfs_mount	*mp)
+{
+	int			intents = atomic_read(&mp->m_rt_intents);
+
+	trace_xchk_rt_lock(mp, -1U, intents, _RET_IP_);
+
+	return intents > 0;
+}
+#else
+# define xchk_rt_intents_pending(mp)	(false)
+#endif
+
+/* Lock everything we need to work on realtime metadata and wait for intents. */
+int
 xchk_rt_lock(
 	struct xfs_scrub	*sc,
 	struct xchk_rt		*sr)
 {
-	xfs_rtlock(NULL, sc->mp, XFS_RTLOCK_ALL);
-	sr->locked = true;
+	int			error;
+
+	do {
+		xfs_rtlock(NULL, sc->mp, XFS_RTLOCK_ALL);
+
+		/*
+		 * Decide if the RT volume is quiet enough for all metadata to
+		 * be consistent with each other.  Regular file IO doesn't get
+		 * to lock all the rt inodes at the same time, which means that
+		 * there could be other threads in the middle of processing a
+		 * chain of deferred ops.
+		 *
+		 * We just locked all the rt inodes; now take a look to see if
+		 * there are any rt intents in progress.  If there are, drop
+		 * the rt inode locks and wait for the intents to drain.  Since
+		 * we hold the rt inode locks for the duration of the scrub,
+		 * this is the only time we have to sample the intents counter;
+		 * any threads increasing it after this point can't possibly be
+		 * in the middle of a chain of rt metadata updates.
+		 */
+		if (!xchk_rt_intents_pending(sc->mp)) {
+			sr->locked = true;
+			error = 0;
+			break;
+		}
+
+		xfs_rtunlock(sc->mp, XFS_RTLOCK_ALL);
+
+		error = xfs_rt_wait_intents(sc->mp);
+	} while (!error);
+
+	return error;
 }
 
 /*
