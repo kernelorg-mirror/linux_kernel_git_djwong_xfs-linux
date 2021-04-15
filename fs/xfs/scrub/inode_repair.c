@@ -595,7 +595,9 @@ xrep_dinode_count_rt_rmaps(
 	    xrep_is_rtmeta_ino(sc, sc->ip->i_ino))
 		return 0;
 
-	xchk_rt_lock(sc, &sc->sr);
+	error = xchk_rt_lock(sc, &sc->sr);
+	if (error)
+		return error;
 	xrep_rt_btcur_init(sc, &sc->sr);
 	error = xfs_rmap_query_all(sc->sr.rmap_cur, xrep_dinode_walk_rtrmap,
 			dis);
