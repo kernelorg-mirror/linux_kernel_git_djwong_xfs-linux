@@ -704,6 +704,37 @@ TRACE_EVENT(xchk_iallocbt_check_cluster,
 		  __entry->cluster_ino)
 )
 
+DECLARE_EVENT_CLASS(xchk_ag_class,
+	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno, int refcount,
+		 unsigned long caller_ip),
+	TP_ARGS(mp, agno, refcount, caller_ip),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_agnumber_t, agno)
+		__field(int, refcount)
+		__field(unsigned long, caller_ip)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->agno = agno;
+		__entry->refcount = refcount;
+		__entry->caller_ip = caller_ip;
+	),
+	TP_printk("dev %d:%d agno %u refcount %d caller %pS",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->agno,
+		  __entry->refcount,
+		  (char *)__entry->caller_ip)
+);
+
+#define DEFINE_XCHK_AG_EVENT(name)	\
+DEFINE_EVENT(xchk_ag_class, name,	\
+	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno, int refcount,	\
+		 unsigned long caller_ip),					\
+	TP_ARGS(mp, agno, refcount, caller_ip))
+DEFINE_XCHK_AG_EVENT(xchk_ag_read_headers);
+DEFINE_XCHK_AG_EVENT(xchk_rt_lock);
+
 TRACE_EVENT(xchk_fscounters_calc,
 	TP_PROTO(struct xfs_mount *mp, uint64_t icount, uint64_t ifree,
 		 uint64_t fdblocks, uint64_t delalloc),
