@@ -56,6 +56,9 @@ typedef struct xfs_inode {
 	unsigned long		i_flags;	/* see defined flags below */
 	uint64_t		i_delayed_blks;	/* count of delay alloc blks */
 
+	/* Space that has been set aside to root a btree in this file. */
+	uint64_t		i_meta_resv_asked;
+
 	struct xfs_icdinode	i_d;		/* most of ondisk inode */
 
 	/* VFS inode */
