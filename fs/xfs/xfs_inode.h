@@ -55,6 +55,7 @@ typedef struct xfs_inode {
 	/* Miscellaneous state. */
 	unsigned long		i_flags;	/* see defined flags below */
 	uint64_t		i_delayed_blks;	/* count of delay alloc blks */
+	uint64_t		i_rtresv_asked;	/* reserved for rt btree */
 
 	struct xfs_icdinode	i_d;		/* most of ondisk inode */
 

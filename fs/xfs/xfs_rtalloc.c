@@ -22,6 +22,7 @@
 #include "xfs_health.h"
 #include "xfs_da_format.h"
 #include "xfs_imeta.h"
+#include "xfs_rt_resv.h"
 
 /*
  * Read and return the summary information for a given extent size,
@@ -1110,6 +1111,14 @@ error_cancel:
 
 	/* Update secondary superblocks now the physical grow has completed */
 	error = xfs_update_secondary_sbs(mp);
+	if (error)
+		goto out_free;
+
+	/* Reset the rt metadata btree space reservations. */
+	xfs_rt_resv_free(mp);
+	error = xfs_rt_resv_init(mp);
+	if (error == -ENOSPC)
+		error = 0;
 
 out_free:
 	/*

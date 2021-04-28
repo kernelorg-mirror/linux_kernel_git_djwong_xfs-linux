@@ -180,6 +180,13 @@ enum xfs_ag_resv_type {
 	 * altering fdblocks.  If you think you need this you're wrong.
 	 */
 	XFS_AG_RESV_IGNORE,
+
+	/*
+	 * This allocation activity is being done on behalf of a realtime
+	 * metadata file.  Such files maintain their own permanent space
+	 * reservations and are required to adjust fdblocks on their own.
+	 */
+	XFS_AG_RESV_RTMETADATA,
 };
 
 /*

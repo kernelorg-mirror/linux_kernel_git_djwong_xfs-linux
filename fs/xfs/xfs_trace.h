@@ -2772,6 +2772,53 @@ DEFINE_AG_RESV_EVENT(xfs_ag_resv_needed);
 
 DEFINE_AG_ERROR_EVENT(xfs_ag_resv_init_error);
 
+DECLARE_EVENT_CLASS(xfs_rt_resv_class,
+	TP_PROTO(struct xfs_inode *ip, xfs_filblks_t len),
+	TP_ARGS(ip, len),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(unsigned long long, freeblks)
+		__field(unsigned long long, reserved)
+		__field(unsigned long long, asked)
+		__field(unsigned long long, used)
+		__field(unsigned long long, len)
+		__field(unsigned long long, delalloc)
+	),
+	TP_fast_assign(
+		struct xfs_mount *mp = ip->i_mount;
+
+		__entry->dev = mp->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->freeblks = percpu_counter_sum(&mp->m_fdblocks);
+		__entry->reserved = ip->i_delayed_blks;
+		__entry->asked = ip->i_rtresv_asked;
+		__entry->used = ip->i_d.di_nblocks;
+		__entry->len = len;
+		__entry->delalloc = percpu_counter_sum(&mp->m_delalloc_blks);
+	),
+	TP_printk("dev %d:%d freeblks %llu ino 0x%llx resv %llu ask %llu used %llu len %llu da %lld",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->freeblks,
+		  __entry->ino,
+		  __entry->reserved,
+		  __entry->asked,
+		  __entry->used,
+		  __entry->len,
+		  __entry->delalloc)
+)
+#define DEFINE_RT_RESV_EVENT(name) \
+DEFINE_EVENT(xfs_rt_resv_class, name, \
+	TP_PROTO(struct xfs_inode *ip, xfs_filblks_t len), \
+	TP_ARGS(ip, len))
+DEFINE_RT_RESV_EVENT(xfs_rt_resv_init);
+DEFINE_RT_RESV_EVENT(xfs_rt_resv_free);
+DEFINE_RT_RESV_EVENT(xfs_rt_resv_alloc_extent);
+DEFINE_RT_RESV_EVENT(xfs_rt_resv_free_extent);
+DEFINE_RT_RESV_EVENT(xfs_rt_resv_critical);
+
+DEFINE_AG_ERROR_EVENT(xfs_rt_resv_init_error);
+
 /* refcount tracepoint classes */
 
 /* reuse the discard trace class for agbno/aglen-based traces */
