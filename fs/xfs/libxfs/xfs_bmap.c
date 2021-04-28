@@ -6566,6 +6566,16 @@ xfs_get_cowextsz_hint(
 	if (ip->i_d.di_flags2 & XFS_DIFLAG2_COWEXTSIZE)
 		a = ip->i_d.di_cowextsize;
 	if (XFS_IS_REALTIME_INODE(ip)) {
+		/*
+		 * Because we can only share complete realtime extents, the
+		 * copy on write mechanism can only copy-write in the same
+		 * units.  XFS uses a write-around mechanisms to enforce this
+		 * rule with smaller writes to files, but we ignore the extent
+		 * size hint for copy-writes to prevent write around from
+		 * becoming larger than what the sysadmin decided.
+		 */
+		if (ip->i_mount->m_sb.sb_rextsize > 1)
+			return ip->i_mount->m_sb.sb_rextsize;
 		b = 0;
 		if (ip->i_d.di_flags & XFS_DIFLAG_EXTSIZE)
 			b = ip->i_d.di_extsize;
