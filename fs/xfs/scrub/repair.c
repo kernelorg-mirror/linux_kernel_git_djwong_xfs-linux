@@ -1462,8 +1462,6 @@ int
 xrep_reset_perag_resv(
 	struct xfs_scrub	*sc)
 {
-	int			error;
-
 	if (!(sc->flags & XREP_RESET_PERAG_RESV))
 		return 0;
 
@@ -1472,12 +1470,8 @@ xrep_reset_perag_resv(
 	ASSERT(sc->tp);
 
 	sc->flags &= ~XREP_RESET_PERAG_RESV;
-	error = xfs_ag_resv_free(sc->sa.pag);
-	if (error)
-		goto out;
-	error = xfs_ag_resv_init(sc->sa.pag, sc->tp);
-out:
-	return error;
+	xfs_ag_resv_free(sc->sa.pag);
+	return xfs_ag_resv_init(sc->sa.pag, sc->tp);
 }
 
 /*
