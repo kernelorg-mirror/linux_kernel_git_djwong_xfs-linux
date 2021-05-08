@@ -1042,7 +1042,8 @@ xfs_growfs_rt(
 		return -EOPNOTSUPP;
 
 	if (xfs_sb_version_hasreflink(&mp->m_sb) &&
-	    !is_power_of_2(mp->m_sb.sb_rextsize))
+	    !is_power_of_2(mp->m_sb.sb_rextsize) &&
+	    (XFS_FSB_TO_B(mp, mp->m_sb.sb_rextsize) & ~PAGE_MASK))
 		return -EOPNOTSUPP;
 
 	nrblocks = in->newblocks;
