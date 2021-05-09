@@ -269,6 +269,9 @@ typedef struct xfs_mount {
 						   inode inactivation worker? */
 #define XFS_OPFLAG_INACTIVATE_NOW_BIT	(1)	/* force foreground inactivation
 						   of unlinked inodes */
+#define XFS_OPFLAG_BLOCKGC_RUNNING_BIT	(2)	/* are we allowed to start the
+						   speculative preallocation gc
+						   worker? */
 
 /*
  * Max and min values for mount-option defined I/O
