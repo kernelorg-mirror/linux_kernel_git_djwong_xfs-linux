@@ -231,6 +231,11 @@ xfs_inode_mark_sick(
 	ip->i_sick |= mask;
 	ip->i_checked |= mask;
 	spin_unlock(&ip->i_flags_lock);
+
+	/* Keep this inode around so we don't lose the sickness report. */
+	spin_lock(&VFS_I(ip)->i_lock);
+	VFS_I(ip)->i_state &= ~I_DONTCACHE;
+	spin_unlock(&VFS_I(ip)->i_lock);
 }
 
 /* Mark parts of an inode healed. */
