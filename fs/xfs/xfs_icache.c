@@ -727,13 +727,17 @@ xfs_icache_inode_is_allocated(
  */
 #define XFS_LOOKUP_BATCH	32
 
+/* Don't try to run block gc on an inode that's in any of these states. */
+#define XFS_BLOCKGC_NOGRAB_IFLAGS	(XFS_INEW | \
+					 XFS_IRECLAIMABLE | \
+					 XFS_IRECLAIM)
 /*
- * Decide if the given @ip is eligible to be a part of the inode walk, and
- * grab it if so.  Returns true if it's ready to go or false if we should just
- * ignore it.
+ * Decide if the given @ip is eligible for garbage collection of speculative
+ * preallocations, and grab it if so.  Returns true if it's ready to go or
+ * false if we should just ignore it.
  */
 STATIC bool
-xfs_inode_walk_ag_grab(
+xfs_blockgc_grab(
 	struct xfs_inode	*ip)
 {
 	struct inode		*inode = VFS_I(ip);
@@ -745,8 +749,7 @@ xfs_inode_walk_ag_grab(
 	if (!ip->i_ino)
 		goto out_unlock_noent;
 
-	/* avoid new or reclaimable inodes. Leave for reclaim code to flush */
-	if (__xfs_iflags_test(ip, XFS_INEW | XFS_IRECLAIMABLE | XFS_IRECLAIM))
+	if (ip->i_flags & XFS_BLOCKGC_NOGRAB_IFLAGS)
 		goto out_unlock_noent;
 	spin_unlock(&ip->i_flags_lock);
 
@@ -773,7 +776,7 @@ xfs_grabbed_for_walk(
 {
 	switch (tag) {
 	case XFS_ICI_BLOCKGC_TAG:
-		return xfs_inode_walk_ag_grab(ip);
+		return xfs_blockgc_grab(ip);
 	case XFS_ICI_DQRELE_NONTAG:
 		return xfs_dqrele_inode_grab(ip);
 	default:
@@ -863,12 +866,12 @@ restart:
 			switch (tag) {
 			case XFS_ICI_DQRELE_NONTAG:
 				error = xfs_dqrele_inode(batch[i], args);
+				xfs_irele(batch[i]);
 				break;
 			case XFS_ICI_BLOCKGC_TAG:
 				error = xfs_blockgc_scan_inode(batch[i], args);
 				break;
 			}
-			xfs_irele(batch[i]);
 			if (error == -EAGAIN) {
 				skipped++;
 				continue;
@@ -1709,6 +1712,7 @@ xfs_blockgc_scan_inode(
 unlock:
 	if (lockflags)
 		xfs_iunlock(ip, lockflags);
+	xfs_irele(ip);
 	return error;
 }
 
