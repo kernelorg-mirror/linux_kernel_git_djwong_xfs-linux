@@ -1883,8 +1883,7 @@ xfs_fs_eofblocks_from_user(
 	if (src->eof_flags & ~XFS_EOF_FLAGS_VALID)
 		return -EINVAL;
 
-	if (memchr_inv(&src->pad32, 0, sizeof(src->pad32)) ||
-	    memchr_inv(src->pad64, 0, sizeof(src->pad64)))
+	if (memchr_inv(src->pad64, 0, sizeof(src->pad64)))
 		return -EINVAL;
 
 	dst->eof_flags = src->eof_flags;
@@ -1904,6 +1903,12 @@ xfs_fs_eofblocks_from_user(
 		if (!gid_valid(dst->eof_gid))
 			return -EINVAL;
 	}
+
+	if (src->eof_flags & XFS_EOF_FLAGS_SCAN_LIMIT)
+		dst->nr_to_scan = min_t(int, src->eof_limit, INT_MAX);
+	else if (src->eof_limit != 0)
+		return -EINVAL;
+
 	return 0;
 }
 
