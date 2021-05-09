@@ -27,7 +27,7 @@
 #include <linux/iversion.h>
 
 static bool xfs_dqrele_inode_grab(struct xfs_inode *ip);
-static int xfs_dqrele_inode(struct xfs_inode *ip, void *priv);
+static void xfs_dqrele_inode(struct xfs_inode *ip, void *priv);
 static int xfs_blockgc_scan_inode(struct xfs_inode *ip, void *args);
 
 /*
@@ -865,8 +865,7 @@ restart:
 				continue;
 			switch (tag) {
 			case XFS_ICI_DQRELE_NONTAG:
-				error = xfs_dqrele_inode(batch[i], args);
-				xfs_irele(batch[i]);
+				xfs_dqrele_inode(batch[i], args);
 				break;
 			case XFS_ICI_BLOCKGC_TAG:
 				error = xfs_blockgc_scan_inode(batch[i], args);
@@ -975,7 +974,7 @@ out_unlock:
 }
 
 /* Drop this inode's dquots. */
-static int
+static void
 xfs_dqrele_inode(
 	struct xfs_inode	*ip,
 	void			*priv)
@@ -999,7 +998,7 @@ xfs_dqrele_inode(
 		ip->i_pdquot = NULL;
 	}
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
-	return 0;
+	xfs_irele(ip);
 }
 
 /*
