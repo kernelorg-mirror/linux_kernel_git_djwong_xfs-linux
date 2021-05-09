@@ -3,6 +3,23 @@
 # Makefile for the linux ext4-filesystem routines.
 #
 
+UBSAN_SANITIZE := y
+
+ccflags-y += -Werror \
+-femit-struct-debug-detailed=any \
+-Wunused-but-set-variable \
+-Wuninitialized \
+-Wno-pointer-sign \
+-Wall \
+-Wextra \
+-Wno-unused-parameter \
+-fstack-usage \
+-Wno-sign-compare \
+-Wno-ignored-qualifiers \
+-Wno-error=empty-body \
+-Wno-type-limits
+ccflags-$(CONFIG_KASAN) += -Wno-error
+
 obj-$(CONFIG_EXT4_FS) += ext4.o
 
 ext4-y	:= balloc.o bitmap.o block_validity.o dir.o ext4_jbd2.o extents.o \
