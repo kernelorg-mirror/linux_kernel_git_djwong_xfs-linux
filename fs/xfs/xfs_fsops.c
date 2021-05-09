@@ -19,6 +19,8 @@
 #include "xfs_log.h"
 #include "xfs_ag.h"
 #include "xfs_ag_resv.h"
+#include "xfs_inode.h"
+#include "xfs_icache.h"
 
 /*
  * Write new AG headers to disk. Non-transactional, but need to be
@@ -343,6 +345,8 @@ xfs_fs_counts(
 	xfs_mount_t		*mp,
 	xfs_fsop_counts_t	*cnt)
 {
+	xfs_inodegc_summary_flush(mp);
+
 	cnt->allocino = percpu_counter_read_positive(&mp->m_icount);
 	cnt->freeino = percpu_counter_read_positive(&mp->m_ifree);
 	cnt->freedata = percpu_counter_read_positive(&mp->m_fdblocks) -
