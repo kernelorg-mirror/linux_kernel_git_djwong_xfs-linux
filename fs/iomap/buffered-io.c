@@ -872,6 +872,59 @@ iomap_file_unshare(struct inode *inode, loff_t pos, loff_t len,
 }
 EXPORT_SYMBOL_GPL(iomap_file_unshare);
 
+static loff_t
+iomap_dirty_range_actor(struct inode *inode, loff_t pos, loff_t length,
+			void *data, struct iomap *iomap, struct iomap *srcmap)
+{
+	long status = 0;
+	loff_t written = 0;
+
+	do {
+		unsigned long offset = offset_in_page(pos);
+		unsigned long bytes = min_t(loff_t, PAGE_SIZE - offset, length);
+		struct page *page;
+
+		status = iomap_write_begin(inode, pos, bytes, 0, &page, iomap,
+					   srcmap);
+		if (unlikely(status))
+			return status;
+
+		status = iomap_write_end(inode, pos, bytes, bytes, page, iomap,
+				srcmap);
+		if (WARN_ON_ONCE(status == 0))
+			return -EIO;
+
+		cond_resched();
+
+		pos += status;
+		written += status;
+		length -= status;
+
+		balance_dirty_pages_ratelimited(inode->i_mapping);
+	} while (length);
+
+	return written;
+}
+
+int
+iomap_file_dirty_range(struct inode *inode, loff_t pos, uint64_t len,
+		       const struct iomap_ops *ops)
+{
+	loff_t ret;
+
+	while (len) {
+		ret = iomap_apply(inode, pos, len, IOMAP_WRITE, ops, NULL,
+				iomap_dirty_range_actor);
+		if (ret <= 0)
+			return ret;
+		pos += ret;
+		len -= ret;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(iomap_file_dirty_range);
+
 static s64 iomap_zero(struct inode *inode, loff_t pos, u64 length,
 		struct iomap *iomap, struct iomap *srcmap)
 {
