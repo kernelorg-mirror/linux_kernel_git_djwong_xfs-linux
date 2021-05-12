@@ -569,19 +569,20 @@ xfs_inode_validate_extsize(
 	uint16_t			mode,
 	uint16_t			flags)
 {
-	bool				rt_flag;
+	bool				rt_flag, rtinherit_flag;
 	bool				hint_flag;
 	bool				inherit_flag;
 	uint32_t			extsize_bytes;
 	uint32_t			blocksize_bytes;
 
 	rt_flag = (flags & XFS_DIFLAG_REALTIME);
+	rtinherit_flag = (flags & XFS_DIFLAG_RTINHERIT);
 	hint_flag = (flags & XFS_DIFLAG_EXTSIZE);
 	inherit_flag = (flags & XFS_DIFLAG_EXTSZINHERIT);
 	extsize_bytes = XFS_FSB_TO_B(mp, extsize);
 
-	if (rt_flag)
-		blocksize_bytes = mp->m_sb.sb_rextsize << mp->m_sb.sb_blocklog;
+	if (rt_flag || (rtinherit_flag && inherit_flag))
+		blocksize_bytes = XFS_FSB_TO_B(mp, mp->m_sb.sb_rextsize);
 	else
 		blocksize_bytes = mp->m_sb.sb_blocksize;
 
