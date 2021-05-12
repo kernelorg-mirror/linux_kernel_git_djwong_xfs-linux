@@ -589,6 +589,19 @@ xfs_inode_validate_extsize(
 	inherit_flag = (flags & XFS_DIFLAG_EXTSZINHERIT);
 	extsize_bytes = XFS_FSB_TO_B(mp, extsize);
 
+	/*
+	 * This comment describes a historic gap in this verifier function.
+	 * On older kernels, XFS doesnt't check that the extent size hint is
+	 * an integer multiple of the rt extent size on a directory with both
+	 * RTINHERIT and EXTSZINHERIT flags set.  This results in corruption
+	 * shutdowns when the misaligned hint propagates into new realtime
+	 * files, since they do check the rextsize alignment of the hint for
+	 * files with the REALTIME flag set.  There could be filesystems with
+	 * misconfigured directories in the wild, so we cannot add it to the
+	 * verifier now because that would cause new corruption shutdowns on
+	 * the directories.
+	 */
+
 	if (rt_flag)
 		blocksize_bytes = mp->m_sb.sb_rextsize << mp->m_sb.sb_blocklog;
 	else
