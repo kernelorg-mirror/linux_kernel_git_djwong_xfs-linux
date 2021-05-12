@@ -589,8 +589,21 @@ xfs_inode_validate_extsize(
 	inherit_flag = (flags & XFS_DIFLAG_EXTSZINHERIT);
 	extsize_bytes = XFS_FSB_TO_B(mp, extsize);
 
+	/*
+	 * Historically, XFS didn't check that the extent size hint was an
+	 * integer multiple of the rt extent size on a directory with both
+	 * rtinherit and extszinherit flags set.  This results in math errors
+	 * in the rt allocator and inode verifier errors when the unaligned
+	 * hint value propagates into new realtime files.  Since there might
+	 * be filesystems in the wild, the best we can do for now is to
+	 * mitigate the harms by stopping the propagation.
+	 *
+	 * The next time we add a new inode feature, the if test below should
+	 * also trigger if that new feature is enabled and (rtinherit_flag &&
+	 * inherit_flag).
+	 */
 	if (rt_flag)
-		blocksize_bytes = mp->m_sb.sb_rextsize << mp->m_sb.sb_blocklog;
+		blocksize_bytes = XFS_FSB_TO_B(mp, mp->m_sb.sb_rextsize);
 	else
 		blocksize_bytes = mp->m_sb.sb_blocksize;
 
