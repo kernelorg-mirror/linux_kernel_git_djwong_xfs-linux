@@ -689,6 +689,7 @@ xfs_inode_inherit_flags(
 	struct xfs_inode	*ip,
 	const struct xfs_inode	*pip)
 {
+	xfs_failaddr_t		failaddr;
 	unsigned int		di_flags = 0;
 	umode_t			mode = VFS_I(ip)->i_mode;
 
@@ -728,6 +729,14 @@ xfs_inode_inherit_flags(
 	if (pip->i_diflags & XFS_DIFLAG_FILESTREAM)
 		di_flags |= XFS_DIFLAG_FILESTREAM;
 
+	/* Make sure the extsize actually validates properly. */
+	failaddr = xfs_inode_validate_extsize(ip->i_mount, ip->i_extsize,
+			VFS_I(ip)->i_mode, ip->i_diflags);
+	if (failaddr) {
+		di_flags &= ~(XFS_DIFLAG_EXTSIZE | XFS_DIFLAG_EXTSZINHERIT);
+		ip->i_extsize = 0;
+	}
+
 	ip->i_diflags |= di_flags;
 }
 
@@ -737,12 +746,22 @@ xfs_inode_inherit_flags2(
 	struct xfs_inode	*ip,
 	const struct xfs_inode	*pip)
 {
+	xfs_failaddr_t		failaddr;
+
 	if (pip->i_diflags2 & XFS_DIFLAG2_COWEXTSIZE) {
 		ip->i_diflags2 |= XFS_DIFLAG2_COWEXTSIZE;
 		ip->i_cowextsize = pip->i_cowextsize;
 	}
 	if (pip->i_diflags2 & XFS_DIFLAG2_DAX)
 		ip->i_diflags2 |= XFS_DIFLAG2_DAX;
+
+	/* Make sure the cowextsize actually validates properly. */
+	failaddr = xfs_inode_validate_cowextsize(ip->i_mount, ip->i_cowextsize,
+			VFS_I(ip)->i_mode, ip->i_diflags, ip->i_diflags2);
+	if (failaddr) {
+		ip->i_diflags2 &= ~XFS_DIFLAG2_COWEXTSIZE;
+		ip->i_cowextsize = 0;
+	}
 }
 
 /*
