@@ -911,7 +911,8 @@ xfs_dqrele_all_inodes(
  */
 static bool
 xfs_reclaim_igrab(
-	struct xfs_inode	*ip)
+	struct xfs_inode	*ip,
+	struct xfs_eofblocks	*eofb)
 {
 	ASSERT(rcu_read_lock_held());
 
@@ -922,6 +923,17 @@ xfs_reclaim_igrab(
 		spin_unlock(&ip->i_flags_lock);
 		return false;
 	}
+
+	/*
+	 * Don't reclaim a sick inode unless we're under memory pressure or the
+	 * filesystem is unmounting.
+	 */
+	if (ip->i_sick && eofb == NULL &&
+	    !(ip->i_mount->m_flags & XFS_MOUNT_UNMOUNTING)) {
+		spin_unlock(&ip->i_flags_lock);
+		return false;
+	}
+
 	__xfs_iflags_set(ip, XFS_IRECLAIM);
 	spin_unlock(&ip->i_flags_lock);
 	return true;
@@ -1606,7 +1618,8 @@ xfs_blockgc_free_quota(
 static inline bool
 xfs_icwalk_igrab(
 	enum xfs_icwalk_goal	goal,
-	struct xfs_inode	*ip)
+	struct xfs_inode	*ip,
+	struct xfs_eofblocks	*eofb)
 {
 	switch (goal) {
 	case XFS_ICWALK_DQRELE:
@@ -1614,7 +1627,7 @@ xfs_icwalk_igrab(
 	case XFS_ICWALK_BLOCKGC:
 		return xfs_blockgc_igrab(ip);
 	case XFS_ICWALK_RECLAIM:
-		return xfs_reclaim_igrab(ip);
+		return xfs_reclaim_igrab(ip, eofb);
 	default:
 		return false;
 	}
@@ -1703,7 +1716,7 @@ restart:
 		for (i = 0; i < nr_found; i++) {
 			struct xfs_inode *ip = batch[i];
 
-			if (done || !xfs_icwalk_igrab(goal, ip))
+			if (done || !xfs_icwalk_igrab(goal, ip, eofb))
 				batch[i] = NULL;
 
 			/*
