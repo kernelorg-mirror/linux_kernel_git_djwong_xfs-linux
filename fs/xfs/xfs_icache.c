@@ -1632,9 +1632,15 @@ xfs_blockgc_free_space(
 	struct xfs_mount	*mp,
 	struct xfs_eofblocks	*eofb)
 {
+	int			error;
+
 	trace_xfs_blockgc_free_space(mp, eofb, _RET_IP_);
 
-	return xfs_inode_walk(mp, XFS_ICWALK_BLOCKGC, eofb);
+	error = xfs_inode_walk(mp, XFS_ICWALK_BLOCKGC, eofb);
+	if (error)
+		return error;
+
+	return xfs_inodegc_free_space(mp, eofb);
 }
 
 /*
