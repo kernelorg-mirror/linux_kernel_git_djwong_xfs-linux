@@ -50,9 +50,9 @@ xfs_icwalk_tagged(enum xfs_icwalk_goal goal)
 }
 
 static int xfs_inode_walk(struct xfs_mount *mp,
-		enum xfs_icwalk_goal goal, void *args);
+		enum xfs_icwalk_goal goal, struct xfs_eofblocks *eofb);
 static int xfs_inode_walk_ag(struct xfs_perag *pag,
-		enum xfs_icwalk_goal goal, void *args);
+		enum xfs_icwalk_goal goal, struct xfs_eofblocks *eofb);
 
 /*
  * Allocate and initialise an xfs_inode.
@@ -797,10 +797,8 @@ out_unlock:
 static void
 xfs_dqrele_inode(
 	struct xfs_inode	*ip,
-	void			*priv)
+	struct xfs_eofblocks	*eofb)
 {
-	struct xfs_eofblocks	*eofb = priv;
-
 	if (xfs_iflags_test(ip, XFS_INEW))
 		xfs_inew_wait(ip);
 
@@ -1217,10 +1215,9 @@ xfs_reclaim_worker(
 STATIC int
 xfs_inode_free_eofblocks(
 	struct xfs_inode	*ip,
-	void			*args,
+	struct xfs_eofblocks	*eofb,
 	unsigned int		*lockflags)
 {
-	struct xfs_eofblocks	*eofb = args;
 	bool			wait;
 
 	wait = eofb && (eofb->eof_flags & XFS_EOF_FLAGS_SYNC);
@@ -1424,10 +1421,9 @@ xfs_prep_free_cowblocks(
 STATIC int
 xfs_inode_free_cowblocks(
 	struct xfs_inode	*ip,
-	void			*args,
+	struct xfs_eofblocks	*eofb,
 	unsigned int		*lockflags)
 {
-	struct xfs_eofblocks	*eofb = args;
 	bool			wait;
 	int			ret = 0;
 
@@ -1564,16 +1560,16 @@ out_unlock_noent:
 static int
 xfs_blockgc_scan_inode(
 	struct xfs_inode	*ip,
-	void			*args)
+	struct xfs_eofblocks	*eofb)
 {
 	unsigned int		lockflags = 0;
 	int			error;
 
-	error = xfs_inode_free_eofblocks(ip, args, &lockflags);
+	error = xfs_inode_free_eofblocks(ip, eofb, &lockflags);
 	if (error)
 		goto unlock;
 
-	error = xfs_inode_free_cowblocks(ip, args, &lockflags);
+	error = xfs_inode_free_cowblocks(ip, eofb, &lockflags);
 unlock:
 	if (lockflags)
 		xfs_iunlock(ip, lockflags);
@@ -1705,7 +1701,7 @@ static int
 xfs_inode_walk_ag(
 	struct xfs_perag	*pag,
 	enum xfs_icwalk_goal	goal,
-	void			*args)
+	struct xfs_eofblocks	*eofb)
 {
 	struct xfs_mount	*mp = pag->pag_mount;
 	uint32_t		first_index;
@@ -1778,10 +1774,10 @@ restart:
 				continue;
 			switch (goal) {
 			case XFS_ICWALK_DQRELE:
-				xfs_dqrele_inode(batch[i], args);
+				xfs_dqrele_inode(batch[i], eofb);
 				break;
 			case XFS_ICWALK_BLOCKGC:
-				error = xfs_blockgc_scan_inode(batch[i], args);
+				error = xfs_blockgc_scan_inode(batch[i], eofb);
 				break;
 			}
 			if (error == -EAGAIN) {
@@ -1824,7 +1820,7 @@ static int
 xfs_inode_walk(
 	struct xfs_mount	*mp,
 	enum xfs_icwalk_goal	goal,
-	void			*args)
+	struct xfs_eofblocks	*eofb)
 {
 	struct xfs_perag	*pag;
 	int			error = 0;
@@ -1834,7 +1830,7 @@ xfs_inode_walk(
 	ag = 0;
 	while ((pag = xfs_inode_walk_get_perag(mp, ag, goal))) {
 		ag = pag->pag_agno + 1;
-		error = xfs_inode_walk_ag(pag, goal, args);
+		error = xfs_inode_walk_ag(pag, goal, eofb);
 		xfs_perag_put(pag);
 		if (error) {
 			last_error = error;
