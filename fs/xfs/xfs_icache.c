@@ -1518,6 +1518,10 @@ xfs_blockgc_start(
 		xfs_blockgc_queue(pag);
 }
 
+/* Don't try to run block gc on an inode that's in any of these states. */
+#define XFS_BLOCKGC_NOGRAB_IFLAGS	(XFS_INEW | \
+					 XFS_IRECLAIMABLE | \
+					 XFS_IRECLAIM)
 /*
  * Decide if the given @ip is eligible for garbage collection of speculative
  * preallocations, and grab it if so.  Returns true if it's ready to go or
@@ -1536,8 +1540,7 @@ xfs_blockgc_igrab(
 	if (!ip->i_ino)
 		goto out_unlock_noent;
 
-	/* avoid new or reclaimable inodes. Leave for reclaim code to flush */
-	if (__xfs_iflags_test(ip, XFS_INEW | XFS_IRECLAIMABLE | XFS_IRECLAIM))
+	if (ip->i_flags & XFS_BLOCKGC_NOGRAB_IFLAGS)
 		goto out_unlock_noent;
 	spin_unlock(&ip->i_flags_lock);
 
@@ -1574,6 +1577,7 @@ xfs_blockgc_scan_inode(
 unlock:
 	if (lockflags)
 		xfs_iunlock(ip, lockflags);
+	xfs_irele(ip);
 	return error;
 }
 
@@ -1775,12 +1779,12 @@ restart:
 			switch (goal) {
 			case XFS_ICWALK_DQRELE:
 				error = xfs_dqrele_inode(batch[i], args);
+				xfs_irele(batch[i]);
 				break;
 			case XFS_ICWALK_BLOCKGC:
 				error = xfs_blockgc_scan_inode(batch[i], args);
 				break;
 			}
-			xfs_irele(batch[i]);
 			if (error == -EAGAIN) {
 				skipped++;
 				continue;
