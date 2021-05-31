@@ -33,6 +33,8 @@
 #define XFS_ICI_RECLAIM_TAG	0
 /* Inode has speculative preallocations (posteof or cow) to clean. */
 #define XFS_ICI_BLOCKGC_TAG	1
+/* Inode can be inactivated. */
+#define XFS_ICI_INODEGC_TAG	2
 
 /*
  * The goal for walking incore inodes.  These can correspond with incore inode
@@ -45,6 +47,7 @@ enum xfs_icwalk_goal {
 	/* Goals directly associated with tagged inodes. */
 	XFS_ICWALK_BLOCKGC	= XFS_ICI_BLOCKGC_TAG,
 	XFS_ICWALK_RECLAIM	= XFS_ICI_RECLAIM_TAG,
+	XFS_ICWALK_INODEGC	= XFS_ICI_INODEGC_TAG,
 };
 
 #define XFS_ICWALK_NULL_TAG	(-1U)
@@ -224,6 +227,26 @@ xfs_blockgc_queue(
 	rcu_read_unlock();
 }
 
+static inline bool
+xfs_inodegc_running(struct xfs_mount *mp)
+{
+	return test_bit(XFS_OPFLAG_INODEGC_RUNNING_BIT, &mp->m_opflags);
+}
+
+/* Queue a new inode gc pass if there are inodes needing inactivation. */
+static void
+xfs_inodegc_queue(
+	struct xfs_mount        *mp)
+{
+	if (!xfs_inodegc_running(mp))
+		return;
+
+	rcu_read_lock();
+	if (radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_INODEGC_TAG))
+		queue_delayed_work(mp->m_gc_workqueue, &mp->m_inodegc_work, 0);
+	rcu_read_unlock();
+}
+
 /* Set a tag on both the AG incore inode tree and the AG radix tree. */
 static void
 xfs_perag_set_inode_tag(
@@ -257,6 +280,9 @@ xfs_perag_set_inode_tag(
 		break;
 	case XFS_ICI_BLOCKGC_TAG:
 		xfs_blockgc_queue(pag);
+		break;
+	case XFS_ICI_INODEGC_TAG:
+		xfs_inodegc_queue(mp);
 		break;
 	}
 
@@ -304,18 +330,28 @@ xfs_perag_clear_inode_tag(
  */
 void
 xfs_inode_mark_reclaimable(
-	struct xfs_inode	*ip)
+	struct xfs_inode	*ip,
+	bool			need_inactive)
 {
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_perag	*pag;
+	unsigned int		tag;
 
 	pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, ip->i_ino));
 	spin_lock(&pag->pag_ici_lock);
 	spin_lock(&ip->i_flags_lock);
 
-	xfs_perag_set_inode_tag(pag, XFS_INO_TO_AGINO(mp, ip->i_ino),
-			XFS_ICI_RECLAIM_TAG);
-	__xfs_iflags_set(ip, XFS_IRECLAIMABLE);
+	if (need_inactive) {
+		trace_xfs_inode_set_need_inactive(ip);
+		ip->i_flags |= XFS_NEED_INACTIVE;
+		tag = XFS_ICI_INODEGC_TAG;
+	} else {
+		trace_xfs_inode_set_reclaimable(ip);
+		ip->i_flags |= XFS_IRECLAIMABLE;
+		tag = XFS_ICI_RECLAIM_TAG;
+	}
+
+	xfs_perag_set_inode_tag(pag, XFS_INO_TO_AGINO(mp, ip->i_ino), tag);
 
 	spin_unlock(&ip->i_flags_lock);
 	spin_unlock(&pag->pag_ici_lock);
@@ -379,11 +415,18 @@ xfs_reinit_inode(
 static int
 xfs_iget_recycle(
 	struct xfs_perag	*pag,
-	struct xfs_inode	*ip) __releases(&ip->i_flags_lock)
+	struct xfs_inode	*ip,
+	unsigned long		iflag) __releases(&ip->i_flags_lock)
 {
 	struct xfs_mount	*mp = ip->i_mount;
 	struct inode		*inode = VFS_I(ip);
+	unsigned int		tag;
 	int			error;
+
+	ASSERT(iflag == XFS_IRECLAIM || iflag == XFS_INACTIVATING);
+
+	tag = (iflag == XFS_INACTIVATING) ? XFS_ICI_INODEGC_TAG :
+					    XFS_ICI_RECLAIM_TAG;
 
 	/*
 	 * We need to make it look like the inode is being reclaimed to prevent
@@ -391,7 +434,7 @@ xfs_iget_recycle(
 	 * the inode.  We can't clear the radix tree tag yet as it requires
 	 * pag_ici_lock to be held exclusive.
 	 */
-	ip->i_flags |= XFS_IRECLAIM;
+	ip->i_flags |= iflag;
 
 	spin_unlock(&ip->i_flags_lock);
 	rcu_read_unlock();
@@ -408,10 +451,13 @@ xfs_iget_recycle(
 		rcu_read_lock();
 		spin_lock(&ip->i_flags_lock);
 		wake = !!__xfs_iflags_test(ip, XFS_INEW);
-		ip->i_flags &= ~(XFS_INEW | XFS_IRECLAIM);
+		ip->i_flags &= ~(XFS_INEW | iflag);
 		if (wake)
 			wake_up_bit(&ip->i_flags, __XFS_INEW_BIT);
-		ASSERT(ip->i_flags & XFS_IRECLAIMABLE);
+		if (iflag == XFS_IRECLAIM)
+			ASSERT(ip->i_flags & XFS_IRECLAIMABLE);
+		if (iflag == XFS_INACTIVATING)
+			ASSERT(ip->i_flags & XFS_NEED_INACTIVE);
 		spin_unlock(&ip->i_flags_lock);
 		rcu_read_unlock();
 		return error;
@@ -427,8 +473,7 @@ xfs_iget_recycle(
 	 */
 	ip->i_flags &= ~XFS_IRECLAIM_RESET_FLAGS;
 	ip->i_flags |= XFS_INEW;
-	xfs_perag_clear_inode_tag(pag, XFS_INO_TO_AGINO(mp, ip->i_ino),
-			XFS_ICI_RECLAIM_TAG);
+	xfs_perag_clear_inode_tag(pag, XFS_INO_TO_AGINO(mp, ip->i_ino), tag);
 	inode->i_state = I_NEW;
 	spin_unlock(&ip->i_flags_lock);
 	spin_unlock(&pag->pag_ici_lock);
@@ -451,6 +496,13 @@ xfs_iget_check_free_state(
 	struct xfs_inode	*ip,
 	int			flags)
 {
+	/*
+	 * Unlinked inodes awaiting inactivation must not be reused until we
+	 * have a chance to clear the on-disk metadata.
+	 */
+	if (VFS_I(ip)->i_nlink == 0 && (ip->i_flags & XFS_NEED_INACTIVE))
+		return -ENOENT;
+
 	if (flags & XFS_IGET_CREATE) {
 		/* should be a free inode */
 		if (VFS_I(ip)->i_mode != 0) {
@@ -517,7 +569,7 @@ xfs_iget_cache_hit(
 	 *	     wait_on_inode to wait for these flags to be cleared
 	 *	     instead of polling for it.
 	 */
-	if (ip->i_flags & (XFS_INEW|XFS_IRECLAIM)) {
+	if (ip->i_flags & (XFS_INEW | XFS_IRECLAIM | XFS_INACTIVATING)) {
 		trace_xfs_iget_skip(ip);
 		XFS_STATS_INC(mp, xs_ig_frecycle);
 		error = -EAGAIN;
@@ -545,9 +597,27 @@ xfs_iget_cache_hit(
 		}
 
 		/* Drops i_flags_lock and RCU read lock. */
-		error = xfs_iget_recycle(pag, ip);
+		error = xfs_iget_recycle(pag, ip, XFS_IRECLAIM);
 		if (error) {
 			trace_xfs_iget_reclaim_fail(ip);
+			return error;
+		}
+	} else if (ip->i_flags & XFS_NEED_INACTIVE) {
+		/*
+		 * If NEED_INACTIVE is set, we've torn down the VFS inode
+		 * already, and must carefully restore it to usable state.
+		 */
+		trace_xfs_iget_inactive(ip);
+
+		if (flags & XFS_IGET_INCORE) {
+			error = -EAGAIN;
+			goto out_error;
+		}
+
+		/* Drops i_flags_lock and RCU read lock. */
+		error = xfs_iget_recycle(pag, ip, XFS_INACTIVATING);
+		if (error) {
+			trace_xfs_iget_inactive_fail(ip);
 			return error;
 		}
 	} else {
@@ -841,22 +911,33 @@ xfs_dqrele_igrab(
 
 	/*
 	 * Skip inodes that are anywhere in the reclaim machinery because we
-	 * drop dquots before tagging an inode for reclamation.
+	 * drop dquots before tagging an inode for reclamation.  If the inode
+	 * is being inactivated, skip it because inactivation will drop the
+	 * dquots for us.
 	 */
-	if (ip->i_flags & (XFS_IRECLAIM | XFS_IRECLAIMABLE))
+	if (ip->i_flags & (XFS_IRECLAIM | XFS_IRECLAIMABLE | XFS_INACTIVATING))
 		goto out_unlock;
 
 	/*
-	 * The inode looks alive; try to grab a VFS reference so that it won't
-	 * get destroyed.  If we got the reference, return true to say that
-	 * we grabbed the inode.
+	 * If the inode is queued but not undergoing inactivation, set the
+	 * inactivating flag so everyone will leave it alone and return true
+	 * to say that we are taking ownership of it.
+	 *
+	 * Otherwise, the inode looks alive; try to grab a VFS reference so
+	 * that it won't get destroyed.  If we got the reference, return true
+	 * to say that we grabbed the inode.
 	 *
 	 * If we can't get the reference, then we know the inode had its VFS
 	 * state torn down and hasn't yet entered the reclaim machinery.  Since
 	 * we also know that dquots are detached from an inode before it enters
 	 * reclaim, we can skip the inode.
 	 */
-	ret = igrab(VFS_I(ip)) != NULL;
+	if (ip->i_flags & XFS_NEED_INACTIVE) {
+		ip->i_flags |= XFS_INACTIVATING;
+		ret = true;
+	} else {
+		ret = igrab(VFS_I(ip)) != NULL;
+	}
 
 out_unlock:
 	spin_unlock(&ip->i_flags_lock);
@@ -869,6 +950,8 @@ xfs_dqrele_inode(
 	struct xfs_inode	*ip,
 	struct xfs_icwalk	*icw)
 {
+	bool			live_inode;
+
 	if (xfs_iflags_test(ip, XFS_INEW))
 		xfs_inew_wait(ip);
 
@@ -886,7 +969,19 @@ xfs_dqrele_inode(
 		ip->i_pdquot = NULL;
 	}
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
-	xfs_irele(ip);
+
+	/*
+	 * If we set INACTIVATING earlier to prevent this inode from being
+	 * touched, clear that state to let the inodegc claim it.  Otherwise,
+	 * it's a live inode and we need to release it.
+	 */
+	spin_lock(&ip->i_flags_lock);
+	live_inode = !(ip->i_flags & XFS_INACTIVATING);
+	ip->i_flags &= ~XFS_INACTIVATING;
+	spin_unlock(&ip->i_flags_lock);
+
+	if (live_inode)
+		xfs_irele(ip);
 }
 
 /*
@@ -998,6 +1093,7 @@ xfs_reclaim_inode(
 
 	xfs_iflags_clear(ip, XFS_IFLUSHING);
 reclaim:
+	trace_xfs_inode_reclaiming(ip);
 
 	/*
 	 * Because we use RCU freeing we need to ensure the inode always appears
@@ -1463,6 +1559,8 @@ xfs_blockgc_start(
 
 /* Don't try to run block gc on an inode that's in any of these states. */
 #define XFS_BLOCKGC_NOGRAB_IFLAGS	(XFS_INEW | \
+					 XFS_NEED_INACTIVE | \
+					 XFS_INACTIVATING | \
 					 XFS_IRECLAIMABLE | \
 					 XFS_IRECLAIM)
 /*
@@ -1623,6 +1721,221 @@ xfs_blockgc_free_quota(
 			xfs_inode_dquot(ip, XFS_DQTYPE_PROJ), iwalk_flags);
 }
 
+/*
+ * Inode Inactivation and Reclaimation
+ * ===================================
+ *
+ * Sometimes, inodes need to have work done on them once the last program has
+ * closed the file.  Typically this means cleaning out any leftover speculative
+ * preallocations after EOF or in the CoW fork.  For inodes that have been
+ * totally unlinked, this means unmapping data/attr/cow blocks, removing the
+ * inode from the unlinked buckets, and marking it free in the inobt and inode
+ * table.
+ *
+ * This process can generate many metadata updates, which shows up as close()
+ * and unlink() calls that take a long time.  We defer all that work to a
+ * workqueue which means that we can batch a lot of work and do it in inode
+ * order for better performance.  Furthermore, we can control the workqueue,
+ * which means that we can avoid doing inactivation work at a bad time, such as
+ * when the fs is frozen.
+ *
+ * Deferred inactivation introduces new inode flag states (NEED_INACTIVE and
+ * INACTIVATING) and adds a new INODEGC radix tree tag for fast access.  We
+ * maintain separate perag counters for both types, and move counts as inodes
+ * wander the state machine, which now works as follows:
+ *
+ * If the inode needs inactivation, we:
+ *   - Set the NEED_INACTIVE inode flag
+ *   - Increment the per-AG inactive count
+ *   - Set the ICI_INODEGC tag in the per-AG inode tree
+ *   - Set the ICI_INODEGC tag in the per-fs AG tree
+ *   - Schedule background inode inactivation
+ *
+ * If the inode does not need inactivation, we:
+ *   - Set the IRECLAIMABLE inode flag
+ *   - Increment the per-AG reclaim count
+ *   - Set the ICI_RECLAIM tag in the per-AG inode tree
+ *   - Set the ICI_RECLAIM tag in the per-fs AG tree
+ *   - Schedule background inode reclamation
+ *
+ * When it is time for background inode inactivation, we:
+ *   - Set the INACTIVATING inode flag
+ *   - Make all the on-disk updates
+ *   - Clear both INACTIVATING and NEED_INACTIVE inode flags
+ *   - Decrement the per-AG inactive count
+ *   - Clear the ICI_INODEGC tag in the per-AG inode tree
+ *   - Clear the ICI_INODEGC tag in the per-fs AG tree if we just inactivated
+ *     the last inode in the AG
+ *   - Kick the inode into reclamation per the previous paragraph
+ *
+ * When it is time for background inode reclamation, we:
+ *   - Set the IRECLAIM inode flag
+ *   - Detach all the resources and remove the inode from the per-AG inode tree
+ *   - Clear both IRECLAIM and RECLAIMABLE inode flags
+ *   - Decrement the per-AG reclaim count
+ *   - Clear the ICI_RECLAIM tag from the per-AG inode tree
+ *   - Clear the ICI_RECLAIM tag from the per-fs AG tree if we just reclaimed
+ *     the last inode in the AG
+ *
+ * When these state transitions occur, the caller must have taken the per-AG
+ * incore inode tree lock and then the inode i_flags lock, in that order.
+ */
+
+/*
+ * Decide if the given @ip is eligible for inactivation, and grab it if so.
+ * Returns true if it's ready to go or false if we should just ignore it.
+ */
+static bool
+xfs_inodegc_igrab(
+	struct xfs_inode	*ip)
+{
+	ASSERT(rcu_read_lock_held());
+
+	/* Check for stale RCU freed inode */
+	spin_lock(&ip->i_flags_lock);
+	if (!ip->i_ino)
+		goto out_unlock_noent;
+
+	/*
+	 * Skip inodes that don't need inactivation or are being inactivated
+	 * (or reactivated) by another thread.  Inodes should not be tagged
+	 * for inactivation while also in INEW or any reclaim state.
+	 */
+	if (!(ip->i_flags & XFS_NEED_INACTIVE) ||
+	    (ip->i_flags & XFS_INACTIVATING))
+		goto out_unlock_noent;
+
+	/*
+	 * Mark this inode as being inactivated even if the fs is shut down
+	 * because we need xfs_inodegc_inactivate to push this inode into the
+	 * reclaim state.
+	 */
+	ip->i_flags |= XFS_INACTIVATING;
+	spin_unlock(&ip->i_flags_lock);
+	return true;
+
+out_unlock_noent:
+	spin_unlock(&ip->i_flags_lock);
+	return false;
+}
+
+/*
+ * Free all speculative preallocations and possibly even the inode itself.
+ * This is the last chance to make changes to an otherwise unreferenced file
+ * before incore reclamation happens.
+ */
+static int
+xfs_inodegc_inactivate(
+	struct xfs_inode	*ip,
+	struct xfs_perag	*pag,
+	struct xfs_icwalk	*icw)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	xfs_agino_t		agino = XFS_INO_TO_AGINO(mp, ip->i_ino);
+
+	/*
+	 * Inactivation isn't supposed to run when the fs is frozen because
+	 * we don't want kernel threads to block on transaction allocation.
+	 */
+	ASSERT(mp->m_super->s_writers.frozen < SB_FREEZE_FS);
+
+	/*
+	 * Foreground threads that have hit ENOSPC or EDQUOT are allowed to
+	 * pass in a icw structure to look for inodes to inactivate
+	 * immediately to free some resources.  If this inode isn't a match,
+	 * put it back on the shelf and move on.
+	 */
+	spin_lock(&ip->i_flags_lock);
+	if (!xfs_icwalk_match(ip, icw)) {
+		ip->i_flags &= ~XFS_INACTIVATING;
+		spin_unlock(&ip->i_flags_lock);
+		return 0;
+	}
+	spin_unlock(&ip->i_flags_lock);
+
+	trace_xfs_inode_inactivating(ip);
+
+	xfs_inactive(ip);
+	ASSERT(XFS_FORCED_SHUTDOWN(ip->i_mount) || ip->i_delayed_blks == 0);
+
+	/*
+	 * Move the inode from the inactivation phase to the reclamation phase
+	 * by clearing both inactivation inode state flags and marking the
+	 * inode reclaimable.  Schedule background reclaim to run later.
+	 */
+	spin_lock(&pag->pag_ici_lock);
+	spin_lock(&ip->i_flags_lock);
+
+	ip->i_flags &= ~(XFS_NEED_INACTIVE | XFS_INACTIVATING);
+	ip->i_flags |= XFS_IRECLAIMABLE;
+
+	xfs_perag_clear_inode_tag(pag, agino, XFS_ICI_INODEGC_TAG);
+	xfs_perag_set_inode_tag(pag, agino, XFS_ICI_RECLAIM_TAG);
+
+	spin_unlock(&ip->i_flags_lock);
+	spin_unlock(&pag->pag_ici_lock);
+
+	return 0;
+}
+
+/* Walk the fs and inactivate the inodes in them. */
+int
+xfs_inodegc_free_space(
+	struct xfs_mount	*mp,
+	struct xfs_icwalk	*icw)
+{
+	trace_xfs_inodegc_free_space(mp, icw, _RET_IP_);
+
+	return xfs_icwalk(mp, XFS_ICWALK_INODEGC, icw);
+}
+
+/* Background inode inactivation worker. */
+void
+xfs_inodegc_worker(
+	struct work_struct	*work)
+{
+	struct xfs_mount	*mp = container_of(to_delayed_work(work),
+					struct xfs_mount, m_inodegc_work);
+	int			error;
+
+	error = xfs_inodegc_free_space(mp, NULL);
+	if (error && error != -EAGAIN)
+		xfs_err(mp, "inode inactivation failed, error %d", error);
+
+	xfs_inodegc_queue(mp);
+}
+
+/* Force all currently queued inode inactivation work to run immediately. */
+void
+xfs_inodegc_flush(
+	struct xfs_mount	*mp)
+{
+	if (!xfs_inodegc_running(mp) ||
+	    !radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_INODEGC_TAG))
+		return;
+
+	mod_delayed_work(mp->m_gc_workqueue, &mp->m_inodegc_work, 0);
+	flush_delayed_work(&mp->m_inodegc_work);
+}
+
+/* Stop all queued inactivation work. */
+void
+xfs_inodegc_stop(
+	struct xfs_mount	*mp)
+{
+	clear_bit(XFS_OPFLAG_INODEGC_RUNNING_BIT, &mp->m_opflags);
+	cancel_delayed_work_sync(&mp->m_inodegc_work);
+}
+
+/* Schedule deferred inode inactivation work. */
+void
+xfs_inodegc_start(
+	struct xfs_mount	*mp)
+{
+	set_bit(XFS_OPFLAG_INODEGC_RUNNING_BIT, &mp->m_opflags);
+	xfs_inodegc_queue(mp);
+}
+
 /* XFS Inode Cache Walking Code */
 
 /*
@@ -1651,6 +1964,8 @@ xfs_icwalk_igrab(
 		return xfs_blockgc_igrab(ip);
 	case XFS_ICWALK_RECLAIM:
 		return xfs_reclaim_igrab(ip, icw);
+	case XFS_ICWALK_INODEGC:
+		return xfs_inodegc_igrab(ip);
 	default:
 		return false;
 	}
@@ -1678,6 +1993,9 @@ xfs_icwalk_process_inode(
 		break;
 	case XFS_ICWALK_RECLAIM:
 		xfs_reclaim_inode(ip, pag);
+		break;
+	case XFS_ICWALK_INODEGC:
+		error = xfs_inodegc_inactivate(ip, pag, icw);
 		break;
 	}
 	return error;
