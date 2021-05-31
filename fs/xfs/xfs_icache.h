@@ -85,6 +85,7 @@ void xfs_inodegc_flush(struct xfs_mount *mp);
 void xfs_inodegc_stop(struct xfs_mount *mp);
 void xfs_inodegc_start(struct xfs_mount *mp);
 int xfs_inodegc_free_space(struct xfs_mount *mp, struct xfs_eofblocks *eofb);
+bool xfs_has_inodegc_work(struct xfs_mount *mp);
 
 /*
  * Process all pending inode inactivations immediately (sort of) so that a
