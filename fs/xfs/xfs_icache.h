@@ -52,7 +52,7 @@ void xfs_reclaim_inodes(struct xfs_mount *mp);
 int xfs_reclaim_inodes_count(struct xfs_mount *mp);
 long xfs_reclaim_inodes_nr(struct xfs_mount *mp, int nr_to_scan);
 
-void xfs_inode_mark_reclaimable(struct xfs_inode *ip);
+void xfs_inode_mark_reclaimable(struct xfs_inode *ip, bool need_inactive);
 
 int xfs_blockgc_free_dquots(struct xfs_mount *mp, struct xfs_dquot *udqp,
 		struct xfs_dquot *gdqp, struct xfs_dquot *pdqp,
@@ -79,5 +79,38 @@ int xfs_icache_inode_is_allocated(struct xfs_mount *mp, struct xfs_trans *tp,
 
 void xfs_blockgc_stop(struct xfs_mount *mp);
 void xfs_blockgc_start(struct xfs_mount *mp);
+
+void xfs_inodegc_worker(struct work_struct *work);
+void xfs_inodegc_flush(struct xfs_mount *mp);
+void xfs_inodegc_stop(struct xfs_mount *mp);
+void xfs_inodegc_start(struct xfs_mount *mp);
+int xfs_inodegc_free_space(struct xfs_mount *mp, struct xfs_eofblocks *eofb);
+
+/*
+ * Process all pending inode inactivations immediately (sort of) so that a
+ * resource usage report will be mostly accurate with regards to files that
+ * have been unlinked recently.
+ *
+ * It isn't practical to maintain a count of the resources used by unlinked
+ * inodes to adjust the values reported by this function.  Resources that are
+ * shared (e.g. reflink) when an inode is queued for inactivation cannot be
+ * counted towards the adjustment, and cross referencing data extents with the
+ * refcount btree is the only way to decide if a resource is shared.  Worse,
+ * unsharing of any data blocks in the system requires either a second
+ * consultation with the refcount btree, or training users to deal with the
+ * free space counts possibly fluctuating upwards as inactivations occur.
+ *
+ * Hence we guard the inactivation flush with a ratelimiter so that the counts
+ * are not way out of whack while ignoring workloads that hammer us with statfs
+ * calls.  Once per clock tick seems frequent enough to avoid complaints about
+ * inaccurate counts.
+ */
+static inline void
+xfs_inodegc_summary_flush(
+	struct xfs_mount	*mp)
+{
+	if (__ratelimit(&mp->m_inodegc_ratelimit))
+		xfs_inodegc_flush(mp);
+}
 
 #endif
