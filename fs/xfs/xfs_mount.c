@@ -640,6 +640,10 @@ xfs_check_summary_counts(
  * so we need to unpin them, write them back and/or reclaim them before unmount
  * can proceed.
  *
+ * The caller should start the process by flushing queued inactivation work so
+ * that all file updates to on-disk metadata can be flushed with the log.
+ * After the AIL push, all inodes should be ready for reclamation.
+ *
  * An inode cluster that has been freed can have its buffer still pinned in
  * memory because the transaction is still sitting in a iclog. The stale inodes
  * on that buffer will be pinned to the buffer until the transaction hits the
@@ -670,6 +674,7 @@ xfs_unmount_flush_inodes(
 	mp->m_flags |= XFS_MOUNT_UNMOUNTING;
 
 	xfs_ail_push_all_sync(mp->m_ail);
+	xfs_inodegc_stop(mp);
 	cancel_delayed_work_sync(&mp->m_reclaim_work);
 	xfs_reclaim_inodes(mp);
 	xfs_health_unmount(mp);
@@ -907,6 +912,17 @@ xfs_mountfs(
 		goto out_log_dealloc;
 
 	/*
+	 * Don't allow statfs to hammer us with inodegc flushes.  Once per
+	 * clock tick seems sufficient to avoid complaints about inaccurate
+	 * counter values.  Disable ratelimit logging.
+	 */
+	ratelimit_state_init(&mp->m_inodegc_ratelimit, 1, 1);
+	ratelimit_set_flags(&mp->m_inodegc_ratelimit, RATELIMIT_MSG_ON_RELEASE);
+
+	/* Enable background workers. */
+	xfs_inodegc_start(mp);
+
+	/*
 	 * Get and sanity-check the root inode.
 	 * Save the pointer to it in the mount structure.
 	 */
@@ -1061,9 +1077,9 @@ xfs_mountfs(
 	/* Clean out dquots that might be in memory after quotacheck. */
 	xfs_qm_unmount(mp);
 	/*
-	 * Flush all inode reclamation work and flush the log.
-	 * We have to do this /after/ rtunmount and qm_unmount because those
-	 * two will have scheduled delayed reclaim for the rt/quota inodes.
+	 * Flush all inode reclamation work and flush inodes to the log.  Do
+	 * this after rtunmount and qm_unmount because those two will have
+	 * released the rt and quota inodes.
 	 *
 	 * This is slightly different from the unmountfs call sequence
 	 * because we could be tearing down a partially set up mount.  In
@@ -1071,6 +1087,7 @@ xfs_mountfs(
 	 * qm_unmount_quotas and therefore rely on qm_unmount to release the
 	 * quota inodes.
 	 */
+	xfs_inodegc_flush(mp);
 	xfs_unmount_flush_inodes(mp);
  out_log_dealloc:
 	xfs_log_mount_cancel(mp);
@@ -1106,6 +1123,12 @@ xfs_unmountfs(
 {
 	uint64_t		resblks;
 	int			error;
+
+	/*
+	 * Flush all the queued inode inactivation work to disk before tearing
+	 * down rt metadata and quotas.
+	 */
+	xfs_inodegc_flush(mp);
 
 	xfs_blockgc_stop(mp);
 	xfs_fs_unreserve_ag_blocks(mp);
