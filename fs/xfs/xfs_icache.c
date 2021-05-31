@@ -1944,6 +1944,14 @@ xfs_inodegc_start(
 	xfs_inodegc_queue(mp);
 }
 
+/* Are there files waiting for inactivation? */
+bool
+xfs_has_inodegc_work(
+	struct xfs_mount	*mp)
+{
+	return radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_INODEGC_TAG);
+}
+
 /* XFS Inode Cache Walking Code */
 
 /*
