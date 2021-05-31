@@ -1160,7 +1160,7 @@ xfs_reclaim_inodes_nr(
 	int			nr_to_scan)
 {
 	struct xfs_eofblocks	eofb = {
-		.eof_flags	= XFS_EOFB_SCAN_LIMIT,
+		.eof_flags	= XFS_EOF_FLAGS_SCAN_LIMIT,
 		.nr_to_scan	= nr_to_scan,
 	};
 
@@ -2138,7 +2138,7 @@ restart:
 
 		cond_resched();
 
-		if (eofb && (eofb->eof_flags & XFS_EOFB_SCAN_LIMIT)) {
+		if (eofb && (eofb->eof_flags & XFS_EOF_FLAGS_SCAN_LIMIT)) {
 			eofb->nr_to_scan -= XFS_LOOKUP_BATCH;
 			if (eofb->nr_to_scan <= 0)
 				break;
