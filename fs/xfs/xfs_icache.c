@@ -40,6 +40,7 @@
 enum xfs_icwalk_goal {
 	XFS_ICWALK_DQRELE	= -1,
 	XFS_ICWALK_BLOCKGC	= XFS_ICI_BLOCKGC_TAG,
+	XFS_ICWALK_RECLAIM	= XFS_ICI_RECLAIM_TAG,
 };
 
 /* Is there a radix tree tag for this goal? */
@@ -743,17 +744,6 @@ xfs_icache_inode_is_allocated(
 	return 0;
 }
 
-/*
- * The inode lookup is done in batches to keep the amount of lock traffic and
- * radix tree lookups to a minimum. The batch size is a trade off between
- * lookup reduction and stack usage. This is in the reclaim path, so we can't
- * be too greedy.
- *
- * XXX: This will be moved closer to xfs_inode_walk* once we get rid of the
- * separate reclaim walk functions.
- */
-#define XFS_LOOKUP_BATCH	32
-
 #ifdef CONFIG_XFS_QUOTA
 /* Decide if we want to grab this inode to drop its dquots. */
 static bool
@@ -865,7 +855,7 @@ xfs_dqrele_all_inodes(
  * Return true if we grabbed it, false otherwise.
  */
 static bool
-xfs_reclaim_inode_grab(
+xfs_reclaim_igrab(
 	struct xfs_inode	*ip)
 {
 	ASSERT(rcu_read_lock_held());
@@ -975,108 +965,13 @@ out:
 	xfs_iflags_clear(ip, XFS_IRECLAIM);
 }
 
-/*
- * Walk the AGs and reclaim the inodes in them. Even if the filesystem is
- * corrupted, we still want to try to reclaim all the inodes. If we don't,
- * then a shut down during filesystem unmount reclaim walk leak all the
- * unreclaimed inodes.
- *
- * Returns non-zero if any AGs or inodes were skipped in the reclaim pass
- * so that callers that want to block until all dirty inodes are written back
- * and reclaimed can sanely loop.
- */
-static void
-xfs_reclaim_inodes_ag(
-	struct xfs_mount	*mp,
-	int			*nr_to_scan)
-{
-	struct xfs_perag	*pag;
-	xfs_agnumber_t		ag = 0;
-
-	while ((pag = xfs_perag_get_tag(mp, ag, XFS_ICI_RECLAIM_TAG))) {
-		unsigned long	first_index = 0;
-		int		done = 0;
-		int		nr_found = 0;
-
-		ag = pag->pag_agno + 1;
-
-		first_index = READ_ONCE(pag->pag_ici_reclaim_cursor);
-		do {
-			struct xfs_inode *batch[XFS_LOOKUP_BATCH];
-			int	i;
-
-			rcu_read_lock();
-			nr_found = radix_tree_gang_lookup_tag(
-					&pag->pag_ici_root,
-					(void **)batch, first_index,
-					XFS_LOOKUP_BATCH,
-					XFS_ICI_RECLAIM_TAG);
-			if (!nr_found) {
-				done = 1;
-				rcu_read_unlock();
-				break;
-			}
-
-			/*
-			 * Grab the inodes before we drop the lock. if we found
-			 * nothing, nr == 0 and the loop will be skipped.
-			 */
-			for (i = 0; i < nr_found; i++) {
-				struct xfs_inode *ip = batch[i];
-
-				if (done || !xfs_reclaim_inode_grab(ip))
-					batch[i] = NULL;
-
-				/*
-				 * Update the index for the next lookup. Catch
-				 * overflows into the next AG range which can
-				 * occur if we have inodes in the last block of
-				 * the AG and we are currently pointing to the
-				 * last inode.
-				 *
-				 * Because we may see inodes that are from the
-				 * wrong AG due to RCU freeing and
-				 * reallocation, only update the index if it
-				 * lies in this AG. It was a race that lead us
-				 * to see this inode, so another lookup from
-				 * the same index will not find it again.
-				 */
-				if (XFS_INO_TO_AGNO(mp, ip->i_ino) !=
-								pag->pag_agno)
-					continue;
-				first_index = XFS_INO_TO_AGINO(mp, ip->i_ino + 1);
-				if (first_index < XFS_INO_TO_AGINO(mp, ip->i_ino))
-					done = 1;
-			}
-
-			/* unlock now we've grabbed the inodes. */
-			rcu_read_unlock();
-
-			for (i = 0; i < nr_found; i++) {
-				if (batch[i])
-					xfs_reclaim_inode(batch[i], pag);
-			}
-
-			*nr_to_scan -= XFS_LOOKUP_BATCH;
-			cond_resched();
-		} while (nr_found && !done && *nr_to_scan > 0);
-
-		if (done)
-			first_index = 0;
-		WRITE_ONCE(pag->pag_ici_reclaim_cursor, first_index);
-		xfs_perag_put(pag);
-	}
-}
-
 void
 xfs_reclaim_inodes(
 	struct xfs_mount	*mp)
 {
-	int		nr_to_scan = INT_MAX;
-
 	while (radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_RECLAIM_TAG)) {
 		xfs_ail_push_all_sync(mp->m_ail);
-		xfs_reclaim_inodes_ag(mp, &nr_to_scan);
+		xfs_inode_walk(mp, XFS_ICWALK_RECLAIM, NULL);
 	}
 }
 
@@ -1092,11 +987,16 @@ xfs_reclaim_inodes_nr(
 	struct xfs_mount	*mp,
 	int			nr_to_scan)
 {
+	struct xfs_eofblocks	eofb = {
+		.eof_flags	= XFS_EOFB_SCAN_LIMIT,
+		.nr_to_scan	= nr_to_scan,
+	};
+
 	/* kick background reclaimer and push the AIL */
 	xfs_reclaim_work_queue(mp);
 	xfs_ail_push_all(mp->m_ail);
 
-	xfs_reclaim_inodes_ag(mp, &nr_to_scan);
+	xfs_inode_walk(mp, XFS_ICWALK_RECLAIM, &eofb);
 	return 0;
 }
 
@@ -1206,9 +1106,8 @@ xfs_reclaim_worker(
 {
 	struct xfs_mount *mp = container_of(to_delayed_work(work),
 					struct xfs_mount, m_reclaim_work);
-	int		nr_to_scan = INT_MAX;
 
-	xfs_reclaim_inodes_ag(mp, &nr_to_scan);
+	xfs_inode_walk(mp, XFS_ICWALK_RECLAIM, NULL);
 	xfs_reclaim_work_queue(mp);
 }
 
@@ -1678,6 +1577,14 @@ xfs_blockgc_free_quota(
 
 /* XFS Incore Inode Walking Code */
 
+/*
+ * The inode lookup is done in batches to keep the amount of lock traffic and
+ * radix tree lookups to a minimum. The batch size is a trade off between
+ * lookup reduction and stack usage. This is in the reclaim path, so we can't
+ * be too greedy.
+ */
+#define XFS_LOOKUP_BATCH	32
+
 static inline bool
 xfs_grabbed_for_walk(
 	enum xfs_icwalk_goal	goal,
@@ -1688,6 +1595,8 @@ xfs_grabbed_for_walk(
 		return xfs_blockgc_igrab(ip);
 	case XFS_ICWALK_DQRELE:
 		return xfs_dqrele_igrab(ip);
+	case XFS_ICWALK_RECLAIM:
+		return xfs_reclaim_igrab(ip);
 	default:
 		return false;
 	}
@@ -1713,7 +1622,10 @@ xfs_inode_walk_ag(
 restart:
 	done = false;
 	skipped = 0;
-	first_index = 0;
+	if (goal == XFS_ICWALK_RECLAIM)
+		first_index = READ_ONCE(pag->pag_ici_reclaim_cursor);
+	else
+		first_index = 0;
 	nr_found = 0;
 	do {
 		struct xfs_inode *batch[XFS_LOOKUP_BATCH];
@@ -1733,6 +1645,7 @@ restart:
 					XFS_LOOKUP_BATCH, goal);
 
 		if (!nr_found) {
+			done = true;
 			rcu_read_unlock();
 			break;
 		}
@@ -1779,6 +1692,9 @@ restart:
 			case XFS_ICWALK_BLOCKGC:
 				error = xfs_blockgc_scan_inode(batch[i], eofb);
 				break;
+			case XFS_ICWALK_RECLAIM:
+				xfs_reclaim_inode(batch[i], pag);
+				break;
 			}
 			if (error == -EAGAIN) {
 				skipped++;
@@ -1794,7 +1710,18 @@ restart:
 
 		cond_resched();
 
+		if (eofb && (eofb->eof_flags & XFS_EOFB_SCAN_LIMIT)) {
+			eofb->nr_to_scan -= XFS_LOOKUP_BATCH;
+			if (eofb->nr_to_scan <= 0)
+				break;
+		}
 	} while (nr_found && !done);
+
+	if (goal == XFS_ICWALK_RECLAIM) {
+		if (done)
+			first_index = 0;
+		WRITE_ONCE(pag->pag_ici_reclaim_cursor, first_index);
+	}
 
 	if (skipped) {
 		delay(1);

@@ -15,6 +15,7 @@ struct xfs_eofblocks {
 	kgid_t		eof_gid;
 	prid_t		eof_prid;
 	__u64		eof_min_file_size;
+	int		nr_to_scan;
 };
 
 /* Special eof_flags for dropping dquots. */
@@ -22,9 +23,13 @@ struct xfs_eofblocks {
 #define XFS_EOFB_DROP_GDQUOT	(1U << 30)
 #define XFS_EOFB_DROP_PDQUOT	(1U << 29)
 
+/* Stop scanning after nr_to_scan inodes. */
+#define XFS_EOFB_SCAN_LIMIT	(1U << 28)
+
 #define XFS_EOFB_PRIVATE_FLAGS	(XFS_EOFB_DROP_UDQUOT | \
 				 XFS_EOFB_DROP_GDQUOT | \
-				 XFS_EOFB_DROP_PDQUOT)
+				 XFS_EOFB_DROP_PDQUOT | \
+				 XFS_EOFB_SCAN_LIMIT)
 
 /*
  * Flags for xfs_iget()
