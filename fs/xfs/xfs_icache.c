@@ -794,7 +794,7 @@ out_unlock:
 }
 
 /* Drop this inode's dquots. */
-static int
+static void
 xfs_dqrele_inode(
 	struct xfs_inode	*ip,
 	void			*priv)
@@ -818,7 +818,7 @@ xfs_dqrele_inode(
 		ip->i_pdquot = NULL;
 	}
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
-	return 0;
+	xfs_irele(ip);
 }
 
 /*
@@ -846,7 +846,7 @@ xfs_dqrele_all_inodes(
 }
 #else
 # define xfs_dqrele_igrab(ip)		(false)
-# define xfs_dqrele_inode(ip, priv)	(0)
+# define xfs_dqrele_inode(ip, priv)	((void)0)
 #endif /* CONFIG_XFS_QUOTA */
 
 /*
@@ -1778,8 +1778,7 @@ restart:
 				continue;
 			switch (goal) {
 			case XFS_ICWALK_DQRELE:
-				error = xfs_dqrele_inode(batch[i], args);
-				xfs_irele(batch[i]);
+				xfs_dqrele_inode(batch[i], args);
 				break;
 			case XFS_ICWALK_BLOCKGC:
 				error = xfs_blockgc_scan_inode(batch[i], args);
