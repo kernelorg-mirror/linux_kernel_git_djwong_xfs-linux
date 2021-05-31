@@ -50,11 +50,9 @@ xfs_icwalk_tagged(enum xfs_icwalk_goal goal)
 }
 
 static int xfs_inode_walk(struct xfs_mount *mp,
-		int (*execute)(struct xfs_inode *ip, void *args),
-		void *args, enum xfs_icwalk_goal goal);
+		enum xfs_icwalk_goal goal, void *args);
 static int xfs_inode_walk_ag(struct xfs_perag *pag,
-		int (*execute)(struct xfs_inode *ip, void *args),
-		void *args, enum xfs_icwalk_goal goal);
+		enum xfs_icwalk_goal goal, void *args);
 
 /*
  * Allocate and initialise an xfs_inode.
@@ -844,11 +842,11 @@ xfs_dqrele_all_inodes(
 	if (qflags & XFS_PQUOTA_ACCT)
 		eofb.eof_flags |= XFS_EOFB_DROP_PDQUOT;
 
-	return xfs_inode_walk(mp, xfs_dqrele_inode, &eofb,
-			XFS_ICWALK_DQRELE);
+	return xfs_inode_walk(mp, XFS_ICWALK_DQRELE, &eofb);
 }
 #else
 # define xfs_dqrele_igrab(ip)		(false)
+# define xfs_dqrele_inode(ip, priv)	(0)
 #endif /* CONFIG_XFS_QUOTA */
 
 /*
@@ -1591,8 +1589,7 @@ xfs_blockgc_worker(
 
 	if (!sb_start_write_trylock(mp->m_super))
 		return;
-	error = xfs_inode_walk_ag(pag, xfs_blockgc_scan_inode, NULL,
-			XFS_ICWALK_BLOCKGC);
+	error = xfs_inode_walk_ag(pag, XFS_ICWALK_BLOCKGC, NULL);
 	if (error)
 		xfs_info(mp, "AG %u preallocation gc worker failed, err=%d",
 				pag->pag_agno, error);
@@ -1610,8 +1607,7 @@ xfs_blockgc_free_space(
 {
 	trace_xfs_blockgc_free_space(mp, eofb, _RET_IP_);
 
-	return xfs_inode_walk(mp, xfs_blockgc_scan_inode, eofb,
-			XFS_ICWALK_BLOCKGC);
+	return xfs_inode_walk(mp, XFS_ICWALK_BLOCKGC, eofb);
 }
 
 /*
@@ -1698,15 +1694,14 @@ xfs_grabbed_for_walk(
 }
 
 /*
- * For a given per-AG structure @pag, grab, @execute, and rele all incore
- * inodes with the given radix tree @tag.
+ * For a given per-AG structure @pag and a goal, grab qualifying inodes and
+ * process them in some manner.
  */
 static int
 xfs_inode_walk_ag(
 	struct xfs_perag	*pag,
-	int			(*execute)(struct xfs_inode *ip, void *args),
-	void			*args,
-	enum xfs_icwalk_goal	goal)
+	enum xfs_icwalk_goal	goal,
+	void			*args)
 {
 	struct xfs_mount	*mp = pag->pag_mount;
 	uint32_t		first_index;
@@ -1777,7 +1772,14 @@ restart:
 		for (i = 0; i < nr_found; i++) {
 			if (!batch[i])
 				continue;
-			error = execute(batch[i], args);
+			switch (goal) {
+			case XFS_ICWALK_DQRELE:
+				error = xfs_dqrele_inode(batch[i], args);
+				break;
+			case XFS_ICWALK_BLOCKGC:
+				error = xfs_blockgc_scan_inode(batch[i], args);
+				break;
+			}
 			xfs_irele(batch[i]);
 			if (error == -EAGAIN) {
 				skipped++;
@@ -1814,16 +1816,12 @@ xfs_inode_walk_get_perag(
 	return xfs_perag_get_tag(mp, agno, goal);
 }
 
-/*
- * Call the @execute function on all incore inodes matching the radix tree
- * @tag.
- */
+/* Walk all incore inodes to achieve a given goal. */
 static int
 xfs_inode_walk(
 	struct xfs_mount	*mp,
-	int			(*execute)(struct xfs_inode *ip, void *args),
-	void			*args,
-	enum xfs_icwalk_goal	goal)
+	enum xfs_icwalk_goal	goal,
+	void			*args)
 {
 	struct xfs_perag	*pag;
 	int			error = 0;
@@ -1833,7 +1831,7 @@ xfs_inode_walk(
 	ag = 0;
 	while ((pag = xfs_inode_walk_get_perag(mp, ag, goal))) {
 		ag = pag->pag_agno + 1;
-		error = xfs_inode_walk_ag(pag, execute, args, goal);
+		error = xfs_inode_walk_ag(pag, goal, args);
 		xfs_perag_put(pag);
 		if (error) {
 			last_error = error;
