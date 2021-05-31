@@ -628,6 +628,43 @@ xfs_check_delalloc(
 #define xfs_check_delalloc(ip, whichfork)	do { } while (0)
 #endif
 
+#ifdef CONFIG_XFS_QUOTA
+/*
+ * If a quota type is turned off but we still have a dquot attached to the
+ * inode, detach it before tagging this inode for inactivation (or reclaim) to
+ * avoid delaying quotaoff for longer than is necessary.  Because the inode has
+ * no VFS state and has not yet been tagged for reclaim or inactivation, it is
+ * safe to drop the dquots locklessly because iget, quotaoff, blockgc, and
+ * reclaim will not touch the inode.
+ */
+static inline void
+xfs_fs_dqdestroy_inode(
+	struct xfs_inode	*ip)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+
+	if (!XFS_IS_UQUOTA_ON(mp)) {
+		xfs_qm_dqrele(ip->i_udquot);
+		ip->i_udquot = NULL;
+	}
+	if (!XFS_IS_GQUOTA_ON(mp)) {
+		xfs_qm_dqrele(ip->i_gdquot);
+		ip->i_gdquot = NULL;
+	}
+	if (!XFS_IS_PQUOTA_ON(mp)) {
+		xfs_qm_dqrele(ip->i_pdquot);
+		ip->i_pdquot = NULL;
+	}
+}
+#else
+# define xfs_fs_dqdestroy_inode(ip)		((void)0)
+#endif
+
+/* iflags that we shouldn't see before scheduling reclaim or inactivation. */
+#define XFS_IDESTROY_BAD_IFLAGS	(XFS_IRECLAIMABLE | \
+				 XFS_IRECLAIM | \
+				 XFS_NEED_INACTIVE | \
+				 XFS_INACTIVATING)
 /*
  * Now that the generic code is guaranteed not to be accessing
  * the linux inode, we can inactivate and reclaim the inode.
@@ -637,28 +674,44 @@ xfs_fs_destroy_inode(
 	struct inode		*inode)
 {
 	struct xfs_inode	*ip = XFS_I(inode);
+	struct xfs_mount	*mp = ip->i_mount;
+	bool			need_inactive;
 
 	trace_xfs_destroy_inode(ip);
 
 	ASSERT(!rwsem_is_locked(&inode->i_rwsem));
-	XFS_STATS_INC(ip->i_mount, vn_rele);
-	XFS_STATS_INC(ip->i_mount, vn_remove);
+	XFS_STATS_INC(mp, vn_rele);
+	XFS_STATS_INC(mp, vn_remove);
 
-	xfs_inactive(ip);
+	need_inactive = xfs_inode_needs_inactivation(ip);
+	if (!need_inactive) {
+		/*
+		 * If the inode doesn't need inactivation, that means we're
+		 * going directly into reclaim and can drop the dquots.  It
+		 * also means that there shouldn't be any delalloc reservations
+		 * or speculative CoW preallocations remaining.
+		 */
+		xfs_qm_dqdetach(ip);
 
-	if (!XFS_FORCED_SHUTDOWN(ip->i_mount) && ip->i_delayed_blks) {
-		xfs_check_delalloc(ip, XFS_DATA_FORK);
-		xfs_check_delalloc(ip, XFS_COW_FORK);
-		ASSERT(0);
+		if (!XFS_FORCED_SHUTDOWN(mp) && ip->i_delayed_blks) {
+			xfs_check_delalloc(ip, XFS_DATA_FORK);
+			xfs_check_delalloc(ip, XFS_COW_FORK);
+			ASSERT(0);
+		}
+	} else {
+		/*
+		 * Drop dquots for disabled quota types to avoid delaying
+		 * quotaoff while we wait for inactivation to occur.
+		 */
+		xfs_fs_dqdestroy_inode(ip);
 	}
 
-	XFS_STATS_INC(ip->i_mount, vn_reclaim);
+	XFS_STATS_INC(mp, vn_reclaim);
 
 	/*
-	 * We should never get here with one of the reclaim flags already set.
+	 * We should never get here with any of the reclaim flags already set.
 	 */
-	ASSERT_ALWAYS(!xfs_iflags_test(ip, XFS_IRECLAIMABLE));
-	ASSERT_ALWAYS(!xfs_iflags_test(ip, XFS_IRECLAIM));
+	ASSERT_ALWAYS(!xfs_iflags_test(ip, XFS_IDESTROY_BAD_IFLAGS));
 
 	/*
 	 * We always use background reclaim here because even if the inode is
@@ -667,7 +720,7 @@ xfs_fs_destroy_inode(
 	 * reclaim path handles this more efficiently than we can here, so
 	 * simply let background reclaim tear down all inodes.
 	 */
-	xfs_inode_mark_reclaimable(ip);
+	xfs_inode_mark_reclaimable(ip, need_inactive);
 }
 
 static void
@@ -779,6 +832,21 @@ xfs_fs_sync_fs(
 		flush_delayed_work(&mp->m_log->l_work);
 	}
 
+	/*
+	 * If the fs is at FREEZE_PAGEFAULTS, that means the VFS holds the
+	 * umount mutex and is syncing the filesystem just before setting the
+	 * state to FREEZE_FS.  We are not allowed to run transactions on a
+	 * filesystem that is in FREEZE_FS state, so deactivate the background
+	 * workers before we get there, and leave them off for the duration of
+	 * the freeze.
+	 *
+	 * We can't do this in xfs_fs_freeze_super because freeze_super takes
+	 * s_umount, which means we can't lock out a concurrent thaw request
+	 * without adding another layer of locks to the freeze process.
+	 */
+	if (sb->s_writers.frozen == SB_FREEZE_PAGEFAULT)
+		xfs_inodegc_stop(mp);
+
 	return 0;
 }
 
@@ -796,6 +864,8 @@ xfs_fs_statfs(
 	uint64_t		fdblocks;
 	xfs_extlen_t		lsize;
 	int64_t			ffree;
+
+	xfs_inodegc_summary_flush(mp);
 
 	statp->f_type = XFS_SUPER_MAGIC;
 	statp->f_namelen = MAXNAMELEN - 1;
@@ -907,8 +977,25 @@ xfs_fs_unfreeze(
 
 	xfs_restore_resvblks(mp);
 	xfs_log_work_queue(mp);
+	xfs_inodegc_start(mp);
 	xfs_blockgc_start(mp);
 	return 0;
+}
+
+STATIC int
+xfs_fs_freeze_super(
+	struct super_block	*sb)
+{
+	struct xfs_mount	*mp = XFS_M(sb);
+
+	/*
+	 * Before we take s_umount to get to FREEZE_WRITE, flush all the
+	 * accumulated background work so that there's less recovery work
+	 * to do if we crash during the freeze.
+	 */
+	xfs_inodegc_flush(mp);
+
+	return freeze_super(sb);
 }
 
 /*
@@ -1089,6 +1176,7 @@ static const struct super_operations xfs_super_operations = {
 	.show_options		= xfs_fs_show_options,
 	.nr_cached_objects	= xfs_fs_nr_cached_objects,
 	.free_cached_objects	= xfs_fs_free_cached_objects,
+	.freeze_super		= xfs_fs_freeze_super,
 };
 
 static int
@@ -1736,6 +1824,13 @@ xfs_remount_ro(
 		return error;
 	}
 
+	/*
+	 * Perform all on-disk metadata updates required to inactivate inodes.
+	 * Since this can involve finobt updates, do it now before we lose the
+	 * per-AG space reservations to guarantee that we won't fail there.
+	 */
+	xfs_inodegc_flush(mp);
+
 	/* Free the per-AG metadata reservation pool. */
 	error = xfs_fs_unreserve_ag_blocks(mp);
 	if (error) {
@@ -1859,6 +1954,7 @@ static int xfs_init_fs_context(
 	mutex_init(&mp->m_growlock);
 	INIT_WORK(&mp->m_flush_inodes_work, xfs_flush_inodes_worker);
 	INIT_DELAYED_WORK(&mp->m_reclaim_work, xfs_reclaim_worker);
+	INIT_DELAYED_WORK(&mp->m_inodegc_work, xfs_inodegc_worker);
 	mp->m_kobj.kobject.kset = xfs_kset;
 	/*
 	 * We don't create the finobt per-ag space reservation until after log
