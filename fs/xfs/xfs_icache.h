@@ -18,6 +18,21 @@ struct xfs_eofblocks {
 	int		icw_scan_limit;
 };
 
+/* Flags that we borrowed from struct xfs_fs_eofblocks */
+#define XFS_ICWALK_FLAG_SYNC		(XFS_EOF_FLAGS_SYNC)
+#define XFS_ICWALK_FLAG_UID		(XFS_EOF_FLAGS_UID)
+#define XFS_ICWALK_FLAG_GID		(XFS_EOF_FLAGS_GID)
+#define XFS_ICWALK_FLAG_PRID		(XFS_EOF_FLAGS_PRID)
+#define XFS_ICWALK_FLAG_MINFILESIZE	(XFS_EOF_FLAGS_MINFILESIZE)
+#define XFS_ICWALK_FLAG_UNION		(XFS_EOF_FLAGS_UNION)
+
+#define XFS_ICWALK_FLAGS_VALID		(XFS_ICWALK_FLAG_SYNC | \
+					 XFS_ICWALK_FLAG_UID | \
+					 XFS_ICWALK_FLAG_GID | \
+					 XFS_ICWALK_FLAG_PRID | \
+					 XFS_ICWALK_FLAG_MINFILESIZE | \
+					 XFS_ICWALK_FLAG_UNION)
+
 /*
  * Flags for xfs_iget()
  */
@@ -43,8 +58,8 @@ void xfs_inode_mark_reclaimable(struct xfs_inode *ip);
 
 int xfs_blockgc_free_dquots(struct xfs_mount *mp, struct xfs_dquot *udqp,
 		struct xfs_dquot *gdqp, struct xfs_dquot *pdqp,
-		unsigned int eof_flags);
-int xfs_blockgc_free_quota(struct xfs_inode *ip, unsigned int eof_flags);
+		unsigned int iwalk_flags);
+int xfs_blockgc_free_quota(struct xfs_inode *ip, unsigned int iwalk_flags);
 int xfs_blockgc_free_space(struct xfs_mount *mp, struct xfs_eofblocks *eofb);
 
 void xfs_inode_set_eofblocks_tag(struct xfs_inode *ip);
