@@ -35,6 +35,7 @@
 #include "xfs_swapext.h"
 #include "xfs_xchgrange.h"
 #include "xfs_rtalloc.h"
+#include "xfs_fsrefs.h"
 
 /*
  * We include this last to have the helpers above available for the trace
