@@ -852,8 +852,10 @@ xfs_fs_sync_fs(
 	 * s_umount, which means we can't lock out a concurrent thaw request
 	 * without adding another layer of locks to the freeze process.
 	 */
-	if (sb->s_writers.frozen == SB_FREEZE_PAGEFAULT)
+	if (sb->s_writers.frozen == SB_FREEZE_PAGEFAULT) {
 		xfs_inodegc_stop(mp);
+		xfs_blockgc_stop(mp);
+	}
 
 	return 0;
 }
@@ -970,7 +972,6 @@ xfs_fs_freeze(
 	 * set a GFP_NOFS context here to avoid recursion deadlocks.
 	 */
 	flags = memalloc_nofs_save();
-	xfs_blockgc_stop(mp);
 	xfs_save_resvblks(mp);
 	ret = xfs_log_quiesce(mp);
 	memalloc_nofs_restore(flags);

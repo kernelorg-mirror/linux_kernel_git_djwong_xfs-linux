@@ -215,6 +215,12 @@ xfs_reclaim_work_queue(
 	rcu_read_unlock();
 }
 
+static inline bool
+xfs_blockgc_running(struct xfs_mount *mp)
+{
+	return test_bit(XFS_OPFLAG_BLOCKGC_RUNNING_BIT, &mp->m_opflags);
+}
+
 /*
  * Background scanning to trim preallocated space. This is queued based on the
  * 'speculative_prealloc_lifetime' tunable (5m by default).
@@ -223,6 +229,9 @@ static inline void
 xfs_blockgc_queue(
 	struct xfs_perag	*pag)
 {
+	if (!xfs_blockgc_running(pag->pag_mount))
+		return;
+
 	rcu_read_lock();
 	if (radix_tree_tagged(&pag->pag_ici_root, XFS_ICI_BLOCKGC_TAG))
 		queue_delayed_work(pag->pag_mount->m_gc_workqueue,
@@ -1557,7 +1566,8 @@ xfs_blockgc_stop(
 	struct xfs_perag	*pag;
 	xfs_agnumber_t		agno;
 
-	for_each_perag_tag(mp, agno, pag, XFS_ICI_BLOCKGC_TAG)
+	clear_bit(XFS_OPFLAG_BLOCKGC_RUNNING_BIT, &mp->m_opflags);
+	for_each_perag(mp, agno, pag)
 		cancel_delayed_work_sync(&pag->pag_blockgc_work);
 }
 
@@ -1569,6 +1579,7 @@ xfs_blockgc_start(
 	struct xfs_perag	*pag;
 	xfs_agnumber_t		agno;
 
+	set_bit(XFS_OPFLAG_BLOCKGC_RUNNING_BIT, &mp->m_opflags);
 	for_each_perag_tag(mp, agno, pag, XFS_ICI_BLOCKGC_TAG)
 		xfs_blockgc_queue(pag);
 }
@@ -1626,6 +1637,13 @@ xfs_blockgc_scan_inode(
 	unsigned int		lockflags = 0;
 	int			error;
 
+	/*
+	 * Speculative preallocation gc isn't supposed to run when the fs is
+	 * frozen because we don't want kernel threads to block on transaction
+	 * allocation.
+	 */
+	ASSERT(ip->i_mount->m_super->s_writers.frozen < SB_FREEZE_FS);
+
 	error = xfs_inode_free_eofblocks(ip, icw, &lockflags);
 	if (error)
 		goto unlock;
@@ -1648,13 +1666,18 @@ xfs_blockgc_worker(
 	struct xfs_mount	*mp = pag->pag_mount;
 	int			error;
 
-	if (!sb_start_write_trylock(mp->m_super))
+	/*
+	 * Queueing of this blockgc worker can race with xfs_blockgc_stop,
+	 * which means that we can be running after the opflag clears.  Double
+	 * check the flag state so that we don't trip asserts.
+	 */
+	if (!xfs_blockgc_running(mp))
 		return;
+
 	error = xfs_icwalk_ag(pag, XFS_ICWALK_BLOCKGC, NULL);
 	if (error)
 		xfs_info(mp, "AG %u preallocation gc worker failed, err=%d",
 				pag->pag_agno, error);
-	sb_end_write(mp->m_super);
 	xfs_blockgc_queue(pag);
 }
 
