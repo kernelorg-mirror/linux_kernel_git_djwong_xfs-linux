@@ -1907,9 +1907,13 @@ xfs_inodegc_free_space(
 	struct xfs_mount	*mp,
 	struct xfs_icwalk	*icw)
 {
+	int			error;
+
 	trace_xfs_inodegc_free_space(mp, icw, _RET_IP_);
 
-	return xfs_icwalk(mp, XFS_ICWALK_INODEGC, icw);
+	error = xfs_icwalk(mp, XFS_ICWALK_INODEGC, icw);
+	wake_up(&mp->m_inactive_wait);
+	return error;
 }
 
 /* Background inode inactivation worker. */
@@ -1957,6 +1961,44 @@ xfs_inodegc_flush(
 		return;
 
 	flush_workqueue(mp->m_gc_workqueue);
+}
+
+/*
+ * Force all queued inode inactivation work to run immediately, and poll
+ * until the work is complete.  Callers should only use this function if they
+ * must inactivate inodes while holding VFS mutexes.
+ */
+void
+xfs_inodegc_flush_poll(
+	struct xfs_mount	*mp)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+	bool			queued = false;
+
+	/*
+	 * Force to the foreground any inode inactivations that may happen
+	 * while we're running our polling loop.
+	 */
+	set_bit(XFS_OPFLAG_INACTIVATE_NOW_BIT, &mp->m_opflags);
+
+	for_each_perag_tag(mp, agno, pag, XFS_ICI_INODEGC_TAG) {
+		mod_delayed_work(mp->m_gc_workqueue, &pag->pag_inodegc_work, 0);
+		queued = true;
+	}
+	if (!queued)
+		goto clear;
+
+	/*
+	 * Touch the softlockup watchdog every 1/10th of a second while there
+	 * are still inactivation-tagged inodes in the filesystem.
+	 */
+	while (!wait_event_timeout(mp->m_inactive_wait,
+				!xfs_has_inodegc_work(mp), HZ / 10)) {
+		touch_softlockup_watchdog();
+	}
+clear:
+	clear_bit(XFS_OPFLAG_INACTIVATE_NOW_BIT, &mp->m_opflags);
 }
 
 /* Stop all queued inactivation work. */

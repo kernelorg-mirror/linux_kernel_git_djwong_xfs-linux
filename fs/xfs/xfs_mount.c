@@ -1004,7 +1004,7 @@ xfs_unmountfs(
 	 * Flush all the queued inode inactivation work to disk before tearing
 	 * down rt metadata and quotas.
 	 */
-	xfs_inodegc_flush(mp);
+	xfs_inodegc_flush_poll(mp);
 
 	xfs_blockgc_stop(mp);
 	xfs_fs_unreserve_ag_blocks(mp);
