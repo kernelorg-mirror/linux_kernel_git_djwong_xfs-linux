@@ -1754,7 +1754,7 @@ xfs_inode_needs_inactive(
  */
 void
 xfs_inactive(
-	xfs_inode_t	*ip)
+	struct xfs_inode	*ip)
 {
 	struct xfs_mount	*mp;
 	int			error;
@@ -1778,6 +1778,11 @@ xfs_inactive(
 
 	/* Metadata inodes require explicit resource cleanup. */
 	if (xfs_is_metadata_inode(ip))
+		goto out;
+
+	/* Ensure dquots are attached prior to making changes to this file. */
+	error = xfs_qm_dqattach(ip);
+	if (error)
 		goto out;
 
 	/* Try to clean out the cow blocks if there are any. */
@@ -1804,10 +1809,6 @@ xfs_inactive(
 	    (ip->i_disk_size != 0 || XFS_ISIZE(ip) != 0 ||
 	     ip->i_df.if_nextents > 0 || ip->i_delayed_blks > 0))
 		truncate = 1;
-
-	error = xfs_qm_dqattach(ip);
-	if (error)
-		goto out;
 
 	if (S_ISLNK(VFS_I(ip)->i_mode))
 		error = xfs_inactive_symlink(ip);
