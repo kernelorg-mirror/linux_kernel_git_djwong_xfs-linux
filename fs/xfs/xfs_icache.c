@@ -1981,6 +1981,9 @@ xfs_inodegc_igrab(
 
 	ASSERT(rcu_read_lock_held());
 
+	if (!(ip->i_mount->m_super->s_flags & SB_ACTIVE))
+		trace_xfs_inactive_igrab_notsbactive(ip);
+
 	/* Check for stale RCU freed inode */
 	spin_lock(&ip->i_flags_lock);
 	if (!ip->i_ino)
@@ -1990,6 +1993,11 @@ xfs_inodegc_igrab(
 	    !(ip->i_flags & XFS_INACTIVATING)) {
 		ret = true;
 		ip->i_flags |= XFS_INACTIVATING;
+	}
+
+	if (ret && (ip->i_mount->m_flags & XFS_MOUNT_INODEGC_DBG)) {
+		xfs_err(ip->i_mount, "INODEGC DEBUG 0x%llx iflags 0x%lx", ip->i_ino, ip->i_flags);
+		atomic_inc(&ip->i_mount->m_inodegc_bad);
 	}
 
 out_unlock_noent:

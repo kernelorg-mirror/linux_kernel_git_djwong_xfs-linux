@@ -664,6 +664,11 @@ static void
 xfs_unmount_flush_inodes(
 	struct xfs_mount	*mp)
 {
+	atomic_set(&mp->m_inodegc_bad, 0);
+	mp->m_flags |= XFS_MOUNT_INODEGC_DBG;
+	xfs_inodegc_flush(mp);
+	ASSERT(atomic_read(&mp->m_inodegc_bad) == 0);
+
 	xfs_log_force(mp, XFS_LOG_SYNC);
 	xfs_extent_busy_wait_all(mp);
 	flush_workqueue(xfs_discard_wq);
