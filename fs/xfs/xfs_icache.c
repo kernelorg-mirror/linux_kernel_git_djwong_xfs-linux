@@ -246,8 +246,9 @@ xfs_inodegc_queue(
 
 	rcu_read_lock();
 	if (radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_INODEGC_TAG)) {
-		trace_xfs_inodegc_queue(mp, 0, _RET_IP_);
-		queue_delayed_work(mp->m_gc_workqueue, &mp->m_inodegc_work, 0);
+		trace_xfs_inodegc_queue(mp, xfs_inodegc_ms, _RET_IP_);
+		queue_delayed_work(mp->m_gc_workqueue, &mp->m_inodegc_work,
+				msecs_to_jiffies(xfs_inodegc_ms));
 	}
 	rcu_read_unlock();
 }
