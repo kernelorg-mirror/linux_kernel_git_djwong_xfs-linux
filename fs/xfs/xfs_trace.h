@@ -122,7 +122,7 @@ TRACE_EVENT(xlog_intent_recovery_failed,
 		  __entry->error, __entry->function)
 );
 
-DECLARE_EVENT_CLASS(xfs_perag_class,
+DECLARE_EVENT_CLASS(xfs_perag_ref_class,
 	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno, int refcount,
 		 unsigned long caller_ip),
 	TP_ARGS(mp, agno, refcount, caller_ip),
@@ -146,7 +146,7 @@ DECLARE_EVENT_CLASS(xfs_perag_class,
 );
 
 #define DEFINE_PERAG_REF_EVENT(name)	\
-DEFINE_EVENT(xfs_perag_class, name,	\
+DEFINE_EVENT(xfs_perag_ref_class, name,	\
 	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno, int refcount,	\
 		 unsigned long caller_ip),					\
 	TP_ARGS(mp, agno, refcount, caller_ip))
@@ -155,6 +155,8 @@ DEFINE_PERAG_REF_EVENT(xfs_perag_get_tag);
 DEFINE_PERAG_REF_EVENT(xfs_perag_put);
 DEFINE_PERAG_REF_EVENT(xfs_perag_set_inode_tag);
 DEFINE_PERAG_REF_EVENT(xfs_perag_clear_inode_tag);
+DEFINE_PERAG_REF_EVENT(xfs_inodegc_queue);
+DEFINE_PERAG_REF_EVENT(xfs_inodegc_worker);
 
 DECLARE_EVENT_CLASS(xfs_fs_class,
 	TP_PROTO(struct xfs_mount *mp, int data, unsigned long caller_ip),
@@ -191,8 +193,6 @@ DEFINE_EVENT(xfs_fs_class, name,					\
 DEFINE_FS_EVENT(xfs_inodegc_flush);
 DEFINE_FS_EVENT(xfs_inodegc_start);
 DEFINE_FS_EVENT(xfs_inodegc_stop);
-DEFINE_FS_EVENT(xfs_inodegc_queue);
-DEFINE_FS_EVENT(xfs_inodegc_worker);
 DEFINE_FS_EVENT(xfs_fs_sync_fs);
 
 DECLARE_EVENT_CLASS(xfs_ag_class,
