@@ -770,6 +770,7 @@ xfs_log_mount_finish(
 	if (readonly)
 		mp->m_flags |= XFS_MOUNT_RDONLY;
 
+	ASSERT(!error || (mp->m_log->l_flags & XLOG_IO_ERROR));
 	return error;
 }
 
