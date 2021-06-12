@@ -366,7 +366,8 @@ xfs_worker_delay_ms(
  */
 static inline void
 xfs_blockgc_queue(
-	struct xfs_perag	*pag)
+	struct xfs_perag	*pag,
+	struct xfs_inode	*ip)
 {
 	struct xfs_mount        *mp = pag->pag_mount;
 
@@ -375,12 +376,43 @@ xfs_blockgc_queue(
 
 	rcu_read_lock();
 	if (radix_tree_tagged(&pag->pag_ici_root, XFS_ICI_BLOCKGC_TAG)) {
-		unsigned int	delay = xfs_blockgc_secs * 1000;
+		unsigned int	delay;
 
+		delay = xfs_worker_delay_ms(pag, ip, xfs_blockgc_secs * 1000);
 		trace_xfs_blockgc_queue(mp, pag->pag_agno, delay, _RET_IP_);
 		queue_delayed_work(mp->m_gc_workqueue, &pag->pag_blockgc_work,
 				msecs_to_jiffies(delay));
 	}
+	rcu_read_unlock();
+}
+
+/*
+ * Reschedule the background speculative gc worker immediately if space is
+ * getting tight and the worker hasn't started running yet.
+ */
+static void
+xfs_blockgc_queue_sooner(
+	struct xfs_perag	*pag,
+	struct xfs_inode	*ip)
+{
+	struct xfs_mount	*mp = pag->pag_mount;
+	unsigned int		blockgc_ms = xfs_blockgc_secs * 1000;
+
+	if (!XFS_IS_QUOTA_ON(mp) ||
+	    !delayed_work_pending(&pag->pag_blockgc_work) ||
+	    !test_bit(XFS_OPFLAG_INODEGC_RUNNING_BIT, &mp->m_opflags))
+		return;
+
+	rcu_read_lock();
+	if (!radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_BLOCKGC_TAG))
+		goto unlock;
+
+	if (xfs_worker_delay_ms(pag, ip, blockgc_ms) == blockgc_ms)
+		goto unlock;
+
+	trace_xfs_blockgc_queue(mp, pag->pag_agno, 0, _RET_IP_);
+	mod_delayed_work(mp->m_gc_workqueue, &pag->pag_blockgc_work, 0);
+unlock:
 	rcu_read_unlock();
 }
 
@@ -476,7 +508,7 @@ xfs_perag_set_inode_tag(
 		xfs_reclaim_work_queue(mp);
 		break;
 	case XFS_ICI_BLOCKGC_TAG:
-		xfs_blockgc_queue(pag);
+		xfs_blockgc_queue(pag, ip);
 		break;
 	case XFS_ICI_INODEGC_TAG:
 		xfs_inodegc_queue(pag, ip);
@@ -1597,6 +1629,7 @@ xfs_blockgc_set_iflag(
 {
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_perag	*pag;
+	bool			already_queued;
 
 	ASSERT((iflag & ~(XFS_IEOFBLOCKS | XFS_ICOWBLOCKS)) == 0);
 
@@ -1613,9 +1646,13 @@ xfs_blockgc_set_iflag(
 	pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, ip->i_ino));
 	spin_lock(&pag->pag_ici_lock);
 
-	xfs_perag_set_inode_tag(pag, ip, XFS_ICI_BLOCKGC_TAG);
+	already_queued = xfs_perag_set_inode_tag(pag, ip, XFS_ICI_BLOCKGC_TAG);
 
 	spin_unlock(&pag->pag_ici_lock);
+
+	if (already_queued)
+		xfs_blockgc_queue_sooner(pag, ip);
+
 	xfs_perag_put(pag);
 }
 
@@ -1801,7 +1838,7 @@ xfs_blockgc_start(
 
 	trace_xfs_blockgc_start(mp, 0, _RET_IP_);
 	for_each_perag_tag(mp, agno, pag, XFS_ICI_BLOCKGC_TAG)
-		xfs_blockgc_queue(pag);
+		xfs_blockgc_queue(pag, NULL);
 }
 
 /* Don't try to run block gc on an inode that's in any of these states. */
@@ -1892,7 +1929,7 @@ xfs_blockgc_worker(
 	if (error)
 		xfs_info(mp, "AG %u preallocation gc worker failed, err=%d",
 				pag->pag_agno, error);
-	xfs_blockgc_queue(pag);
+	xfs_blockgc_queue(pag, NULL);
 }
 
 /*
