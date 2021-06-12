@@ -25,6 +25,7 @@
 #include "xfs_icache.h"
 #include "xfs_error.h"
 #include "xfs_buf_item.h"
+#include "xfs_ag.h"
 
 #define BLK_AVG(blk1, blk2)	((blk1+blk2) >> 1)
 
@@ -3426,6 +3427,10 @@ xlog_recover(
 	return error;
 }
 
+/* XXX testing only */
+int xfs_ag_resv_init(struct xfs_perag *pag, struct xfs_trans *tp);
+extern int xfs_fs_unreserve_ag_blocks(struct xfs_mount *mp);
+
 /*
  * In the first part of recovery we replay inodes and buffers and build
  * up the list of extent free items which need to be processed.  Here
@@ -3437,8 +3442,9 @@ xlog_recover(
  */
 int
 xlog_recover_finish(
-	struct xlog	*log)
+	struct xlog		*log)
 {
+	struct xfs_mount	*mp = log->l_mp;
 	/*
 	 * Now we're ready to do the transactions needed for the
 	 * rest of recovery.  Start with completing all the extent
@@ -3448,7 +3454,22 @@ xlog_recover_finish(
 	 * rather than accepting new requests.
 	 */
 	if (log->l_flags & XLOG_RECOVERY_NEEDED) {
-		int	error;
+		struct xfs_perag	*pag;
+		xfs_agnumber_t		agno;
+		int			error = 0;
+
+		/* Reserve AG blocks for intents processing. */
+		mp->m_finobt_nores = false;
+		for_each_perag(mp, agno, pag) {
+			int err2 = xfs_ag_resv_init(pag, NULL);
+			if (err2 && !error)
+				error = err2;
+		}
+		if (error)
+			xfs_alert(log->l_mp,
+	"Error %d reserving per-AG metadata reserve pool, log recovery may fail.",
+					error);
+
 		error = xlog_recover_process_intents(log);
 		if (error) {
 			/*
@@ -3459,6 +3480,7 @@ xlog_recover_finish(
 			 * this) before we get around to xfs_log_mount_cancel.
 			 */
 			xlog_recover_cancel_intents(log);
+			xfs_fs_unreserve_ag_blocks(mp);
 			xfs_alert(log->l_mp, "Failed to recover intents");
 			return error;
 		}
@@ -3472,6 +3494,8 @@ xlog_recover_finish(
 		xfs_log_force(log->l_mp, XFS_LOG_SYNC);
 
 		xlog_recover_process_iunlinks(log);
+
+		xfs_fs_unreserve_ag_blocks(mp);
 
 		xlog_recover_check_summary(log);
 
