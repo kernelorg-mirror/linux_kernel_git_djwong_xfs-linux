@@ -365,13 +365,15 @@ void
 xfs_set_low_space_thresholds(
 	struct xfs_mount	*mp)
 {
-	int i;
+	uint64_t		space = mp->m_sb.sb_dblocks;
+	uint32_t		ag_space = mp->m_sb.sb_agblocks / 100;
+	int			i;
+
+	do_div(space, 100);
 
 	for (i = 0; i < XFS_LOWSP_MAX; i++) {
-		uint64_t space = mp->m_sb.sb_dblocks;
-
-		do_div(space, 100);
 		mp->m_low_space[i] = space * (i + 1);
+		mp->m_ag_low_space[i] = ag_space * (i + 1);
 	}
 }
 
