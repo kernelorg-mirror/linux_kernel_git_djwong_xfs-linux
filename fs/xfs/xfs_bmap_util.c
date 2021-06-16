@@ -29,6 +29,10 @@
 #include "xfs_iomap.h"
 #include "xfs_reflink.h"
 #include "xfs_swapext.h"
+#include "xfs_health.h"
+#include "xfs_alloc_btree.h"
+#include "xfs_rmap.h"
+#include "xfs_ag.h"
 
 /* Kernel only BMAP related definitions and functions */
 
@@ -1273,3 +1277,273 @@ out_trans_cancel:
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	return error;
 }
+
+/*
+ * Allocate a transaction with whatever resources we need to map free space
+ * into a file.  If @ip is a regular data file, the AGF header must be passed
+ * in via @agf_bp so that it can be joined to the transaction.  If @ip is a
+ * realtime file, the realtime allocation inodes will be joined to the
+ * transaction.  This function returns with @len set to however much we can map
+ * in this transaction, and the transaction itself.
+ */
+STATIC int
+xfs_map_freesp_trans_alloc(
+	struct xfs_inode	*ip,
+	struct xfs_buf		*agf_bp,
+	xfs_extlen_t		*len,
+	struct xfs_trans	**tpp)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_trans	*tp;
+	unsigned int		dblocks;
+	unsigned int		rblocks;
+	unsigned int		min_len;
+	bool			isrt = XFS_IS_REALTIME_INODE(ip);
+	int			error;
+
+	if (*len > MAXEXTLEN)
+		*len = MAXEXTLEN;
+	min_len = isrt ? mp->m_sb.sb_rextsize : 1;
+
+again:
+	if (isrt) {
+		dblocks = XFS_DIOSTRAT_SPACE_RES(mp, *len);
+		rblocks = 0;
+	} else {
+		dblocks = XFS_EXTENTADD_SPACE_RES(mp, XFS_DATA_FORK);
+		rblocks = *len;
+	}
+	error = xfs_trans_alloc_inode(ip, &M_RES(mp)->tr_write, dblocks,
+			rblocks, false, &tp);
+	if (error == -ENOSPC && *len > min_len) {
+		*len >>= 1;
+		goto again;
+	}
+	if (error)
+		return error;
+
+	/*
+	 * Transfer ownership of the AGF buffer (or the rt bitmap inode lock)
+	 * to the transaction.
+	 */
+	if (isrt) {
+		xfs_trans_ijoin(tp, mp->m_rbmip, XFS_ILOCK_EXCL);
+		xfs_trans_ijoin(tp, mp->m_rsumip, XFS_ILOCK_EXCL);
+	} else {
+		xfs_trans_bjoin(tp, agf_bp);
+	}
+
+	*tpp = tp;
+	return 0;
+}
+
+/*
+ * Allocate all free physical space between off and len and map it to this
+ * regular non-realtime file.
+ */
+int
+xfs_map_free_space(
+	struct xfs_inode	*ip,
+	xfs_off_t		off,
+	xfs_off_t		len)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_perag	*pag = NULL;
+	xfs_daddr_t		off_daddr = BTOBB(off);
+	xfs_daddr_t		end_daddr = BTOBBT(off + len);
+	xfs_fsblock_t		off_fsb = XFS_DADDR_TO_FSB(mp, off_daddr);
+	xfs_fsblock_t		end_fsb = XFS_DADDR_TO_FSB(mp, end_daddr);
+	xfs_agnumber_t		off_agno = XFS_FSB_TO_AGNO(mp, off_fsb);
+	xfs_agnumber_t		end_agno = XFS_FSB_TO_AGNO(mp, end_fsb);
+	xfs_agnumber_t		agno;
+	int			error = 0;
+
+	trace_xfs_map_free_space(ip, off, len);
+
+	agno = off_agno;
+	for_each_perag_range(mp, agno, end_agno, pag) {
+		xfs_agblock_t	off_agbno = 0;
+		xfs_agblock_t	end_agbno;
+
+		end_agbno = xfs_ag_block_count(mp, pag->pag_agno);
+
+		if (pag->pag_agno == off_agno)
+			off_agbno = XFS_FSB_TO_AGBNO(mp, off_fsb);
+		if (pag->pag_agno == end_agno)
+			end_agbno = XFS_FSB_TO_AGBNO(mp, end_fsb);
+
+		while (off_agbno < end_agbno) {
+			struct xfs_bmbt_irec	irec;
+			struct xfs_buf		*agf_bp;
+			struct xfs_trans	*tp;
+			xfs_off_t		endpos;
+			xfs_fsblock_t		fsbno;
+			xfs_extlen_t		len;
+
+			if (fatal_signal_pending(current))
+				goto out;
+
+			error = xfs_alloc_read_agf(mp, NULL, pag->pag_agno, 0,
+					&agf_bp);
+			if (error)
+				goto out;
+
+			error = xfs_alloc_find_freesp(pag, agf_bp, &off_agbno,
+					end_agbno, &len);
+			if (error) {
+				xfs_buf_relse(agf_bp);
+				goto out;
+			}
+
+			/*
+			 * If off_agbno is beyond the end of the AG or is past
+			 * what the user asked for, break to the outer loop.
+			 */
+			if (off_agbno >= end_agbno) {
+				xfs_buf_relse(agf_bp);
+				break;
+			}
+
+			error = xfs_map_freesp_trans_alloc(ip, agf_bp, &len,
+					&tp);
+			if (error) {
+				xfs_buf_relse(agf_bp);
+				goto out;
+			}
+
+			fsbno = XFS_AGB_TO_FSB(mp, pag->pag_agno, off_agbno);
+			error = xfs_bmapi_freesp(&tp, ip, fsbno, len, &irec);
+			if (error) {
+				xfs_trans_cancel(tp);
+				xfs_iunlock(ip, XFS_ILOCK_EXCL);
+				goto out;
+			}
+
+			/* Update isize if needed. */
+			endpos = XFS_FSB_TO_B(mp, irec.br_startoff +
+						  irec.br_blockcount);
+			if (endpos > i_size_read(VFS_I(ip))) {
+				i_size_write(VFS_I(ip), endpos);
+				ip->i_disk_size = endpos;
+				xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
+			}
+
+			error = xfs_trans_commit(tp);
+			if (error) {
+				xfs_iunlock(ip, XFS_ILOCK_EXCL);
+				goto out;
+			}
+
+			off_agbno += irec.br_blockcount;
+		}
+	}
+
+out:
+	if (pag)
+		xfs_perag_put(pag);
+	if (error == -ENOSPC)
+		return 0;
+	return error;
+}
+
+#ifdef CONFIG_XFS_RT
+/*
+ * Allocate all free physical space between off and len and map it to this
+ * regular non-realtime file.
+ */
+int
+xfs_map_free_rt_space(
+	struct xfs_inode	*ip,
+	xfs_off_t		off,
+	xfs_off_t		len)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	xfs_fsblock_t		off_rtb = XFS_B_TO_FSB(mp, off);
+	xfs_fsblock_t		end_rtb = XFS_B_TO_FSBT(mp, off + len);
+	xfs_rtblock_t		off_rtx;
+	xfs_rtblock_t		end_rtx;
+	uint32_t		mod;
+	int			error = 0;
+
+	/* Compute rt extents from the input parameters. */
+	off_rtx = div_u64_rem(off_rtb, mp->m_sb.sb_rextsize, &mod);
+	if (mod)
+		off_rtx++;
+	end_rtx = div_u64(end_rtb, mp->m_sb.sb_rextsize);
+
+	if (off_rtx >= mp->m_sb.sb_rextents)
+		return 0;
+	if (end_rtx >= mp->m_sb.sb_rextents)
+		end_rtx = mp->m_sb.sb_rextents - 1;
+
+	trace_xfs_map_free_rt_space(ip, off, len);
+
+	while (off_rtx < end_rtx) {
+		struct xfs_bmbt_irec	irec;
+		struct xfs_trans	*tp;
+		xfs_off_t		endpos;
+		xfs_fsblock_t		fsbno;
+		xfs_extlen_t		len_rtx;
+		xfs_extlen_t		len;
+		uint32_t		mod;
+
+		if (fatal_signal_pending(current))
+			break;
+
+		xfs_rtlock(NULL, mp, XFS_RTLOCK_ALLOC);
+		error = xfs_rtalloc_find_freesp(mp, &off_rtx, end_rtx,
+				&len_rtx);
+		if (error) {
+			xfs_rtunlock(mp, XFS_RTLOCK_ALLOC);
+			break;
+		}
+
+		/*
+		 * If off_rtx is beyond the end of the rt device or is past
+		 * what the user asked for, bail out.
+		 */
+		if (off_rtx >= end_rtx) {
+			xfs_rtunlock(mp, XFS_RTLOCK_ALLOC);
+			break;
+		}
+
+		len = len_rtx * mp->m_sb.sb_rextsize;
+		error = xfs_map_freesp_trans_alloc(ip, NULL, &len, &tp);
+		if (error) {
+			xfs_rtunlock(mp, XFS_RTLOCK_ALLOC);
+			break;
+		}
+
+		fsbno = off_rtx * mp->m_sb.sb_rextsize;
+		error = xfs_bmapi_freesp(&tp, ip, fsbno, len, &irec);
+		if (error) {
+			xfs_trans_cancel(tp);
+			xfs_iunlock(ip, XFS_ILOCK_EXCL);
+			break;
+		}
+
+		/* Update isize if needed. */
+		endpos = XFS_FSB_TO_B(mp, irec.br_startoff +
+					  irec.br_blockcount);
+		if (endpos > i_size_read(VFS_I(ip))) {
+			i_size_write(VFS_I(ip), endpos);
+			ip->i_disk_size = endpos;
+			xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
+		}
+
+		error = xfs_trans_commit(tp);
+		if (error) {
+			xfs_iunlock(ip, XFS_ILOCK_EXCL);
+			break;
+		}
+
+		off_rtx += div_u64_rem(irec.br_blockcount,
+				       mp->m_sb.sb_rextsize, &mod);
+		ASSERT(mod == 0);
+	}
+
+	if (error == -ENOSPC)
+		return 0;
+	return error;
+}
+#endif

@@ -159,6 +159,8 @@ int xfs_rtfile_convert_unwritten(struct xfs_inode *ip, loff_t pos,
 void xfs_rtlock(struct xfs_trans *tp, struct xfs_mount *mp,
 		unsigned int rtlock_flags);
 void xfs_rtunlock(struct xfs_mount *mp, unsigned int lock_flags);
+int xfs_rtalloc_find_freesp(struct xfs_mount *mp, xfs_rtblock_t *rtx,
+		xfs_rtblock_t end_rtx, xfs_extlen_t *len_rtx);
 #else
 # define xfs_rtallocate_extent(t,b,min,max,l,f,p,rb)    (ENOSYS)
 # define xfs_rtfree_extent(t,b,l)                       (ENOSYS)
@@ -189,6 +191,7 @@ xfs_rtmount_init(
 # define xfs_rtfile_convert_unwritten(ip, pos, len)	(0)
 # define xfs_rtlock(tp, mp, lock_flags)	do { } while (0)
 # define xfs_rtunlock(mp, lock_flags)	do { } while (0)
+# define xfs_rtalloc_find_freesp(mp, rtx, end_rtx, len_rtx)	(-ENOSYS)
 #endif	/* CONFIG_XFS_RT */
 
 #endif	/* __XFS_RTALLOC_H__ */

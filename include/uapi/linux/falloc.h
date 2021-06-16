@@ -77,4 +77,12 @@
  */
 #define FALLOC_FL_UNSHARE_RANGE		0x40
 
+/*
+ * FALLOC_FL_MAP_FREE_SPACE maps all the free physical space in the
+ * filesystem into the file at the same offsets.  This flag requires
+ * CAP_SYS_ADMIN, and cannot be used with any other flags.  It probably
+ * only works on filesystems that are backed by physical media.
+ */
+#define FALLOC_FL_MAP_FREE_SPACE	0x80
+
 #endif /* _UAPI_FALLOC_H_ */

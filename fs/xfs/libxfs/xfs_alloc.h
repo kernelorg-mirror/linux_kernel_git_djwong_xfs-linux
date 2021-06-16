@@ -248,4 +248,8 @@ xfs_buf_to_agfl_bno(
 	return bp->b_addr;
 }
 
+int xfs_alloc_find_freesp(struct xfs_perag *pag, struct xfs_buf *agf_bp,
+		xfs_agblock_t *agbno, xfs_agblock_t end_agbno,
+		xfs_extlen_t *len);
+
 #endif	/* __XFS_ALLOC_H__ */
