@@ -81,6 +81,12 @@ struct xfs_perag {
 
 	atomic_t        pagf_fstrms;    /* # of filestreams active in this AG */
 
+	/*
+	 * How many times has the memory shrinker poked us since the last time
+	 * inodegc was queued?
+	 */
+	atomic_t	pag_inodegc_reclaim;
+
 	spinlock_t	pag_ici_lock;	/* incore inode cache lock */
 	struct radix_tree_root pag_ici_root;	/* incore inode cache root */
 	unsigned int	pag_ici_needs_inactive;	/* inodes queued for inactivation */
@@ -96,6 +102,10 @@ struct xfs_perag {
 
 	/* background prealloc block trimming */
 	struct delayed_work	pag_blockgc_work;
+
+	/* background inode inactivation */
+	struct delayed_work	pag_inodegc_work;
+	struct shrinker		pag_inodegc_shrink;
 
 	/*
 	 * Unlinked inode information.  This incore information reflects
