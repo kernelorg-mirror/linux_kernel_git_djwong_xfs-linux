@@ -173,6 +173,7 @@ __xfs_free_perag(
 	struct xfs_perag *pag = container_of(head, struct xfs_perag, rcu_head);
 
 	ASSERT(!delayed_work_pending(&pag->pag_blockgc_work));
+	ASSERT(!delayed_work_pending(&pag->pag_inodegc_work));
 	ASSERT(atomic_read(&pag->pag_ref) == 0);
 	kmem_free(pag);
 }
@@ -195,7 +196,9 @@ xfs_free_perag(
 		ASSERT(atomic_read(&pag->pag_ref) == 0);
 		ASSERT(pag->pag_ici_needs_inactive == 0);
 
+		unregister_shrinker(&pag->pag_inodegc_shrink);
 		cancel_delayed_work_sync(&pag->pag_blockgc_work);
+		cancel_delayed_work_sync(&pag->pag_inodegc_work);
 		xfs_iunlink_destroy(pag);
 		xfs_buf_hash_destroy(pag);
 
@@ -254,14 +257,19 @@ xfs_initialize_perag(
 		spin_lock_init(&pag->pagb_lock);
 		spin_lock_init(&pag->pag_state_lock);
 		INIT_DELAYED_WORK(&pag->pag_blockgc_work, xfs_blockgc_worker);
+		INIT_DELAYED_WORK(&pag->pag_inodegc_work, xfs_inodegc_worker);
 		INIT_RADIX_TREE(&pag->pag_ici_root, GFP_ATOMIC);
 		init_waitqueue_head(&pag->pagb_wait);
 		pag->pagb_count = 0;
 		pag->pagb_tree = RB_ROOT;
 
-		error = xfs_buf_hash_init(pag);
+		error = xfs_inodegc_register_shrinker(pag);
 		if (error)
 			goto out_remove_pag;
+
+		error = xfs_buf_hash_init(pag);
+		if (error)
+			goto out_inodegc_shrink;
 
 		error = xfs_iunlink_init(pag);
 		if (error)
@@ -282,6 +290,8 @@ xfs_initialize_perag(
 
 out_hash_destroy:
 	xfs_buf_hash_destroy(pag);
+out_inodegc_shrink:
+	unregister_shrinker(&pag->pag_inodegc_shrink);
 out_remove_pag:
 	radix_tree_delete(&mp->m_perag_tree, index);
 out_free_pag:
