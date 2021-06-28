@@ -4620,6 +4620,29 @@ DEFINE_IMETA_DIR_EVENT(xfs_imeta_dir_created);
 DEFINE_IMETA_DIR_EVENT(xfs_imeta_dir_unlinked);
 DEFINE_IMETA_DIR_EVENT(xfs_imeta_dir_link);
 
+TRACE_EVENT(xfs_force_shutdown,
+	TP_PROTO(struct xfs_mount *mp, int flags, const char *fname,
+		 int line_num),
+	TP_ARGS(mp, flags, fname, line_num),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(int, flags)
+		__string(fname, fname)
+		__field(int, line_num)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->flags = flags;
+		__assign_str(fname, fname);
+		__entry->line_num = line_num;
+	),
+	TP_printk("dev %d:%d flags 0x%x file %s line_num %d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		__entry->flags,
+		__get_str(fname),
+		__entry->line_num)
+);
+
 #endif /* _TRACE_XFS_H */
 
 #undef TRACE_INCLUDE_PATH
