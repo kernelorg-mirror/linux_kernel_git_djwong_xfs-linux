@@ -20,6 +20,7 @@
 #include "xfs_ag.h"
 #include "xfs_ag_resv.h"
 #include "xfs_rtalloc.h"
+#include "xfs_trace.h"
 
 /*
  * Write new AG headers to disk. Non-transactional, but need to be
@@ -538,6 +539,8 @@ xfs_do_force_shutdown(
 	 */
 	if (xfs_log_force_umount(mp, logerror))
 		return;
+
+	trace_xfs_force_shutdown(mp, flags, fname, lnnum);
 
 	if (flags & SHUTDOWN_FORCE_UMOUNT) {
 		xfs_alert(mp,
