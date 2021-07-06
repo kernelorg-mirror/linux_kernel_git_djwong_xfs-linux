@@ -926,6 +926,52 @@ xfs_growfs_check_rt_maxlevels(
 	return 0;
 }
 
+static int
+xfs_growfsrt_imeta_create(
+	struct xfs_mount		*mp,
+	const struct xfs_imeta_path	*path,
+	struct xfs_inode		**ipp)
+{
+	struct xfs_imeta_end		ic;
+	struct xfs_trans		*tp;
+	struct xfs_inode		*ip = NULL;
+	int				error;
+
+	error = xfs_imeta_ensure_dirpath(mp, path);
+	if (error)
+		return error;
+
+	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_imeta_create,
+			xfs_imeta_create_space_res(mp), 0, 0, &tp);
+	if (error)
+		return error;
+
+	if (path == &XFS_IMETA_RTRMAPBT) {
+		error = xfs_rtrmapbt_create(&tp, &ic, &ip);
+	} else {
+		ASSERT(0);
+		error = -EIO;
+	}
+	if (error)
+		xfs_trans_cancel(tp);
+	else
+		error = xfs_trans_commit(tp);
+	xfs_imeta_end_update(mp, &ic, error);
+
+	/* Have to finish setting up the inode to ensure it's deleted. */
+	if (ip)
+		xfs_finish_inode_setup(ip);
+
+	if (error) {
+		if (ip)
+			xfs_irele(ip);
+		return error;
+	}
+
+	*ipp = ip;
+	return 0;
+}
+
 /*
  * Grow the realtime area of the filesystem.
  */
@@ -981,8 +1027,9 @@ xfs_growfs_rt(
 		return -EINVAL;
 
 	/* Unsupported realtime features. */
-	if (xfs_sb_version_hasrmapbt(&mp->m_sb) ||
-	    xfs_sb_version_hasreflink(&mp->m_sb))
+	if ((!xfs_sb_version_hasmetadir(&mp->m_sb) &&
+	     xfs_sb_version_hasrmapbt(&mp->m_sb)) ||
+	     xfs_sb_version_hasreflink(&mp->m_sb))
 		return -EOPNOTSUPP;
 
 	nrblocks = in->newblocks;
@@ -1021,6 +1068,15 @@ xfs_growfs_rt(
 	 */
 	if (nrsumblocks > (mp->m_sb.sb_logblocks >> 1))
 		return -EINVAL;
+
+	/* Add the realtime rmap inode. */
+	if (xfs_sb_version_hasrmapbt(&mp->m_sb) && !mp->m_rrmapip) {
+		error = xfs_growfsrt_imeta_create(mp, &XFS_IMETA_RTRMAPBT,
+				&mp->m_rrmapip);
+		if (error)
+			return error;
+	}
+
 	/*
 	 * Get the old block counts for bitmap and summary inodes.
 	 * These can't change since other growfs callers are locked out.
