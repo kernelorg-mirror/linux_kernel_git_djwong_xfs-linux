@@ -33,6 +33,7 @@
 #include "xfs_ag.h"
 #include "xfs_ag_resv.h"
 #include "xfs_bmap.h"
+#include "xfs_swapext.h"
 
 /*
  * We include this last to have the helpers above available for the trace
