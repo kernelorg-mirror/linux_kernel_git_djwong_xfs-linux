@@ -24,7 +24,6 @@
 #include "xfs_error.h"
 #include "xfs_log_priv.h"
 #include "xfs_log_recover.h"
-#include "xfs_quota.h"
 
 kmem_zone_t	*xfs_bui_zone;
 kmem_zone_t	*xfs_bud_zone;
@@ -441,7 +440,6 @@ xfs_bui_item_recover(
 	struct xfs_bmap_intent		fake = { };
 	struct xfs_bui_log_item		*buip = BUI_ITEM(lip);
 	struct xfs_trans		*tp;
-	struct xfs_inode		*ip = NULL;
 	struct xfs_mount		*mp = lip->li_mountp;
 	struct xfs_map_extent		*map;
 	struct xfs_bud_log_item		*budp;
@@ -459,17 +457,9 @@ xfs_bui_item_recover(
 			XFS_ATTR_FORK : XFS_DATA_FORK;
 	fake.bi_type = map->me_flags & XFS_BMAP_EXTENT_TYPE_MASK;
 
-	/* Grab the inode. */
-	error = xfs_iget(mp, NULL, map->me_owner, 0, 0, &ip);
+	error = xlog_recover_iget(mp, map->me_owner, &fake.bi_owner);
 	if (error)
 		return error;
-
-	error = xfs_qm_dqattach(ip);
-	if (error)
-		goto err_rele;
-
-	if (VFS_I(ip)->i_nlink == 0)
-		xfs_iflags_set(ip, XFS_IRECOVERY);
 
 	/* Allocate transaction and do the work. */
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_itruncate,
@@ -478,11 +468,11 @@ xfs_bui_item_recover(
 		goto err_rele;
 
 	budp = xfs_trans_get_bud(tp, buip);
-	xfs_ilock(ip, XFS_ILOCK_EXCL);
-	xfs_trans_ijoin(tp, ip, 0);
+	xfs_ilock(fake.bi_owner, XFS_ILOCK_EXCL);
+	xfs_trans_ijoin(tp, fake.bi_owner, 0);
 
 	if (!!(map->me_flags & XFS_BMAP_EXTENT_REALTIME) !=
-	    xfs_ifork_is_realtime(ip, fake.bi_whichfork)) {
+	    xfs_ifork_is_realtime(fake.bi_owner, fake.bi_whichfork)) {
 		error = -EFSCORRUPTED;
 		goto err_cancel;
 	}
@@ -492,11 +482,11 @@ xfs_bui_item_recover(
 	else
 		iext_delta = XFS_IEXT_PUNCH_HOLE_CNT;
 
-	error = xfs_iext_count_may_overflow(ip, fake.bi_whichfork, iext_delta);
+	error = xfs_iext_count_may_overflow(fake.bi_owner, fake.bi_whichfork,
+			iext_delta);
 	if (error)
 		goto err_cancel;
 
-	fake.bi_owner = ip;
 	fake.bi_bmap.br_startblock = map->me_startblock;
 	fake.bi_bmap.br_startoff = map->me_startoff;
 	fake.bi_bmap.br_blockcount = map->me_len;
@@ -520,20 +510,21 @@ xfs_bui_item_recover(
 	 * Commit transaction, which frees the transaction and saves the inode
 	 * for later replay activities.
 	 */
-	error = xfs_defer_ops_capture_and_commit(tp, ip, NULL, capture_list);
+	error = xfs_defer_ops_capture_and_commit(tp, fake.bi_owner, NULL,
+			capture_list);
 	if (error)
 		goto err_unlock;
 
-	xfs_iunlock(ip, XFS_ILOCK_EXCL);
-	xfs_irele(ip);
+	xfs_iunlock(fake.bi_owner, XFS_ILOCK_EXCL);
+	xfs_irele(fake.bi_owner);
 	return 0;
 
 err_cancel:
 	xfs_trans_cancel(tp);
 err_unlock:
-	xfs_iunlock(ip, XFS_ILOCK_EXCL);
+	xfs_iunlock(fake.bi_owner, XFS_ILOCK_EXCL);
 err_rele:
-	xfs_irele(ip);
+	xfs_irele(fake.bi_owner);
 	return error;
 }
 
