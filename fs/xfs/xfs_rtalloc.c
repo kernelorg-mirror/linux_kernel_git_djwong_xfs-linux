@@ -1019,7 +1019,7 @@ xfs_growfs_rt(
 		nsbp->sb_rbmblocks = bmbno + 1;
 		nsbp->sb_rblocks =
 			XFS_RTMIN(nrblocks,
-				  nsbp->sb_rbmblocks * NBBY *
+				  (xfs_rfsblock_t)nsbp->sb_rbmblocks * NBBY *
 				  nsbp->sb_blocksize * nsbp->sb_rextsize);
 		nsbp->sb_rextents = nsbp->sb_rblocks;
 		do_div(nsbp->sb_rextents, nsbp->sb_rextsize);
