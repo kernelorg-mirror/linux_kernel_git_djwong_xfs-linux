@@ -928,11 +928,23 @@ xfs_growfs_rt(
 	 */
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
-	if (mp->m_rtdev_targp == NULL || mp->m_rbmip == NULL ||
-	    (nrblocks = in->newblocks) <= sbp->sb_rblocks ||
-	    (sbp->sb_rblocks && (in->extsize != sbp->sb_rextsize)))
+	if (mp->m_rtdev_targp == NULL || !mp->m_rbmip || !mp->m_rsumip)
 		return -EINVAL;
-	if ((error = xfs_sb_validate_fsb_count(sbp, nrblocks)))
+	if (in->newblocks <= sbp->sb_rblocks)
+		return -EINVAL;
+	if (xfs_sb_version_hasrealtime(&mp->m_sb) &&
+	    in->extsize != sbp->sb_rextsize)
+		return -EINVAL;
+	if (XFS_FSB_TO_B(mp, in->extsize) > XFS_MAX_RTEXTSIZE ||
+	    XFS_FSB_TO_B(mp, in->extsize) < XFS_MIN_RTEXTSIZE)
+		return -EINVAL;
+	if (xfs_sb_version_hasrmapbt(&mp->m_sb) ||
+	    xfs_sb_version_hasreflink(&mp->m_sb))
+		return -EOPNOTSUPP;
+
+	nrblocks = in->newblocks;
+	error = xfs_sb_validate_fsb_count(sbp, nrblocks);
+	if (error)
 		return error;
 	/*
 	 * Read in the last block of the device, make sure it exists.
