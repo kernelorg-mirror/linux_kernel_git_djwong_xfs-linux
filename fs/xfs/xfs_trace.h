@@ -174,7 +174,8 @@ TRACE_EVENT(xfs_inodegc_worker,
 );
 
 #define XFS_STATE_FLAGS \
-	{ (1UL << XFS_STATE_INODEGC_ENABLED),		"inodegc" }
+	{ (1UL << XFS_STATE_INODEGC_ENABLED),		"inodegc" }, \
+	{ (1UL << XFS_STATE_BLOCKGC_ENABLED),		"blockgc" }
 
 DECLARE_EVENT_CLASS(xfs_fs_class,
 	TP_PROTO(struct xfs_mount *mp, void *caller_ip),
@@ -213,6 +214,9 @@ DEFINE_FS_EVENT(xfs_inodegc_stop);
 DEFINE_FS_EVENT(xfs_inodegc_queue);
 DEFINE_FS_EVENT(xfs_inodegc_throttle);
 DEFINE_FS_EVENT(xfs_fs_sync_fs);
+DEFINE_FS_EVENT(xfs_blockgc_start);
+DEFINE_FS_EVENT(xfs_blockgc_stop);
+DEFINE_FS_EVENT(xfs_blockgc_worker);
 
 TRACE_EVENT(xfs_inodegc_shrinker_scan,
 	TP_PROTO(struct xfs_mount *mp, struct shrink_control *sc,
