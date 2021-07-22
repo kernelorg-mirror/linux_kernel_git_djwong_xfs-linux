@@ -1882,3 +1882,44 @@ xfs_qm_vop_create_dqattach(
 	}
 }
 
+/* Decide if this inode's dquot is near an enforcement boundary. */
+bool
+xfs_inode_near_dquot_enforcement(
+	struct xfs_inode	*ip,
+	xfs_dqtype_t		type)
+{
+	struct xfs_dquot	*dqp;
+	int64_t			freesp;
+
+	/*
+	 * Leave the delay untouched if there are no quota limits to enforce.
+	 * These comparisons are done locklessly because at worst we schedule
+	 * background work sooner than necessary.
+	 */
+	dqp = xfs_inode_dquot(ip, type);
+	if (!dqp || !xfs_dquot_is_enforced(dqp))
+		return false;
+
+	if (xfs_dquot_res_over_limits(&dqp->q_ino) ||
+	    xfs_dquot_res_over_limits(&dqp->q_rtb))
+		return true;
+
+	/* no hi watermark, no throttle */
+	if (!dqp->q_prealloc_hi_wmark)
+		return false;
+
+	/* under the lo watermark, no throttle */
+	if (dqp->q_blk.reserved < dqp->q_prealloc_lo_wmark)
+		return false;
+
+	/* If we're over the hard limit, run immediately. */
+	if (dqp->q_blk.reserved >= dqp->q_prealloc_hi_wmark)
+		return true;
+
+	/* Scale down the delay if we're close to the soft limits. */
+	freesp = dqp->q_prealloc_hi_wmark - dqp->q_blk.reserved;
+	if (freesp < dqp->q_low_space[XFS_QLOWSP_5_PCNT])
+		return true;
+
+	return false;
+}
