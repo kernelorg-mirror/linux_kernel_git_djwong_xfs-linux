@@ -1906,6 +1906,7 @@ xfs_inodegc_start(
 /*
  * Schedule the inactivation worker when:
  *
+ *  - Memory reclaim wants us to free this inode.
  *  - We've accumulated more than one inode cluster buffer's worth of inodes.
  */
 static inline bool
@@ -1914,6 +1915,9 @@ xfs_inodegc_want_queue_work(
 	unsigned int		items)
 {
 	struct xfs_mount	*mp = ip->i_mount;
+
+	if (current->reclaim_state != NULL)
+		return true;
 
 	if (items > mp->m_ino_geo.inodes_per_cluster)
 		return true;
