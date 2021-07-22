@@ -420,9 +420,11 @@ xfs_blockgc_queue(
  */
 static void
 xfs_inodegc_queue(
-	struct xfs_mount        *mp,
+	struct xfs_perag	*pag,
 	struct xfs_inode	*ip)
 {
+	struct xfs_mount        *mp = pag->pag_mount;
+
 	if (!test_bit(XFS_OPFLAG_INODEGC_RUNNING_BIT, &mp->m_opflags))
 		return;
 
@@ -431,8 +433,8 @@ xfs_inodegc_queue(
 		unsigned int	delay;
 
 		delay = xfs_gc_delay_ms(mp, ip, XFS_ICI_INODEGC_TAG);
-		trace_xfs_inodegc_queue(mp, delay);
-		queue_delayed_work(mp->m_gc_workqueue, &mp->m_inodegc_work,
+		trace_xfs_inodegc_queue(pag, delay);
+		queue_delayed_work(mp->m_gc_workqueue, &pag->pag_inodegc_work,
 				msecs_to_jiffies(delay));
 	}
 	rcu_read_unlock();
@@ -444,17 +446,18 @@ xfs_inodegc_queue(
  */
 static void
 xfs_gc_requeue_now(
-	struct xfs_mount	*mp,
+	struct xfs_perag	*pag,
 	struct xfs_inode	*ip,
 	unsigned int		tag)
 {
 	struct delayed_work	*dwork;
+	struct xfs_mount	*mp = pag->pag_mount;
 	unsigned int		opflag_bit;
 	unsigned int		default_ms;
 
 	switch (tag) {
 	case XFS_ICI_INODEGC_TAG:
-		dwork = &mp->m_inodegc_work;
+		dwork = &pag->pag_inodegc_work;
 		default_ms = xfs_inodegc_ms;
 		opflag_bit = XFS_OPFLAG_INODEGC_RUNNING_BIT;
 		break;
@@ -473,7 +476,7 @@ xfs_gc_requeue_now(
 	if (xfs_gc_delay_ms(mp, ip, tag) == default_ms)
 		goto unlock;
 
-	trace_xfs_gc_requeue_now(mp, tag);
+	trace_xfs_gc_requeue_now(pag, tag);
 	queue_delayed_work(mp->m_gc_workqueue, dwork, 0);
 unlock:
 	rcu_read_unlock();
@@ -501,7 +504,7 @@ xfs_perag_set_inode_tag(
 		pag->pag_ici_needs_inactive++;
 
 	if (was_tagged) {
-		xfs_gc_requeue_now(mp, ip, tag);
+		xfs_gc_requeue_now(pag, ip, tag);
 		return;
 	}
 
@@ -519,7 +522,7 @@ xfs_perag_set_inode_tag(
 		xfs_blockgc_queue(pag);
 		break;
 	case XFS_ICI_INODEGC_TAG:
-		xfs_inodegc_queue(mp, ip);
+		xfs_inodegc_queue(pag, ip);
 		break;
 	}
 
@@ -597,8 +600,6 @@ static inline bool
 xfs_inodegc_want_throttle(
 	struct xfs_perag	*pag)
 {
-	struct xfs_mount	*mp = pag->pag_mount;
-
 	/*
 	 * If we're in memory reclaim context, we don't want to wait for inode
 	 * inactivation to finish because it can take a very long time to
@@ -615,8 +616,8 @@ xfs_inodegc_want_throttle(
 	}
 
 	/* Throttle if memory reclaim anywhere has triggered us. */
-	if (atomic_read(&mp->m_inodegc_reclaim) > 0) {
-		trace_xfs_inodegc_throttle_mempressure(mp);
+	if (atomic_read(&pag->pag_inodegc_reclaim) > 0) {
+		trace_xfs_inodegc_throttle_mempressure(pag);
 		return true;
 	}
 
@@ -683,10 +684,11 @@ xfs_inode_mark_reclaimable(
 
 	spin_unlock(&ip->i_flags_lock);
 	spin_unlock(&pag->pag_ici_lock);
-	xfs_perag_put(pag);
 
-	if (flush_inodegc && flush_work(&mp->m_inodegc_work.work))
-		trace_xfs_inodegc_throttled(mp, __return_address);
+	if (flush_inodegc && flush_work(&pag->pag_inodegc_work.work))
+		trace_xfs_inodegc_throttled(pag, __return_address);
+
+	xfs_perag_put(pag);
 }
 
 static inline void
@@ -2066,23 +2068,23 @@ void
 xfs_inodegc_worker(
 	struct work_struct	*work)
 {
-	struct xfs_mount	*mp = container_of(to_delayed_work(work),
-					struct xfs_mount, m_inodegc_work);
+	struct xfs_perag	*pag = container_of(to_delayed_work(work),
+					struct xfs_perag, pag_inodegc_work);
 
 	/*
 	 * Inactivation never returns error codes and never fails to push a
 	 * tagged inode to reclaim.  Loop until there there's nothing left.
 	 */
-	while (radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_INODEGC_TAG)) {
-		trace_xfs_inodegc_worker(mp, __return_address);
-		xfs_icwalk(mp, XFS_ICWALK_INODEGC, NULL);
+	while (radix_tree_tagged(&pag->pag_ici_root, XFS_ICI_INODEGC_TAG)) {
+		trace_xfs_inodegc_worker(pag, __return_address);
+		xfs_icwalk_ag(pag, XFS_ICWALK_INODEGC, NULL);
 	}
 
 	/*
 	 * We inactivated all the inodes we could, so disable the throttling
 	 * of new inactivations that happens when memory gets tight.
 	 */
-	atomic_set(&mp->m_inodegc_reclaim, 0);
+	atomic_set(&pag->pag_inodegc_reclaim, 0);
 }
 
 /*
@@ -2093,8 +2095,13 @@ void
 xfs_inodegc_flush(
 	struct xfs_mount	*mp)
 {
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+
 	trace_xfs_inodegc_flush(mp, __return_address);
-	flush_delayed_work(&mp->m_inodegc_work);
+
+	for_each_perag_tag(mp, agno, pag, XFS_ICI_INODEGC_TAG)
+		flush_delayed_work(&pag->pag_inodegc_work);
 }
 
 /* Disable the inode inactivation background worker and wait for it to stop. */
@@ -2102,10 +2109,14 @@ void
 xfs_inodegc_stop(
 	struct xfs_mount	*mp)
 {
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+
 	if (!test_and_clear_bit(XFS_OPFLAG_INODEGC_RUNNING_BIT, &mp->m_opflags))
 		return;
 
-	cancel_delayed_work_sync(&mp->m_inodegc_work);
+	for_each_perag(mp, agno, pag)
+		cancel_delayed_work_sync(&pag->pag_inodegc_work);
 	trace_xfs_inodegc_stop(mp, __return_address);
 }
 
@@ -2117,11 +2128,15 @@ void
 xfs_inodegc_start(
 	struct xfs_mount	*mp)
 {
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+
 	if (test_and_set_bit(XFS_OPFLAG_INODEGC_RUNNING_BIT, &mp->m_opflags))
 		return;
 
 	trace_xfs_inodegc_start(mp, __return_address);
-	xfs_inodegc_queue(mp, NULL);
+	for_each_perag_tag(mp, agno, pag, XFS_ICI_INODEGC_TAG)
+		xfs_inodegc_queue(pag, NULL);
 }
 
 /*
@@ -2140,11 +2155,11 @@ xfs_inodegc_shrink_count(
 	struct shrinker		*shrink,
 	struct shrink_control	*sc)
 {
-	struct xfs_mount	*mp;
+	struct xfs_perag	*pag;
 
-	mp = container_of(shrink, struct xfs_mount, m_inodegc_shrink);
+	pag = container_of(shrink, struct xfs_perag, pag_inodegc_shrink);
 
-	if (radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_INODEGC_TAG))
+	if (radix_tree_tagged(&pag->pag_ici_root, XFS_ICI_INODEGC_TAG))
 		return XFS_INODEGC_SHRINK_COUNT;
 
 	return 0;
@@ -2155,7 +2170,7 @@ xfs_inodegc_shrink_scan(
 	struct shrinker		*shrink,
 	struct shrink_control	*sc)
 {
-	struct xfs_mount	*mp;
+	struct xfs_perag	*pag;
 
 	/*
 	 * Inode inactivation work requires NOFS allocations, so don't make
@@ -2164,14 +2179,15 @@ xfs_inodegc_shrink_scan(
 	if (!(sc->gfp_mask & __GFP_FS))
 		return SHRINK_STOP;
 
-	mp = container_of(shrink, struct xfs_mount, m_inodegc_shrink);
+	pag = container_of(shrink, struct xfs_perag, pag_inodegc_shrink);
 
-	if (radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_INODEGC_TAG)) {
-		trace_xfs_inodegc_requeue_mempressure(mp, sc->nr_to_scan,
+	if (radix_tree_tagged(&pag->pag_ici_root, XFS_ICI_INODEGC_TAG)) {
+		struct xfs_mount *mp = pag->pag_mount;
+
+		trace_xfs_inodegc_requeue_mempressure(pag, sc->nr_to_scan,
 				__return_address);
-
-		atomic_inc(&mp->m_inodegc_reclaim);
-		mod_delayed_work(mp->m_gc_workqueue, &mp->m_inodegc_work, 0);
+		atomic_inc(&pag->pag_inodegc_reclaim);
+		mod_delayed_work(mp->m_gc_workqueue, &pag->pag_inodegc_work, 0);
 	}
 
 	return 0;
@@ -2180,9 +2196,9 @@ xfs_inodegc_shrink_scan(
 /* Register a shrinker so we can accelerate inodegc and throttle queuing. */
 int
 xfs_inodegc_register_shrinker(
-	struct xfs_mount	*mp)
+	struct xfs_perag	*pag)
 {
-	struct shrinker		*shrink = &mp->m_inodegc_shrink;
+	struct shrinker		*shrink = &pag->pag_inodegc_shrink;
 
 	shrink->count_objects = xfs_inodegc_shrink_count;
 	shrink->scan_objects = xfs_inodegc_shrink_scan;
