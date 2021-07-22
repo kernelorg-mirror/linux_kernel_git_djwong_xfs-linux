@@ -419,6 +419,12 @@ xfs_gc_delay_ms(
 					__return_address);
 			return 0;
 		}
+
+		/* Kick the worker immediately if we've hit the max backlog. */
+		if (pag->pag_ici_needs_inactive > XFS_INODEGC_MAX_BACKLOG) {
+			trace_xfs_inodegc_delay_backlog(pag);
+			return 0;
+		}
 		break;
 	default:
 		ASSERT(0);
