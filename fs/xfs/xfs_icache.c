@@ -1935,12 +1935,18 @@ xfs_inodegc_want_queue_work(
  * Make the frontend wait for inactivations when:
  *
  *  - The queue depth exceeds the maximum allowable percpu backlog.
+ *
+ * Don't wait if we're in memory reclaim context, because we don't want to
+ * stall reclaim with ondisk metadata updates.
  */
 static inline bool
 xfs_inodegc_want_flush_work(
 	struct xfs_inode	*ip,
 	unsigned int		items)
 {
+	if (current->reclaim_state != NULL)
+		return false;
+
 	if (items > XFS_INODEGC_MAX_BACKLOG)
 		return true;
 
