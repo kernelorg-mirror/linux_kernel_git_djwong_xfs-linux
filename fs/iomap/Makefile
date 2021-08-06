@@ -3,6 +3,23 @@
 # Copyright (c) 2019 Oracle.
 # All Rights Reserved.
 #
+ccflags-y += -Werror \
+-femit-struct-debug-detailed=any \
+-Wunused-but-set-variable \
+-Wuninitialized \
+-Wno-pointer-sign \
+-Wall \
+-Wextra \
+-Wno-unused-parameter \
+-fstack-usage \
+-Wno-sign-compare \
+-Wno-ignored-qualifiers \
+-Wno-error=unused-but-set-variable \
+-Wno-error=format= \
+-Wno-type-limits
+ccflags-$(CONFIG_KASAN) += -Wno-error
+
+UBSAN_SANITIZE := y
 
 ccflags-y += -I $(srctree)/$(src)		# needed for trace events
 
