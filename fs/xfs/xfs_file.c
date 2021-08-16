@@ -956,6 +956,25 @@ xfs_file_fallocate(
 			goto out_unlock;
 	}
 
+	/*
+	 * If the file is in DAX mode, try to use a DAX-specific function to
+	 * zero the region.  We can fall back to punch-and-realloc if necessary.
+	 */
+	if ((mode & FALLOC_FL_ZERO_RANGE) && IS_DAX(inode)) {
+		bool	did_zeroout = false;
+
+		trace_xfs_zero_file_space(ip);
+
+		error = dax_zeroinit_range(inode, offset, len, &did_zeroout,
+				&xfs_read_iomap_ops);
+		if (error == -EINVAL)
+			error = 0;
+		if (error)
+			goto out_unlock;
+		if (did_zeroout)
+			goto done;
+	}
+
 	if (mode & FALLOC_FL_PUNCH_HOLE) {
 		error = xfs_free_file_space(ip, offset, len);
 		if (error)
@@ -1059,6 +1078,7 @@ xfs_file_fallocate(
 		}
 	}
 
+done:
 	if (file->f_flags & O_DSYNC)
 		flags |= XFS_PREALLOC_SYNC;
 
