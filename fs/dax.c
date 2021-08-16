@@ -1742,3 +1742,75 @@ vm_fault_t dax_finish_sync_fault(struct vm_fault *vmf,
 	return dax_insert_pfn_mkwrite(vmf, pfn, order);
 }
 EXPORT_SYMBOL_GPL(dax_finish_sync_fault);
+
+static loff_t
+dax_zeroinit_actor(struct inode *inode, loff_t pos, loff_t length, void *data,
+		struct iomap *iomap, struct iomap *srcmap)
+{
+	sector_t sector = iomap_sector(iomap, pos);
+	int ret;
+
+	if (!iomap->bdev)
+		return -ECANCELED;
+
+	/* Must be able to zero storage directly without fs intervention. */
+	if (iomap->flags & IOMAP_F_SHARED)
+		return -ECANCELED;
+	if (srcmap != iomap)
+		return -ECANCELED;
+
+	switch (iomap->type) {
+	case IOMAP_MAPPED:
+		ret = blkdev_issue_zeroout(iomap->bdev, sector,
+				length >> SECTOR_SHIFT, GFP_KERNEL, 0);
+		if (ret)
+			return ret;
+		fallthrough;
+	case IOMAP_UNWRITTEN:
+		return length;
+	}
+
+	/* Reject holes, inline data, or delalloc extents. */
+	return -ECANCELED;
+}
+
+/*
+ * Initialize storage mapped to a DAX-mode file to a known value and ensure the
+ * media are ready to accept read and write commands.  This requires the use of
+ * the block layer's zeroout function (with zero-page fallback enabled) to
+ * write zeroes to a pmem region and to reset any hardware media error state.
+ *
+ * The range arguments must be aligned to sector size.  The file must be backed
+ * by a block device.  The extents returned must not require copy on write (or
+ * any other mapping interventions from the filesystem) and must be contiguous.
+ * @done will be set to true if the reset succeeded.
+ */
+int
+dax_zeroinit_range(struct inode *inode, loff_t pos, loff_t len, bool *done,
+		const struct iomap_ops *ops)
+{
+	loff_t ret;
+
+	if (!IS_DAX(inode))
+		return -EINVAL;
+	if ((pos | len) & (SECTOR_SIZE - 1))
+		return -EINVAL;
+	if (pos + len > i_size_read(inode))
+		return -EINVAL;
+
+	while (len > 0) {
+		ret = iomap_apply(inode, pos, len, IOMAP_REPORT, ops, NULL,
+				dax_zeroinit_actor);
+		if (ret == -ECANCELED)
+			return 0;
+		if (ret < 0)
+			return ret;
+
+		pos += ret;
+		len -= ret;
+	}
+
+	*done = true;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(dax_zeroinit_range);
