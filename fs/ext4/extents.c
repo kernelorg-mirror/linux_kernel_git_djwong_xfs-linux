@@ -29,6 +29,7 @@
 #include <linux/fiemap.h>
 #include <linux/backing-dev.h>
 #include <linux/iomap.h>
+#include <linux/dax.h>
 #include "ext4_jbd2.h"
 #include "ext4_extents.h"
 #include "xattr.h"
@@ -4678,6 +4679,24 @@ long ext4_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 	}
 
 	if (mode & FALLOC_FL_ZERO_RANGE) {
+		/*
+		 * If the file is in DAX mode, try to use a DAX-specific
+		 * function to zero the region.
+		 */
+		if (IS_DAX(inode)) {
+			bool	did_zeroout = false;
+
+			inode_lock(inode);
+
+			ret = dax_zeroinit_range(inode, offset, len,
+					&did_zeroout, &ext4_iomap_report_ops);
+			if (ret == -EINVAL)
+				ret = 0;
+			if (ret || did_zeroout)
+				goto out;
+
+			inode_unlock(inode);
+		}
 		ret = ext4_zero_range(file, offset, len, mode);
 		goto exit;
 	}
