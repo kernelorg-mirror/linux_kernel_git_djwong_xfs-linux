@@ -2364,7 +2364,7 @@ DECLARE_EVENT_CLASS(xfs_log_recover_icreate_item_class,
 		__entry->gen = be32_to_cpu(in_f->icl_gen);
 	),
 	TP_printk("dev %d:%d agno 0x%x agbno 0x%x count %u isize %u blockcount 0x%x "
-		  "gen %u", MAJOR(__entry->dev), MINOR(__entry->dev),
+		  "gen 0x%x", MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->agno, __entry->agbno, __entry->count, __entry->isize,
 		  __entry->length, __entry->gen)
 )
