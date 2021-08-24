@@ -2547,7 +2547,7 @@ xfs_free_extent_later(
 	xfs_fsblock_t			bno,
 	xfs_filblks_t			len,
 	const struct xfs_owner_info	*oinfo,
-	bool				skip_discard)
+	unsigned int			flags)
 {
 	struct xfs_extent_free_item	*new;		/* new element */
 #ifdef DEBUG
@@ -2565,6 +2565,7 @@ xfs_free_extent_later(
 	ASSERT(agbno < mp->m_sb.sb_agblocks);
 	ASSERT(len < mp->m_sb.sb_agblocks);
 	ASSERT(agbno + len <= mp->m_sb.sb_agblocks);
+	ASSERT(!(flags & ~XFS_FREE_EXTENT_ALL_FLAGS));
 #endif
 	ASSERT(xfs_extent_free_item_zone != NULL);
 
@@ -2576,7 +2577,7 @@ xfs_free_extent_later(
 		new->xefi_oinfo = *oinfo;
 	else
 		new->xefi_oinfo = XFS_RMAP_OINFO_SKIP_UPDATE;
-	new->xefi_skip_discard = skip_discard;
+	new->xefi_skip_discard = !!(flags & XFS_FREE_EXTENT_SKIP_DISCARD);
 
 	trace_xfs_extent_free_defer(mp, XFS_FREE_EXTENT_REGULAR, new);
 	xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_FREE, &new->xefi_list);
