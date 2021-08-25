@@ -277,25 +277,6 @@ xfs_refcount_update_diff_items(
 		XFS_FSB_TO_AGNO(mp, rb->ri_startblock);
 }
 
-/* Set the phys extent flags for this reverse mapping. */
-static void
-xfs_trans_set_refcount_flags(
-	struct xfs_phys_extent		*refc,
-	enum xfs_refcount_intent_type	type)
-{
-	refc->pe_flags = 0;
-	switch (type) {
-	case XFS_REFCOUNT_INCREASE:
-	case XFS_REFCOUNT_DECREASE:
-	case XFS_REFCOUNT_ALLOC_COW:
-	case XFS_REFCOUNT_FREE_COW:
-		refc->pe_flags |= type;
-		break;
-	default:
-		ASSERT(0);
-	}
-}
-
 /* Log refcount updates in the intent item. */
 STATIC void
 xfs_refcount_update_log_item(
@@ -319,7 +300,18 @@ xfs_refcount_update_log_item(
 	ext = &cuip->cui_format.cui_extents[next_extent];
 	ext->pe_startblock = refc->ri_startblock;
 	ext->pe_len = refc->ri_blockcount;
-	xfs_trans_set_refcount_flags(ext, refc->ri_type);
+	switch (refc->ri_type) {
+	case XFS_REFCOUNT_INCREASE:
+	case XFS_REFCOUNT_DECREASE:
+	case XFS_REFCOUNT_ALLOC_COW:
+	case XFS_REFCOUNT_FREE_COW:
+		ext->pe_flags = refc->ri_type;
+		break;
+	default:
+		ASSERT(0);
+		ext->pe_flags = 0;
+		break;
+	}
 }
 
 static struct xfs_log_item *
