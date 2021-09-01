@@ -438,12 +438,24 @@ xchk_ag_read_headers(
 	struct xchk_ag		*sa)
 {
 	struct xfs_mount	*mp = sc->mp;
-	int			error;
 
 	ASSERT(!sa->pag);
 	sa->pag = xfs_perag_get(mp, agno);
 	if (!sa->pag)
 		return -ENOENT;
+
+	return xchk_ag_lock(sc);
+}
+
+/* Lock the AG headers. */
+int
+xchk_ag_lock(
+	struct xfs_scrub	*sc)
+{
+	struct xfs_mount	*mp = sc->mp;
+	struct xchk_ag		*sa = &sc->sa;
+	xfs_agnumber_t		agno = sa->pag->pag_agno;
+	int			error;
 
 	error = xfs_ialloc_read_agi(mp, sc->tp, agno, &sa->agi_bp);
 	if (error && want_ag_read_header_failure(sc, XFS_SCRUB_TYPE_AGI))
@@ -626,7 +638,7 @@ xchk_trans_alloc(
 		return xfs_trans_alloc(sc->mp, &M_RES(sc->mp)->tr_itruncate,
 				resblks, 0, flags, &sc->tp);
 
-	return xfs_trans_alloc_empty(sc->mp, &sc->tp);
+	return xchk_trans_alloc_empty(sc);
 }
 
 /* Set us up with a transaction and an empty context. */
