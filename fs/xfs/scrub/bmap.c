@@ -310,8 +310,12 @@ xchk_bmap_rt_iextent_xref(
 	struct xchk_bmap_info	*info,
 	struct xfs_bmbt_irec	*irec)
 {
+	xchk_rt_init(info->sc, &info->sc->sr);
+
 	xchk_xref_is_used_rt_space(info->sc, irec->br_startblock,
 			irec->br_blockcount);
+
+	xchk_rt_unlock(info->sc, &info->sc->sr);
 }
 
 /* Cross-reference a single datadev extent record. */

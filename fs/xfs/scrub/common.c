@@ -598,6 +598,39 @@ xchk_ag_init(
 	return 0;
 }
 
+/*
+ * For scrubbing a realtime file, grab all the in-core resources we'll need to
+ * check the realtime metadata, which means taking the ILOCK of the realtime
+ * metadata inodes.  Callers must not join these inodes to the transaction
+ * with non-zero lockflags or concurrency problems will result.
+ */
+void
+xchk_rt_init(
+	struct xfs_scrub	*sc,
+	struct xchk_rt		*sr)
+{
+	xfs_ilock(sc->mp->m_rbmip, XFS_ILOCK_EXCL | XFS_ILOCK_RTBITMAP);
+	xfs_ilock(sc->mp->m_rsumip, XFS_ILOCK_EXCL | XFS_ILOCK_RTSUM);
+	sr->locked = true;
+}
+
+/*
+ * Unlock the realtime metadata inodes.  This must be done /after/ committing
+ * (or cancelling) the scrub transaction.
+ */
+void
+xchk_rt_unlock(
+	struct xfs_scrub	*sc,
+	struct xchk_rt		*sr)
+{
+	if (!sr->locked)
+		return;
+
+	xfs_iunlock(sc->mp->m_rsumip, XFS_ILOCK_EXCL);
+	xfs_iunlock(sc->mp->m_rbmip, XFS_ILOCK_EXCL);
+	sr->locked = false;
+}
+
 /* Per-scrubber setup functions */
 
 void
