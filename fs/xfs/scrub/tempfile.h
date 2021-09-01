@@ -13,6 +13,7 @@ void xrep_tempfile_rele(struct xfs_scrub *sc);
 void xrep_tempfile_ilock(struct xfs_scrub *sc, unsigned int ilock_flags);
 bool xrep_tempfile_ilock_nowait(struct xfs_scrub *sc, unsigned int ilock_flags);
 void xrep_tempfile_iunlock(struct xfs_scrub *sc, unsigned int ilock_flags);
+void xrep_tempfile_ilock_two(struct xfs_scrub *sc, unsigned int ilock_flags);
 
 int xrep_tempfile_prealloc(struct xfs_scrub *sc, xfs_fileoff_t off,
 		xfs_filblks_t len);
@@ -24,6 +25,12 @@ typedef int (*xrep_tempfile_copyin_getbuf_fn)(struct xfs_scrub *sc,
 int xrep_tempfile_copyin(struct xfs_scrub *sc,
 		const struct xfs_buf_ops *ops, enum xfs_blft type,
 		xfs_fileoff_t isize);
+
+struct xfs_swapext_req;
+struct xfs_swapext_res;
+
+int xrep_tempfile_swapext_prep(struct xfs_scrub *sc, int whichfork,
+		struct xfs_swapext_req *req, struct xfs_swapext_res *res);
 #else
 # define xrep_tempfile_rele(sc)
 #endif /* CONFIG_XFS_ONLINE_REPAIR */

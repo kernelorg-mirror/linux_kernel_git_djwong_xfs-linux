@@ -20,6 +20,7 @@
 #include "xfs_dir2.h"
 #include "xfs_xchgrange.h"
 #include "xfs_defer.h"
+#include "xfs_swapext.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/repair.h"
@@ -203,6 +204,16 @@ xrep_tempfile_iunlock(
 	sc->temp_ilock_flags &= ~ilock_flags;
 }
 
+void
+xrep_tempfile_ilock_two(
+	struct xfs_scrub	*sc,
+	unsigned int		ilock_flags)
+{
+	xfs_lock_two_inodes(sc->ip, ilock_flags, sc->tempip, ilock_flags);
+	sc->ilock_flags |= ilock_flags;
+	sc->temp_ilock_flags |= ilock_flags;
+}
+
 /* Release the temporary file. */
 void
 xrep_tempfile_rele(
@@ -383,4 +394,96 @@ xrep_tempfile_copyin(
 out_err:
 	xfs_buf_delwri_cancel(&buffers_list);
 	return error;
+}
+
+/*
+ * Fill out the swapext request and resource estimation structures in
+ * preparation for swapping the contents of a metadata file that we've rebuilt
+ * in the temp file.
+ */
+int
+xrep_tempfile_swapext_prep(
+	struct xfs_scrub	*sc,
+	int			whichfork,
+	struct xfs_swapext_req	*req,
+	struct xfs_swapext_res	*res)
+{
+	struct xfs_ifork	*ifp, *tifp;
+	int			state = 0;
+
+	ASSERT(whichfork != XFS_COW_FORK);
+
+	/* Both files should have the relevant forks. */
+	ifp = XFS_IFORK_PTR(sc->ip, whichfork);
+	tifp = XFS_IFORK_PTR(sc->tempip, whichfork);
+	if (!ifp || !tifp) {
+		ASSERT(0);
+		return -EINVAL;
+	}
+
+	memset(res, 0, sizeof(struct xfs_swapext_res));
+	req->ip1 = sc->tempip;
+	req->ip2 = sc->ip;
+	req->startoff1 = 0;
+	req->startoff2 = 0;
+	req->whichfork = whichfork;
+	req->blockcount = XFS_MAX_FILEOFF;
+	req->req_flags = 0;
+
+	/*
+	 * If we're repairing xattrs or directories, always try to convert ip2
+	 * to short format after swapping.
+	 */
+	if (whichfork == XFS_ATTR_FORK || S_ISDIR(VFS_I(sc->ip)->i_mode))
+		req->req_flags |= XFS_SWAP_REQ_FILE2_CVT_SF;
+
+	/*
+	 * Deal with either fork being in local format.  The swapext code only
+	 * knows how to exchange block mappings for regular files, so we only
+	 * have to know about local format for xattrs and directories.
+	 */
+	if (ifp->if_format == XFS_DINODE_FMT_LOCAL)
+		state |= 1;
+	if (tifp->if_format == XFS_DINODE_FMT_LOCAL)
+		state |= 2;
+	switch (state) {
+	case 0:
+		/* Both files have mapped extents; use the regular estimate. */
+		return xfs_xchg_range_estimate(req, res);
+	case 1:
+		/*
+		 * The file being repaired is in local format, but the temp
+		 * file has mapped extents.  To perform the swap, the file
+		 * being repaired will be reinitialized to have an empty extent
+		 * map, so the number of exchanges is the temporary file's
+		 * extent count.
+		 */
+		res->ip1_bcount = sc->tempip->i_nblocks;
+		res->nr_exchanges = tifp->if_nextents;
+		break;
+	case 2:
+		/*
+		 * The temporary file is in local format, but the file being
+		 * repaired has mapped extents.  To perform the swap, the temp
+		 * file will be converted to have a single block, so the number
+		 * of exchanges is (worst case) the extent count of the file
+		 * being repaired plus one more.
+		 */
+		res->ip1_bcount = 1;
+		res->ip2_bcount = sc->ip->i_nblocks;
+		res->nr_exchanges = ifp->if_nextents;
+		break;
+	case 3:
+		/*
+		 * Both forks are in local format.  To perform the swap, the
+		 * file being repaired will be reinitialized to have an empty
+		 * extent map and the temp file will be converted to have a
+		 * single block.  Only one exchange is required.
+		 */
+		res->ip1_bcount = 1;
+		res->nr_exchanges = 1;
+		break;
+	}
+
+	return xfs_swapext_estimate_overhead(req, res);
 }
