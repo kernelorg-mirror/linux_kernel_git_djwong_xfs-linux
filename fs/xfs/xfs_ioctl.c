@@ -1810,7 +1810,8 @@ xfs_ioc_scrub_metadata(
 	if (copy_from_user(&scrub, arg, sizeof(scrub)))
 		return -EFAULT;
 
-	if ((scrub.sm_flags & XFS_SCRUB_IFLAG_FREEZE_OK) &&
+	if ((scrub.sm_flags & (XFS_SCRUB_IFLAG_FREEZE_OK |
+			       XFS_SCRUB_IFLAG_FORCE_REBUILD)) &&
 			!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
