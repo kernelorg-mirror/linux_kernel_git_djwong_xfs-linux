@@ -1548,11 +1548,11 @@ xfs_rtlock(
 	ASSERT(!(lock_flags & ~XFS_RTLOCK_ALL));
 
 	if (lock_flags & XFS_RTLOCK_ALLOC) {
-		xfs_ilock(mp->m_rbmip, XFS_ILOCK_EXCL | XFS_ILOCK_RTBITMAP);
+		xfs_ilock(mp->m_rbmip, XFS_ILOCK_EXCL);
 		if (tp)
 			xfs_trans_ijoin(tp, mp->m_rbmip, XFS_ILOCK_EXCL);
 
-		xfs_ilock(mp->m_rsumip, XFS_ILOCK_EXCL | XFS_ILOCK_RTSUM);
+		xfs_ilock(mp->m_rsumip, XFS_ILOCK_EXCL);
 		if (tp)
 			xfs_trans_ijoin(tp, mp->m_rsumip, XFS_ILOCK_EXCL);
 	}
@@ -1567,7 +1567,7 @@ xfs_rtunlock(
 	ASSERT(!(lock_flags & ~XFS_RTLOCK_ALL));
 
 	if (lock_flags & XFS_RTLOCK_ALLOC) {
-		xfs_iunlock(mp->m_rsumip, XFS_ILOCK_EXCL | XFS_ILOCK_RTSUM);
-		xfs_iunlock(mp->m_rbmip, XFS_ILOCK_EXCL | XFS_ILOCK_RTBITMAP);
+		xfs_iunlock(mp->m_rsumip, XFS_ILOCK_EXCL);
+		xfs_iunlock(mp->m_rbmip, XFS_ILOCK_EXCL);
 	}
 }
