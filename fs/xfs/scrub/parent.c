@@ -16,6 +16,7 @@
 #include "xfs_dir2_priv.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
+#include "scrub/parent.h"
 
 /* Set us up to scrub parents. */
 int
@@ -121,6 +122,36 @@ out:
 }
 
 /*
+ * Try to iolock the parent dir @dp in shared mode and the child dir @sc->ip
+ * exclusively.
+ */
+int
+xchk_parent_lock_two_dirs(
+	struct xfs_scrub	*sc,
+	struct xfs_inode	*dp)
+{
+	int			error = 0;
+
+	/* Callers shouldn't do this, but protect ourselves anyway. */
+	if (dp == sc->ip) {
+		ASSERT(dp != sc->ip);
+		return -EDEADLOCK;
+	}
+
+	xchk_iunlock(sc, sc->ilock_flags);
+	while (true) {
+		if (xchk_should_terminate(sc, &error))
+			return error;
+		xfs_ilock(dp, XFS_IOLOCK_SHARED);
+		if (xchk_ilock_nowait(sc, XFS_IOLOCK_EXCL))
+			break;
+		xfs_iunlock(dp, XFS_IOLOCK_SHARED);
+	}
+
+	return 0;
+}
+
+/*
  * Given the inode number of the alleged parent of the inode being
  * scrubbed, try to validate that the parent has exactly one directory
  * entry pointing back to the inode being scrubbed.
@@ -185,21 +216,9 @@ xchk_parent_validate(
 	 * try to lock the alleged parent and trylock the child.
 	 */
 	if (!xfs_ilock_nowait(dp, XFS_IOLOCK_SHARED)) {
-		xchk_iunlock(sc, sc->ilock_flags);
-		while (true) {
-			if (xchk_should_terminate(sc, &error))
-				goto out_rele;
-			xfs_ilock(dp, XFS_IOLOCK_SHARED);
-			if (xchk_ilock_nowait(sc, XFS_IOLOCK_EXCL))
-				break;
-			xfs_iunlock(dp, XFS_IOLOCK_SHARED);
-		}
-
-		/*
-		 * Now that we've locked out updates to the child directory,
-		 * re-sample the expected nlink and the '..' dirent.
-		 */
-		expected_nlink = VFS_I(sc->ip)->i_nlink == 0 ? 0 : 1;
+		error = xchk_parent_lock_two_dirs(sc, dp);
+		if (error)
+			goto out_rele;
 
 		error = xfs_dir_lookup(sc->tp, sc->ip, &xfs_name_dotdot,
 				&parent_ino, NULL);
