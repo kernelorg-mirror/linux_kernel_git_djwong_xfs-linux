@@ -987,6 +987,7 @@ xfs_break_layouts(
 #define	XFS_FALLOC_FL_SUPPORTED						\
 		(FALLOC_FL_KEEP_SIZE | FALLOC_FL_PUNCH_HOLE |		\
 		 FALLOC_FL_COLLAPSE_RANGE | FALLOC_FL_ZERO_RANGE |	\
+		 FALLOC_FL_ZEROINIT_RANGE |				\
 		 FALLOC_FL_INSERT_RANGE | FALLOC_FL_UNSHARE_RANGE |	\
 		 FALLOC_FL_MAP_FREE_SPACE)
 
@@ -1039,13 +1040,17 @@ xfs_file_fallocate(
 	 * handled at the right time by xfs_prepare_shift().
 	 */
 	if (mode & (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_ZERO_RANGE |
-		    FALLOC_FL_COLLAPSE_RANGE)) {
+		    FALLOC_FL_COLLAPSE_RANGE | FALLOC_FL_ZEROINIT_RANGE)) {
 		error = xfs_flush_unmap_range(ip, offset, len);
 		if (error)
 			goto out_unlock;
 	}
 
-	if (mode & FALLOC_FL_PUNCH_HOLE) {
+	if (mode & FALLOC_FL_ZEROINIT_RANGE) {
+		error = xfs_file_zeroinit_space(ip, offset, len);
+		if (error)
+			goto out_unlock;
+	} else if (mode & FALLOC_FL_PUNCH_HOLE) {
 		/* Unshare around the region to punch, if needed. */
 		if (xfs_inode_needs_cow_around(ip)) {
 			error = xfs_file_cow_around(ip, offset, len);
