@@ -361,15 +361,9 @@ xfs_trans_free_extent(
 	struct xfs_mount		*mp = tp->t_mountp;
 	struct xfs_extent		*extp;
 	uint				next_extent;
-	xfs_agnumber_t			agno;
-	xfs_agblock_t			agbno;
 	int				error;
 
-	agno = XFS_FSB_TO_AGNO(mp, free->xefi_startblock);
-	agbno = XFS_FSB_TO_AGBNO(mp, free->xefi_startblock);
-
-	trace_xfs_bmap_free_deferred(tp->t_mountp, agno, 0, agbno,
-			free->xefi_blockcount);
+	trace_xfs_extent_free_deferred(mp, XFS_FREE_EXTENT_REGULAR, free);
 
 	error = __xfs_free_extent(tp, free->xefi_startblock,
 			free->xefi_blockcount, &free->xefi_oinfo,
@@ -538,7 +532,7 @@ xfs_agfl_free_finish_item(
 	agno = XFS_FSB_TO_AGNO(mp, free->xefi_startblock);
 	agbno = XFS_FSB_TO_AGBNO(mp, free->xefi_startblock);
 
-	trace_xfs_agfl_free_deferred(mp, agno, 0, agbno, free->xefi_blockcount);
+	trace_xfs_extent_free_deferred(mp, XFS_FREE_EXTENT_AGFL, free);
 
 	error = xfs_alloc_read_agf(mp, tp, agno, 0, &agbp);
 	if (!error)
