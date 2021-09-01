@@ -150,6 +150,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   health.o \
 				   ialloc.o \
 				   inode.o \
+				   iscan.o \
 				   parent.o \
 				   refcount.o \
 				   rmap.o \
@@ -165,7 +166,6 @@ xfs-$(CONFIG_XFS_RT)		+= $(addprefix scrub/, \
 				   )
 
 xfs-$(CONFIG_XFS_QUOTA)		+= $(addprefix scrub/, \
-				   iscan.o \
 				   quota.o \
 				   quotacheck.o \
 				   )
@@ -182,6 +182,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   fscounters_repair.o \
 				   ialloc_repair.o \
 				   inode_repair.o \
+				   parent_repair.o \
 				   refcount_repair.o \
 				   repair.o \
 				   rmap_repair.o \

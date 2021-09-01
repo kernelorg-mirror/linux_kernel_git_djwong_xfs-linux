@@ -35,6 +35,7 @@
 #include "scrub/tempfile.h"
 #include "scrub/xfarray.h"
 #include "scrub/xfblob.h"
+#include "scrub/parent.h"
 
 /*
  * Directory Repair
@@ -1101,6 +1102,7 @@ xrep_directory_find_parent(
 {
 	struct xfs_scrub	*sc = rd->sc;
 	xfs_ino_t		parent_ino;
+	int			error;
 
 	/*
 	 * If we're the root directory, we are our own parent.  If we're an
@@ -1114,16 +1116,25 @@ xrep_directory_find_parent(
 	}
 
 	/*
-	 * Try to look up '..'; if it seems plausible, go with it.  This will
-	 * be augmented later.
+	 * Try to look up '..'; if it seems plausible, go with it.  Check that
+	 * the parent directory actually points to this directory.  If so, we
+	 * are good to go.  Any errors just push us to scanning the fs.
 	 */
 	parent_ino = xrep_dotdot_lookup(sc);
-	if (parent_ino != NULLFSINO) {
-		rd->parent_ino = parent_ino;
-		return 0;
-	}
+	error = xrep_parent_confirm(sc, &parent_ino);
+	if (!error && parent_ino != NULLFSINO)
+		goto foundit;
 
-	return -EFSCORRUPTED;
+	/* Otherwise, scan the entire filesystem. */
+	error = xrep_parent_scan(sc, &parent_ino);
+	if (error)
+		return error;
+	if (parent_ino == NULLFSINO)
+		return -EFSCORRUPTED;
+
+foundit:
+	rd->parent_ino = parent_ino;
+	return 0;
 }
 
 /*
