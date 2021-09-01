@@ -1557,6 +1557,7 @@ DEFINE_SIMPLE_IO_EVENT(xfs_end_io_direct_write_append);
 DEFINE_SIMPLE_IO_EVENT(xfs_alloc_file_space);
 DEFINE_SIMPLE_IO_EVENT(xfs_free_file_space);
 DEFINE_SIMPLE_IO_EVENT(xfs_zero_file_space);
+DEFINE_SIMPLE_IO_EVENT(xfs_zeroinit_file_space);
 DEFINE_SIMPLE_IO_EVENT(xfs_collapse_file_space);
 DEFINE_SIMPLE_IO_EVENT(xfs_insert_file_space);
 DEFINE_SIMPLE_IO_EVENT(xfs_map_free_rt_space);
