@@ -35,6 +35,7 @@
 #include "scrub/tempfile.h"
 #include "scrub/xfarray.h"
 #include "scrub/xfblob.h"
+#include "scrub/parent.h"
 
 /*
  * Directory Repair
@@ -1069,24 +1070,47 @@ xrep_directory_self_parent(
 }
 
 /*
- * Look up the dotdot entry.  Returns NULLFSINO if we don't know what to do.
- * The next patch will check this more carefully.
+ * Look up the dotdot entry and confirm that it's really the parent.
+ * Returns NULLFSINO if we don't know what to do.
  */
 static inline xfs_ino_t
 xrep_directory_lookup_parent(
 	struct xrep_dir		*rd)
 {
-	return xrep_dotdot_lookup(rd->sc);
+	struct xfs_scrub	*sc = rd->sc;
+	xfs_ino_t		parent_ino;
+	int			error;
+
+	parent_ino = xrep_dotdot_lookup(sc);
+	if (parent_ino == NULLFSINO)
+		return parent_ino;
+
+	error = xrep_parent_confirm(sc, &parent_ino);
+	if (error)
+		return NULLFSINO;
+
+	return parent_ino;
 }
 
 /*
- * Try to find the parent of the directory being repaired.
- *
- * NOTE: This function will someday be augmented by the directory parent repair
- * code, which will know how to check the parent and scan the filesystem if
- * we cannot find anything.  Inode scans will have to be done before we start
- * salvaging directory entries, so we do this now.
+ * Scan the whole filesystem to try to find a parent for this directory.
+ * Returns NULLFSINO if we don't know what to do.
  */
+static inline xfs_ino_t
+xrep_directory_scan_parent(
+	struct xrep_dir		*rd)
+{
+	xfs_ino_t		parent_ino;
+	int			error;
+
+	error = xrep_parent_scan(rd->sc, &parent_ino);
+	if (error)
+		return NULLFSINO;
+
+	return parent_ino;
+}
+
+/* Try to find the parent of the directory being repaired. */
 STATIC int
 xrep_directory_find_parent(
 	struct xrep_dir		*rd)
@@ -1096,6 +1120,10 @@ xrep_directory_find_parent(
 		return 0;
 
 	rd->parent_ino = xrep_directory_lookup_parent(rd);
+	if (rd->parent_ino != NULLFSINO)
+		return 0;
+
+	rd->parent_ino = xrep_directory_scan_parent(rd);
 	if (rd->parent_ino != NULLFSINO)
 		return 0;
 
