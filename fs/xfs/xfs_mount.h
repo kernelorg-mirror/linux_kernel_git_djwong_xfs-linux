@@ -271,7 +271,25 @@ typedef struct xfs_mount {
 	 * while a repair freeze is in progress.
 	 */
 	struct mutex		m_scrub_freeze;
+
+	/* online file link count check stuff */
+	struct xfs_hook_chain	m_nlink_delta_hooks;
 } xfs_mount_t;
+
+/*
+ * Parameters for tracking bumplink and droplink operations.  The hook
+ * function arg parameter is one of these.
+ */
+enum xfs_nlink_delta_type {
+	XFS_PARENT_NLINK_DELTA,		/* parent pointing to child */
+	XFS_CHILD_NLINK_DELTA,		/* child pointing to parent */
+};
+
+struct xfs_nlink_delta_params {
+	struct xfs_inode	*dp;
+	xfs_ino_t		ino;
+	int			delta;
+};
 
 #define M_IGEO(mp)		(&(mp)->m_ino_geo)
 
