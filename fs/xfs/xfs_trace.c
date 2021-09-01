@@ -39,6 +39,7 @@
 #include "xfs_xchgrange.h"
 #include "xfs_rtalloc.h"
 #include "xfs_rmap.h"
+#include "xfs_refcount.h"
 
 static inline void
 xfs_btree_crack_agno_opdev(
