@@ -2550,7 +2550,7 @@ xfs_free_extent_later(
 	const struct xfs_owner_info	*oinfo,
 	unsigned int			flags)
 {
-	struct xfs_extent_free_item	*new;		/* new element */
+	struct xfs_extent_free_item	*xefi;		/* new element */
 #ifdef DEBUG
 	struct xfs_mount		*mp = tp->t_mountp;
 
@@ -2577,20 +2577,20 @@ xfs_free_extent_later(
 #endif
 	ASSERT(xfs_extent_free_item_zone != NULL);
 
-	new = kmem_cache_alloc(xfs_extent_free_item_zone,
+	xefi = kmem_cache_alloc(xfs_extent_free_item_zone,
 			       GFP_KERNEL | __GFP_NOFAIL);
-	new->xefi_startblock = bno;
-	new->xefi_blockcount = (xfs_extlen_t)len;
+	xefi->xefi_startblock = bno;
+	xefi->xefi_blockcount = (xfs_extlen_t)len;
 	if (oinfo)
-		new->xefi_oinfo = *oinfo;
+		xefi->xefi_oinfo = *oinfo;
 	else
-		new->xefi_oinfo = XFS_RMAP_OINFO_SKIP_UPDATE;
-	new->xefi_skip_discard = !!(flags & XFS_FREE_EXTENT_SKIP_DISCARD);
-	new->xefi_realtime = !!(flags & XFS_FREE_EXTENT_REALTIME);
+		xefi->xefi_oinfo = XFS_RMAP_OINFO_SKIP_UPDATE;
+	xefi->xefi_skip_discard = !!(flags & XFS_FREE_EXTENT_SKIP_DISCARD);
+	xefi->xefi_realtime = !!(flags & XFS_FREE_EXTENT_REALTIME);
 
 	trace_xfs_extent_free_defer(tp->t_mountp, XFS_FREE_EXTENT_REGULAR,
-			new);
-	xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_FREE, &new->xefi_list);
+			xefi);
+	xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_FREE, &xefi->xefi_list);
 }
 
 
