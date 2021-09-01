@@ -24,6 +24,7 @@
 #include "xfs_da_format.h"
 #include "xfs_imeta.h"
 #include "xfs_quota.h"
+#include "xfs_error.h"
 
 /*
  * Read and return the summary information for a given extent size,
@@ -1316,6 +1317,7 @@ xfs_rt_resv_init(
  */
 static struct lock_class_key xfs_rbmip_key;
 static struct lock_class_key xfs_rsumip_key;
+static struct lock_class_key xfs_rrmapip_key;
 
 static inline int
 xfs_rt_iget(
@@ -1338,12 +1340,13 @@ xfs_rt_iget(
  * Get the bitmap and summary inodes and the summary cache into the mount
  * structure at mount time.
  */
-int					/* error */
+int
 xfs_rtmount_inodes(
-	xfs_mount_t	*mp)		/* file system mount structure */
+	struct xfs_mount	*mp)
 {
-	int		error;		/* error return value */
-	xfs_sb_t	*sbp;
+	struct xfs_sb		*sbp;
+	xfs_ino_t		ino;
+	int			error;
 
 	sbp = &mp->m_sb;
 	error = xfs_rt_iget(mp, mp->m_sb.sb_rbmino, &xfs_rbmip_key,
@@ -1358,13 +1361,38 @@ xfs_rtmount_inodes(
 			&mp->m_rsumip);
 	if (xfs_metadata_is_sick(error))
 		xfs_rt_mark_sick(mp, XFS_SICK_RT_SUMMARY);
-	if (error) {
-		xfs_imeta_irele(mp->m_rbmip);
-		return error;
-	}
+	if (error)
+		goto out_rbm;
 	ASSERT(mp->m_rsumip != NULL);
+
+	/* If we have rmap and a realtime device, look for the rtrmapbt. */
+	if (xfs_has_rtrmapbt(mp)) {
+		error = xfs_imeta_lookup(mp, &XFS_IMETA_RTRMAPBT, &ino);
+		if (error)
+			goto out_rsum;
+
+		error = xfs_rt_iget(mp, ino, &xfs_rrmapip_key,
+				&mp->m_rrmapip);
+		if (error)
+			goto out_rsum;
+
+		if (XFS_IS_CORRUPT(mp,
+				   mp->m_rrmapip->i_df.if_format !=
+				   XFS_DINODE_FMT_RMAP)) {
+			error = -EFSCORRUPTED;
+			goto out_rrmap;
+		}
+	}
+
 	xfs_alloc_rsum_cache(mp, sbp->sb_rbmblocks);
 	return 0;
+out_rrmap:
+	xfs_imeta_irele(mp->m_rrmapip);
+out_rsum:
+	xfs_imeta_irele(mp->m_rsumip);
+out_rbm:
+	xfs_imeta_irele(mp->m_rbmip);
+	return error;
 }
 
 /* Attach dquots for realtime metadata files. */
@@ -1382,6 +1410,12 @@ xfs_rtmount_dqattach(
 	if (error)
 		return error;
 
+	if (xfs_has_rtrmapbt(mp)) {
+		error = xfs_qm_dqattach(mp->m_rrmapip);
+		if (error)
+			return error;
+	}
+
 	return 0;
 }
 
@@ -1390,6 +1424,8 @@ xfs_rtunmount_inodes(
 	struct xfs_mount	*mp)
 {
 	kmem_free(mp->m_rsum_cache);
+	if (mp->m_rrmapip)
+		xfs_imeta_irele(mp->m_rrmapip);
 	if (mp->m_rbmip)
 		xfs_imeta_irele(mp->m_rbmip);
 	if (mp->m_rsumip)
