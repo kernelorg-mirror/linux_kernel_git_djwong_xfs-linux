@@ -44,6 +44,9 @@ struct xchk_nlink {
 /* This data item was seen by the check-time compare function. */
 #define XCHK_NLINK_COMPARE_SCANNED	(1U << 0)
 
+/* Item was modified by the repair function. */
+#define XREP_NLINK_DIRTY		(1U << 1)
+
 /* Compute total link count, using large enough variables to detect overflow. */
 static inline uint64_t
 xchk_nlink_total(const struct xchk_nlink *live)
