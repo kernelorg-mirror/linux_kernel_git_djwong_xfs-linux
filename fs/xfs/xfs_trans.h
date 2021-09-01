@@ -116,7 +116,7 @@ void	xfs_log_item_init(struct xfs_mount *mp, struct xfs_log_item *item,
  * Deferred operation item relogging limits.
  */
 #define XFS_DEFER_OPS_NR_INODES	2	/* join up to two inodes */
-#define XFS_DEFER_OPS_NR_BUFS	2	/* join up to two buffers */
+#define XFS_DEFER_OPS_NR_BUFS	3	/* join up to three buffers */
 
 /*
  * This is the structure maintained for every active transaction.

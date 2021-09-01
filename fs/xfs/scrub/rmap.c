@@ -9,13 +9,16 @@
 #include "xfs_format.h"
 #include "xfs_trans_resv.h"
 #include "xfs_mount.h"
+#include "xfs_log_format.h"
+#include "xfs_trans.h"
 #include "xfs_btree.h"
 #include "xfs_rmap.h"
 #include "xfs_refcount.h"
+#include "xfs_ag.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/btree.h"
-#include "xfs_ag.h"
+#include "scrub/repair.h"
 
 /*
  * Set us up to scrub reverse mapping btrees.
@@ -24,6 +27,8 @@ int
 xchk_setup_ag_rmapbt(
 	struct xfs_scrub	*sc)
 {
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR)
+		return xrep_setup_ag_rmapbt(sc);
 	return xchk_setup_ag_btree(sc, false);
 }
 
