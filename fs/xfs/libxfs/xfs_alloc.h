@@ -186,6 +186,25 @@ xfs_free_extent(
 	return __xfs_free_extent(tp, bno, len, oinfo, type, false);
 }
 
+void xfs_free_extent_later(struct xfs_trans *tp, xfs_fsblock_t bno,
+		xfs_filblks_t len, const struct xfs_owner_info *oinfo,
+		bool skip_discard);
+
+/*
+ * List of extents to be free "later".
+ * The list is kept sorted on xefi_startblock.
+ */
+struct xfs_extent_free_item
+{
+	struct list_head	xefi_list;
+	xfs_fsblock_t		xefi_startblock;/* starting fs block number */
+	xfs_extlen_t		xefi_blockcount;/* number of blocks in extent */
+	bool			xefi_skip_discard;
+	struct xfs_owner_info	xefi_oinfo;	/* extent owner */
+};
+
+extern struct kmem_cache	*xfs_extent_free_item_zone;
+
 int				/* error */
 xfs_alloc_lookup_le(
 	struct xfs_btree_cur	*cur,	/* btree cursor */

@@ -28,7 +28,7 @@
 #include "xfs_bmap.h"
 #include "xfs_health.h"
 
-extern struct kmem_cache	*xfs_bmap_free_item_zone;
+struct kmem_cache		*xfs_extent_free_item_zone;
 
 struct workqueue_struct *xfs_alloc_wq;
 
@@ -2503,7 +2503,8 @@ xfs_agfl_reset(
 
 /*
  * Defer an AGFL block free. This is effectively equivalent to
- * xfs_bmap_add_free() with some special handling particular to AGFL blocks.
+ * xfs_free_extent_later() with some special handling particular to AGFL
+ * blocks.
  *
  * Deferring AGFL frees helps prevent log reservation overruns due to too many
  * allocation operations in a transaction. AGFL frees are prone to this problem
@@ -2522,10 +2523,10 @@ xfs_defer_agfl_block(
 	struct xfs_mount		*mp = tp->t_mountp;
 	struct xfs_extent_free_item	*new;		/* new element */
 
-	ASSERT(xfs_bmap_free_item_zone != NULL);
+	ASSERT(xfs_extent_free_item_zone != NULL);
 	ASSERT(oinfo != NULL);
 
-	new = kmem_cache_alloc(xfs_bmap_free_item_zone,
+	new = kmem_cache_alloc(xfs_extent_free_item_zone,
 			       GFP_KERNEL | __GFP_NOFAIL);
 	new->xefi_startblock = XFS_AGB_TO_FSB(mp, agno, agbno);
 	new->xefi_blockcount = 1;
@@ -2536,6 +2537,53 @@ xfs_defer_agfl_block(
 
 	xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_AGFL_FREE, &new->xefi_list);
 }
+
+/*
+ * Add the extent to the list of extents to be free at transaction end.
+ * The list is maintained sorted (by block number).
+ */
+void
+xfs_free_extent_later(
+	struct xfs_trans		*tp,
+	xfs_fsblock_t			bno,
+	xfs_filblks_t			len,
+	const struct xfs_owner_info	*oinfo,
+	bool				skip_discard)
+{
+	struct xfs_extent_free_item	*new;		/* new element */
+#ifdef DEBUG
+	struct xfs_mount		*mp = tp->t_mountp;
+	xfs_agnumber_t			agno;
+	xfs_agblock_t			agbno;
+
+	ASSERT(bno != NULLFSBLOCK);
+	ASSERT(len > 0);
+	ASSERT(len <= MAXEXTLEN);
+	ASSERT(!isnullstartblock(bno));
+	agno = XFS_FSB_TO_AGNO(mp, bno);
+	agbno = XFS_FSB_TO_AGBNO(mp, bno);
+	ASSERT(agno < mp->m_sb.sb_agcount);
+	ASSERT(agbno < mp->m_sb.sb_agblocks);
+	ASSERT(len < mp->m_sb.sb_agblocks);
+	ASSERT(agbno + len <= mp->m_sb.sb_agblocks);
+#endif
+	ASSERT(xfs_extent_free_item_zone != NULL);
+
+	new = kmem_cache_alloc(xfs_extent_free_item_zone,
+			       GFP_KERNEL | __GFP_NOFAIL);
+	new->xefi_startblock = bno;
+	new->xefi_blockcount = (xfs_extlen_t)len;
+	if (oinfo)
+		new->xefi_oinfo = *oinfo;
+	else
+		new->xefi_oinfo = XFS_RMAP_OINFO_SKIP_UPDATE;
+	new->xefi_skip_discard = skip_discard;
+	trace_xfs_bmap_free_defer(tp->t_mountp,
+			XFS_FSB_TO_AGNO(tp->t_mountp, bno), 0,
+			XFS_FSB_TO_AGBNO(tp->t_mountp, bno), len);
+	xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_FREE, &new->xefi_list);
+}
+
 
 #ifdef DEBUG
 /*
