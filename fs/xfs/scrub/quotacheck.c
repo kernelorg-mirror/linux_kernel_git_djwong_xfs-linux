@@ -473,7 +473,7 @@ xqcheck_collect_counts(
 			break;
 
 		error = xqcheck_inode(xqc, ip);
-		xfs_irele(ip);
+		xchk_irele(sc, ip);
 		if (error)
 			break;
 
