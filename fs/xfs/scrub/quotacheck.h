@@ -24,6 +24,9 @@ struct xqcheck_dquot {
 /* Already checked this dquot */
 #define XQCHECK_DQUOT_COMPARE_SCANNED	(1U << 0)
 
+/* Already repaired this dquot */
+#define XQCHECK_DQUOT_REPAIR_SCANNED	(1U << 1)
+
 /* Live quotacheck control structure. */
 struct xqcheck {
 	struct xfs_scrub	*sc;
@@ -67,5 +70,8 @@ xqcheck_counters_for(
 
 int xqcheck_get_shadow_dquot(struct xfarray *counts, xfs_dqid_t id,
 		struct xqcheck_dquot *xcdq);
+
+int xqcheck_update_incore_state(struct xqcheck *xqc, struct xfarray *counts,
+		xfs_dqid_t id, struct xqcheck_dquot *xcdq);
 
 #endif /* __XFS_SCRUB_QUOTACHECK_H__ */

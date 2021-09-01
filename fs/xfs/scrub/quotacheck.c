@@ -517,7 +517,7 @@ xqcheck_collect_counts(
 }
 
 /* Update an incore dquot state flags. */
-static int
+int
 xqcheck_update_incore_state(
 	struct xqcheck		*xqc,
 	struct xfarray		*counts,
