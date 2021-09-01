@@ -72,6 +72,7 @@ int xrep_reset_perag_resv(struct xfs_scrub *sc);
 int xrep_bmap(struct xfs_scrub *sc, int whichfork, bool allow_unwritten);
 int xrep_metadata_inode_forks(struct xfs_scrub *sc);
 int xrep_setup_ag_rmapbt(struct xfs_scrub *sc);
+int xrep_setup_rtsummary(struct xfs_scrub *sc, unsigned int *resblks);
 
 void xrep_ag_btcur_init(struct xfs_scrub *sc, struct xchk_ag *sa);
 int xrep_ag_init(struct xfs_scrub *sc, struct xfs_perag *pag,
@@ -106,6 +107,12 @@ int xrep_quotacheck(struct xfs_scrub *sc);
 # define xrep_quota			xrep_notsupported
 # define xrep_quotacheck		xrep_notsupported
 #endif /* CONFIG_XFS_QUOTA */
+
+#ifdef CONFIG_XFS_RT
+int xrep_rtsummary(struct xfs_scrub *sc);
+#else
+# define xrep_rtsummary			xrep_notsupported
+#endif /* CONFIG_XFS_RT */
 
 struct xrep_newbt_resv {
 	/* Link to list of extents that we've reserved. */
@@ -209,6 +216,13 @@ xrep_setup_ag_rmapbt(
 	return xchk_setup_ag_btree(sc, false);
 }
 
+static inline int
+xrep_setup_rtsummary(struct xfs_scrub *sc, unsigned int *resblks)
+{
+	*resblks = 0;
+	return 0;
+}
+
 #define xrep_revalidate_allocbt		(NULL)
 #define xrep_revalidate_iallocbt	(NULL)
 
@@ -228,6 +242,7 @@ xrep_setup_ag_rmapbt(
 #define xrep_quota			xrep_notsupported
 #define xrep_quotacheck			xrep_notsupported
 #define xrep_fscounters			xrep_notsupported
+#define xrep_rtsummary			xrep_notsupported
 
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
