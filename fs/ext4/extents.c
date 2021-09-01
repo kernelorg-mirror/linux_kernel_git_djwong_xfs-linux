@@ -29,6 +29,7 @@
 #include <linux/fiemap.h>
 #include <linux/backing-dev.h>
 #include <linux/iomap.h>
+#include <linux/dax.h>
 #include "ext4_jbd2.h"
 #include "ext4_extents.h"
 #include "xattr.h"
@@ -4470,6 +4471,95 @@ static int ext4_collapse_range(struct inode *inode, loff_t offset, loff_t len);
 
 static int ext4_insert_range(struct inode *inode, loff_t offset, loff_t len);
 
+static long ext4_zeroinit_range(struct file *file, loff_t offset, loff_t len)
+{
+	struct inode *inode = file_inode(file);
+	handle_t *handle = NULL;
+	loff_t start, end;
+	long ret;
+
+	trace_ext4_zeroinit_range(inode, offset, len,
+			FALLOC_FL_ZEROINIT_RANGE | FALLOC_FL_KEEP_SIZE);
+
+	/* We don't support data=journal mode */
+	if (ext4_should_journal_data(inode))
+		return -EOPNOTSUPP;
+
+	inode_lock(inode);
+
+	/*
+	 * Indirect files do not support unwritten extents
+	 */
+	if (!(ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS))) {
+		ret = -EOPNOTSUPP;
+		goto out_mutex;
+	}
+
+	/* Wait all existing dio workers, newcomers will block on i_mutex */
+	inode_dio_wait(inode);
+
+	/*
+	 * Prevent page faults from reinstantiating pages we have released from
+	 * page cache.
+	 */
+	down_write(&EXT4_I(inode)->i_mmap_sem);
+
+	ret = ext4_break_layouts(inode);
+	if (ret) {
+		up_write(&EXT4_I(inode)->i_mmap_sem);
+		goto out_mutex;
+	}
+
+	ret = ext4_update_disksize_before_punch(inode, offset, len);
+	if (ret) {
+		up_write(&EXT4_I(inode)->i_mmap_sem);
+		goto out_mutex;
+	}
+	/* Now release the pages and zero block aligned part of pages */
+	truncate_pagecache_range(inode, start, end - 1);
+	inode->i_mtime = inode->i_ctime = current_time(inode);
+
+	if (IS_DAX(inode))
+		ret = dax_zeroinit_range(inode, offset, len,
+				&ext4_iomap_report_ops);
+	else
+		ret = iomap_zeroout_range(inode, offset, len,
+				&ext4_iomap_report_ops);
+	if (ret == -ECANCELED)
+		ret = -EOPNOTSUPP;
+	up_write(&EXT4_I(inode)->i_mmap_sem);
+	if (ret)
+		goto out_mutex;
+
+	/*
+	 * In worst case we have to writeout two nonadjacent unwritten
+	 * blocks and update the inode
+	 */
+	handle = ext4_journal_start(inode, EXT4_HT_MISC, 1);
+	if (IS_ERR(handle)) {
+		ret = PTR_ERR(handle);
+		ext4_std_error(inode->i_sb, ret);
+		goto out_mutex;
+	}
+
+	inode->i_mtime = inode->i_ctime = current_time(inode);
+	ret = ext4_mark_inode_dirty(handle, inode);
+	if (unlikely(ret))
+		goto out_handle;
+	ext4_fc_track_range(handle, inode, offset >> inode->i_sb->s_blocksize_bits,
+			(offset + len - 1) >> inode->i_sb->s_blocksize_bits);
+	ext4_update_inode_fsync_trans(handle, inode, 1);
+
+	if (file->f_flags & O_SYNC)
+		ext4_handle_sync(handle);
+
+out_handle:
+	ext4_journal_stop(handle);
+out_mutex:
+	inode_unlock(inode);
+	return ret;
+}
+
 static long ext4_zero_range(struct file *file, loff_t offset,
 			    loff_t len, int mode)
 {
@@ -4653,7 +4743,7 @@ long ext4_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 	/* Return error if mode is not supported */
 	if (mode & ~(FALLOC_FL_KEEP_SIZE | FALLOC_FL_PUNCH_HOLE |
 		     FALLOC_FL_COLLAPSE_RANGE | FALLOC_FL_ZERO_RANGE |
-		     FALLOC_FL_INSERT_RANGE))
+		     FALLOC_FL_INSERT_RANGE | FALLOC_FL_ZEROINIT_RANGE))
 		return -EOPNOTSUPP;
 
 	ext4_fc_start_update(inode);
@@ -4681,6 +4771,12 @@ long ext4_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 		ret = ext4_zero_range(file, offset, len, mode);
 		goto exit;
 	}
+
+	if (mode & FALLOC_FL_ZEROINIT_RANGE) {
+		ret = ext4_zeroinit_range(file, offset, len);
+		goto exit;
+	}
+
 	trace_ext4_fallocate_enter(inode, offset, len, mode);
 	lblk = offset >> blkbits;
 
