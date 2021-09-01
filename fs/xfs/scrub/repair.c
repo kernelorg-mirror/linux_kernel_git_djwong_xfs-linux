@@ -665,7 +665,7 @@ xrep_newbt_destroy_reservation(
 			resv->len, xnr->oinfo.oi_owner);
 
 	xfs_free_extent_later(sc->tp, resv->fsbno, resv->len, &xnr->oinfo,
-			true);
+			XFS_FREE_EXTENT_SKIP_DISCARD);
 
 	return 0;
 }
@@ -1069,7 +1069,7 @@ xrep_reap_ag_extent(
 		 * every 100 or so EFIs so that we don't exceed the log
 		 * reservation.
 		 */
-		xfs_free_extent_later(sc->tp, fsbno, aglen, rs->oinfo, false);
+		xfs_free_extent_later(sc->tp, fsbno, aglen, rs->oinfo, 0);
 		rs->deferred++;
 		need_roll = rs->deferred > 100;
 	}

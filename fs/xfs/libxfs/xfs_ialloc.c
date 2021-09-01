@@ -1886,7 +1886,7 @@ xfs_difree_inode_chunk(
 		/* not sparse, calculate extent info directly */
 		xfs_free_extent_later(tp, XFS_AGB_TO_FSB(mp, agno, sagbno),
 				M_IGEO(mp)->ialloc_blks,
-				&XFS_RMAP_OINFO_INODES, false);
+				&XFS_RMAP_OINFO_INODES, 0);
 		return;
 	}
 
@@ -1930,7 +1930,7 @@ xfs_difree_inode_chunk(
 		ASSERT(agbno % mp->m_sb.sb_spino_align == 0);
 		ASSERT(contigblk % mp->m_sb.sb_spino_align == 0);
 		xfs_free_extent_later(tp, XFS_AGB_TO_FSB(mp, agno, agbno),
-				  contigblk, &XFS_RMAP_OINFO_INODES, false);
+				  contigblk, &XFS_RMAP_OINFO_INODES, 0);
 
 		/* reset range to current bit and carry on... */
 		startidx = endidx = nextbit;

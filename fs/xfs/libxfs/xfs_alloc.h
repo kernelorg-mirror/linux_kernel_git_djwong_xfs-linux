@@ -186,9 +186,14 @@ xfs_free_extent(
 	return __xfs_free_extent(tp, bno, len, oinfo, type, false);
 }
 
+/* Don't issue a discard for the blocks freed. */
+#define XFS_FREE_EXTENT_SKIP_DISCARD	(1U << 0)
+
+#define XFS_FREE_EXTENT_ALL_FLAGS	(XFS_FREE_EXTENT_SKIP_DISCARD)
+
 void xfs_free_extent_later(struct xfs_trans *tp, xfs_fsblock_t bno,
 		xfs_filblks_t len, const struct xfs_owner_info *oinfo,
-		bool skip_discard);
+		unsigned int flags);
 
 /*
  * List of extents to be free "later".
