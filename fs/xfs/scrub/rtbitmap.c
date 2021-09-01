@@ -20,15 +20,25 @@
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/btree.h"
+#include "scrub/xfile.h"
+#include "scrub/repair.h"
+#include "scrub/tempfile.h"
 
 /* Set us up with the realtime metadata locked. */
 int
 xchk_setup_rtbitmap(
 	struct xfs_scrub	*sc)
 {
+	unsigned int		resblks = 0;
 	int			error;
 
-	error = xchk_trans_alloc(sc, 0);
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		error = xrep_setup_rtbitmap(sc, &resblks);
+		if (error)
+			return error;
+	}
+
+	error = xchk_trans_alloc(sc, resblks);
 	if (error)
 		return error;
 
