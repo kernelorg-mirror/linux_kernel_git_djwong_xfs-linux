@@ -5241,6 +5241,32 @@ xfs_btree_has_more_records(
 		return block->bb_u.s.bb_rightsib != cpu_to_be32(NULLAGBLOCK);
 }
 
+/* Compute the maximum allowed height for a given btree type. */
+static unsigned int
+xfs_btree_maxlevels(
+	struct xfs_mount	*mp,
+	xfs_btnum_t		btnum)
+{
+	switch (btnum) {
+	case XFS_BTNUM_BNO:
+	case XFS_BTNUM_CNT:
+		return mp->m_ag_maxlevels;
+	case XFS_BTNUM_BMAP:
+		return max(mp->m_bm_maxlevels[XFS_DATA_FORK],
+			   mp->m_bm_maxlevels[XFS_ATTR_FORK]);
+	case XFS_BTNUM_INO:
+	case XFS_BTNUM_FINO:
+		return M_IGEO(mp)->inobt_maxlevels;
+	case XFS_BTNUM_RMAP:
+		return mp->m_rmap_maxlevels;
+	case XFS_BTNUM_REFC:
+		return mp->m_refc_maxlevels;
+	default:
+		ASSERT(0);
+		return XFS_BTREE_MAXLEVELS;
+	}
+}
+
 /* Allocate a new btree cursor of the appropriate size. */
 struct xfs_btree_cur *
 xfs_btree_alloc_cursor(
@@ -5249,13 +5275,16 @@ xfs_btree_alloc_cursor(
 	xfs_btnum_t		btnum)
 {
 	struct xfs_btree_cur	*cur;
+	unsigned int		maxlevels = xfs_btree_maxlevels(mp, btnum);
+
+	ASSERT(maxlevels <= XFS_BTREE_CUR_ZONE_MAXLEVELS);
 
 	cur = kmem_cache_zalloc(xfs_btree_cur_zone, GFP_NOFS | __GFP_NOFAIL);
 	cur->bc_tp = tp;
 	cur->bc_mp = mp;
 	cur->bc_btnum = btnum;
 	cur->bc_blocklog = mp->m_sb.sb_blocklog;
-	cur->bc_maxlevels = XFS_BTREE_MAXLEVELS;
+	cur->bc_maxlevels = maxlevels;
 
 	return cur;
 }
