@@ -15,9 +15,12 @@
 
 #include <linux/tracepoint.h>
 #include "xfs_bit.h"
+#include "xfs_quota_defs.h"
 
+struct xfs_scrub;
 struct xfile;
 struct xfarray;
+struct xchk_iscan;
 
 /*
  * ftrace's __print_symbolic requires that all enum values be wrapped in the
@@ -84,7 +87,8 @@ TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_FSCOUNTERS);
 	{ XFS_SCRUB_TYPE_UQUOTA,	"usrquota" }, \
 	{ XFS_SCRUB_TYPE_GQUOTA,	"grpquota" }, \
 	{ XFS_SCRUB_TYPE_PQUOTA,	"prjquota" }, \
-	{ XFS_SCRUB_TYPE_FSCOUNTERS,	"fscounters" }
+	{ XFS_SCRUB_TYPE_FSCOUNTERS,	"fscounters" }, \
+	{ XFS_SCRUB_TYPE_QUOTACHECK,	"quotacheck" }
 
 #define XFS_SCRUB_FLAG_STRINGS \
 	{ XFS_SCRUB_IFLAG_REPAIR,		"repair" }, \
@@ -307,6 +311,29 @@ DEFINE_EVENT(xchk_fblock_error_class, name, \
 
 DEFINE_SCRUB_FBLOCK_ERROR_EVENT(xchk_fblock_error);
 DEFINE_SCRUB_FBLOCK_ERROR_EVENT(xchk_fblock_warning);
+
+TRACE_EVENT(xchk_qcheck_error,
+	TP_PROTO(struct xfs_scrub *sc, xfs_dqtype_t dqtype, xfs_dqid_t id,
+		 void *ret_ip),
+	TP_ARGS(sc, dqtype, id, ret_ip),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_dqtype_t, dqtype)
+		__field(xfs_dqid_t, id)
+		__field(void *, ret_ip)
+	),
+	TP_fast_assign(
+		__entry->dev = sc->mp->m_super->s_dev;
+		__entry->dqtype = dqtype;
+		__entry->id = id;
+		__entry->ret_ip = ret_ip;
+	),
+	TP_printk("dev %d:%d dquot type %s id 0x%x ret_ip %pS",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __print_symbolic(__entry->dqtype, XFS_DQTYPE_STRINGS),
+		  __entry->id,
+		  __entry->ret_ip)
+);
 
 TRACE_EVENT(xchk_incomplete,
 	TP_PROTO(struct xfs_scrub *sc, void *ret_ip),
@@ -827,7 +854,51 @@ TRACE_EVENT(xchk_rtsum_record_free,
 		  __entry->log,
 		  __entry->pos,
 		  __entry->v)
+);
+
+DECLARE_EVENT_CLASS(xchk_iscan_class,
+	TP_PROTO(struct xfs_mount *mp, struct xchk_iscan *iscan),
+	TP_ARGS(mp, iscan),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, cursor)
+		__field(xfs_ino_t, visited)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->cursor = iscan->cursor_ino;
+		__entry->visited = iscan->__visited_ino;
+	),
+	TP_printk("dev %d:%d iscan cursor 0x%llx visited 0x%llx",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->cursor, __entry->visited)
 )
+#define DEFINE_ISCAN_EVENT(name) \
+DEFINE_EVENT(xchk_iscan_class, name, \
+	TP_PROTO(struct xfs_mount *mp, struct xchk_iscan *iscan), \
+	TP_ARGS(mp, iscan))
+DEFINE_ISCAN_EVENT(xchk_iscan_move_cursor);
+DEFINE_ISCAN_EVENT(xchk_iscan_visit);
+
+TRACE_EVENT(xchk_iscan_iget,
+	TP_PROTO(struct xfs_mount *mp, struct xchk_iscan *iscan, int error),
+	TP_ARGS(mp, iscan, error),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, cursor)
+		__field(xfs_ino_t, visited)
+		__field(int, error)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->cursor = iscan->cursor_ino;
+		__entry->visited = iscan->__visited_ino;
+		__entry->error = error;
+	),
+	TP_printk("dev %d:%d iscan cursor 0x%llx visited 0x%llx error %d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->cursor, __entry->visited, __entry->error)
+);
 
 /* repair tracepoints */
 #if IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR)
