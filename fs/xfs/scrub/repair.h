@@ -75,6 +75,7 @@ int xrep_setup_ag_rmapbt(struct xfs_scrub *sc);
 int xrep_setup_rtsummary(struct xfs_scrub *sc, unsigned int *resblks);
 int xrep_setup_xattr(struct xfs_scrub *sc);
 int xrep_setup_directory(struct xfs_scrub *sc);
+int xrep_setup_parent(struct xfs_scrub *sc);
 
 int xrep_xattr_reset_fork(struct xfs_scrub *sc, struct xfs_inode *ip);
 
@@ -260,6 +261,7 @@ xrep_setup_xattr(
 }
 
 #define xrep_setup_directory		xrep_setup_xattr
+#define xrep_setup_parent		xrep_setup_xattr
 
 #define xrep_revalidate_allocbt		(NULL)
 #define xrep_revalidate_iallocbt	(NULL)

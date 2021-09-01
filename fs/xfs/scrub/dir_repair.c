@@ -36,6 +36,7 @@
 #include "scrub/xfarray.h"
 #include "scrub/xfblob.h"
 #include "scrub/parent.h"
+#include "scrub/orphanage.h"
 
 /*
  * Directory Repair
@@ -101,6 +102,13 @@ xrep_directory_namebuf(
 	return sc->buf;
 }
 
+static inline struct xrep_orphanage_req *
+xrep_dir_orphanage_req(
+	struct xfs_scrub	*sc)
+{
+	return sc->buf + MAXNAMELEN + 1;
+}
+
 /* Set up for a directory repair. */
 int
 xrep_setup_directory(
@@ -109,16 +117,22 @@ xrep_setup_directory(
 	unsigned int		sz;
 	int			error;
 
+	error = xrep_orphanage_try_create(sc);
+	if (error)
+		return error;
+
 	error = xrep_tempfile_create(sc, S_IFDIR);
 	if (error)
 		return error;
 
 	/*
 	 * We need a buffer to hold a directory entry name while we're building
-	 * the new directory, and later for the da state when we're freeing the
-	 * old directory blocks.  We don't need both uses at the same time.
+	 * the new directory, later for the da state when we're freeing the old
+	 * directory blocks, and a request to move the directory to the
+	 * orphanage.  We don't need all three uses at the same time.
 	 */
-	sz = max_t(unsigned int, MAXNAMELEN + 1, sizeof(struct xfs_da_args));
+	sz = max_t(unsigned int, xrep_orphanage_req_sizeof(),
+			sizeof(struct xfs_da_args));
 	sc->buf = kvmalloc(sz,
 			GFP_KERNEL | __GFP_NOWARN | __GFP_RETRY_MAYFAIL);
 	if (!sc->buf)
@@ -1098,7 +1112,8 @@ xrep_directory_rebuild_tree(
  */
 STATIC int
 xrep_directory_find_parent(
-	struct xrep_dir		*rd)
+	struct xrep_dir		*rd,
+	bool			*move_orphanage)
 {
 	struct xfs_scrub	*sc = rd->sc;
 	xfs_ino_t		parent_ino;
@@ -1135,12 +1150,85 @@ xrep_directory_find_parent(
 	error = xrep_parent_scan(sc, &parent_ino);
 	if (error)
 		return error;
-	if (parent_ino == NULLFSINO)
-		return -EFSCORRUPTED;
+	if (parent_ino == NULLFSINO) {
+		/*
+		 * Temporarily assign the root dir as the parent; we'll move
+		 * this to the orphanage after swapping the dir contents.
+		 */
+		*move_orphanage = true;
+		rd->parent_ino = sc->mp->m_sb.sb_rootino;
+		return 0;
+	}
 
 foundit:
 	rd->parent_ino = parent_ino;
 	return 0;
+}
+
+/*
+ * Move the current file to the orphanage.  Caller must not hold any inode
+ * locks.  Upon return, the scrub state will reflect the transaction, ijoin,
+ * and inode lock states.
+ */
+STATIC int
+xrep_dir_move_to_orphanage(
+	struct xfs_scrub	*sc)
+{
+	struct xrep_orphanage_req *orph = xrep_dir_orphanage_req(sc);
+	unsigned char		*namebuf = xrep_directory_namebuf(sc);
+	int			error;
+
+	/* No orphanage?  We can't fix this. */
+	if (!sc->orphanage)
+		return -EFSCORRUPTED;
+
+	/*
+	 * If we can take the orphanage's iolock then we're ready to move.
+	 *
+	 * If we can't, release the iolock on the child, and then try to iolock
+	 * the orphanage and child at the same time.  Use trylock for the
+	 * second lock so that we don't ABBA deadlock the system.
+	 */
+	if (!xrep_orphanage_ilock_nowait(sc, XFS_IOLOCK_EXCL)) {
+		xfs_ino_t	orig_parent, new_parent;
+
+		orig_parent = xrep_dotdot_lookup(sc);
+
+		xchk_iunlock(sc, sc->ilock_flags);
+		error = xrep_orphanage_iolock_two(sc);
+		if (error)
+			return error;
+
+		/*
+		 * If the parent changed or the child was unlinked while the
+		 * child directory was unlocked, we don't need to move the
+		 * child to the orphanage after all.
+		 */
+		new_parent = xrep_dotdot_lookup(sc);
+		if (orig_parent != new_parent || VFS_I(sc->ip)->i_nlink == 0)
+			return 0;
+	}
+
+	/*
+	 * Move the directory to the orphanage, and let scrub teardown unlock
+	 * everything for us.
+	 */
+	xrep_orphanage_compute_blkres(sc, orph);
+
+	error = xrep_orphanage_compute_name(orph, namebuf);
+	if (error)
+		return error;
+
+	error = xfs_trans_reserve_more(sc->tp,
+			orph->orphanage_blkres + orph->child_blkres, 0);
+	if (error)
+		return error;
+
+	error = xrep_orphanage_ilock_resv_quota(orph);
+	if (error)
+		return error;
+
+	return xrep_orphanage_adopt(orph);
 }
 
 /*
@@ -1163,6 +1251,7 @@ xrep_directory(
 		.parent_ino	= NULLFSINO,
 		.new_nlink	= 2,
 	};
+	bool			move_orphanage = false;
 	int			error;
 
 	/* Set up some storage */
@@ -1186,7 +1275,7 @@ xrep_directory(
 	xchk_iunlock(sc, XFS_MMAPLOCK_EXCL);
 
 	/* Figure out who is going to be the parent of this directory. */
-	error = xrep_directory_find_parent(&rd);
+	error = xrep_directory_find_parent(&rd, &move_orphanage);
 	if (error)
 		goto out_names;
 
@@ -1216,7 +1305,25 @@ xrep_directory(
 	xchk_iunlock(sc, XFS_ILOCK_EXCL);
 	xrep_tempfile_iunlock(sc, XFS_ILOCK_EXCL);
 
-	return xrep_directory_rebuild_tree(&rd);
+	error = xrep_directory_rebuild_tree(&rd);
+	if (error || !move_orphanage)
+		return error;
+
+	/*
+	 * We hold ILOCK_EXCL on both the directory and the tempdir after a
+	 * successful rebuild.  Before we can move the directory to the
+	 * orphanage, we must roll to a clean unjoined transaction and drop the
+	 * ILOCKs on the dir and the temp dir.  We still hold IOLOCK_EXCL on
+	 * the dir, so nobody will be able to access it in the mean time.
+	 */
+	error = xfs_trans_roll(&sc->tp);
+	if (error)
+		return error;
+
+	xchk_iunlock(sc, XFS_ILOCK_EXCL);
+	xrep_tempfile_iunlock(sc, XFS_ILOCK_EXCL);
+
+	return xrep_dir_move_to_orphanage(sc);
 
 out_names:
 	xfblob_destroy(rd.dir_names);
