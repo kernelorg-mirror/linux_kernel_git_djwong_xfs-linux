@@ -66,4 +66,11 @@ xchk_iscan_mark_locked(struct xchk_iscan *iscan, struct xfs_inode *ip)
 	iscan->marked_ino = ip->i_ino;
 }
 
+/* Decide if this inode was previously scanned. */
+static inline bool
+xchk_iscan_marked(struct xchk_iscan *iscan, struct xfs_inode *ip)
+{
+	return iscan->marked_ino >= ip->i_ino;
+}
+
 #endif /* __XFS_SCRUB_ISCAN_H__ */
