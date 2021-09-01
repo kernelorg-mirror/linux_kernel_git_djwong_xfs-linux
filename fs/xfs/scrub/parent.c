@@ -282,7 +282,7 @@ check_nlink:
 out_unlock:
 	xfs_iunlock(dp, XFS_IOLOCK_SHARED);
 out_rele:
-	xfs_irele(dp);
+	xchk_irele(sc, dp);
 	return error;
 }
 

@@ -74,11 +74,13 @@ xfs_bulkstat_one_int(
 	struct xfs_inode	*ip;		/* incore inode pointer */
 	struct inode		*inode;
 	struct xfs_bulkstat	*buf = bc->buf;
+	int			flags = XFS_IGET_UNTRUSTED;
 	int			error = -EINVAL;
 
-	error = xfs_iget(mp, tp, ino,
-			 (XFS_IGET_DONTCACHE | XFS_IGET_UNTRUSTED),
-			 XFS_ILOCK_SHARED, &ip);
+	if (!(bc->breq->flags & XFS_IBULK_RETAIN_INODES))
+		flags |= XFS_IGET_DONTCACHE;
+
+	error = xfs_iget(mp, tp, ino, flags, XFS_ILOCK_SHARED, &ip);
 	if (error == -ENOENT || error == -EINVAL)
 		goto out_advance;
 	if (error)

@@ -472,7 +472,7 @@ xqcheck_collect_counts(
 			break;
 
 		ret = xqcheck_inode(xqc, ip);
-		xfs_irele(ip);
+		xchk_irele(sc, ip);
 		if (ret)
 			break;
 
