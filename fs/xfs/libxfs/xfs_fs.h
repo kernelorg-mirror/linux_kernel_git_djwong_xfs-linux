@@ -502,9 +502,13 @@ struct xfs_bulk_ireq {
  */
 #define XFS_BULK_IREQ_METADIR	(1 << 2)
 
+/* Don't mark inodes DONTCACHE */
+#define XFS_BULK_IREQ_RETAIN_INODES	(1 << 3)
+
 #define XFS_BULK_IREQ_FLAGS_ALL	(XFS_BULK_IREQ_AGNO | \
 				 XFS_BULK_IREQ_SPECIAL | \
-				 XFS_BULK_IREQ_METADIR)
+				 XFS_BULK_IREQ_METADIR | \
+				 XFS_BULK_IREQ_RETAIN_INODES)
 
 /* Operate on the root directory inode. */
 #define XFS_BULK_IREQ_SPECIAL_ROOT	(1)
@@ -783,7 +787,11 @@ struct xfs_scrub_metadata {
  */
 #define XFS_SCRUB_OFLAG_NO_REPAIR_NEEDED (1 << 7)
 
-#define XFS_SCRUB_FLAGS_IN	(XFS_SCRUB_IFLAG_REPAIR)
+/* i: Don't mark inodes DONTCACHE at the end. */
+#define XFS_SCRUB_IFLAG_RETAIN_INODES	(1 << 9)
+
+#define XFS_SCRUB_FLAGS_IN	(XFS_SCRUB_IFLAG_REPAIR | \
+				 XFS_SCRUB_IFLAG_RETAIN_INODES)
 #define XFS_SCRUB_FLAGS_OUT	(XFS_SCRUB_OFLAG_CORRUPT | \
 				 XFS_SCRUB_OFLAG_PREEN | \
 				 XFS_SCRUB_OFLAG_XFAIL | \
@@ -812,7 +820,10 @@ struct xfs_scrub_vec_head {
 	struct xfs_scrub_vec svh_vecs[0];
 };
 
-#define XFS_SCRUB_VEC_FLAGS_ALL		(0)
+/* i: Don't mark inodes DONTCACHE at the end. */
+#define XFS_SCRUB_VEC_IFLAG_RETAIN_INODES	(1 << 0)
+
+#define XFS_SCRUB_VEC_FLAGS_ALL		(XFS_SCRUB_VEC_IFLAG_RETAIN_INODES)
 
 static inline size_t sizeof_xfs_scrub_vec(unsigned int nr)
 {
