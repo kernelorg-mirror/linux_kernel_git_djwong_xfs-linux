@@ -336,7 +336,7 @@ xrep_refc_find_refcounts(
 			break;
 		sbno = cbno = rrm.startblock;
 		while (have && rrm.startblock == sbno) {
-			error = xfarray_insert_anywhere(rmap_bag, &rrm);
+			error = xfarray_store_anywhere(rmap_bag, &rrm);
 			if (error)
 				goto out_bag;
 			stack_sz++;
@@ -383,7 +383,7 @@ xrep_refc_find_refcounts(
 			if (error)
 				goto out_bag;
 			while (have && rrm.startblock == nbno) {
-				error = xfarray_insert_anywhere(rmap_bag,
+				error = xfarray_store_anywhere(rmap_bag,
 						&rrm);
 				if (error)
 					goto out_bag;
@@ -449,7 +449,7 @@ xrep_refc_get_record(
 {
 	struct xrep_refc		*rr = priv;
 
-	return xfarray_iter_get(rr->refcount_records, &rr->iter,
+	return xfarray_load_next(rr->refcount_records, &rr->iter,
 			&cur->bc_rec.rc);
 }
 
