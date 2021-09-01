@@ -94,6 +94,12 @@ uint32_t xfs_btree_magic(int crc, xfs_btnum_t btnum);
 
 #define	XFS_BTREE_MAXLEVELS	9	/* max of all btrees */
 
+/*
+ * The btree cursor zone hands out cursors that can handle up to this many
+ * levels.  This is the known maximum for all btree types.
+ */
+#define XFS_BTREE_CUR_ZONE_MAXLEVELS	(9)
+
 struct xfs_btree_ops {
 	/* size of the key and record structures */
 	size_t	key_len;
