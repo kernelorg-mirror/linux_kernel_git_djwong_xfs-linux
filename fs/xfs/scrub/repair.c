@@ -529,7 +529,10 @@ xrep_newbt_alloc_blocks(
 			.resv		= xnr->resv,
 		};
 
-		error = xfs_alloc_vextent(&args);
+		if (xnr->alloc_vextent)
+			error = xnr->alloc_vextent(sc, &args);
+		else
+			error = xfs_alloc_vextent(&args);
 		if (error)
 			return error;
 		if (args.fsbno == NULLFSBLOCK)
@@ -857,7 +860,7 @@ xrep_bload_estimate_slack(
 int
 xrep_fix_freelist(
 	struct xfs_scrub	*sc,
-	bool			can_shrink)
+	int			alloc_flags)
 {
 	struct xfs_alloc_arg	args = {0};
 
@@ -867,8 +870,7 @@ xrep_fix_freelist(
 	args.alignment = 1;
 	args.pag = sc->sa.pag;
 
-	return xfs_alloc_fix_freelist(&args,
-			can_shrink ? 0 : XFS_ALLOC_FLAG_NOSHRINK);
+	return xfs_alloc_fix_freelist(&args, alloc_flags);
 }
 
 /*
@@ -882,7 +884,7 @@ xrep_put_freelist(
 	int			error;
 
 	/* Make sure there's space on the freelist. */
-	error = xrep_fix_freelist(sc, true);
+	error = xrep_fix_freelist(sc, 0);
 	if (error)
 		return error;
 
@@ -1012,6 +1014,14 @@ xrep_reap_ag_extent(
 
 	if (rs->resv == XFS_AG_RESV_AGFL) {
 		error = xrep_put_freelist(sc, agbno);
+	} else if (rs->resv == XFS_AG_RESV_RMAPBT) {
+		/*
+		 * rmapbt blocks are counted as free space, so we have to pass
+		 * XFS_AG_RESV_RMAPBT in the freeing operation to avoid
+		 * decreasing fdblocks incorrectly.
+		 */
+		error = xfs_free_extent(sc->tp, fsbno, aglen, rs->oinfo,
+				rs->resv);
 	} else {
 		/*
 		 * Use deferred frees to get rid of the old btree blocks to try
