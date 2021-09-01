@@ -24,6 +24,9 @@ struct xqcheck_dquot {
 /* Already checked this dquot */
 #define XQCHECK_DQUOT_COMPARE_SCANNED	(1U << 0)
 
+/* Already repaired this dquot */
+#define XQCHECK_DQUOT_REPAIR_SCANNED	(1U << 1)
+
 /* Live quotacheck control structure. */
 struct xqcheck {
 	struct xfs_scrub	*sc;
