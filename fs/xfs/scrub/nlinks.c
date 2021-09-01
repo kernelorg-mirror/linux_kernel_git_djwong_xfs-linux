@@ -53,6 +53,13 @@ int
 xchk_setup_nlinks(
 	struct xfs_scrub	*sc)
 {
+	int			error;
+
+	if (xchk_could_repair(sc)) {
+		error = xrep_setup_nlinks(sc);
+		if (error)
+			return error;
+	}
 	sc->buf = kmem_zalloc(sizeof(struct xchk_nlink_ctrs),
 			KM_NOFS | KM_MAYFAIL);
 	if (!sc->buf)
