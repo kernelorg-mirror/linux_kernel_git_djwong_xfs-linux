@@ -559,6 +559,9 @@ typedef struct xfs_extent {
 	xfs_extlen_t	ext_len;
 } xfs_extent_t;
 
+/* This EFI extent describes a realtime extent. */
+#define XFS_EFI_REALTIME_EXT	(1U << 31)
+
 /*
  * Since an xfs_extent_t has types (start:64, len: 32)
  * there are different alignments on 32 bit and 64 bit kernels.
