@@ -763,7 +763,7 @@ xrep_rmap_walk_cowblocks(
 	struct xfs_refcount_irec	refc;
 	xfs_fsblock_t			fsbno;
 
-	xfs_refcount_btrec_to_irec(rec, &refc);
+	xfs_refcount_btrec_to_irec(cur, rec, &refc);
 	if (refc.rc_refcount != 1)
 		return -EFSCORRUPTED;
 
