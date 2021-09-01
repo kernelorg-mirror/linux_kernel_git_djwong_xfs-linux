@@ -897,6 +897,9 @@ xfs_bulk_ireq_setup(
 	if (hdr->flags & XFS_BULK_IREQ_METADIR)
 		breq->flags |= XFS_IWALK_METADIR;
 
+	if (hdr->flags & XFS_BULK_IREQ_RETAIN_INODES)
+		breq->flags |= XFS_IWALK_RETAIN_INODES;
+
 	return 0;
 }
 

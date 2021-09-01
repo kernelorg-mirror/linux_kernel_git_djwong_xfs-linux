@@ -172,7 +172,7 @@ xchk_teardown(
 	if (sc->ip) {
 		if (sc->ilock_flags)
 			xchk_iunlock(sc, sc->ilock_flags);
-		xfs_irele(sc->ip);
+		xchk_irele(sc, sc->ip);
 		sc->ip = NULL;
 	}
 	if (sc->flags & XREP_ATOMIC_EXCHANGE) {
@@ -734,7 +734,8 @@ xfs_scrubv_metadata(
 		 * consider setting dontcache at the end.
 		 */
 		if (v->sv_type < XFS_SCRUB_TYPE_NR &&
-		    meta_scrub_ops[v->sv_type].type == ST_INODE)
+		    meta_scrub_ops[v->sv_type].type == ST_INODE &&
+		    !(vhead->svh_flags & XFS_SCRUB_VEC_IFLAG_RETAIN_INODES))
 			set_dontcache = true;
 
 		trace_xchk_scrubv_item(mp, vhead, v);
@@ -751,7 +752,7 @@ xfs_scrubv_metadata(
 		if (ip && (VFS_I(ip)->i_generation != vhead->svh_gen ||
 			   (xfs_is_metadata_inode(ip) &&
 			    !S_ISDIR(VFS_I(ip)->i_mode)))) {
-			xfs_irele(ip);
+			__xchk_irele(ip, set_dontcache);
 			ip = NULL;
 		}
 	}
@@ -806,8 +807,6 @@ xfs_scrubv_metadata(
 	 * If we're holding the only reference to this inode and the scan was
 	 * clean, mark it dontcache so that we don't pollute the cache.
 	 */
-	if (set_dontcache && atomic_read(&VFS_I(ip)->i_count) == 1)
-		d_mark_dontcache(VFS_I(ip));
-	xfs_irele(ip);
+	__xchk_irele(ip, set_dontcache);
 	return error;
 }

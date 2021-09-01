@@ -946,7 +946,7 @@ end_agscan:
 			break;
 
 		error = xrep_rmap_scan_inode(rr, ip);
-		xfs_irele(ip);
+		xchk_irele(sc, ip);
 		if (error)
 			break;
 

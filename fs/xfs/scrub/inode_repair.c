@@ -1182,8 +1182,7 @@ xrep_dinode_core(
 		return error;
 
 	/* ...and reload it? */
-	error = xfs_iget(sc->mp, sc->tp, ino,
-			XFS_IGET_UNTRUSTED | XFS_IGET_DONTCACHE, 0, &sc->ip);
+	error = xfs_iget(sc->mp, sc->tp, ino, XFS_IGET_UNTRUSTED, 0, &sc->ip);
 	if (error)
 		return error;
 

@@ -215,12 +215,12 @@ xrep_directory_salvage_entry(
 
 	/* Don't mix metadata and regular directory trees. */
 	if (xfs_is_metadata_inode(ip) ^ xfs_is_metadata_inode(rd->sc->ip)) {
-		xfs_irele(ip);
+		xchk_irele(rd->sc, ip);
 		return 0;
 	}
 
 	entry.ftype = xfs_mode_to_ftype(VFS_I(ip)->i_mode);
-	xfs_irele(ip);
+	xchk_irele(rd->sc, ip);
 
 	/* Remember this for later. */
 	error = xfblob_store(rd->dir_names, &entry.name_cookie, name,

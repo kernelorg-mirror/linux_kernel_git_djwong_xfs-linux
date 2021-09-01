@@ -565,7 +565,7 @@ xrep_rtrmap_find_rmaps(
 			break;
 
 		error = xrep_rtrmap_scan_inode(rr, ip);
-		xfs_irele(ip);
+		xchk_irele(sc, ip);
 		if (error)
 			break;
 

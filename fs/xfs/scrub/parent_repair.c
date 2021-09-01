@@ -298,7 +298,7 @@ xrep_parent_confirm(
 
 	*parent_ino = fpi.found_parent;
 out_rele:
-	xfs_irele(fpi.dp);
+	xchk_irele(sc, fpi.dp);
 	return error;
 }
 
@@ -332,7 +332,7 @@ xrep_parent_from_dcache(
 		ret = XFS_I(pip)->i_ino;
 	}
 
-	xfs_irele(XFS_I(pip));
+	xchk_irele(sc, XFS_I(pip));
 
 out_dput:
 	dput(dentry);
@@ -376,7 +376,7 @@ xrep_parent_scan(
 		if (S_ISDIR(VFS_I(fpi.dp)->i_mode))
 			ret = xrep_findparent_walk_directory(&fpi);
 		xchk_iscan_mark_visited(&iscan, fpi.dp);
-		xfs_irele(fpi.dp);
+		xchk_irele(sc, fpi.dp);
 		if (ret)
 			break;
 
