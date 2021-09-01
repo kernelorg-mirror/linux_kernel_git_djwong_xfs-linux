@@ -41,6 +41,8 @@ int xrep_init_btblock(struct xfs_scrub *sc, xfs_fsblock_t fsb,
 		struct xfs_buf **bpp, xfs_btnum_t btnum,
 		const struct xfs_buf_ops *ops);
 int xrep_setup_tempfile(struct xfs_scrub *sc, uint16_t mode);
+int xrep_setup_orphanage(struct xfs_scrub *sc);
+int xrep_move_to_orphanage(struct xfs_scrub *sc);
 int xrep_fallocate(struct xfs_scrub *sc, xfs_fileoff_t off, xfs_filblks_t len);
 
 typedef int (*xrep_setfile_getbuf_fn)(struct xfs_scrub *sc,
@@ -76,6 +78,7 @@ int xrep_bmap(struct xfs_scrub *sc, int whichfork, bool allow_unwritten);
 int xrep_metadata_inode_forks(struct xfs_scrub *sc);
 int xrep_rmapbt_setup(struct xfs_scrub *sc);
 int xrep_directory_setup(struct xfs_scrub *sc);
+int xrep_parent_setup(struct xfs_scrub *sc);
 int xrep_xattr_reset_fork(struct xfs_scrub *sc, struct xfs_inode *ip);
 
 void xrep_ag_btcur_init(struct xfs_scrub *sc, struct xchk_ag *sa);
@@ -246,6 +249,13 @@ xrep_rmapbt_setup(
 
 static inline int
 xrep_directory_setup(
+	struct xfs_scrub	*sc)
+{
+	return xchk_setup_inode_contents(sc, 0);
+}
+
+static inline int
+xrep_parent_setup(
 	struct xfs_scrub	*sc)
 {
 	return xchk_setup_inode_contents(sc, 0);

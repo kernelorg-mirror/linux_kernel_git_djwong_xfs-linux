@@ -95,6 +95,22 @@ xrep_directory_setup(
 	unsigned int		sz;
 	int			error;
 
+	error = xrep_setup_orphanage(sc);
+	switch (error) {
+	case 0:
+	case -ENOENT:
+	case -ENOTDIR:
+	case -ENOSPC:
+		/*
+		 * If the orphanage can't be found or isn't a directory, we'll
+		 * keep going, but we won't be able to attach the file to the
+		 * orphanage if we can't find the parent.
+		 */
+		break;
+	default:
+		return error;
+	}
+
 	error = xrep_setup_tempfile(sc, S_IFDIR);
 	if (error)
 		return error;
@@ -1083,7 +1099,8 @@ xrep_directory_rebuild_tree(
  */
 STATIC int
 xrep_directory_find_parent(
-	struct xrep_dir		*rd)
+	struct xrep_dir		*rd,
+	bool			*move_orphanage)
 {
 	struct xfs_scrub	*sc = rd->sc;
 	xfs_ino_t		parent_ino;
@@ -1120,8 +1137,15 @@ xrep_directory_find_parent(
 	error = xrep_parent_scan(sc, &parent_ino);
 	if (error)
 		return error;
-	if (parent_ino == NULLFSINO)
-		return -EFSCORRUPTED;
+	if (parent_ino == NULLFSINO) {
+		/*
+		 * Temporarily assign the root dir as the parent; we'll move
+		 * this to the orphanage after swapping the dir contents.
+		 */
+		*move_orphanage = true;
+		rd->parent_ino = sc->mp->m_sb.sb_rootino;
+		return 0;
+	}
 
 foundit:
 	rd->parent_ino = parent_ino;
@@ -1148,6 +1172,7 @@ xrep_directory(
 		.parent_ino	= NULLFSINO,
 		.new_nlink	= 2,
 	};
+	bool			move_orphanage = false;
 	int			error;
 
 	/* Set up some storage */
@@ -1172,7 +1197,7 @@ xrep_directory(
 	sc->ilock_flags &= ~(XFS_MMAPLOCK_EXCL | XFS_ILOCK_EXCL);
 
 	/* Figure out who is going to be the parent of this directory. */
-	error = xrep_directory_find_parent(&rd);
+	error = xrep_directory_find_parent(&rd, &move_orphanage);
 	if (error)
 		goto out_names;
 
@@ -1207,7 +1232,26 @@ xrep_directory(
 	sc->ilock_flags &= ~XFS_ILOCK_EXCL;
 	sc->temp_ilock_flags &= ~XFS_ILOCK_EXCL;
 
-	return xrep_directory_rebuild_tree(&rd);
+	error = xrep_directory_rebuild_tree(&rd);
+	if (error || !move_orphanage)
+		return error;
+
+	/*
+	 * We hold ILOCK_EXCL on both the directory and the tempdir after a
+	 * successful rebuild.  Before we can move the directory to the
+	 * orphanage, we must roll to a clean unjoined transaction and drop the
+	 * ILOCKs on the dir and the temp dir.  We still hold IOLOCK_EXCL on
+	 * the dir, so nobody will be able to access it in the mean time.
+	 */
+	error = xfs_trans_roll(&sc->tp);
+	if (error)
+		return error;
+	xfs_iunlock(sc->ip, XFS_ILOCK_EXCL);
+	sc->ilock_flags &= ~XFS_ILOCK_EXCL;
+	xfs_iunlock(sc->tempip, XFS_ILOCK_EXCL);
+	sc->temp_ilock_flags &= ~XFS_ILOCK_EXCL;
+
+	return xrep_move_to_orphanage(sc);
 
 out_names:
 	xfblob_destroy(rd.dir_names);

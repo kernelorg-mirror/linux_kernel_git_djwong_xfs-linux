@@ -17,12 +17,16 @@
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/parent.h"
+#include "scrub/repair.h"
 
 /* Set us up to scrub parents. */
 int
 xchk_setup_parent(
 	struct xfs_scrub	*sc)
 {
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR)
+		return xrep_parent_setup(sc);
+
 	return xchk_setup_inode_contents(sc, 0);
 }
 

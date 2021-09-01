@@ -360,6 +360,32 @@ xrep_parent_scan(
 	return 0;
 }
 
+/* Set up for a parent repair. */
+int
+xrep_parent_setup(
+	struct xfs_scrub	*sc)
+{
+	int			error;
+
+	error = xrep_setup_orphanage(sc);
+	switch (error) {
+	case 0:
+	case -ENOENT:
+	case -ENOTDIR:
+	case -ENOSPC:
+		/*
+		 * If the orphanage can't be found or isn't a directory, we'll
+		 * keep going, but we won't be able to attach the file to the
+		 * orphanage if we can't find any parents.
+		 */
+		break;
+	default:
+		return error;
+	}
+
+	return xchk_setup_inode_contents(sc, 0);
+}
+
 /*
  * Repairing The Directory Parent Pointer
  * ======================================
@@ -422,7 +448,7 @@ xrep_parent(
 	if (error)
 		return error;
 	if (parent_ino == NULLFSINO)
-		return -EFSCORRUPTED;
+		return xrep_move_to_orphanage(sc);
 
 reset_parent:
 	/* If the '..' entry is already set to the parent inode, we're done. */
