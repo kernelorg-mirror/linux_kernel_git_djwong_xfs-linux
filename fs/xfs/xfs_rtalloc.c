@@ -927,6 +927,8 @@ xfs_growfsrt_imeta_create(
 
 	if (path == &XFS_IMETA_RTRMAPBT) {
 		error = xfs_rtrmapbt_create(&tp, &ic, &ip);
+	} else if (path == &XFS_IMETA_RTREFCOUNTBT) {
+		error = xfs_rtrefcountbt_create(&tp, &ic, &ip);
 	} else {
 		ASSERT(0);
 		error = -EIO;
@@ -1058,7 +1060,10 @@ xfs_growfs_rt(
 		return -EINVAL;
 
 	/* Unsupported realtime features. */
-	if ((!xfs_has_metadir(mp) && xfs_has_rmapbt(mp)) || xfs_has_reflink(mp))
+	if (!xfs_has_metadir(mp) && (xfs_has_rmapbt(mp) || xfs_has_reflink(mp)))
+		return -EOPNOTSUPP;
+
+	if (xfs_has_reflink(mp) && in->extsize != 1)
 		return -EOPNOTSUPP;
 
 	nrblocks = in->newblocks;
@@ -1104,6 +1109,14 @@ xfs_growfs_rt(
 	if (xfs_has_rmapbt(mp) && !mp->m_rrmapip) {
 		error = xfs_growfsrt_imeta_create(mp, &XFS_IMETA_RTRMAPBT,
 				&mp->m_rrmapip);
+		if (error)
+			return error;
+	}
+
+	/* Add the realtime refcount inode. */
+	if (xfs_has_reflink(mp) && !mp->m_rrefcountip) {
+		error = xfs_growfsrt_imeta_create(mp, &XFS_IMETA_RTREFCOUNTBT,
+				&mp->m_rrefcountip);
 		if (error)
 			return error;
 	}
