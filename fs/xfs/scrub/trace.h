@@ -21,6 +21,7 @@ struct xfs_scrub;
 struct xfile;
 struct xfarray;
 struct xchk_iscan;
+struct xchk_nlink;
 
 /*
  * ftrace's __print_symbolic requires that all enum values be wrapped in the
@@ -88,7 +89,8 @@ TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_FSCOUNTERS);
 	{ XFS_SCRUB_TYPE_GQUOTA,	"grpquota" }, \
 	{ XFS_SCRUB_TYPE_PQUOTA,	"prjquota" }, \
 	{ XFS_SCRUB_TYPE_FSCOUNTERS,	"fscounters" }, \
-	{ XFS_SCRUB_TYPE_QUOTACHECK,	"quotacheck" }
+	{ XFS_SCRUB_TYPE_QUOTACHECK,	"quotacheck" }, \
+	{ XFS_SCRUB_TYPE_NLINKS,	"nlinks" }
 
 #define XFS_SCRUB_FLAG_STRINGS \
 	{ XFS_SCRUB_IFLAG_REPAIR,		"repair" }, \
@@ -902,6 +904,136 @@ TRACE_EVENT(xchk_iscan_iget,
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->cursor, __entry->visited, __entry->error)
 );
+
+TRACE_EVENT(xchk_nlinks_walk_dir,
+	TP_PROTO(struct xfs_mount *mp, struct xfs_inode *dp,
+		 bool parent_to_child, xfs_ino_t ino, const char *name,
+		 unsigned int namelen),
+	TP_ARGS(mp, dp, parent_to_child, ino, name, namelen),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, dir)
+		__field(bool, parent)
+		__field(xfs_ino_t, ino)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, namelen)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->dir = dp->i_ino;
+		__entry->parent = parent_to_child;
+		__entry->ino = ino;
+		__entry->namelen = namelen;
+		memcpy(__get_str(name), name, namelen);
+	),
+	TP_printk("dev %d:%d dir 0x%llx parent_to_child? %d ino 0x%llx name '%.*s'",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->dir,
+		  __entry->parent,
+		  __entry->ino,
+		  __entry->namelen,
+		  __get_str(name))
+);
+
+TRACE_EVENT(xchk_nlinks_metafile,
+	TP_PROTO(struct xfs_mount *mp, xfs_ino_t ino),
+	TP_ARGS(mp, ino),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->ino = ino;
+	),
+	TP_printk("dev %d:%d ino 0x%llx",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino)
+);
+
+TRACE_EVENT(xchk_nlinks_live_update,
+	TP_PROTO(struct xfs_mount *mp, struct xfs_inode *dp,
+		 bool parent_to_child, xfs_ino_t ino, int delta),
+	TP_ARGS(mp, dp, parent_to_child, ino, delta),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, dir)
+		__field(bool, parent)
+		__field(xfs_ino_t, ino)
+		__field(int, delta)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->dir = dp ? dp->i_ino : NULLFSINO;
+		__entry->parent = parent_to_child;
+		__entry->ino = ino;
+		__entry->delta = delta;
+	),
+	TP_printk("dev %d:%d dir 0x%llx parent_to_child? %d ino 0x%llx nlink_delta %d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->dir,
+		  __entry->parent,
+		  __entry->ino,
+		  __entry->delta)
+);
+
+TRACE_EVENT(xchk_nlinks_check_zero,
+	TP_PROTO(struct xfs_mount *mp, xfs_ino_t ino,
+		 const struct xchk_nlink *live),
+	TP_ARGS(mp, ino, live),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(xfs_nlink_t, parent)
+		__field(xfs_nlink_t, child)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->ino = ino;
+		__entry->parent = live->parent;
+		__entry->child = live->child;
+	),
+	TP_printk("dev %d:%d ino 0x%llx parent_links %u child_links %u",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->parent,
+		  __entry->child)
+);
+
+DECLARE_EVENT_CLASS(xchk_nlink_diff_class,
+	TP_PROTO(struct xfs_mount *mp, struct xfs_inode *ip,
+		 const struct xchk_nlink *live),
+	TP_ARGS(mp, ip, live),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(umode_t, mode)
+		__field(xfs_nlink_t, nlink)
+		__field(xfs_nlink_t, parent)
+		__field(xfs_nlink_t, child)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->mode = VFS_I(ip)->i_mode;
+		__entry->nlink = VFS_I(ip)->i_nlink;
+		__entry->parent = live->parent;
+		__entry->child = live->child;
+	),
+	TP_printk("dev %d:%d ino 0x%llx dir? %d nlink %u parent_links %u child_links %u",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  !!S_ISDIR(__entry->mode),
+		  __entry->nlink,
+		  __entry->parent,
+		  __entry->child)
+);
+#define DEFINE_SCRUB_NLINK_DIFF_EVENT(name) \
+DEFINE_EVENT(xchk_nlink_diff_class, name, \
+	TP_PROTO(struct xfs_mount *mp, struct xfs_inode *ip, \
+		 const struct xchk_nlink *live), \
+	TP_ARGS(mp, ip, live))
+DEFINE_SCRUB_NLINK_DIFF_EVENT(xchk_nlinks_compare_inode);
 
 /* repair tracepoints */
 #if IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR)
