@@ -74,5 +74,6 @@ xfs_rtrmap_ptr_addr(
 }
 
 int __init xfs_rtrmapbt_create_cursor_cache(void);
+xfs_filblks_t xfs_rtrmapbt_calc_reserves(struct xfs_mount *mp);
 
 #endif	/* __XFS_RTRMAP_BTREE_H__ */
