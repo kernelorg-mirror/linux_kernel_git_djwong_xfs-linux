@@ -1115,6 +1115,12 @@ xrep_directory_find_parent(
 		return 0;
 	}
 
+	/* Does the VFS dcache have an answer for us? */
+	parent_ino = xrep_parent_from_dcache(sc);
+	error = xrep_parent_confirm(sc, &parent_ino);
+	if (!error && parent_ino != NULLFSINO)
+		goto foundit;
+
 	/*
 	 * Try to look up '..'; if it seems plausible, go with it.  Check that
 	 * the parent directory actually points to this directory.  If so, we
