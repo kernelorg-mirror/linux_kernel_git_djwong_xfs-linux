@@ -279,6 +279,7 @@ xfs_btree_cur_sizeof(unsigned int nlevels)
  * is dynamically allocated and must be freed when the cursor is deleted.
  */
 #define XFS_BTREE_STAGING		(1<<5)
+#define XFS_BTREE_IROOT_RECORDS		(1<<6)	/* iroot can store records */
 
 #define	XFS_BTREE_NOERROR	0
 #define	XFS_BTREE_ERROR		1
