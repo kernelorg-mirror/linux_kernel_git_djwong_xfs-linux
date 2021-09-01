@@ -13,6 +13,7 @@
 #include "xfs_rmap.h"
 #include "xfs_refcount.h"
 #include "xfs_inode.h"
+#include "xfs_rtalloc.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/btree.h"
@@ -181,7 +182,6 @@ xchk_rtrefcountbt_process_rmap_fragments(
 	 */
 	INIT_LIST_HEAD(&worklist);
 	rbno = NULLRTBLOCK;
-	nr = 1;
 
 	/* Make sure the fragments actually /are/ in bno order. */
 	bno = 0;
@@ -195,15 +195,14 @@ xchk_rtrefcountbt_process_rmap_fragments(
 	 * Find all the rmaps that start at or before the refc extent,
 	 * and put them on the worklist.
 	 */
+	nr = 0;
 	list_for_each_entry_safe(frag, n, &refchk->fragments, list) {
-		if (frag->rm.rm_startblock > refchk->bno)
-			goto done;
+		if (frag->rm.rm_startblock > refchk->bno || nr > target_nr)
+			break;
 		bno = frag->rm.rm_startblock + frag->rm.rm_blockcount;
 		if (bno < rbno)
 			rbno = bno;
 		list_move_tail(&frag->list, &worklist);
-		if (nr == target_nr)
-			break;
 		nr++;
 	}
 
@@ -340,7 +339,55 @@ xchk_rtrefcountbt_xref(
 
 struct xchk_rtrefcbt_records {
 	xfs_filblks_t			cow_blocks;
+	xfs_rtblock_t			next_rtbno;
 };
+
+STATIC int
+xchk_rtrefcountbt_rmap_check_gap(
+	struct xfs_btree_cur		*cur,
+	const struct xfs_rmap_irec	*rec,
+	void				*priv)
+{
+	xfs_rtblock_t			*next_bno = priv;
+
+	if (*next_bno != NULLRTBLOCK && rec->rm_startblock < *next_bno)
+		return -ECANCELED;
+
+	*next_bno = rec->rm_startblock + rec->rm_blockcount;
+	return 0;
+}
+
+/*
+ * Make sure that a gap in the reference count records does not correspond to
+ * overlapping records (i.e. shared extents) in the reverse mappings.
+ */
+static inline void
+xchk_rtrefcountbt_xref_gaps(
+	struct xfs_scrub	*sc,
+	struct xchk_rtrefcbt_records *rrc,
+	xfs_rtblock_t		bno)
+{
+	struct xfs_rmap_irec	low;
+	struct xfs_rmap_irec	high;
+	xfs_rtblock_t		next_bno = NULLRTBLOCK;
+	int			error;
+
+	if (bno <= rrc->next_rtbno || !sc->sr.rmap_cur ||
+            xchk_skip_xref(sc->sm))
+		return;
+
+	memset(&low, 0, sizeof(low));
+	low.rm_startblock = rrc->next_rtbno;
+	memset(&high, 0xFF, sizeof(high));
+	high.rm_startblock = bno - 1;
+
+	error = xfs_rmap_query_range(sc->sr.rmap_cur, &low, &high,
+			xchk_rtrefcountbt_rmap_check_gap, &next_bno);
+	if (error == -ECANCELED)
+		xchk_btree_xref_set_corrupt(sc, sc->sr.rmap_cur, 0);
+	else
+		xchk_should_check_xref(sc, &error, &sc->sr.rmap_cur);
+}
 
 /* Scrub a rtrefcountbt record. */
 STATIC int
@@ -387,6 +434,16 @@ xchk_rtrefcountbt_rec(
 
 	xchk_rtrefcountbt_xref(bs->sc, bno, len, refcount);
 
+	/*
+	 * If this is a record for a shared extent, check that all blocks
+	 * between the previous record and this one have at most one reverse
+	 * mapping.
+	 */
+	if (!has_cowflag) {
+		xchk_rtrefcountbt_xref_gaps(bs->sc, rrc, bno);
+		rrc->next_rtbno = bno + len;
+	}
+
 	return 0;
 }
 
@@ -432,6 +489,7 @@ xchk_rtrefcountbt(
 	struct xfs_owner_info	btree_oinfo;
 	struct xchk_rtrefcbt_records rrc = {
 		.cow_blocks	= 0,
+		.next_rtbno	= 0,
 	};
 	int			error;
 
@@ -441,6 +499,12 @@ xchk_rtrefcountbt(
 			&btree_oinfo, &rrc);
 	if (error)
 		goto out_unlock;
+
+	/*
+	 * Check that all blocks between the last refcount > 1 record and the
+	 * end of the rt volume have at most one reverse mapping.
+	 */
+	xchk_rtrefcountbt_xref_gaps(sc, &rrc, sc->mp->m_sb.sb_rblocks);
 
 	xchk_refcount_xref_rmap(sc, &btree_oinfo, rrc.cow_blocks);
 
