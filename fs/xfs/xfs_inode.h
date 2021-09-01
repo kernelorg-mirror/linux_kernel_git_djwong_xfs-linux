@@ -539,4 +539,26 @@ int xfs_icreate_dqalloc(const struct xfs_icreate_args *args,
 int xfs_file_cow_around(struct xfs_inode *ip, loff_t pos,
 		long long int count);
 
+/*
+ * Parameters for tracking bumplink and droplink operations.  The hook
+ * function arg parameter is one of these.
+ */
+enum xfs_nlink_delta_type {
+	XFS_PARENT_NLINK_DELTA,		/* parent pointing to child */
+	XFS_CHILD_NLINK_DELTA,		/* child pointing to parent */
+};
+
+struct xfs_nlink_delta_params {
+	struct xfs_inode	*dp;
+	xfs_ino_t		ino;
+	int			delta;
+};
+
+#ifdef CONFIG_XFS_LIVE_HOOKS
+void xfs_nlink_parent_delta(struct xfs_inode *dp, struct xfs_inode *ip,
+		int delta);
+#else
+# define xfs_nlink_parent_delta(dp, ip, delta)	((void)0)
+#endif /* CONFIG_XFS_LIVE_HOOKS */
+
 #endif	/* __XFS_INODE_H__ */

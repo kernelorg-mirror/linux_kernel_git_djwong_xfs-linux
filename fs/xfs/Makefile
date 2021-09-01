@@ -155,6 +155,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   ialloc.o \
 				   inode.o \
 				   iscan.o \
+				   nlinks.o \
 				   parent.o \
 				   refcount.o \
 				   rmap.o \

@@ -273,6 +273,9 @@ typedef struct xfs_mount {
 	 * while a repair freeze is in progress.
 	 */
 	struct mutex		m_scrub_freeze;
+
+	/* online file link count check stuff */
+	struct xfs_hook_chain	m_nlink_delta_hooks;
 } xfs_mount_t;
 
 #define M_IGEO(mp)		(&(mp)->m_ino_geo)
