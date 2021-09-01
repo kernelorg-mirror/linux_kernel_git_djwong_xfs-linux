@@ -44,6 +44,7 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_rmap_btree.h"
 #include "xfs_refcount_btree.h"
+#include "xfs_rtrmap_btree.h"
 
 #include <linux/magic.h>
 #include <linux/fs_context.h>
@@ -2026,6 +2027,9 @@ xfs_init_btree_caches(void)
 	if (error)
 		return error;
 	error = xfs_refcountbt_create_cursor_cache();
+	if (error)
+		return error;
+	error = xfs_rtrmapbt_create_cursor_cache();
 	if (error)
 		return error;
 
