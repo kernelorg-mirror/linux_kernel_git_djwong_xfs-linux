@@ -545,5 +545,8 @@ void xfs_nlink_parent_delta(struct xfs_inode *dp, struct xfs_inode *ip,
 void xfs_icreate_args_inherit(struct xfs_icreate_args *args, struct xfs_inode *dp,
 		struct user_namespace *mnt_userns, umode_t mode);
 void xfs_icreate_args_rootfile(struct xfs_icreate_args *args, umode_t mode);
+int xfs_icreate_dqalloc(const struct xfs_icreate_args *args,
+		struct xfs_dquot **udqpp, struct xfs_dquot **gdqpp,
+		struct xfs_dquot **pdqpp);
 
 #endif	/* __XFS_INODE_H__ */
