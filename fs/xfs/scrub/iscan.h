@@ -21,12 +21,30 @@ struct xchk_iscan {
 	 */
 	xfs_ino_t		__visited_ino;
 
+	/* Operational state of the livescan. */
+	unsigned long		__opstate;
+
 	/* Number of times to try iget calls for any inode. */
 	unsigned int		iget_tries;
 
 	/* Number of tries remaining for iget of cursor_ino.  Do not modify. */
 	unsigned int		__cursor_tries;
 };
+
+/* Set if the scan has been aborted due to some event in the fs. */
+#define XCHK_ISCAN_OPSTATE_ABORTED	(1)
+
+static inline bool
+xchk_iscan_aborted(const struct xchk_iscan *iscan)
+{
+	return test_bit(XCHK_ISCAN_OPSTATE_ABORTED, &iscan->__opstate);
+}
+
+static inline void
+xchk_iscan_abort(struct xchk_iscan *iscan)
+{
+	set_bit(XCHK_ISCAN_OPSTATE_ABORTED, &iscan->__opstate);
+}
 
 void xchk_iscan_start(struct xchk_iscan *iscan, unsigned int iget_tries);
 void xchk_iscan_finish(struct xchk_iscan *iscan);
@@ -57,6 +75,13 @@ xchk_iscan_visit(
 	xchk_iscan_lock(iscan);
 	__xchk_iscan_visit(iscan, ip);
 	xchk_iscan_unlock(iscan);
+}
+
+/* Decide if this inode was previously scanned. */
+static inline bool
+xchk_iscan_visited(const struct xchk_iscan *iscan, struct xfs_inode *ip)
+{
+	return iscan->__visited_ino >= ip->i_ino;
 }
 
 #endif /* __XFS_SCRUB_ISCAN_H__ */

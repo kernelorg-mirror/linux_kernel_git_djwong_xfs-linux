@@ -193,7 +193,7 @@ xchk_iscan_move_cursor(
  * inode allocations in that range once we release the AGI buffer.
  *
  * Returns 1 if there's a new inode to examine, 0 if we've run out of inodes,
- * or the usual negative errno.
+ * -ECANCELED if the live scan aborted, or the usual negative errno.
  */
 int
 xchk_iscan_advance(
@@ -240,6 +240,8 @@ out_buf:
 	xfs_trans_brelse(sc->tp, agi_bp);
 out_pag:
 	xfs_perag_put(pag);
+	if (xchk_iscan_aborted(iscan))
+		return -ECANCELED;
 	return ret;
 }
 
@@ -309,6 +311,7 @@ xchk_iscan_start(
 	struct xchk_iscan	*iscan,
 	unsigned int		iget_tries)
 {
+	clear_bit(XCHK_ISCAN_OPSTATE_ABORTED, &iscan->__opstate);
 	iscan->iget_tries = iget_tries ? iget_tries : 1;
 	iscan->__visited_ino = 0;
 	iscan->cursor_ino = 0;
