@@ -16,6 +16,7 @@
 #include "xfs_dir2_priv.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
+#include "scrub/parent.h"
 
 /* Set us up to scrub parents. */
 int
@@ -124,7 +125,7 @@ out:
  * Try to iolock the parent dir @dp in shared mode and the child dir @sc->ip
  * exclusively.
  */
-STATIC int
+int
 xchk_parent_lock_two_dirs(
 	struct xfs_scrub	*sc,
 	struct xfs_inode	*dp)
