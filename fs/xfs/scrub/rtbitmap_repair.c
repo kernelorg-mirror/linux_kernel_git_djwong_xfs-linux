@@ -20,6 +20,7 @@
 #include "xfs_rmap.h"
 #include "xfs_rtrmap_btree.h"
 #include "xfs_swapext.h"
+#include "xfs_refcount.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -79,6 +80,7 @@ xrep_rtbitmap_mark_free(
 	unsigned int		bit;
 	unsigned int		mod;
 	xfs_rtword_t		mask;
+	bool			shared;
 	int			error;
 
 	if (!xfs_verify_rtext(mp, rb->next_rtbno, next - rb->next_rtbno))
@@ -91,6 +93,17 @@ xrep_rtbitmap_mark_free(
 	next_ext = div_u64_rem(next, mp->m_sb.sb_rextsize, &mod);
 	if (mod)
 		return -EFSCORRUPTED;
+
+	/* Must not be shared or CoW staging. */
+	if (rb->sc->sr.refc_cur) {
+		error = xfs_refcount_has_record(rb->sc->sr.refc_cur,
+				rb->next_rtbno, next - rb->next_rtbno,
+				&shared);
+		if (error)
+			return error;
+		if (shared)
+			return -EFSCORRUPTED;
+	}
 
 	trace_xrep_rtbitmap_record_free(mp, start_ext, next_ext - 1);
 
