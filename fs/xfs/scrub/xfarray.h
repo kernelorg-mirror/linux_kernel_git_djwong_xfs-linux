@@ -27,6 +27,8 @@ int xfarray_store(struct xfarray *array, uint64_t idx, void *ptr);
 int xfarray_store_anywhere(struct xfarray *array, void *ptr);
 bool xfarray_is_null(struct xfarray *array, void *ptr);
 int xfarray_nullify(struct xfarray *array, uint64_t idx);
+void xfarray_truncate(struct xfarray *array);
+long long xfarray_bytes(struct xfarray *array);
 
 /* Append an element to the array. */
 static inline int xfarray_append(struct xfarray *array, void *ptr)
