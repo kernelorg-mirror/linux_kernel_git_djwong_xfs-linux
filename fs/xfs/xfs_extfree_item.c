@@ -487,6 +487,7 @@ xfs_extent_free_finish_item(
 	struct list_head		*item,
 	struct xfs_btree_cur		**state)
 {
+	struct xfs_mount		*mp = tp->t_mountp;
 	struct xfs_extent_free_item	*xefi;
 	int				error;
 
@@ -502,6 +503,14 @@ xfs_extent_free_finish_item(
 	}
 
 	error = xfs_trans_free_extent(tp, EFD_ITEM(done), xefi);
+
+	/*
+	 * Drop our intent counter reference now that we've finished all the
+	 * work or failed.  The finishing function doesn't update the intent
+	 * state, so we need not preserve the original startblock.
+	 */
+	xfs_fs_drop_intents(mp, xefi->xefi_realtime, xefi->xefi_startblock);
+
 	kmem_free(xefi);
 	return error;
 }
@@ -517,12 +526,28 @@ xfs_extent_free_abort_intent(
 /* Cancel a free extent. */
 STATIC void
 xfs_extent_free_cancel_item(
+	struct xfs_mount		*mp,
 	struct list_head		*item)
 {
 	struct xfs_extent_free_item	*xefi;
 
 	xefi = container_of(item, struct xfs_extent_free_item, xefi_list);
+	xfs_fs_drop_intents(mp, xefi->xefi_realtime, xefi->xefi_startblock);
 	kmem_free(xefi);
+}
+
+/* Add a deferred free extent. */
+STATIC void
+xfs_extent_free_add_item(
+	struct xfs_mount		*mp,
+	const struct list_head		*item)
+{
+	const struct xfs_extent_free_item *xefi;
+
+	xefi = container_of(item, struct xfs_extent_free_item, xefi_list);
+
+	/* Grab an intent counter reference for this intent item. */
+	xfs_fs_bump_intents(mp, xefi->xefi_realtime, xefi->xefi_startblock);
 }
 
 const struct xfs_defer_op_type xfs_extent_free_defer_type = {
@@ -532,6 +557,7 @@ const struct xfs_defer_op_type xfs_extent_free_defer_type = {
 	.create_done	= xfs_extent_free_create_done,
 	.finish_item	= xfs_extent_free_finish_item,
 	.cancel_item	= xfs_extent_free_cancel_item,
+	.add_item	= xfs_extent_free_add_item,
 };
 
 /*
@@ -585,6 +611,8 @@ xfs_agfl_free_finish_item(
 	extp->ext_len = xefi->xefi_blockcount;
 	efdp->efd_next_extent++;
 
+	xfs_fs_drop_intents(mp, xefi->xefi_realtime, xefi->xefi_startblock);
+
 	kmem_free(xefi);
 	return error;
 }
@@ -597,6 +625,7 @@ const struct xfs_defer_op_type xfs_agfl_free_defer_type = {
 	.create_done	= xfs_extent_free_create_done,
 	.finish_item	= xfs_agfl_free_finish_item,
 	.cancel_item	= xfs_extent_free_cancel_item,
+	.add_item	= xfs_extent_free_add_item,
 };
 
 /* Is this recovered EFI ok? */

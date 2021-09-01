@@ -193,6 +193,9 @@ xfs_free_perag(
 		spin_unlock(&mp->m_perag_lock);
 		ASSERT(pag);
 		ASSERT(atomic_read(&pag->pag_ref) == 0);
+#ifdef CONFIG_XFS_ONLINE_SCRUB
+		ASSERT(atomic_read(&pag->pag_intents) == 0);
+#endif
 
 		cancel_delayed_work_sync(&pag->pag_blockgc_work);
 		xfs_iunlink_destroy(pag);
@@ -254,6 +257,9 @@ xfs_initialize_perag(
 		spin_lock_init(&pag->pag_state_lock);
 		INIT_DELAYED_WORK(&pag->pag_blockgc_work, xfs_blockgc_worker);
 		INIT_RADIX_TREE(&pag->pag_ici_root, GFP_ATOMIC);
+#ifdef CONFIG_XFS_ONLINE_SCRUB
+		init_waitqueue_head(&pag->pag_intents_wq);
+#endif
 		init_waitqueue_head(&pag->pagb_wait);
 		pag->pagb_count = 0;
 		pag->pagb_tree = RB_ROOT;
