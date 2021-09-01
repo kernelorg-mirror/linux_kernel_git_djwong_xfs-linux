@@ -14,14 +14,19 @@
 #include "xfs_inode.h"
 #include "xfs_ialloc.h"
 #include "xfs_quota.h"
+#include "xfs_bmap.h"
 #include "xfs_bmap_btree.h"
 #include "xfs_trans_space.h"
 #include "xfs_dir2.h"
 #include "xfs_xchgrange.h"
+#include "xfs_swapext.h"
+#include "xfs_defer.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
+#include "scrub/repair.h"
 #include "scrub/trace.h"
 #include "scrub/tempfile.h"
+#include "scrub/xfile.h"
 
 /*
  * Create a temporary file for reconstructing metadata, with the intention of
@@ -212,4 +217,246 @@ xrep_tempfile_rele(
 
 	xchk_irele(sc, sc->tempip);
 	sc->tempip = NULL;
+}
+
+/*
+ * Make sure that the given range of the data fork of the temporary file is
+ * mapped to written blocks.  The caller must ensure that both inodes are
+ * joined to the transaction.
+ */
+int
+xrep_tempfile_prealloc(
+	struct xfs_scrub	*sc,
+	xfs_fileoff_t		off,
+	xfs_filblks_t		len)
+{
+	xfs_fileoff_t		end = off + len;
+	int			error = 0;
+
+	ASSERT(sc->tempip != NULL);
+	ASSERT(!XFS_NOT_DQATTACHED(sc->mp, sc->tempip));
+
+	while (off < len) {
+		struct xfs_bmbt_irec	map;
+		int			nmaps = 1;
+
+		/*
+		 * If we have a real extent mapping this block then we're
+		 * in ok shape.
+		 */
+		error = xfs_bmapi_read(sc->tempip, off, end - off, &map, &nmaps,
+				XFS_DATA_FORK);
+		if (error)
+			break;
+
+		if (nmaps == 1 && xfs_bmap_is_written_extent(&map)) {
+			off += map.br_startblock;
+			continue;
+		}
+
+		/*
+		 * If we find a delalloc reservation then something is very
+		 * very wrong.  Bail out.
+		 */
+		if (map.br_startblock == DELAYSTARTBLOCK)
+			return -EFSCORRUPTED;
+
+		/*
+		 * Make sure this block has a real zeroed extent allocated to
+		 * it.
+		 */
+		nmaps = 1;
+		error = xfs_bmapi_write(sc->tp, sc->tempip, off, end - off,
+				XFS_BMAPI_CONVERT | XFS_BMAPI_ZERO, 0, &map,
+				&nmaps);
+		if (error)
+			break;
+
+		trace_xrep_tempfile_prealloc(sc, XFS_DATA_FORK, &map);
+
+		/* Commit new extent and all deferred work. */
+		error = xfs_defer_finish(&sc->tp);
+		if (error)
+			break;
+
+		off += map.br_startblock;
+	}
+
+	return error;
+}
+
+/*
+ * Write a number of bytes from the xfile into the temp file, one filesystem
+ * block at a time.  The caller must join both inodes to the transaction.
+ */
+int
+xrep_tempfile_copyin_xfile(
+	struct xfs_scrub		*sc,
+	const struct xfs_buf_ops	*ops,
+	enum xfs_blft			type,
+	xfs_fileoff_t			isize)
+{
+	LIST_HEAD(buffers_list);
+	struct xfs_mount		*mp = sc->mp;
+	struct xfs_buf			*bp;
+	xfs_fileoff_t			flush_mask;
+	xfs_rtblock_t			off = 0;
+	loff_t				pos = 0;
+	int				error = 0;
+
+	ASSERT(S_ISREG(VFS_I(sc->tempip)->i_mode));
+
+	/* Flush buffers to disk every 512K */
+	flush_mask = XFS_B_TO_FSBT(mp, (1U << 19)) - 1;
+
+	while (pos < isize) {
+		struct xfs_bmbt_irec	map;
+		int			nmaps = 1;
+		size_t			count;
+
+		/* Read block mapping for this file block. */
+		error = xfs_bmapi_read(sc->tempip, off, 1, &map, &nmaps, 0);
+		if (error)
+			goto out_err;
+		if (nmaps == 0 || !xfs_bmap_is_written_extent(&map)) {
+			error = -EFSCORRUPTED;
+			goto out_err;
+		}
+
+		/* Get the metadata buffer for this offset in the file. */
+		error = xfs_trans_get_buf(sc->tp, mp->m_ddev_targp,
+				XFS_FSB_TO_DADDR(mp, map.br_startblock),
+				mp->m_bsize, 0, &bp);
+		if (error)
+			goto out_err;
+		bp->b_ops = ops;
+		xfs_trans_buf_set_type(sc->tp, bp, type);
+
+		/* Read in a block's worth of data from the xfile. */
+		count = min_t(loff_t, isize - pos, mp->m_sb.sb_blocksize);
+		error = xfile_obj_load(sc->xfile, bp->b_addr, count, pos);
+		if (error) {
+			xfs_trans_brelse(sc->tp, bp);
+			goto out_err;
+		}
+
+		trace_xrep_tempfile_copyin_xfile(sc, XFS_DATA_FORK, &map);
+
+		/* Queue buffer, and flush if we have too much dirty data. */
+		xfs_buf_delwri_queue_here(bp, &buffers_list);
+		xfs_trans_brelse(sc->tp, bp);
+
+		if (!(off & flush_mask)) {
+			error = xfs_buf_delwri_submit(&buffers_list);
+			if (error)
+				goto out_err;
+		}
+
+		pos += mp->m_sb.sb_blocksize;
+		off++;
+	}
+
+	/*
+	 * Write the new blocks to disk.  If the ordered list isn't empty after
+	 * that, then something went wrong and we have to fail.  This should
+	 * never happen, but we'll check anyway.
+	 */
+	error = xfs_buf_delwri_submit(&buffers_list);
+	if (error)
+		goto out_err;
+
+	if (!list_empty(&buffers_list)) {
+		ASSERT(list_empty(&buffers_list));
+		error = -EIO;
+		goto out_err;
+	}
+
+	/* Set the new inode size, if needed. */
+	if (sc->tempip->i_disk_size != isize) {
+		sc->tempip->i_disk_size = isize;
+		i_size_write(VFS_I(sc->tempip), isize);
+		xfs_trans_log_inode(sc->tp, sc->tempip, XFS_ILOG_CORE);
+		return xrep_roll_trans(sc);
+	}
+
+	return 0;
+
+out_err:
+	xfs_buf_delwri_cancel(&buffers_list);
+	return error;
+}
+
+/*
+ * Fill out the swapext request in preparation for swapping the contents of a
+ * metadata file that we've rebuilt in the temp file.
+ */
+int
+xrep_tempfile_swapext_prep_request(
+	struct xfs_scrub	*sc,
+	int			whichfork,
+	struct xfs_swapext_req	*req)
+{
+	/* COW forks don't exist on disk. */
+	if (whichfork == XFS_COW_FORK) {
+		ASSERT(0);
+		return -EINVAL;
+	}
+
+	/* Both files should have the relevant forks. */
+	if (!XFS_IFORK_PTR(sc->ip, whichfork) ||
+	    !XFS_IFORK_PTR(sc->tempip, whichfork)) {
+		ASSERT(0);
+		return -EINVAL;
+	}
+
+	/* Swap all mappings in both forks. */
+	req->ip1 = sc->tempip;
+	req->ip2 = sc->ip;
+	req->startoff1 = 0;
+	req->startoff2 = 0;
+	req->whichfork = whichfork;
+	req->blockcount = XFS_MAX_FILEOFF;
+	req->req_flags = 0;
+
+	/* Always swap sizes when we're swapping data fork mappings. */
+	if (whichfork == XFS_DATA_FORK)
+		req->req_flags |= XFS_SWAP_REQ_SET_SIZES;
+
+	/*
+	 * If we're repairing xattrs or directories, always try to convert ip2
+	 * to short format after swapping.
+	 */
+	if (whichfork == XFS_ATTR_FORK || S_ISDIR(VFS_I(sc->ip)->i_mode))
+		req->req_flags |= XFS_SWAP_REQ_FILE2_CVT_SF;
+
+	return 0;
+}
+
+/* Swap forks between the file being repaired and the temporary file. */
+int
+xrep_tempfile_swapext(
+	struct xfs_scrub	*sc,
+	struct xfs_swapext_req	*req)
+{
+	int			error;
+
+	error = xfs_swapext(&sc->tp, req);
+	if (error)
+		return error;
+
+	/*
+	 * If we swapped the ondisk sizes of two metadata files, we must swap
+	 * the incore sizes as well.  Since online fsck doesn't use swapext on
+	 * the data forks of user-accessible files, the two sizes are always
+	 * the same, so we don't need to log the inodes.
+	 */
+	if (req->req_flags & XFS_SWAP_REQ_SET_SIZES) {
+		loff_t	temp;
+
+		temp = i_size_read(VFS_I(sc->ip));
+		i_size_write(VFS_I(sc->ip), i_size_read(VFS_I(sc->tempip)));
+		i_size_write(VFS_I(sc->tempip), temp);
+	}
+
+	return 0;
 }
