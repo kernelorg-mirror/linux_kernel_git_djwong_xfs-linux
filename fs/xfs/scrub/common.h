@@ -93,6 +93,7 @@ int xchk_setup_parent(struct xfs_scrub *sc);
 int xchk_setup_rtbitmap(struct xfs_scrub *sc);
 int xchk_setup_rtsummary(struct xfs_scrub *sc);
 int xchk_setup_rtrmapbt(struct xfs_scrub *sc);
+int xchk_setup_rtrefcountbt(struct xfs_scrub *sc);
 #else
 static inline int
 xchk_setup_rtbitmap(struct xfs_scrub *sc)
@@ -106,6 +107,11 @@ xchk_setup_rtsummary(struct xfs_scrub *sc)
 }
 static inline int
 xchk_setup_rtrmapbt(struct xfs_scrub *sc)
+{
+	return -ENOENT;
+}
+static inline int
+xchk_setup_rtrefcountbt(struct xfs_scrub *sc)
 {
 	return -ENOENT;
 }
