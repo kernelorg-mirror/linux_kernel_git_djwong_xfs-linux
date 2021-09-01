@@ -1506,6 +1506,25 @@ xfs_reflink_remap_prep(
 		goto out_unlock;
 
 	/*
+	 * Now that we've marked both inodes for reflink, make sure that all
+	 * possible rt extents in both files' ranges are either wholly written,
+	 * wholly unwritten, or holes.  The bmap code requires that we align
+	 * all unmap and remap requests to a rt extent boundary.  We've already
+	 * flushed the page cache and finished directio for the range that's
+	 * being remapped, so we can convert the extents directly.
+	 */
+	if (xfs_inode_has_bigrtextents(src)) {
+		ret = xfs_rtfile_convert_unwritten(src, pos_in, *len);
+		if (ret)
+			goto out_unlock;
+	}
+	if (xfs_inode_has_bigrtextents(dest)) {
+		ret = xfs_rtfile_convert_unwritten(dest, pos_out, *len);
+		if (ret)
+			goto out_unlock;
+	}
+
+	/*
 	 * If pos_out > EOF, we may have dirtied blocks between EOF and
 	 * pos_out. In that case, we need to extend the flush and unmap to cover
 	 * from EOF to the end of the copy length.
