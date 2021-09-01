@@ -292,8 +292,8 @@ xchk_iscan_iget(
 	struct xfs_mount	*mp = sc->mp;
 	int			error;
 
-	error = xfs_iget(mp, sc->tp, iscan->cursor_ino,
-			XFS_IGET_DONTCACHE | XFS_IGET_UNTRUSTED, 0, ipp);
+	error = xfs_iget(mp, sc->tp, iscan->cursor_ino, XFS_IGET_UNTRUSTED, 0,
+			ipp);
 
 	trace_xchk_iscan_iget(mp, iscan, error);
 
