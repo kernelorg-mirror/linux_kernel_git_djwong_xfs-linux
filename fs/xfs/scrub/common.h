@@ -169,8 +169,21 @@ static inline bool xchk_needs_repair(const struct xfs_scrub_metadata *sm)
 			       XFS_SCRUB_OFLAG_XCORRUPT |
 			       XFS_SCRUB_OFLAG_PREEN);
 }
+
+/*
+ * "Should we prepare for a repair?"
+ *
+ * Return true if the caller permits us to repair metadata and we're not
+ * setting up for a post-repair evaluation.
+ */
+static inline bool xchk_could_repair(const struct xfs_scrub *sc)
+{
+	return (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) &&
+		!(sc->flags & XREP_ALREADY_FIXED);
+}
 #else
 # define xchk_needs_repair(sc)		(false)
+# define xchk_could_repair(sc)		(false)
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
 int xchk_metadata_inode_forks(struct xfs_scrub *sc);
