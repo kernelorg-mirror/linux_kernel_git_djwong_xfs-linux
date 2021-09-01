@@ -790,8 +790,12 @@ struct xfs_scrub_metadata {
 /* i: Don't mark inodes DONTCACHE at the end. */
 #define XFS_SCRUB_IFLAG_RETAIN_INODES	(1 << 9)
 
+/* i: Rebuild the data structure. */
+#define XFS_SCRUB_IFLAG_FORCE_REBUILD	(1 << 10)
+
 #define XFS_SCRUB_FLAGS_IN	(XFS_SCRUB_IFLAG_REPAIR | \
-				 XFS_SCRUB_IFLAG_RETAIN_INODES)
+				 XFS_SCRUB_IFLAG_RETAIN_INODES | \
+				 XFS_SCRUB_IFLAG_FORCE_REBUILD)
 #define XFS_SCRUB_FLAGS_OUT	(XFS_SCRUB_OFLAG_CORRUPT | \
 				 XFS_SCRUB_OFLAG_PREEN | \
 				 XFS_SCRUB_OFLAG_XFAIL | \
