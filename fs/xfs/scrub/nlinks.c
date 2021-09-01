@@ -53,6 +53,13 @@ int
 xchk_setup_nlinks(
 	struct xfs_scrub	*sc)
 {
+	int			error;
+
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+		error = xrep_setup_nlinks(sc);
+		if (error)
+			return error;
+	}
 	sc->buf = kmem_zalloc(sizeof(struct xchk_nlink_ctrs),
 			KM_NOFS | KM_MAYFAIL);
 	if (!sc->buf)
@@ -62,7 +69,7 @@ xchk_setup_nlinks(
 }
 
 /* Retrieve the observed link count record for the given inode. */
-STATIC int
+int
 xchk_nlinks_get_record(
 	struct xchk_nlink_ctrs	*xnc,
 	xfs_ino_t		ino,
