@@ -18,12 +18,16 @@
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/dabtree.h"
+#include "scrub/repair.h"
 
 /* Set us up to scrub directories. */
 int
 xchk_setup_directory(
 	struct xfs_scrub	*sc)
 {
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR)
+		return xrep_directory_setup(sc);
+
 	return xchk_setup_inode_contents(sc, 0);
 }
 
