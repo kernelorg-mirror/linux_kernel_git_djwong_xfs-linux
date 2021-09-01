@@ -675,8 +675,8 @@ xrep_newbt_destroy_reservation(
 			XFS_FSB_TO_AGBNO(sc->mp, resv->fsbno),
 			resv->len, xnr->oinfo.oi_owner);
 
-	__xfs_free_extent_later(sc->tp, resv->fsbno, resv->len, &xnr->oinfo,
-			true);
+	xfs_free_extent_later(sc->tp, resv->fsbno, resv->len, &xnr->oinfo,
+			XFS_FREE_EXTENT_SKIP_DISCARD);
 
 	return 0;
 }
@@ -1095,7 +1095,8 @@ xrep_agextent_reap(
 		 * Roll the transaction every 100 or so EFIs so that we don't
 		 * exceed the log reservation.
 		 */
-		__xfs_free_extent_later(sc->tp, fsbno, aglen, rs->oinfo, true);
+		xfs_free_extent_later(sc->tp, fsbno, aglen, rs->oinfo,
+				XFS_FREE_EXTENT_SKIP_DISCARD);
 		rs->deferred++;
 		*want_roll = rs->deferred > 100;
 		break;
@@ -1571,8 +1572,8 @@ xrep_bmapi_reap_extent(
 		if (error)
 			goto out_agf;
 
-		__xfs_free_extent_later(sc->tp, imap->br_startblock, len, NULL,
-				true);
+		xfs_free_extent_later(sc->tp, imap->br_startblock, len, NULL,
+				XFS_FREE_EXTENT_SKIP_DISCARD);
 	}
 
 	/* Update the mapping to reflect the work not yet done and exit. */
