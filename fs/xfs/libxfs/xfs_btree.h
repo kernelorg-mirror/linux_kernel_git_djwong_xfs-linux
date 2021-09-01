@@ -597,4 +597,9 @@ int __init xfs_btree_alias_cursor_cache(xfs_btnum_t btnum, xfs_btnum_t src);
 unsigned int xfs_btree_absolute_maxlevels(xfs_btnum_t btnum);
 void xfs_btree_destroy_cursor_caches(void);
 
+int xfs_btree_alloc_imeta_block(struct xfs_btree_cur *cur,
+		const union xfs_btree_ptr *start, union xfs_btree_ptr *newp,
+		int *stat);
+int xfs_btree_free_imeta_block(struct xfs_btree_cur *cur, struct xfs_buf *bp);
+
 #endif	/* __XFS_BTREE_H__ */
