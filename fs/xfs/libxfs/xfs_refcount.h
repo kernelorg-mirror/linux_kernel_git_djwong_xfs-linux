@@ -78,7 +78,8 @@ extern int xfs_refcount_recover_cow_leftovers(struct xfs_mount *mp,
 extern int xfs_refcount_has_record(struct xfs_btree_cur *cur,
 		xfs_fsblock_t bno, xfs_filblks_t len, bool *exists);
 union xfs_btree_rec;
-extern void xfs_refcount_btrec_to_irec(const union xfs_btree_rec *rec,
+void xfs_refcount_btrec_to_irec(struct xfs_btree_cur *cur,
+		const union xfs_btree_rec *rec,
 		struct xfs_refcount_irec *irec);
 extern int xfs_refcount_insert(struct xfs_btree_cur *cur,
 		struct xfs_refcount_irec *irec, int *stat);
