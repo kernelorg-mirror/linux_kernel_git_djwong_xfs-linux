@@ -904,6 +904,29 @@ xfs_alloc_rsum_cache(
  */
 
 /*
+ * Transaction reservation sizes depend on the realtime btree maxlevels, which
+ * is in turn computed from the size of the data device (where the btrees live)
+ * and the size of the rt volume.  Make sure they don't increase, which could
+ * cause us to fail minimum log size checks at the next mount.
+ */
+int
+xfs_growfs_check_rt_maxlevels(
+	struct xfs_mount	*mp,
+	xfs_rfsblock_t		dblocks,
+	xfs_rfsblock_t		rblocks)
+{
+	unsigned int		new;
+
+	if (xfs_has_rtrmapbt(mp)) {
+		new = xfs_rtrmapbt_compute_maxlevels(mp, dblocks, rblocks);
+		if (new > mp->m_rtrmap_maxlevels)
+			return -EINVAL;
+	}
+
+	return 0;
+}
+
+/*
  * Grow the realtime area of the filesystem.
  */
 int
@@ -963,6 +986,10 @@ xfs_growfs_rt(
 
 	nrblocks = in->newblocks;
 	error = xfs_sb_validate_fsb_count(sbp, nrblocks);
+	if (error)
+		return error;
+	error = xfs_growfs_check_rt_maxlevels(mp, mp->m_sb.sb_dblocks,
+			nrblocks);
 	if (error)
 		return error;
 	/*
