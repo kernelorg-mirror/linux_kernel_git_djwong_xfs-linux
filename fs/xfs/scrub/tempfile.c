@@ -21,6 +21,7 @@
 #include "xfs_xchgrange.h"
 #include "xfs_swapext.h"
 #include "xfs_defer.h"
+#include "xfs_swapext.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/repair.h"
@@ -202,6 +203,16 @@ xrep_tempfile_iunlock(
 {
 	xfs_iunlock(sc->tempip, ilock_flags);
 	sc->temp_ilock_flags &= ~ilock_flags;
+}
+
+void
+xrep_tempfile_ilock_two(
+	struct xfs_scrub	*sc,
+	unsigned int		ilock_flags)
+{
+	xfs_lock_two_inodes(sc->ip, ilock_flags, sc->tempip, ilock_flags);
+	sc->ilock_flags |= ilock_flags;
+	sc->temp_ilock_flags |= ilock_flags;
 }
 
 /* Release the temporary file. */
@@ -431,6 +442,110 @@ xrep_tempfile_swapext_prep_request(
 	return 0;
 }
 
+/*
+ * Fill out the swapext request and resource estimation structures in
+ * preparation for swapping the contents of a metadata file that we've rebuilt
+ * in the temp file.
+ */
+int
+xrep_tempfile_swapext_prep(
+	struct xfs_scrub	*sc,
+	int			whichfork,
+	struct xfs_swapext_req	*req,
+	struct xfs_swapext_res	*res)
+{
+	struct xfs_ifork	*ifp = XFS_IFORK_PTR(sc->ip, whichfork);
+	struct xfs_ifork	*tifp = XFS_IFORK_PTR(sc->tempip, whichfork);
+	int			state = 0;
+	int			error;
+
+	error = xrep_tempfile_swapext_prep_request(sc, whichfork, req);
+	if (error)
+		return error;
+
+	memset(res, 0, sizeof(struct xfs_swapext_res));
+
+	/*
+	 * Deal with either fork being in local format.  The swapext code only
+	 * knows how to exchange block mappings for regular files, so we only
+	 * have to know about local format for xattrs and directories.
+	 */
+	if (ifp->if_format == XFS_DINODE_FMT_LOCAL)
+		state |= 1;
+	if (tifp->if_format == XFS_DINODE_FMT_LOCAL)
+		state |= 2;
+	switch (state) {
+	case 0:
+		/* Both files have mapped extents; use the regular estimate. */
+		return xfs_xchg_range_estimate(req, res);
+	case 1:
+		/*
+		 * The file being repaired is in local format, but the temp
+		 * file has mapped extents.  To perform the swap, the file
+		 * being repaired will be reinitialized to have an empty extent
+		 * map, so the number of exchanges is the temporary file's
+		 * extent count.
+		 */
+		res->ip1_bcount = sc->tempip->i_nblocks;
+		res->nr_exchanges = tifp->if_nextents;
+		break;
+	case 2:
+		/*
+		 * The temporary file is in local format, but the file being
+		 * repaired has mapped extents.  To perform the swap, the temp
+		 * file will be converted to have a single block, so the number
+		 * of exchanges is (worst case) the extent count of the file
+		 * being repaired plus one more.
+		 */
+		res->ip1_bcount = 1;
+		res->ip2_bcount = sc->ip->i_nblocks;
+		res->nr_exchanges = ifp->if_nextents;
+		break;
+	case 3:
+		/*
+		 * Both forks are in local format.  To perform the swap, the
+		 * file being repaired will be reinitialized to have an empty
+		 * extent map and the temp file will be converted to have a
+		 * single block.  Only one exchange is required.  Presumably,
+		 * the caller could not exchange the two inode fork areas
+		 * directly.
+		 */
+		res->ip1_bcount = 1;
+		res->nr_exchanges = 1;
+		break;
+	}
+
+	return xfs_swapext_estimate_overhead(req, res);
+}
+
+/*
+ * Allocate a transaction, ILOCK the temporary file and the file being
+ * repaired, and join them to the transaction in preparation to swap fork
+ * contents as part of a repair operation.
+ */
+int
+xrep_tempfile_swapext_trans_alloc(
+	struct xfs_scrub	*sc,
+	struct xfs_swapext_res	*res)
+{
+	unsigned int		flags = 0;
+	int			error;
+
+	if (xfs_has_lazysbcount(sc->mp))
+		flags |= XFS_TRANS_RES_FDBLKS;
+
+	error = xfs_trans_alloc(sc->mp, &M_RES(sc->mp)->tr_itruncate,
+			res->resblks, 0, flags, &sc->tp);
+	if (error)
+		return error;
+
+	sc->temp_ilock_flags |= XFS_ILOCK_EXCL;
+	sc->ilock_flags |= XFS_ILOCK_EXCL;
+	xfs_xchg_range_ilock(sc->tp, sc->ip, sc->tempip);
+
+	return 0;
+}
+
 /* Swap forks between the file being repaired and the temporary file. */
 int
 xrep_tempfile_swapext(
@@ -458,4 +573,52 @@ xrep_tempfile_swapext(
 	}
 
 	return 0;
+}
+
+/*
+ * Write local format data from one of the temporary file's forks into the same
+ * fork of file being repaired, and swap the file sizes, if appropriate.
+ * Caller must ensure that the file being repaired has enough fork space to
+ * hold all the bytes.
+ */
+void
+xrep_tempfile_copyout_local(
+	struct xfs_scrub	*sc,
+	int			whichfork)
+{
+	struct xfs_ifork	*temp_ifp;
+	struct xfs_ifork	*ifp;
+	unsigned int		ilog_flags = XFS_ILOG_CORE;
+
+	temp_ifp = XFS_IFORK_PTR(sc->tempip, whichfork);
+	ifp = XFS_IFORK_PTR(sc->ip, whichfork);
+
+	ASSERT(temp_ifp != NULL);
+	ASSERT(ifp != NULL);
+	ASSERT(temp_ifp->if_format == XFS_DINODE_FMT_LOCAL);
+	ASSERT(ifp->if_format == XFS_DINODE_FMT_LOCAL);
+
+	switch (whichfork) {
+	case XFS_DATA_FORK:
+		ASSERT(sc->tempip->i_disk_size <= XFS_IFORK_DSIZE(sc->ip));
+		break;
+	case XFS_ATTR_FORK:
+		ASSERT(sc->tempip->i_forkoff >= sc->ip->i_forkoff);
+		break;
+	default:
+		ASSERT(0);
+		return;
+	}
+
+	xfs_idestroy_fork(ifp);
+	xfs_init_local_fork(sc->ip, whichfork, temp_ifp->if_u1.if_data,
+			temp_ifp->if_bytes);
+
+	if (whichfork == XFS_DATA_FORK) {
+		i_size_write(VFS_I(sc->ip), i_size_read(VFS_I(sc->tempip)));
+		sc->ip->i_disk_size = sc->tempip->i_disk_size;
+	}
+
+	ilog_flags |= xfs_ilog_fdata(whichfork);
+	xfs_trans_log_inode(sc->tp, sc->ip, ilog_flags);
 }
