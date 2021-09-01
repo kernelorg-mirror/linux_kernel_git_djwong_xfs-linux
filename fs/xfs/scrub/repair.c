@@ -38,6 +38,8 @@
 #include "xfs_extfree_item.h"
 #include "xfs_reflink.h"
 #include "xfs_health.h"
+#include "xfs_rtrmap_btree.h"
+#include "xfs_rtalloc.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -1649,6 +1651,20 @@ xrep_ag_init(
 	return 0;
 }
 
+/* Initialize all the btree cursors for a RT repair. */
+void
+xrep_rt_btcur_init(
+	struct xfs_scrub	*sc,
+	struct xchk_rt		*sr)
+{
+	struct xfs_mount	*mp = sc->mp;
+
+	if (sc->sm->sm_type != XFS_SCRUB_TYPE_RTRMAPBT &&
+	    xfs_has_rtrmapbt(mp))
+		sr->rmap_cur = xfs_rtrmapbt_init_cursor(mp, sc->tp,
+				mp->m_rrmapip);
+}
+
 /* Reinitialize the per-AG block reservation for the AG we just fixed. */
 int
 xrep_reset_perag_resv(
@@ -1805,4 +1821,45 @@ xrep_dotdot_lookup(
 	if (!xfs_verify_dir_ino(sc->mp, parent_ino))
 		return NULLFSINO;
 	return parent_ino;
+}
+
+#ifdef CONFIG_XFS_RT
+/* Ensure that all rt blocks in the given range are not marked free. */
+int
+xrep_require_rtext_inuse(
+	struct xfs_scrub	*sc,
+	xfs_rtblock_t		rtbno,
+	xfs_filblks_t		len)
+{
+	struct xfs_mount	*mp = sc->mp;
+	xfs_rtblock_t		startext;
+	xfs_rtblock_t		endext;
+	xfs_rtblock_t		extcount;
+	uint32_t		mod;
+	bool			is_free = false;
+	int			error;
+
+	/* Round the starting rt extent down and the end rt extent up. */
+	startext = div_u64_rem(rtbno, mp->m_sb.sb_rextsize, &mod);
+	endext = div_u64_rem(rtbno + len - 1, mp->m_sb.sb_rextsize, &mod);
+
+	extcount = endext - startext + 1;
+	error = xfs_rtalloc_extent_is_free(mp, sc->tp, startext, extcount,
+			&is_free);
+	if (error)
+		return error;
+
+	return is_free ? -EFSCORRUPTED : 0;
+}
+#endif
+
+/* Are we looking at a realtime metadata inode? */
+bool
+xrep_is_rtmeta_ino(
+	struct xfs_scrub	*sc,
+	xfs_ino_t		ino)
+{
+	return ino == sc->mp->m_rbmip->i_ino ||
+	       ino == sc->mp->m_rsumip->i_ino ||
+	       ino == sc->mp->m_rrmapip->i_ino;
 }
