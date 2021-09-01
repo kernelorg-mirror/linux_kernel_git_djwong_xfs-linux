@@ -29,6 +29,7 @@
 #include "xfs_ag.h"
 #include "xfs_error.h"
 #include "xfs_rtalloc.h"
+#include "xfs_rtrmap_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -744,7 +745,33 @@ xchk_rt_init(
 	struct xfs_scrub	*sc,
 	struct xchk_rt		*sr)
 {
-	return xchk_rt_lock(sc, sr);
+	struct xfs_mount	*mp = sc->mp;
+	int			error;
+
+	error = xchk_rt_lock(sc, sr);
+	if (error)
+		return error;
+
+	if (xfs_has_rtrmapbt(mp))
+		sr->rmap_cur = xfs_rtrmapbt_init_cursor(mp, sc->tp,
+				mp->m_rrmapip);
+
+	return 0;
+}
+
+/*
+ * Free all the btree cursors and other incore data relating to the realtime
+ * volume.  This has to be done /before/ committing (or cancelling) the scrub
+ * transaction.
+ */
+void
+xchk_rt_btcur_free(
+	struct xchk_rt		*sr)
+{
+	if (sr->rmap_cur)
+		xfs_btree_del_cursor(sr->rmap_cur, XFS_BTREE_ERROR);
+
+	sr->rmap_cur = NULL;
 }
 
 /*
