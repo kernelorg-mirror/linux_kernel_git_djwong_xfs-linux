@@ -358,7 +358,7 @@ static int
 xfs_trans_free_extent(
 	struct xfs_trans		*tp,
 	struct xfs_efd_log_item		*efdp,
-	struct xfs_extent_free_item	*free)
+	struct xfs_extent_free_item	*xefi)
 {
 	struct xfs_owner_info		oinfo = { };
 	struct xfs_mount		*mp = tp->t_mountp;
@@ -366,24 +366,24 @@ xfs_trans_free_extent(
 	uint				next_extent;
 	int				error;
 
-	oinfo.oi_owner = free->xefi_owner;
-	if (free->xefi_flags & XFS_EFI_ATTR_FORK)
+	oinfo.oi_owner = xefi->xefi_owner;
+	if (xefi->xefi_flags & XFS_EFI_ATTR_FORK)
 		oinfo.oi_flags |= XFS_OWNER_INFO_ATTR_FORK;
-	if (free->xefi_flags & XFS_EFI_BMBT_BLOCK)
+	if (xefi->xefi_flags & XFS_EFI_BMBT_BLOCK)
 		oinfo.oi_flags |= XFS_OWNER_INFO_BMBT_BLOCK;
 
-	trace_xfs_extent_free_deferred(mp, free);
+	trace_xfs_extent_free_deferred(mp, xefi);
 
-	if (free->xefi_flags & XFS_EFI_REALTIME) {
-		ASSERT(free->xefi_owner == XFS_RMAP_OWN_NULL ||
-		       free->xefi_owner == XFS_RMAP_OWN_UNKNOWN);
+	if (xefi->xefi_flags & XFS_EFI_REALTIME) {
+		ASSERT(xefi->xefi_owner == XFS_RMAP_OWN_NULL ||
+		       xefi->xefi_owner == XFS_RMAP_OWN_UNKNOWN);
 
-		error = xfs_rtfree_blocks(tp, free->xefi_startblock,
-				free->xefi_blockcount);
+		error = xfs_rtfree_blocks(tp, xefi->xefi_startblock,
+				xefi->xefi_blockcount);
 	} else {
-		error = __xfs_free_extent(tp, free->xefi_startblock,
-				free->xefi_blockcount, &oinfo, XFS_AG_RESV_NONE,
-				free->xefi_flags & XFS_EFI_SKIP_DISCARD);
+		error = __xfs_free_extent(tp, xefi->xefi_startblock,
+				xefi->xefi_blockcount, &oinfo, XFS_AG_RESV_NONE,
+				xefi->xefi_flags & XFS_EFI_SKIP_DISCARD);
 	}
 
 	/*
@@ -399,8 +399,8 @@ xfs_trans_free_extent(
 	next_extent = efdp->efd_next_extent;
 	ASSERT(next_extent < efdp->efd_format.efd_nextents);
 	extp = &(efdp->efd_format.efd_extents[next_extent]);
-	extp->ext_start = free->xefi_startblock;
-	extp->ext_len = free->xefi_blockcount;
+	extp->ext_start = xefi->xefi_startblock;
+	extp->ext_len = xefi->xefi_blockcount;
 	efdp->efd_next_extent++;
 
 	return error;
@@ -436,7 +436,7 @@ STATIC void
 xfs_extent_free_log_item(
 	struct xfs_trans		*tp,
 	struct xfs_efi_log_item		*efip,
-	struct xfs_extent_free_item	*free)
+	struct xfs_extent_free_item	*xefi)
 {
 	uint				next_extent;
 	struct xfs_extent		*extp;
@@ -452,9 +452,9 @@ xfs_extent_free_log_item(
 	next_extent = atomic_inc_return(&efip->efi_next_extent) - 1;
 	ASSERT(next_extent < efip->efi_format.efi_nextents);
 	extp = &efip->efi_format.efi_extents[next_extent];
-	extp->ext_start = free->xefi_startblock;
-	extp->ext_len = free->xefi_blockcount;
-	if (free->xefi_flags & XFS_EFI_REALTIME)
+	extp->ext_start = xefi->xefi_startblock;
+	extp->ext_len = xefi->xefi_blockcount;
+	if (xefi->xefi_flags & XFS_EFI_REALTIME)
 		extp->ext_len |= XFS_EFI_EXTLEN_REALTIME_EXT;
 }
 
@@ -467,15 +467,15 @@ xfs_extent_free_create_intent(
 {
 	struct xfs_mount		*mp = tp->t_mountp;
 	struct xfs_efi_log_item		*efip = xfs_efi_init(mp, count);
-	struct xfs_extent_free_item	*free;
+	struct xfs_extent_free_item	*xefi;
 
 	ASSERT(count > 0);
 
 	xfs_trans_add_item(tp, &efip->efi_item);
 	if (sort)
 		list_sort(mp, items, xfs_extent_free_diff_items);
-	list_for_each_entry(free, items, xefi_list)
-		xfs_extent_free_log_item(tp, efip, free);
+	list_for_each_entry(xefi, items, xefi_list)
+		xfs_extent_free_log_item(tp, efip, xefi);
 	return &efip->efi_item;
 }
 
@@ -497,22 +497,22 @@ xfs_extent_free_finish_item(
 	struct list_head		*item,
 	struct xfs_btree_cur		**state)
 {
-	struct xfs_extent_free_item	*free;
+	struct xfs_extent_free_item	*xefi;
 	int				error;
 
-	free = container_of(item, struct xfs_extent_free_item, xefi_list);
+	xefi = container_of(item, struct xfs_extent_free_item, xefi_list);
 
 	/*
 	 * Lock the rt bitmap if we've any realtime extents to free and we
 	 * haven't locked the rt inodes yet.
 	 */
-	if (*state == NULL && (free->xefi_flags & XFS_EFI_REALTIME)) {
+	if (*state == NULL && (xefi->xefi_flags & XFS_EFI_REALTIME)) {
 		xfs_rtlock(tp, tp->t_mountp, XFS_RTLOCK_ALLOC);
 		*state = (struct xfs_btree_cur *)1;
 	}
 
-	error = xfs_trans_free_extent(tp, EFD_ITEM(done), free);
-	kmem_cache_free(xfs_extfree_item_cache, free);
+	error = xfs_trans_free_extent(tp, EFD_ITEM(done), xefi);
+	kmem_cache_free(xfs_extfree_item_cache, xefi);
 	return error;
 }
 
@@ -529,10 +529,10 @@ STATIC void
 xfs_extent_free_cancel_item(
 	struct list_head		*item)
 {
-	struct xfs_extent_free_item	*free;
+	struct xfs_extent_free_item	*xefi;
 
-	free = container_of(item, struct xfs_extent_free_item, xefi_list);
-	kmem_cache_free(xfs_extfree_item_cache, free);
+	xefi = container_of(item, struct xfs_extent_free_item, xefi_list);
+	kmem_cache_free(xfs_extfree_item_cache, xefi);
 }
 
 const struct xfs_defer_op_type xfs_extent_free_defer_type = {
@@ -558,7 +558,7 @@ xfs_agfl_free_finish_item(
 	struct xfs_owner_info		oinfo = { };
 	struct xfs_mount		*mp = tp->t_mountp;
 	struct xfs_efd_log_item		*efdp = EFD_ITEM(done);
-	struct xfs_extent_free_item	*free;
+	struct xfs_extent_free_item	*xefi;
 	struct xfs_extent		*extp;
 	struct xfs_buf			*agbp;
 	int				error;
@@ -566,14 +566,14 @@ xfs_agfl_free_finish_item(
 	xfs_agblock_t			agbno;
 	uint				next_extent;
 
-	free = container_of(item, struct xfs_extent_free_item, xefi_list);
-	ASSERT(free->xefi_blockcount == 1);
-	ASSERT(!(free->xefi_flags & XFS_EFI_REALTIME));
-	agno = XFS_FSB_TO_AGNO(mp, free->xefi_startblock);
-	agbno = XFS_FSB_TO_AGBNO(mp, free->xefi_startblock);
-	oinfo.oi_owner = free->xefi_owner;
+	xefi = container_of(item, struct xfs_extent_free_item, xefi_list);
+	ASSERT(xefi->xefi_blockcount == 1);
+	ASSERT(!(xefi->xefi_flags & XFS_EFI_REALTIME));
+	agno = XFS_FSB_TO_AGNO(mp, xefi->xefi_startblock);
+	agbno = XFS_FSB_TO_AGBNO(mp, xefi->xefi_startblock);
+	oinfo.oi_owner = xefi->xefi_owner;
 
-	trace_xfs_agfl_free_deferred(mp, free);
+	trace_xfs_agfl_free_deferred(mp, xefi);
 
 	error = xfs_alloc_read_agf(mp, tp, agno, 0, &agbp);
 	if (!error)
@@ -592,11 +592,11 @@ xfs_agfl_free_finish_item(
 	next_extent = efdp->efd_next_extent;
 	ASSERT(next_extent < efdp->efd_format.efd_nextents);
 	extp = &(efdp->efd_format.efd_extents[next_extent]);
-	extp->ext_start = free->xefi_startblock;
-	extp->ext_len = free->xefi_blockcount;
+	extp->ext_start = xefi->xefi_startblock;
+	extp->ext_len = xefi->xefi_blockcount;
 	efdp->efd_next_extent++;
 
-	kmem_cache_free(xfs_extfree_item_cache, free);
+	kmem_cache_free(xfs_extfree_item_cache, xefi);
 	return error;
 }
 
