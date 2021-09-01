@@ -93,6 +93,7 @@ typedef struct xfs_mount {
 	struct xlog		*m_log;		/* log specific stuff */
 	struct xfs_inode	*m_rbmip;	/* pointer to bitmap inode */
 	struct xfs_inode	*m_rsumip;	/* pointer to summary inode */
+	struct xfs_inode	*m_rrmapip;	/* pointer to rmap inode */
 	struct xfs_inode	*m_rootip;	/* pointer to root directory */
 	struct xfs_inode	*m_metadirip;	/* ptr to metadata directory */
 	struct xfs_quotainfo	*m_quotainfo;	/* disk quota information */
@@ -382,6 +383,12 @@ __XFS_HAS_FEAT(metadir, METADIR)
 static inline bool xfs_can_atomicswap(struct xfs_mount *mp)
 {
 	return xfs_has_reflink(mp) || xfs_has_rmapbt(mp);
+}
+
+static inline bool xfs_has_rtrmapbt(struct xfs_mount *mp)
+{
+	return xfs_has_metadir(mp) && xfs_has_realtime(mp) &&
+	       xfs_has_rmapbt(mp);
 }
 
 /*
