@@ -2156,3 +2156,23 @@ xrep_buf_verify_struct(
 
 	return fa == NULL;
 }
+
+/* Look up the '..' entry for @sc->ip. */
+xfs_ino_t
+xrep_dotdot_lookup(
+	struct xfs_scrub	*sc)
+{
+	xfs_ino_t		parent_ino;
+	int			error;
+
+	if (!S_ISDIR(VFS_I(sc->ip)->i_mode))
+		return NULLFSINO;
+
+	error = xfs_dir_lookup(sc->tp, sc->ip, &xfs_name_dotdot, &parent_ino,
+			NULL);
+	if (error)
+		return NULLFSINO;
+	if (!xfs_verify_dir_ino(sc->mp, parent_ino))
+		return NULLFSINO;
+	return parent_ino;
+}
