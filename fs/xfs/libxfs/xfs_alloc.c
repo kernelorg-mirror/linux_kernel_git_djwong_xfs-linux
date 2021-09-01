@@ -2532,6 +2532,7 @@ xfs_defer_agfl_block(
 	new->xefi_blockcount = 1;
 	new->xefi_oinfo = *oinfo;
 	new->xefi_skip_discard = false;
+	new->xefi_realtime = false;
 
 	trace_xfs_extent_free_defer(mp, XFS_FREE_EXTENT_AGFL, new);
 	xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_AGFL_FREE, &new->xefi_list);
@@ -2552,19 +2553,26 @@ xfs_free_extent_later(
 	struct xfs_extent_free_item	*new;		/* new element */
 #ifdef DEBUG
 	struct xfs_mount		*mp = tp->t_mountp;
-	xfs_agnumber_t			agno;
-	xfs_agblock_t			agbno;
 
 	ASSERT(bno != NULLFSBLOCK);
 	ASSERT(len > 0);
 	ASSERT(len <= MAXEXTLEN);
 	ASSERT(!isnullstartblock(bno));
-	agno = XFS_FSB_TO_AGNO(mp, bno);
-	agbno = XFS_FSB_TO_AGBNO(mp, bno);
-	ASSERT(agno < mp->m_sb.sb_agcount);
-	ASSERT(agbno < mp->m_sb.sb_agblocks);
-	ASSERT(len < mp->m_sb.sb_agblocks);
-	ASSERT(agbno + len <= mp->m_sb.sb_agblocks);
+	if (flags & XFS_FREE_EXTENT_REALTIME) {
+		ASSERT(bno < mp->m_sb.sb_rblocks);
+		ASSERT(len <= mp->m_sb.sb_rblocks);
+		ASSERT(bno + len <= mp->m_sb.sb_rblocks);
+	} else {
+		xfs_agnumber_t		agno;
+		xfs_agblock_t		agbno;
+
+		agno = XFS_FSB_TO_AGNO(mp, bno);
+		agbno = XFS_FSB_TO_AGBNO(mp, bno);
+		ASSERT(agno < mp->m_sb.sb_agcount);
+		ASSERT(agbno < mp->m_sb.sb_agblocks);
+		ASSERT(len < mp->m_sb.sb_agblocks);
+		ASSERT(agbno + len <= mp->m_sb.sb_agblocks);
+	}
 	ASSERT(!(flags & ~XFS_FREE_EXTENT_ALL_FLAGS));
 #endif
 	ASSERT(xfs_extent_free_item_zone != NULL);
@@ -2578,6 +2586,7 @@ xfs_free_extent_later(
 	else
 		new->xefi_oinfo = XFS_RMAP_OINFO_SKIP_UPDATE;
 	new->xefi_skip_discard = !!(flags & XFS_FREE_EXTENT_SKIP_DISCARD);
+	new->xefi_realtime = !!(flags & XFS_FREE_EXTENT_REALTIME);
 
 	trace_xfs_extent_free_defer(tp->t_mountp, XFS_FREE_EXTENT_REGULAR,
 			new);
