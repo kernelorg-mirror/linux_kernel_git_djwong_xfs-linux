@@ -213,6 +213,12 @@ xrep_directory_salvage_entry(
 	if (error)
 		return 0;
 
+	/* Don't mix metadata and regular directory trees. */
+	if (xfs_is_metadata_inode(ip) ^ xfs_is_metadata_inode(rd->sc->ip)) {
+		xfs_irele(ip);
+		return 0;
+	}
+
 	entry.ftype = xfs_mode_to_ftype(VFS_I(ip)->i_mode);
 	xfs_irele(ip);
 
@@ -1080,8 +1086,14 @@ xrep_directory_self_parent(
 	if (sc->ip->i_ino == sc->mp->m_sb.sb_rootino)
 		return sc->mp->m_sb.sb_rootino;
 
-	if (VFS_I(sc->ip)->i_nlink == 0)
+	if (sc->ip->i_ino == sc->mp->m_sb.sb_metadirino)
+		return sc->mp->m_sb.sb_metadirino;
+
+	if (VFS_I(sc->ip)->i_nlink == 0) {
+		if (xfs_is_metadata_inode(sc->ip))
+			return sc->mp->m_sb.sb_metadirino;
 		return sc->mp->m_sb.sb_rootino;
+	}
 
 	return NULLFSINO;
 }
