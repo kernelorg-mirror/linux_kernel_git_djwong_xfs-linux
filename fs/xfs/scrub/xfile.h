@@ -45,6 +45,7 @@ xfile_obj_store(struct xfile *xf, void *buf, size_t count, loff_t pos)
 	return 0;
 }
 
+void xfile_discard(struct xfile *xf, loff_t pos, u64 count);
 loff_t xfile_seek_data(struct xfile *xf, loff_t pos);
 
 struct xfile_stat {
