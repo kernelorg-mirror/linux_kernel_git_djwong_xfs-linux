@@ -205,6 +205,13 @@ struct xfs_extent_free_item
 
 extern kmem_zone_t	*xfs_extent_free_item_zone;
 
+#define XFS_FREE_EXTENT_REGULAR		(1)
+#define XFS_FREE_EXTENT_AGFL		(2)
+
+#define XFS_FREE_EXTENT_STRINGS \
+	{ XFS_FREE_EXTENT_REGULAR,	"free" }, \
+	{ XFS_FREE_EXTENT_AGFL,		"agfl" }
+
 int				/* error */
 xfs_alloc_lookup_le(
 	struct xfs_btree_cur	*cur,	/* btree cursor */
