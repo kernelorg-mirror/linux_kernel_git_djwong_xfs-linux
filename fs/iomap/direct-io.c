@@ -652,3 +652,78 @@ iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 	return iomap_dio_complete(dio);
 }
 EXPORT_SYMBOL_GPL(iomap_dio_rw);
+
+static loff_t
+iomap_zeroinit_iter(struct iomap_iter *iter)
+{
+	struct iomap *iomap = &iter->iomap;
+	const struct iomap *srcmap = iomap_iter_srcmap(iter);
+	const u64 start = iomap->addr + iter->pos - iomap->offset;
+	const u64 nr_bytes = iomap_length(iter);
+	sector_t sector = start >> SECTOR_SHIFT;
+	sector_t nr_sectors = nr_bytes >> SECTOR_SHIFT;
+	int ret;
+
+	if (!iomap->bdev)
+		return -ECANCELED;
+
+	/* The physical extent must be sector-aligned for block layer APIs. */
+	if ((start | nr_bytes) & (SECTOR_SIZE - 1))
+		return -EINVAL;
+
+	/* Must be able to zero storage directly without fs intervention. */
+	if (iomap->flags & IOMAP_F_SHARED)
+		return -ECANCELED;
+	if (srcmap != iomap)
+		return -ECANCELED;
+
+	switch (iomap->type) {
+	case IOMAP_MAPPED:
+		ret = blkdev_issue_zeroout(iomap->bdev, sector, nr_sectors,
+				GFP_KERNEL, 0);
+		if (ret)
+			return ret;
+		fallthrough;
+	case IOMAP_UNWRITTEN:
+		return nr_bytes;
+	}
+
+	/* Reject holes, inline data, or delalloc extents. */
+	return -ECANCELED;
+}
+
+/*
+ * Use a storage device's accelerated zero-writing command to ensure the media
+ * are ready to accept read and write commands.  FSDAX is not supported.
+ *
+ * The range arguments must be aligned to sector size.  The file must be backed
+ * by a block device.  The extents returned must not require copy on write (or
+ * any other mapping interventions from the filesystem) and must be contiguous.
+ * @done will be set to true if the reset succeeded.
+ *
+ * Returns 0 if the zero initialization succeeded, -ECANCELED if the storage
+ * mappings do not support zero initialization, -EOPNOTSUPP if the device does
+ * not support it, or the usual negative errno.
+ */
+int
+iomap_zeroout_range(struct inode *inode, loff_t pos, u64 len,
+		   const struct iomap_ops *ops)
+{
+	struct iomap_iter iter = {
+		.inode		= inode,
+		.pos		= pos,
+		.len		= len,
+		.flags		= IOMAP_REPORT,
+	};
+	int ret;
+
+	if (IS_DAX(inode))
+		return -EINVAL;
+	if (pos + len > i_size_read(inode))
+		return -EINVAL;
+
+	while ((ret = iomap_iter(&iter, ops)) > 0)
+		iter.processed = iomap_zeroinit_iter(&iter);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(iomap_zeroout_range);
