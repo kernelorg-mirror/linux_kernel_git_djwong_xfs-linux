@@ -152,6 +152,8 @@ struct page *dax_layout_busy_page(struct address_space *mapping);
 struct page *dax_layout_busy_page_range(struct address_space *mapping, loff_t start, loff_t end);
 dax_entry_t dax_lock_page(struct page *page);
 void dax_unlock_page(struct page *page, dax_entry_t cookie);
+int dax_zeroinit_range(struct inode *inode, loff_t pos, u64 len,
+			const struct iomap_ops *ops);
 #else
 static inline bool bdev_dax_supported(struct block_device *bdev,
 		int blocksize)
@@ -200,6 +202,11 @@ static inline dax_entry_t dax_lock_page(struct page *page)
 
 static inline void dax_unlock_page(struct page *page, dax_entry_t cookie)
 {
+}
+static inline int dax_zeroinit_range(struct inode *inode, loff_t pos, u64 len,
+		const struct iomap_ops *ops)
+{
+	return -EOPNOTSUPP;
 }
 #endif
 
