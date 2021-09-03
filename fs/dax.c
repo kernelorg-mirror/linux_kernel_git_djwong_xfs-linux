@@ -1714,3 +1714,76 @@ vm_fault_t dax_finish_sync_fault(struct vm_fault *vmf,
 	return dax_insert_pfn_mkwrite(vmf, pfn, order);
 }
 EXPORT_SYMBOL_GPL(dax_finish_sync_fault);
+
+static loff_t
+dax_zeroinit_iter(struct iomap_iter *iter)
+{
+	struct iomap *iomap = &iter->iomap;
+	const struct iomap *srcmap = iomap_iter_srcmap(iter);
+	sector_t sector = iomap_sector(iomap, iter->pos);
+	sector_t length = iomap_length(iter) >> SECTOR_SHIFT;
+	int ret;
+
+	if (!iomap->bdev)
+		return -ECANCELED;
+
+	/* Must be able to zero storage directly without fs intervention. */
+	if (iomap->flags & IOMAP_F_SHARED)
+		return -ECANCELED;
+	if (srcmap != iomap)
+		return -ECANCELED;
+
+	switch (iomap->type) {
+	case IOMAP_MAPPED:
+		ret = blkdev_issue_zeroout(iomap->bdev, sector, length,
+				GFP_KERNEL, 0);
+		if (ret)
+			return ret;
+		fallthrough;
+	case IOMAP_UNWRITTEN:
+		return length;
+	}
+
+	/* Reject holes, inline data, or delalloc extents. */
+	return -ECANCELED;
+}
+
+/*
+ * Initialize storage mapped to a DAX-mode file to a known value and ensure the
+ * media are ready to accept read and write commands.  This requires the use of
+ * the block layer's zeroout function (with zero-page fallback enabled) to
+ * write zeroes to a pmem region and to reset any hardware media error state.
+ *
+ * The range arguments must be aligned to sector size.  The file must be backed
+ * by a block device.  The extents returned must not require copy on write (or
+ * any other mapping interventions from the filesystem) and must be contiguous.
+ * @done will be set to true if the reset succeeded.
+ *
+ * Returns 0 if the zero initialization succeeded, -ECANCELED if the storage
+ * mappings do not support zero initialization, -EOPNOTSUPP if the device does
+ * not support it, or the usual negative errno.
+ */
+int
+dax_zeroinit_range(struct inode *inode, loff_t pos, u64 len,
+		   const struct iomap_ops *ops)
+{
+	struct iomap_iter iter = {
+		.inode		= inode,
+		.pos		= pos,
+		.len		= len,
+		.flags		= IOMAP_REPORT,
+	};
+	int ret;
+
+	if (!IS_DAX(inode))
+		return -EINVAL;
+	if ((pos | len) & (SECTOR_SIZE - 1))
+		return -EINVAL;
+	if (pos + len > i_size_read(inode))
+		return -EINVAL;
+
+	while ((ret = iomap_iter(&iter, ops)) > 0)
+		iter.processed = dax_zeroinit_iter(&iter);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(dax_zeroinit_range);
