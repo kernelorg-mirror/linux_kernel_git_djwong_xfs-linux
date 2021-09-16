@@ -60,6 +60,20 @@
  * to use the reservation system should update ask/used in xfs_ag_resv_init.
  */
 
+/* Compute maximum possible height for per-AG btree types for this fs. */
+static unsigned int
+xfs_ag_btree_maxlevels(
+	struct xfs_mount	*mp)
+{
+	unsigned int		ret = mp->m_ag_maxlevels;
+
+	ret = max(ret, mp->m_bm_maxlevels[XFS_DATA_FORK]);
+	ret = max(ret, mp->m_bm_maxlevels[XFS_ATTR_FORK]);
+	ret = max(ret, M_IGEO(mp)->inobt_maxlevels);
+	ret = max(ret, mp->m_rmap_maxlevels);
+	return max(ret, mp->m_refc_maxlevels);
+}
+
 /*
  * Are we critically low on blocks?  For now we'll define that as the number
  * of blocks we can get our hands on being less than 10% of what we reserved
@@ -72,6 +86,7 @@ xfs_ag_resv_critical(
 {
 	xfs_extlen_t			avail;
 	xfs_extlen_t			orig;
+	xfs_extlen_t			btree_maxlevels;
 
 	switch (type) {
 	case XFS_AG_RESV_METADATA:
@@ -91,7 +106,8 @@ xfs_ag_resv_critical(
 	trace_xfs_ag_resv_critical(pag, type, avail);
 
 	/* Critically low if less than 10% or max btree height remains. */
-	return XFS_TEST_ERROR(avail < orig / 10 || avail < XFS_BTREE_MAXLEVELS,
+	btree_maxlevels = xfs_ag_btree_maxlevels(pag->pag_mount);
+	return XFS_TEST_ERROR(avail < orig / 10 || avail < btree_maxlevels,
 			pag->pag_mount, XFS_ERRTAG_AG_RESV_CRITICAL);
 }
 
