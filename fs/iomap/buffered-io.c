@@ -887,7 +887,8 @@ static s64 __iomap_zero_iter(struct iomap_iter *iter, loff_t pos, u64 length)
 	return iomap_write_end(iter, pos, bytes, bytes, page);
 }
 
-static loff_t iomap_zero_iter(struct iomap_iter *iter, bool *did_zero)
+static loff_t iomap_zero_iter(struct iomap_iter *iter, bool *did_zero,
+			      bool zero_unwritten)
 {
 	struct iomap *iomap = &iter->iomap;
 	const struct iomap *srcmap = iomap_iter_srcmap(iter);
@@ -896,7 +897,8 @@ static loff_t iomap_zero_iter(struct iomap_iter *iter, bool *did_zero)
 	loff_t written = 0;
 
 	/* already zeroed?  we're done. */
-	if (srcmap->type == IOMAP_HOLE || srcmap->type == IOMAP_UNWRITTEN)
+	if (srcmap->type == IOMAP_HOLE || (srcmap->type == IOMAP_UNWRITTEN &&
+					   !zero_unwritten))
 		return length;
 
 	do {
@@ -932,10 +934,36 @@ iomap_zero_range(struct inode *inode, loff_t pos, loff_t len, bool *did_zero,
 	int ret;
 
 	while ((ret = iomap_iter(&iter, ops)) > 0)
-		iter.processed = iomap_zero_iter(&iter, did_zero);
+		iter.processed = iomap_zero_iter(&iter, did_zero, false);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(iomap_zero_range);
+
+/**
+ * Force a filesystem to write zeroes to mapped extents, even if they're
+ * unwritten.  DAX files are not supported, and the caller should fsync the
+ * file before returning to userspace.
+ */
+int
+iomap_zeroinit_range(struct inode *inode, loff_t pos, loff_t len,
+		     const struct iomap_ops *ops)
+{
+	struct iomap_iter iter = {
+		.inode		= inode,
+		.pos		= pos,
+		.len		= len,
+		.flags		= IOMAP_ZERO,
+	};
+	int ret;
+
+	if (IS_DAX(inode))
+		return -EOPNOTSUPP;
+
+	while ((ret = iomap_iter(&iter, ops)) > 0)
+		iter.processed = iomap_zero_iter(&iter, NULL, false);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(iomap_zeroinit_range);
 
 int
 iomap_truncate_page(struct inode *inode, loff_t pos, bool *did_zero,

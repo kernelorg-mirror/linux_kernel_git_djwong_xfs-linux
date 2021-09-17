@@ -83,6 +83,7 @@ DEFINE_RANGE_EVENT(iomap_writepage);
 DEFINE_RANGE_EVENT(iomap_releasepage);
 DEFINE_RANGE_EVENT(iomap_invalidatepage);
 DEFINE_RANGE_EVENT(iomap_dio_invalidate_fail);
+DEFINE_RANGE_EVENT(iomap_zeroout_range);
 
 #define IOMAP_TYPE_STRINGS \
 	{ IOMAP_HOLE,		"HOLE" }, \
