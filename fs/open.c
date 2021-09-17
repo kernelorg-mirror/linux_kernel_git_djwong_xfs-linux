@@ -256,6 +256,11 @@ int vfs_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 	    (mode & ~FALLOC_FL_INSERT_RANGE))
 		return -EINVAL;
 
+	/* Zeroinit should only be used with preallocation or zerorange */
+	if ((mode & FALLOC_FL_ZEROINIT_DATA) &&
+	    (mode & FALLOC_FL_PUNCH_HOLE))
+		return -EINVAL;
+
 	/* Unshare range should only be used with allocate mode. */
 	if ((mode & FALLOC_FL_UNSHARE_RANGE) &&
 	    (mode & ~(FALLOC_FL_UNSHARE_RANGE | FALLOC_FL_KEEP_SIZE)))

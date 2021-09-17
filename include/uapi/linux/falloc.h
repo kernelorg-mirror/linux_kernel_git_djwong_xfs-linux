@@ -77,4 +77,20 @@
  */
 #define FALLOC_FL_UNSHARE_RANGE		0x40
 
+/*
+ * For preallocation, force the filesystem to write zeroes rather than use
+ * unwritten extents to indicate the range contains zeroes.  For zeroing
+ * operations, force the filesystem to write zeroes to existing written
+ * extents and preallocate holes with zeroed space.
+ *
+ * For filesystems that support unwritten extents, this trades off slow
+ * fallocate performance for faster first write performance as unwritten extent
+ * conversion on the first write to each block in the range is not needed.
+ *
+ * Care is required when using FALLOC_FL_ZEROINIT_DATA as it will be much
+ * slower overall for large ranges and/or slow storage compared to using
+ * unwritten extents.
+ */
+#define FALLOC_FL_ZEROINIT_DATA		0x80
+
 #endif /* _UAPI_FALLOC_H_ */
