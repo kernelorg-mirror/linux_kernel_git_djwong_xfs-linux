@@ -1714,3 +1714,102 @@ vm_fault_t dax_finish_sync_fault(struct vm_fault *vmf,
 	return dax_insert_pfn_mkwrite(vmf, pfn, order);
 }
 EXPORT_SYMBOL_GPL(dax_finish_sync_fault);
+
+static loff_t
+dax_zeroinit_iter(struct iomap_iter *iter)
+{
+	struct iomap *iomap = &iter->iomap;
+	const struct iomap *srcmap = iomap_iter_srcmap(iter);
+	const u64 start = iomap->addr + iter->pos - iomap->offset;
+	const u64 nr_bytes = iomap_length(iter);
+	u64 start_page = start >> PAGE_SHIFT;
+	u64 nr_pages = nr_bytes >> PAGE_SHIFT;
+	int ret;
+
+	if (!iomap->dax_dev)
+		return -ECANCELED;
+
+	/*
+	 * The physical extent must be page aligned because that's what the dax
+	 * function requires.
+	 */
+	if (!PAGE_ALIGNED(start | nr_bytes))
+		return -ECANCELED;
+
+	/*
+	 * The dax function, by using pgoff_t, is stuck with unsigned long, so
+	 * we must check for overflows.
+	 */
+	if (start_page >= ULONG_MAX || start_page + nr_pages > ULONG_MAX)
+		return -ECANCELED;
+
+	/* Must be able to zero storage directly without fs intervention. */
+	if (iomap->flags & IOMAP_F_SHARED)
+		return -ECANCELED;
+	if (srcmap != iomap)
+		return -ECANCELED;
+
+	switch (iomap->type) {
+	case IOMAP_MAPPED:
+		ret = dax_zero_page_range(iomap->dax_dev, start_page,
+					  nr_pages);
+		if (ret)
+			return ret;
+		fallthrough;
+	case IOMAP_UNWRITTEN:
+		/*
+		 * Filesystems are required to zero and convert unwritten
+		 * extent records to written records before writing, so we
+		 * can skip unwritten extents even though writing doesn't
+		 * clear poison.
+		 */
+		fallthrough;
+	case IOMAP_HOLE:
+		/*
+		 * Filesystems are required to zero freshly allocated extents
+		 * before mapping them into the file prior to writing.
+		 */
+		return nr_bytes;
+	}
+
+	/* Inline data and delalloc extents aren't supposed to happen. */
+	return -ECANCELED;
+}
+
+/*
+ * Initialize storage mapped to a DAX-mode file to a known value and ensure the
+ * media are ready to accept read and write commands.  This requires the use of
+ * the dax layer's zero page range function to write zeroes to a pmem region
+ * and to reset any hardware media error state.
+ *
+ * The physical extents must be aligned to page size.  The file must be backed
+ * by a pmem device.  The extents returned must not require copy on write (or
+ * any other mapping interventions from the filesystem) and must be contiguous.
+ * @done will be set to true if the reset succeeded.
+ *
+ * Returns 0 if the zero initialization succeeded, -ECANCELED if the storage
+ * mappings do not support zero initialization, -EOPNOTSUPP if the device does
+ * not support it, or the usual negative errno.
+ */
+int
+dax_zeroinit_range(struct inode *inode, loff_t pos, u64 len,
+		   const struct iomap_ops *ops)
+{
+	struct iomap_iter iter = {
+		.inode		= inode,
+		.pos		= pos,
+		.len		= len,
+		.flags		= IOMAP_REPORT,
+	};
+	int ret;
+
+	if (!IS_DAX(inode))
+		return -EINVAL;
+	if (pos + len > i_size_read(inode))
+		return -EINVAL;
+
+	while ((ret = iomap_iter(&iter, ops)) > 0)
+		iter.processed = dax_zeroinit_iter(&iter);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(dax_zeroinit_range);
