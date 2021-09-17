@@ -339,6 +339,9 @@ struct iomap_dio *__iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 ssize_t iomap_dio_complete(struct iomap_dio *dio);
 int iomap_dio_iopoll(struct kiocb *kiocb, bool spin);
 
+int iomap_zeroout_range(struct inode *inode, loff_t pos, u64 len,
+		const struct iomap_ops *ops);
+
 #ifdef CONFIG_SWAP
 struct file;
 struct swap_info_struct;
