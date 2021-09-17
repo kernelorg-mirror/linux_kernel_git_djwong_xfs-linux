@@ -77,4 +77,13 @@
  */
 #define FALLOC_FL_UNSHARE_RANGE		0x40
 
+/*
+ * FALLOC_FL_ZEROINIT_RANGE is used to reinitialize storage backing a file by
+ * writing zeros to it.  Subsequent read and writes should not fail due to any
+ * previous media errors.  Blocks must be not be shared or require copy on
+ * write.  Holes and unwritten extents are left untouched.  This mode must be
+ * used with FALLOC_FL_KEEP_SIZE.
+ */
+#define FALLOC_FL_ZEROINIT_RANGE	0x80
+
 #endif /* _UAPI_FALLOC_H_ */
