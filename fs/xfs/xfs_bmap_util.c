@@ -957,6 +957,28 @@ xfs_flush_unmap_range(
 }
 
 int
+xfs_file_zeroinit_space(
+	struct xfs_inode	*ip,
+	xfs_off_t		offset,
+	xfs_off_t		len)
+{
+	struct inode		*inode = VFS_I(ip);
+	int			error;
+
+	trace_xfs_zeroinit_file_space(ip, offset, len);
+
+	if (IS_DAX(inode))
+		error = dax_zeroinit_range(inode, offset, len,
+				&xfs_read_iomap_ops);
+	else
+		error = iomap_zeroout_range(inode, offset, len,
+				&xfs_buffered_write_iomap_ops);
+	if (error == -ECANCELED)
+		return -EOPNOTSUPP;
+	return error;
+}
+
+int
 xfs_free_file_space(
 	struct xfs_inode	*ip,
 	xfs_off_t		offset,
