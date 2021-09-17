@@ -1407,6 +1407,13 @@ DEFINE_EVENT(ext4__fallocate_mode, ext4_zero_range,
 	TP_ARGS(inode, offset, len, mode)
 );
 
+DEFINE_EVENT(ext4__fallocate_mode, ext4_zeroinit_range,
+
+	TP_PROTO(struct inode *inode, loff_t offset, loff_t len, int mode),
+
+	TP_ARGS(inode, offset, len, mode)
+);
+
 TRACE_EVENT(ext4_fallocate_exit,
 	TP_PROTO(struct inode *inode, loff_t offset,
 		 unsigned int max_blocks, int ret),
