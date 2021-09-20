@@ -8,6 +8,38 @@
 
 struct xfbtree;
 
+struct xfbtree_config {
+	/* Buffer ops for the btree root block */
+	const struct xfs_btree_ops	*btree_ops;
+
+	/* Description of this btree */
+	const char			*description;
+
+	/*
+	 * This is the maximum amount of address space (in bytes) that this
+	 * btree could possibly use in the underlying backing file.  Zero means
+	 * no maximum.
+	 *
+	 * Offline repair (in userspace) rebuilds all the metadata all at once.
+	 * Because there are per-process limits on the number of open fds, we
+	 * store multiple in-memory btrees in a single memfd.
+	 *
+	 * For online repair (in the kernel) we assume that you only need to
+	 * rebuild a few data structures here and there, so we use one memfd
+	 * per btree.  This value is ignored.
+	 */
+	unsigned long long		maxrange;
+
+	/* Btree type number */
+	xfs_btnum_t			btnum;
+
+	/* XFBTREE_CREATE_* flags */
+	unsigned int			flags;
+};
+
+/* btree has long pointers */
+#define XFBTREE_CREATE_LONG_PTRS	(1U << 0)
+
 #ifdef CONFIG_XFS_IN_MEMORY_BTREE
 unsigned int xfs_btree_mem_head_nlevels(struct xfs_buf *head_bp);
 
@@ -30,6 +62,16 @@ bool xfbtree_verify_xfileoff(struct xfs_btree_cur *cur,
 		unsigned long long xfoff);
 xfs_failaddr_t xfbtree_lblock_verify(struct xfs_buf *bp, unsigned int max_recs);
 xfs_failaddr_t xfbtree_sblock_verify(struct xfs_buf *bp, unsigned int max_recs);
+
+int xfbtree_get_minrecs(struct xfs_btree_cur *cur, int level);
+int xfbtree_get_maxrecs(struct xfs_btree_cur *cur, int level);
+
+int xfbtree_create(struct xfs_mount *mp, const struct xfbtree_config *cfg,
+		struct xfbtree **xfbtreep);
+int xfbtree_alloc_block(struct xfs_btree_cur *cur,
+		const union xfs_btree_ptr *start, union xfs_btree_ptr *ptr,
+		int *stat);
+int xfbtree_free_block(struct xfs_btree_cur *cur, struct xfs_buf *bp);
 #else
 static inline unsigned int xfs_btree_mem_head_nlevels(struct xfs_buf *head_bp)
 {
@@ -72,7 +114,18 @@ static inline unsigned int xfbtree_bbsize(void)
 #define xfbtree_set_root			NULL
 #define xfbtree_init_ptr_from_cur		NULL
 #define xfbtree_dup_cursor			NULL
+#define xfbtree_get_minrecs			NULL
+#define xfbtree_get_maxrecs			NULL
+#define xfbtree_alloc_block			NULL
+#define xfbtree_free_block			NULL
 #define xfbtree_verify_xfileoff(cur, xfoff)	(false)
+
+static inline int
+xfbtree_create(struct xfs_mount *mp, const struct xfbtree_config *cfg,
+		struct xfbtree **xfbtreep)
+{
+	return -EOPNOTSUPP;
+}
 #endif /* CONFIG_XFS_IN_MEMORY_BTREE */
 
 #endif /* __XFS_BTREE_MEM_H__ */

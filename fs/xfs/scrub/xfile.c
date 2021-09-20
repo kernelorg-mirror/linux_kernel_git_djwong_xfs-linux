@@ -312,6 +312,85 @@ xfile_discard(
 	shmem_truncate_range(file_inode(xf->file), pos, pos + count - 1);
 }
 
+/* Ensure that there is storage backing the given range. */
+int
+xfile_prealloc(
+	struct xfile		*xf,
+	loff_t			pos,
+	u64			count)
+{
+	struct inode		*inode = file_inode(xf->file);
+	struct address_space	*mapping = inode->i_mapping;
+	struct page		*page = NULL;
+	unsigned int		pflags;
+	int			error = 0;
+
+	if (count > MAX_RW_COUNT)
+		return -E2BIG;
+	if (inode->i_sb->s_maxbytes - pos < count)
+		return -EFBIG;
+
+	trace_xfile_prealloc(xf, pos, count);
+
+	pflags = memalloc_nofs_save();
+	while (count > 0) {
+		void		*fsdata;
+		unsigned int	len;
+		int		ret;
+
+		len = min_t(ssize_t, count, PAGE_SIZE - offset_in_page(pos));
+
+		/*
+		 * We call pagecache_write_begin directly here to avoid all
+		 * the freezer protection lock-taking that happens in the
+		 * normal path.  shmem doesn't support fs freeze, but lockdep
+		 * doesn't know that and will trip over that.
+		 */
+		error = pagecache_write_begin(NULL, mapping, pos, len,
+				AOP_FLAG_NOFS, &page, &fsdata);
+		if (error)
+			break;
+
+		if (PageHWPoison(page)) {
+			error = pagecache_write_end(NULL, mapping, pos, len, 0,
+					page, fsdata);
+			if (error >= 0)
+				error = -EIO;
+			break;
+		}
+
+		/*
+		 * xfile pages must never be mapped into userspace, so we skip
+		 * the dcache flush.  If the page is not uptodate, zero it to
+		 * ensure we never go lacking for space here.
+		 */
+		if (!PageUptodate(page)) {
+			void	*kaddr = kmap_local_page(page);
+
+			memset(kaddr, 0, PAGE_SIZE);
+			SetPageUptodate(page);
+			kunmap_local(kaddr);
+		}
+
+		ret = pagecache_write_end(NULL, mapping, pos, len, len, page,
+				fsdata);
+		if (ret < 0) {
+			error = ret;
+			break;
+		}
+		if (ret != len) {
+			error = -EIO;
+			break;
+		}
+
+		count -= len;
+		pos += len;
+	}
+	memalloc_nofs_restore(pflags);
+
+	return error;
+}
+
 /* Find the next written area in the xfile data for a given offset. */
 loff_t
 xfile_seek_data(

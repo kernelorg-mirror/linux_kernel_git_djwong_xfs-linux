@@ -12,6 +12,7 @@
 #include "xfs_mount.h"
 #include "xfs_inode.h"
 #include "xfs_btree.h"
+#include "xfs_btree_mem.h"
 #include "xfs_ag.h"
 #include "xfs_quota_defs.h"
 #include "xfs_da_format.h"
@@ -20,6 +21,7 @@
 #include "scrub/xfarray.h"
 #include "scrub/iscan.h"
 #include "scrub/nlinks.h"
+#include "scrub/xfbtree.h"
 
 /* Figure out which block the btree cursor was pointing to. */
 static inline xfs_fsblock_t
