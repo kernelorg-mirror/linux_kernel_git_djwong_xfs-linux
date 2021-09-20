@@ -41,6 +41,9 @@
 #include "xfs_rmap.h"
 #include "xfs_refcount.h"
 #include "xfs_fsrefs.h"
+#include "scrub/xfile.h"
+#include "scrub/xfbtree.h"
+#include "xfs_btree_mem.h"
 
 static inline void
 xfs_btree_crack_agno_opdev(
@@ -48,7 +51,10 @@ xfs_btree_crack_agno_opdev(
 	xfs_agnumber_t		*agno,
 	dev_t			*opdev)
 {
-	if (cur->bc_flags & XFS_BTREE_ROOT_IN_INODE) {
+	if (cur->bc_flags & XFS_BTREE_IN_MEMORY) {
+		*agno = 0;
+		*opdev = xfbtree_target(cur->bc_mem.xfbtree)->bt_dev;
+	} else if (cur->bc_flags & XFS_BTREE_ROOT_IN_INODE) {
 		*agno = 0;
 		*opdev = cur->bc_mp->m_rtdev_targp->bt_dev;
 	} else {
