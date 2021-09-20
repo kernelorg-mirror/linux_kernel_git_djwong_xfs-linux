@@ -22,6 +22,8 @@ struct xfile;
 struct xfarray;
 struct xchk_iscan;
 struct xchk_nlink;
+struct xfbtree;
+struct xfbtree_config;
 
 /*
  * ftrace's __print_symbolic requires that all enum values be wrapped in the
@@ -890,6 +892,7 @@ DEFINE_XFILE_EVENT(xfile_pread);
 DEFINE_XFILE_EVENT(xfile_pwrite);
 DEFINE_XFILE_EVENT(xfile_seek_data);
 DEFINE_XFILE_EVENT(xfile_discard);
+DEFINE_XFILE_EVENT(xfile_prealloc);
 
 TRACE_EVENT(xfarray_sort_stats,
 	TP_PROTO(struct xfarray *xfa, unsigned int max_stack_depth,
@@ -2230,7 +2233,121 @@ TRACE_EVENT(xrep_nlinks_set_record,
 		  __entry->child_nlinks)
 );
 
+TRACE_EVENT(xfbtree_create,
+	TP_PROTO(struct xfs_mount *mp, const struct xfbtree_config *cfg,
+		 struct xfbtree *xfbt),
+	TP_ARGS(mp, cfg, xfbt),
+	TP_STRUCT__entry(
+		__field(unsigned int, descr_len)
+		__dynamic_array(char, descr, strlen(cfg->description))
+		__field(unsigned long long, maxrange)
+		__field(xfs_btnum_t, btnum)
+		__field(unsigned int, xfbtree_flags)
+		__field(unsigned long, xfino)
+		__field(unsigned int, leaf_mxr)
+		__field(unsigned int, leaf_mnr)
+		__field(unsigned int, node_mxr)
+		__field(unsigned int, node_mnr)
+		__field(unsigned long long, owner)
+	),
+	TP_fast_assign(
+		__entry->descr_len = strlen(cfg->description);
+		memcpy(__get_str(descr), cfg->description, __entry->descr_len);
+		__entry->maxrange = cfg->maxrange;
+		__entry->btnum = cfg->btnum;
+		__entry->xfbtree_flags = cfg->flags;
+		__entry->xfino = file_inode(xfbt->xfile->file)->i_ino;
+		__entry->leaf_mxr = xfbt->maxrecs[0];
+		__entry->node_mxr = xfbt->maxrecs[1];
+		__entry->leaf_mnr = xfbt->minrecs[0];
+		__entry->node_mnr = xfbt->minrecs[1];
+		__entry->owner = cfg->owner;
+	),
+	TP_printk("descr '%.*s' maxrange 0x%llx btnum %s owner 0x%llx xfino 0x%lx leaf_mxr %u leaf_mnr %u node_mxr %u node_mnr %u",
+		  __entry->descr_len,
+		  __get_str(descr),
+		  __entry->maxrange,
+		  __print_symbolic(__entry->btnum, XFS_BTNUM_STRINGS),
+		  __entry->owner,
+		  __entry->xfino,
+		  __entry->leaf_mxr,
+		  __entry->leaf_mnr,
+		  __entry->node_mxr,
+		  __entry->node_mnr)
+);
+
+DECLARE_EVENT_CLASS(xfbtree_buf_class,
+	TP_PROTO(struct xfbtree *xfbt, struct xfs_buf *bp),
+	TP_ARGS(xfbt, bp),
+	TP_STRUCT__entry(
+		__field(unsigned long, xfino)
+		__field(xfs_daddr_t, bno)
+		__field(int, nblks)
+		__field(int, hold)
+		__field(int, pincount)
+		__field(unsigned, lockval)
+		__field(unsigned, flags)
+	),
+	TP_fast_assign(
+		__entry->xfino = file_inode(xfbt->xfile->file)->i_ino;
+		__entry->bno = xfs_buf_daddr(bp);
+		__entry->nblks = bp->b_length;
+		__entry->hold = atomic_read(&bp->b_hold);
+		__entry->pincount = atomic_read(&bp->b_pin_count);
+		__entry->lockval = bp->b_sema.count;
+		__entry->flags = bp->b_flags;
+	),
+	TP_printk("xfino 0x%lx daddr 0x%llx bbcount 0x%x hold %d pincount %d "
+		  "lock %d flags %s",
+		  __entry->xfino,
+		  (unsigned long long)__entry->bno,
+		  __entry->nblks,
+		  __entry->hold,
+		  __entry->pincount,
+		  __entry->lockval,
+		  __print_flags(__entry->flags, "|", XFS_BUF_FLAGS))
+)
+
+#define DEFINE_XFBTREE_BUF_EVENT(name) \
+DEFINE_EVENT(xfbtree_buf_class, name, \
+	TP_PROTO(struct xfbtree *xfbt, struct xfs_buf *bp), \
+	TP_ARGS(xfbt, bp))
+DEFINE_XFBTREE_BUF_EVENT(xfbtree_create_root_buf);
+DEFINE_XFBTREE_BUF_EVENT(xfbtree_trans_commit_buf);
+DEFINE_XFBTREE_BUF_EVENT(xfbtree_trans_cancel_buf);
+
+DECLARE_EVENT_CLASS(xfbtree_freesp_class,
+	TP_PROTO(struct xfbtree *xfbt, struct xfs_btree_cur *cur,
+		 xfs_fileoff_t fileoff),
+	TP_ARGS(xfbt, cur, fileoff),
+	TP_STRUCT__entry(
+		__field(unsigned long, xfino)
+		__field(xfs_btnum_t, btnum)
+		__field(int, nlevels)
+		__field(xfs_fileoff_t, fileoff)
+	),
+	TP_fast_assign(
+		__entry->xfino = file_inode(xfbt->xfile->file)->i_ino;
+		__entry->btnum = cur->bc_btnum;
+		__entry->nlevels = cur->bc_nlevels;
+		__entry->fileoff = fileoff;
+	),
+	TP_printk("xfino 0x%lx btree %s nlevels %d fileoff 0x%llx",
+		  __entry->xfino,
+		  __print_symbolic(__entry->btnum, XFS_BTNUM_STRINGS),
+		  __entry->nlevels,
+		  (unsigned long long)__entry->fileoff)
+)
+
+#define DEFINE_XFBTREE_FREESP_EVENT(name) \
+DEFINE_EVENT(xfbtree_freesp_class, name, \
+	TP_PROTO(struct xfbtree *xfbt, struct xfs_btree_cur *cur, \
+		 xfs_fileoff_t fileoff), \
+	TP_ARGS(xfbt, cur, fileoff))
+DEFINE_XFBTREE_FREESP_EVENT(xfbtree_alloc_block);
+DEFINE_XFBTREE_FREESP_EVENT(xfbtree_free_block);
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
+
 
 #endif /* _TRACE_XFS_SCRUB_TRACE_H */
 
