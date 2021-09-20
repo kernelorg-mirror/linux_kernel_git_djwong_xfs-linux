@@ -25,6 +25,15 @@ int xfs_btree_mem_head_read_buf(struct xfs_buftarg *btp, struct xfs_trans *tp,
 
 struct xfbtree {
 	struct xfs_buftarg		*target;
+	struct xfile			*xfile;
+	struct xbitmap			*freespace;
 };
+
+/* in-memory btrees are always created with an empty leaf block at block 1 */
+#define XFBTREE_NEW_LEAF_FILEOFF		1
+
+void xfbtree_destroy(struct xfbtree *xfbt);
+int xfbtree_trans_commit(struct xfbtree *xfbt, struct xfs_trans *tp);
+void xfbtree_trans_cancel(struct xfbtree *xfbt, struct xfs_trans *tp);
 
 #endif /* XFS_SCRUB_XFBTREE_H__ */

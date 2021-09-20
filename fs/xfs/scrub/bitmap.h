@@ -37,4 +37,7 @@ bool xbitmap_empty(struct xbitmap *bitmap);
 uint64_t xbitmap_count_set_regions(struct xbitmap *bitmap);
 bool xbitmap_test(struct xbitmap *bitmap, uint64_t start, uint64_t *len);
 
+uint64_t xbitmap_take_first_set(struct xbitmap *bitmap, uint64_t start,
+		uint64_t last);
+
 #endif	/* __XFS_SCRUB_BITMAP_H__ */

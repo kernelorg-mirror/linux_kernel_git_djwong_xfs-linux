@@ -367,3 +367,22 @@ xbitmap_test(
 	*len = bn->bn_start - start;
 	return false;
 }
+
+/* Find and set the first bit set in this bitmap, or -1 if no bits are set. */
+uint64_t
+xbitmap_take_first_set(
+	struct xbitmap		*bitmap,
+	uint64_t		start,
+	uint64_t		last)
+{
+	struct xbitmap_node	*bn;
+	uint64_t		ret;
+
+	bn = xbitmap_tree_iter_first(&bitmap->xb_root, start, last);
+	if (!bn)
+		return -1ULL;
+
+	ret = bn->bn_start;
+	xbitmap_clear(bitmap, bn->bn_start, 1);
+	return ret;
+}
