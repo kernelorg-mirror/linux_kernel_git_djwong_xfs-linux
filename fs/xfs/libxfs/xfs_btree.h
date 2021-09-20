@@ -221,6 +221,14 @@ struct xfs_btree_cur_ino {
 	struct xbtree_refc		refc;
 };
 
+/* In-memory btree information */
+struct xfbtree;
+
+struct xfs_btree_cur_mem {
+	struct xfbtree			*xfbtree;
+	struct xfs_buf			*head_bp;
+};
+
 struct xfs_btree_level {
 	/* buffer pointer */
 	struct xfs_buf	*bp;
@@ -259,6 +267,7 @@ struct xfs_btree_cur
 	union {
 		struct xfs_btree_cur_ag	bc_ag;
 		struct xfs_btree_cur_ino bc_ino;
+		struct xfs_btree_cur_mem bc_mem;
 	};
 
 	/* Must be at the end of the struct! */
@@ -284,6 +293,9 @@ xfs_btree_cur_sizeof(unsigned int nlevels)
  */
 #define XFS_BTREE_STAGING		(1<<5)
 #define XFS_BTREE_IROOT_RECORDS		(1<<6)	/* iroot can store records */
+
+/* btree stored in memory; not compatible with ROOT_IN_INODE */
+#define XFS_BTREE_IN_MEMORY		(1<<7)
 
 #define	XFS_BTREE_NOERROR	0
 #define	XFS_BTREE_ERROR		1

@@ -21,6 +21,7 @@
 #include "xfs_alloc.h"
 #include "xfs_log.h"
 #include "xfs_btree_staging.h"
+#include "xfs_btree_mem.h"
 #include "xfs_ag.h"
 #include "xfs_health.h"
 #include "xfs_bmap.h"
@@ -223,6 +224,8 @@ xfs_btree_check_lptr(
 {
 	if (level <= 0)
 		return false;
+	if (cur->bc_flags & XFS_BTREE_IN_MEMORY)
+		return true;
 	return xfs_verify_fsbno(cur->bc_mp, fsbno);
 }
 
@@ -235,6 +238,8 @@ xfs_btree_check_sptr(
 {
 	if (level <= 0)
 		return false;
+	if (cur->bc_flags & XFS_BTREE_IN_MEMORY)
+		return true;
 	return xfs_verify_agbno(cur->bc_mp, cur->bc_ag.pag->pag_agno, agbno);
 }
 
@@ -249,6 +254,23 @@ xfs_btree_check_ptr(
 	int				index,
 	int				level)
 {
+	if (cur->bc_flags & XFS_BTREE_IN_MEMORY) {
+		xfs_fileoff_t		xfileoff;
+
+		if (cur->bc_flags & XFS_BTREE_LONG_PTRS)
+			xfileoff = be64_to_cpu(ptr->l);
+		else
+			xfileoff = be32_to_cpu(ptr->s);
+
+		if (!xfbtree_check_ptr(cur, xfileoff)) {
+			xfs_err(cur->bc_mp,
+"In-memory: Corrupt btree %d flags 0x%x pointer at level %d index %d.",
+					cur->bc_btnum, cur->bc_flags, level, index);
+			return -EFSCORRUPTED;
+		}
+		return 0;
+	}
+
 	if (cur->bc_flags & XFS_BTREE_LONG_PTRS) {
 		if (xfs_btree_check_lptr(cur, be64_to_cpu((&ptr->l)[index]),
 				level))
@@ -400,9 +422,19 @@ xfs_btree_del_cursor(
 	       xfs_is_shutdown(cur->bc_mp));
 	if (unlikely(cur->bc_flags & XFS_BTREE_STAGING))
 		kmem_free(cur->bc_ops);
-	if (!(cur->bc_flags & XFS_BTREE_LONG_PTRS) && cur->bc_ag.pag)
+	if (!(cur->bc_flags & XFS_BTREE_LONG_PTRS) &&
+	    !(cur->bc_flags & XFS_BTREE_IN_MEMORY) && cur->bc_ag.pag)
 		xfs_perag_put(cur->bc_ag.pag);
 	kmem_cache_free(cc->cache, cur);
+}
+
+static inline struct xfs_buftarg *
+xfs_btree_buftarg(
+	struct xfs_btree_cur	*cur)
+{
+	if (cur->bc_flags & XFS_BTREE_IN_MEMORY)
+		return xfbtree_target(cur->bc_mem.xfbtree);
+	return cur->bc_mp->m_ddev_targp;
 }
 
 /*
@@ -442,10 +474,10 @@ xfs_btree_dup_cursor(
 		new->bc_levels[i].ra = cur->bc_levels[i].ra;
 		bp = cur->bc_levels[i].bp;
 		if (bp) {
-			error = xfs_trans_read_buf(mp, tp, mp->m_ddev_targp,
-						   xfs_buf_daddr(bp), mp->m_bsize,
-						   0, &bp,
-						   cur->bc_ops->buf_ops);
+			error = xfs_trans_read_buf(mp, tp,
+					xfs_btree_buftarg(cur),
+					xfs_buf_daddr(bp), mp->m_bsize, 0, &bp,
+					cur->bc_ops->buf_ops);
 			if (xfs_metadata_is_sick(error))
 				xfs_btree_mark_sick(new);
 			if (error) {
@@ -886,6 +918,9 @@ xfs_btree_readahead_lblock(
 	xfs_fsblock_t		left = be64_to_cpu(block->bb_u.l.bb_leftsib);
 	xfs_fsblock_t		right = be64_to_cpu(block->bb_u.l.bb_rightsib);
 
+	if (cur->bc_flags & XFS_BTREE_IN_MEMORY)
+		return 0;
+
 	if ((lr & XFS_BTCUR_LEFTRA) && left != NULLFSBLOCK) {
 		xfs_btree_reada_bufl(cur->bc_mp, left, 1,
 				     cur->bc_ops->buf_ops);
@@ -911,6 +946,8 @@ xfs_btree_readahead_sblock(
 	xfs_agblock_t		left = be32_to_cpu(block->bb_u.s.bb_leftsib);
 	xfs_agblock_t		right = be32_to_cpu(block->bb_u.s.bb_rightsib);
 
+	if (cur->bc_flags & XFS_BTREE_IN_MEMORY)
+		return 0;
 
 	if ((lr & XFS_BTCUR_LEFTRA) && left != NULLAGBLOCK) {
 		xfs_btree_reada_bufs(cur->bc_mp, cur->bc_ag.pag->pag_agno,
@@ -972,6 +1009,16 @@ xfs_btree_ptr_to_daddr(
 	if (error)
 		return error;
 
+	/* in-memory btrees always use linear addressing */
+	if (cur->bc_flags & XFS_BTREE_IN_MEMORY) {
+		if (cur->bc_flags & XFS_BTREE_LONG_PTRS)
+			fsbno = be64_to_cpu(ptr->l);
+		else
+			fsbno = be32_to_cpu(ptr->s);
+		*daddr = XFS_FSB_TO_DADDR(cur->bc_mp, fsbno);
+		return 0;
+	}
+
 	if (cur->bc_flags & XFS_BTREE_LONG_PTRS) {
 		fsbno = be64_to_cpu(ptr->l);
 		*daddr = XFS_FSB_TO_DADDR(cur->bc_mp, fsbno);
@@ -1000,7 +1047,7 @@ xfs_btree_readahead_ptr(
 
 	if (xfs_btree_ptr_to_daddr(cur, ptr, &daddr))
 		return;
-	xfs_buf_readahead(cur->bc_mp->m_ddev_targp, daddr,
+	xfs_buf_readahead(xfs_btree_buftarg(cur), daddr,
 			  cur->bc_mp->m_bsize * count, cur->bc_ops->buf_ops);
 }
 
@@ -1175,7 +1222,9 @@ xfs_btree_init_block_cur(
 	 * change in future, but is safe for current users of the generic btree
 	 * code.
 	 */
-	if (cur->bc_flags & XFS_BTREE_LONG_PTRS)
+	if (cur->bc_flags & XFS_BTREE_IN_MEMORY)
+		owner = 0;
+	else if (cur->bc_flags & XFS_BTREE_LONG_PTRS)
 		owner = cur->bc_ino.ip->i_ino;
 	else
 		owner = cur->bc_ag.pag->pag_agno;
@@ -1268,8 +1317,8 @@ xfs_btree_get_buf_block(
 	error = xfs_btree_ptr_to_daddr(cur, ptr, &d);
 	if (error)
 		return error;
-	error = xfs_trans_get_buf(cur->bc_tp, mp->m_ddev_targp, d, mp->m_bsize,
-			0, bpp);
+	error = xfs_trans_get_buf(cur->bc_tp, xfs_btree_buftarg(cur), d,
+			mp->m_bsize, 0, bpp);
 	if (error)
 		return error;
 
@@ -1300,9 +1349,8 @@ xfs_btree_read_buf_block(
 	error = xfs_btree_ptr_to_daddr(cur, ptr, &d);
 	if (error)
 		return error;
-	error = xfs_trans_read_buf(mp, cur->bc_tp, mp->m_ddev_targp, d,
-				   mp->m_bsize, flags, bpp,
-				   cur->bc_ops->buf_ops);
+	error = xfs_trans_read_buf(mp, cur->bc_tp, xfs_btree_buftarg(cur), d,
+			mp->m_bsize, flags, bpp, cur->bc_ops->buf_ops);
 	if (xfs_metadata_is_sick(error))
 		xfs_btree_mark_sick(cur);
 	if (error)
@@ -1466,7 +1514,6 @@ xfs_btree_log_ptrs(
 	int			first,	/* index of first pointer to log */
 	int			last)	/* index of last pointer to log */
 {
-
 	if (bp) {
 		struct xfs_btree_block	*block = XFS_BUF_TO_BLOCK(bp);
 		int			level = xfs_btree_get_level(block);
@@ -1746,6 +1793,37 @@ error0:
 	return error;
 }
 
+/*
+ * Check the btree block owner now that we have the context to know who the
+ * real owner is.
+ */
+static inline xfs_failaddr_t
+xfs_btree_check_block_owner(
+	struct xfs_btree_cur	*cur,
+	struct xfs_btree_block	*block)
+{
+	if (!xfs_has_crc(cur->bc_mp))
+		return NULL;
+
+	if (cur->bc_flags & XFS_BTREE_IN_MEMORY)
+		return NULL;
+
+	if (!(cur->bc_flags & XFS_BTREE_LONG_PTRS)) {
+		if (be32_to_cpu(block->bb_u.s.bb_owner) !=
+						cur->bc_ag.pag->pag_agno)
+			return __this_address;
+		return NULL;
+	}
+
+	if (cur->bc_ino.flags & XFS_BTCUR_BMBT_INVALID_OWNER)
+		return NULL;
+
+	if (be64_to_cpu(block->bb_u.l.bb_owner) != cur->bc_ino.ip->i_ino)
+		return __this_address;
+
+	return NULL;
+}
+
 int
 xfs_btree_lookup_get_block(
 	struct xfs_btree_cur		*cur,	/* btree cursor */
@@ -1784,11 +1862,7 @@ xfs_btree_lookup_get_block(
 		return error;
 
 	/* Check the inode owner since the verifiers don't. */
-	if (xfs_has_crc(cur->bc_mp) &&
-	    !(cur->bc_ino.flags & XFS_BTCUR_BMBT_INVALID_OWNER) &&
-	    (cur->bc_flags & XFS_BTREE_LONG_PTRS) &&
-	    be64_to_cpu((*blkp)->bb_u.l.bb_owner) !=
-			cur->bc_ino.ip->i_ino)
+	if (xfs_btree_check_block_owner(cur, *blkp) != NULL)
 		goto out_bad;
 
 	/* Did we get the level we were looking for? */
@@ -4714,6 +4788,10 @@ xfs_btree_lblock_verify(
 	if (be16_to_cpu(block->bb_numrecs) > max_recs)
 		return __this_address;
 
+	/* no size limits to in memory btree */
+	if (xfs_buftarg_in_memory(bp->b_target))
+		return NULL;
+
 	/* sibling pointer verification */
 	if (block->bb_u.l.bb_leftsib != cpu_to_be64(NULLFSBLOCK) &&
 	    !xfs_verify_fsbno(mp, be64_to_cpu(block->bb_u.l.bb_leftsib)))
@@ -4768,6 +4846,10 @@ xfs_btree_sblock_verify(
 	/* numrecs verification */
 	if (be16_to_cpu(block->bb_numrecs) > max_recs)
 		return __this_address;
+
+	/* no size limits to in memory btree */
+	if (xfs_buftarg_in_memory(bp->b_target))
+		return NULL;
 
 	/* sibling pointer verification */
 	agno = xfs_daddr_to_agno(mp, xfs_buf_daddr(bp));
