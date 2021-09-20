@@ -199,6 +199,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   symlink_repair.o \
 				   tempfile.o \
 				   xfblob.o \
+				   xfbtree.o \
 				   )
 
 xfs-$(CONFIG_XFS_RT)		+= $(addprefix scrub/, \
