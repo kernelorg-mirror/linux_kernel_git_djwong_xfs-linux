@@ -220,4 +220,7 @@ extern const struct xfs_owner_info XFS_RMAP_OINFO_INODES;
 extern const struct xfs_owner_info XFS_RMAP_OINFO_REFC;
 extern const struct xfs_owner_info XFS_RMAP_OINFO_COW;
 
+int xfs_rmap_map_immediate(struct xfs_btree_cur *mcur,
+		struct xfs_rmap_irec *irec);
+
 #endif	/* __XFS_RMAP_H__ */
