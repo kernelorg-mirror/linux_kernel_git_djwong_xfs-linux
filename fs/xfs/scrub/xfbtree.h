@@ -30,6 +30,9 @@ struct xfbtree {
 	/* Number of xfile blocks actually used by this xfbtree. */
 	xfileoff_t			xf_used;
 
+	/* Private data from the xfbtree config. */
+	unsigned long long		data;
+
 	/* Minimum and maximum records per block. */
 	unsigned int			maxrecs[2];
 	unsigned int			minrecs[2];

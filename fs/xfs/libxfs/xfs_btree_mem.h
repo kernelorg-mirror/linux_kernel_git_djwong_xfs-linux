@@ -30,6 +30,9 @@ struct xfbtree_config {
 	 */
 	unsigned long long		maxrange;
 
+	/* Private data to be added to the xfbtree. */
+	unsigned long long		data;
+
 	/* Btree type number */
 	xfs_btnum_t			btnum;
 

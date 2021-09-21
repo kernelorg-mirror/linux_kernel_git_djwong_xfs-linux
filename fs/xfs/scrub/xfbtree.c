@@ -460,6 +460,7 @@ xfbtree_create(
 	if (error)
 		goto err_freesp;
 
+	xfbt->data = cfg->data;
 	*xfbtreep = xfbt;
 	return 0;
 
