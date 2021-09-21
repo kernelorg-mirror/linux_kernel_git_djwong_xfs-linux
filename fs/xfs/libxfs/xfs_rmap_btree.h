@@ -62,4 +62,10 @@ extern int xfs_rmapbt_calc_reserves(struct xfs_mount *mp, struct xfs_trans *tp,
 
 int __init xfs_rmapbt_create_cursor_cache(void);
 
+struct xfbtree;
+struct xfs_btree_cur *xfs_rmapbt_mem_cursor(struct xfs_mount *mp,
+		struct xfs_trans *tp, struct xfs_buf *head_bp,
+		struct xfbtree *xfbtree);
+struct xfbtree *xfs_rmapbt_mem_create(struct xfs_mount *mp, const char *name);
+
 #endif /* __XFS_RMAP_BTREE_H__ */

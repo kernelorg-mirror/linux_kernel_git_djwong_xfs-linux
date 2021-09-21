@@ -620,4 +620,6 @@ int xfs_btree_alloc_imeta_block(struct xfs_btree_cur *cur,
 		int *stat);
 int xfs_btree_free_imeta_block(struct xfs_btree_cur *cur, struct xfs_buf *bp);
 
+int xfs_btree_goto_left_edge(struct xfs_btree_cur *cur);
+
 #endif	/* __XFS_BTREE_H__ */
