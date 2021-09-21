@@ -260,7 +260,11 @@ xfs_rmap_get_rec(
 
 	if (irec->rm_blockcount == 0)
 		goto out_bad_rec;
-	if (cur->bc_btnum == XFS_BTNUM_RTRMAP) {
+	if (cur->bc_flags & XFS_BTREE_IN_MEMORY) {
+		if (cur->bc_btnum == XFS_BTNUM_RMAP &&
+		    !xfs_rmapbt_mem_verify_rec(cur, irec))
+			goto out_bad_rec;
+	} else if (cur->bc_btnum == XFS_BTNUM_RTRMAP) {
 		if (!xfs_verify_rtbno(mp, irec->rm_startblock))
 			goto out_bad_rec;
 		if (irec->rm_startblock >
@@ -299,7 +303,10 @@ xfs_rmap_get_rec(
 
 	return 0;
 out_bad_rec:
-	if (cur->bc_btnum == XFS_BTNUM_RTRMAP)
+	if (cur->bc_flags & XFS_BTREE_IN_MEMORY)
+		xfs_warn(mp,
+ "In-Memory Reverse Mapping BTree record corruption detected!");
+	else if (cur->bc_btnum == XFS_BTNUM_RTRMAP)
 		xfs_warn(mp,
  "RT Reverse Mapping BTree record corruption detected!");
 	else
@@ -2367,15 +2374,12 @@ xfs_rmap_map_raw(
 {
 	struct xfs_owner_info	oinfo;
 
-	oinfo.oi_owner = rmap->rm_owner;
-	oinfo.oi_offset = rmap->rm_offset;
-	oinfo.oi_flags = 0;
-	if (rmap->rm_flags & XFS_RMAP_ATTR_FORK)
-		oinfo.oi_flags |= XFS_OWNER_INFO_ATTR_FORK;
-	if (rmap->rm_flags & XFS_RMAP_BMBT_BLOCK)
-		oinfo.oi_flags |= XFS_OWNER_INFO_BMBT_BLOCK;
+	xfs_owner_info_pack(&oinfo, rmap->rm_owner, rmap->rm_offset,
+			rmap->rm_flags);
 
-	if (rmap->rm_flags || XFS_RMAP_NON_INODE_OWNER(rmap->rm_owner))
+	if ((rmap->rm_flags & (XFS_RMAP_ATTR_FORK | XFS_RMAP_BMBT_BLOCK |
+			       XFS_RMAP_UNWRITTEN)) ||
+	    XFS_RMAP_NON_INODE_OWNER(rmap->rm_owner))
 		return xfs_rmap_map(cur, rmap->rm_startblock,
 				rmap->rm_blockcount,
 				rmap->rm_flags & XFS_RMAP_UNWRITTEN,
