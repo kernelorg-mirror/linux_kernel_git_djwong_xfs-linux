@@ -288,10 +288,18 @@ static int pmem_dax_zero_page_range(struct dax_device *dax_dev, pgoff_t pgoff,
 				    size_t nr_pages)
 {
 	struct pmem_device *pmem = dax_get_private(dax_dev);
+	int ret = 0;
 
-	return blk_status_to_errno(pmem_do_write(pmem, ZERO_PAGE(0), 0,
-				   PFN_PHYS(pgoff) >> SECTOR_SHIFT,
-				   PAGE_SIZE));
+	for (; nr_pages > 0 && ret == 0; pgoff++, nr_pages--) {
+		blk_status_t status;
+
+		status = pmem_do_write(pmem, ZERO_PAGE(0), 0,
+				       PFN_PHYS(pgoff) >> SECTOR_SHIFT,
+				       PAGE_SIZE);
+		ret = blk_status_to_errno(status);
+	}
+
+	return ret;
 }
 
 static long pmem_dax_direct_access(struct dax_device *dax_dev,

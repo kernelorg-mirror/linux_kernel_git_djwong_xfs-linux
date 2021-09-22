@@ -353,13 +353,6 @@ int dax_zero_page_range(struct dax_device *dax_dev, pgoff_t pgoff,
 {
 	if (!dax_alive(dax_dev))
 		return -ENXIO;
-	/*
-	 * There are no callers that want to zero more than one page as of now.
-	 * Once users are there, this check can be removed after the
-	 * device mapper code has been updated to split ranges across targets.
-	 */
-	if (nr_pages != 1)
-		return -EIO;
 
 	return dax_dev->ops->zero_page_range(dax_dev, pgoff, nr_pages);
 }
