@@ -244,7 +244,6 @@ struct xfs_btree_cur
 	uint			bc_flags; /* btree features - below */
 	uint8_t		bc_maxlevels;	/* maximum levels for this btree type */
 	uint8_t		bc_nlevels;	/* number of levels in the tree */
-	uint8_t		bc_blocklog;	/* log2(blocksize) of btree blocks */
 	union xfs_btree_irec	bc_rec;	/* current insert/search record value */
 	xfs_btnum_t	bc_btnum;	/* identifies which btree type */
 	int		bc_statoff;	/* offset of btre stats array */
