@@ -583,4 +583,14 @@ struct xfs_btree_cur *xfs_btree_alloc_cursor(struct xfs_mount *mp,
 		struct xfs_trans *tp, xfs_btnum_t btnum);
 unsigned int xfs_btree_maxlevels(struct xfs_mount *mp, xfs_btnum_t btnum);
 
+void xfs_btree_absolute_minrecs(unsigned int *minrecs, unsigned int bc_flags,
+		unsigned int leaf_recbytes, unsigned int node_recbytes);
+
+struct xfs_btree_cur_zone {
+	const char		*name;
+	unsigned int		maxlevels;
+};
+
+extern struct xfs_btree_cur_zone xfs_btree_cur_zones[XFS_BTNUM_MAX];
+
 #endif	/* __XFS_BTREE_H__ */

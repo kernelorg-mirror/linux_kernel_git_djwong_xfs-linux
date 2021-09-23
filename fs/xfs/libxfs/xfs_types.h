@@ -126,6 +126,9 @@ typedef enum {
 	XFS_BTNUM_INOi, XFS_BTNUM_FINOi, XFS_BTNUM_REFCi, XFS_BTNUM_MAX
 } xfs_btnum_t;
 
+#define for_each_xfs_btnum(btnum) \
+	for((btnum) = XFS_BTNUM_BNOi; (btnum) < XFS_BTNUM_MAX; (btnum)++)
+
 #define XFS_BTNUM_STRINGS \
 	{ XFS_BTNUM_BNOi,	"bnobt" }, \
 	{ XFS_BTNUM_CNTi,	"cntbt" }, \

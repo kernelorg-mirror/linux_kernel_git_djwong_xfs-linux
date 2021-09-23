@@ -582,6 +582,18 @@ xfs_allocbt_maxrecs(
 	return blocklen / (sizeof(xfs_alloc_key_t) + sizeof(xfs_alloc_ptr_t));
 }
 
+unsigned int
+xfs_allocbt_absolute_maxlevels(void)
+{
+	unsigned int		minrecs[2];
+
+	xfs_btree_absolute_minrecs(minrecs, 0, sizeof(xfs_alloc_rec_t),
+			sizeof(xfs_alloc_key_t) + sizeof(xfs_alloc_ptr_t));
+
+	return xfs_btree_compute_maxlevels(minrecs,
+			(XFS_MAX_AG_BLOCKS + 1) / 2);
+}
+
 /* Calculate the freespace btree size for some records. */
 xfs_extlen_t
 xfs_allocbt_calc_size(

@@ -74,5 +74,6 @@ int xfs_inobt_cur(struct xfs_mount *mp, struct xfs_trans *tp,
 
 void xfs_inobt_commit_staged_btree(struct xfs_btree_cur *cur,
 		struct xfs_trans *tp, struct xfs_buf *agbp);
+unsigned int xfs_inobt_absolute_maxlevels(void);
 
 #endif	/* __XFS_IALLOC_BTREE_H__ */

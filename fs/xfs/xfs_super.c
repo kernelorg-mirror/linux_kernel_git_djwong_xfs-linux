@@ -37,6 +37,12 @@
 #include "xfs_reflink.h"
 #include "xfs_pwork.h"
 #include "xfs_ag.h"
+#include "xfs_btree.h"
+#include "xfs_alloc_btree.h"
+#include "xfs_ialloc_btree.h"
+#include "xfs_bmap_btree.h"
+#include "xfs_rmap_btree.h"
+#include "xfs_refcount_btree.h"
 
 #include <linux/magic.h>
 #include <linux/fs_context.h>
@@ -1951,8 +1957,33 @@ static struct file_system_type xfs_fs_type = {
 MODULE_ALIAS_FS("xfs");
 
 STATIC int __init
+xfs_init_btree_zones(void)
+{
+	struct xfs_btree_cur_zone	*z = xfs_btree_cur_zones;
+	xfs_btnum_t			btnum;
+
+	z[XFS_BTNUM_BNO].maxlevels	= xfs_allocbt_absolute_maxlevels();
+	z[XFS_BTNUM_RMAP].maxlevels	= xfs_rmapbt_absolute_maxlevels();
+	z[XFS_BTNUM_BMAP].maxlevels	= xfs_bmbt_absolute_maxlevels();
+	z[XFS_BTNUM_INO].maxlevels	= xfs_inobt_absolute_maxlevels();
+	z[XFS_BTNUM_REFC].maxlevels	= xfs_refcountbt_absolute_maxlevels();
+
+	for_each_xfs_btnum(btnum) {
+		ASSERT(z[btnum].maxlevels <= XFS_BTREE_CUR_ZONE_MAXLEVELS);
+	}
+
+	/* struct copies for btree types that share zones */
+	z[XFS_BTNUM_CNT] = z[XFS_BTNUM_BNO];
+	z[XFS_BTNUM_FINO] = z[XFS_BTNUM_INO];
+
+	return 0;
+}
+
+STATIC int __init
 xfs_init_zones(void)
 {
+	int			error;
+
 	xfs_log_ticket_zone = kmem_cache_create("xfs_log_ticket",
 						sizeof(struct xlog_ticket),
 						0, 0, NULL);
@@ -1964,6 +1995,10 @@ xfs_init_zones(void)
 					0, 0, NULL);
 	if (!xfs_bmap_free_item_zone)
 		goto out_destroy_log_ticket_zone;
+
+	error = xfs_init_btree_zones();
+	if (error)
+		goto out_destroy_bmap_free_item_zone;
 
 	xfs_btree_cur_zone = kmem_cache_create("xfs_btree_cur",
 			xfs_btree_cur_sizeof(XFS_BTREE_CUR_ZONE_MAXLEVELS),

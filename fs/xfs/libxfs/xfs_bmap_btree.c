@@ -586,6 +586,19 @@ xfs_bmbt_maxrecs(
 	return blocklen / (sizeof(xfs_bmbt_key_t) + sizeof(xfs_bmbt_ptr_t));
 }
 
+unsigned int
+xfs_bmbt_absolute_maxlevels(void)
+{
+	unsigned int		minrecs[2];
+
+	xfs_btree_absolute_minrecs(minrecs, XFS_BTREE_LONG_PTRS,
+			sizeof(struct xfs_bmbt_rec),
+			sizeof(struct xfs_bmbt_key) +
+				sizeof(xfs_bmbt_ptr_t));
+
+	return xfs_btree_compute_maxlevels(minrecs, MAXEXTNUM) + 1;
+}
+
 /*
  * Calculate number of records in a bmap btree inode root.
  */

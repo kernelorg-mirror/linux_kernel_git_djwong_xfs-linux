@@ -27,6 +27,13 @@
  * Cursor allocation zone.
  */
 kmem_zone_t	*xfs_btree_cur_zone;
+struct xfs_btree_cur_zone xfs_btree_cur_zones[XFS_BTNUM_MAX] = {
+	[XFS_BTNUM_BNO]		= { .name = "xfs_alloc_btree_cur" },
+	[XFS_BTNUM_INO]		= { .name = "xfs_ialloc_btree_cur" },
+	[XFS_BTNUM_RMAP]	= { .name = "xfs_rmap_btree_cur" },
+	[XFS_BTNUM_REFC]	= { .name = "xfs_refc_btree_cur" },
+	[XFS_BTNUM_BMAP]	= { .name = "xfs_bmap_btree_cur" },
+};
 
 /*
  * Btree magic numbers.
@@ -5026,4 +5033,45 @@ xfs_btree_alloc_cursor(
 	cur->bc_maxlevels = maxlevels;
 
 	return cur;
+}
+
+/*
+ * Compute absolute minrecs for leaf and node btree blocks.  Callers should set
+ * BTREE_LONG_PTRS and BTREE_OVERLAPPING as they would for regular cursors.
+ * Set BTREE_CRC_BLOCKS if the btree type is supported on V5 or newer
+ * filesystems.
+ */
+void
+xfs_btree_absolute_minrecs(
+	unsigned int		*minrecs,
+	unsigned int		bc_flags,
+	unsigned int		leaf_recbytes,
+	unsigned int		node_recbytes)
+{
+	unsigned int		min_recbytes;
+
+	/*
+	 * If this btree type is supported on V4, we use the smaller V4 min
+	 * block size along with the V4 header size.  If the btree type is only
+	 * supported on V5, use the (twice as large) V5 min block size along
+	 * with the V5 header size.
+	 */
+	if (!(bc_flags & XFS_BTREE_CRC_BLOCKS)) {
+		if (bc_flags & XFS_BTREE_LONG_PTRS)
+			min_recbytes = XFS_MIN_BLOCKSIZE -
+							XFS_BTREE_LBLOCK_LEN;
+		else
+			min_recbytes = XFS_MIN_BLOCKSIZE -
+							XFS_BTREE_SBLOCK_LEN;
+	} else if (bc_flags & XFS_BTREE_LONG_PTRS) {
+		min_recbytes = XFS_MIN_CRC_BLOCKSIZE - XFS_BTREE_LBLOCK_CRC_LEN;
+	} else {
+		min_recbytes = XFS_MIN_CRC_BLOCKSIZE - XFS_BTREE_SBLOCK_CRC_LEN;
+	}
+
+	if (bc_flags & XFS_BTREE_OVERLAPPING)
+		node_recbytes <<= 1;
+
+	minrecs[0] = min_recbytes / (2 * leaf_recbytes);
+	minrecs[1] = min_recbytes / (2 * node_recbytes);
 }

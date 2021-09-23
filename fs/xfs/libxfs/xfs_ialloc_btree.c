@@ -541,6 +541,17 @@ xfs_inobt_maxrecs(
 	return blocklen / (sizeof(xfs_inobt_key_t) + sizeof(xfs_inobt_ptr_t));
 }
 
+unsigned int
+xfs_inobt_absolute_maxlevels(void)
+{
+	unsigned int		minrecs[2];
+
+	xfs_btree_absolute_minrecs(minrecs, 0, sizeof(xfs_inobt_rec_t),
+			sizeof(xfs_inobt_key_t) + sizeof(xfs_inobt_ptr_t));
+
+	return xfs_btree_compute_maxlevels(minrecs, XFS_MAX_AG_INODES);
+}
+
 /*
  * Convert the inode record holemask to an inode allocation bitmap. The inode
  * allocation bitmap is inode granularity and specifies whether an inode is

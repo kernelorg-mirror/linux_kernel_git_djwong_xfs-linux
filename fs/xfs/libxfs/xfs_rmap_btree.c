@@ -534,6 +534,31 @@ xfs_rmapbt_maxrecs(
 		(2 * sizeof(struct xfs_rmap_key) + sizeof(xfs_rmap_ptr_t));
 }
 
+unsigned int
+xfs_rmapbt_absolute_maxlevels(void)
+{
+	unsigned int		minrecs[2];
+
+	xfs_btree_absolute_minrecs(minrecs,
+			XFS_BTREE_CRC_BLOCKS | XFS_BTREE_OVERLAPPING,
+			sizeof(struct xfs_rmap_rec),
+			sizeof(struct xfs_rmap_key) + sizeof(xfs_rmap_ptr_t));
+
+	/*
+	 * Compute the asymptotic maxlevels for an rmapbt on any reflink fs.
+	 *
+	 * On a reflink filesystem, each AG block can have up to 2^32 (per the
+	 * refcount record format) owners, which means that theoretically we
+	 * could face up to 2^64 rmap records.  However, we're likely to run
+	 * out of blocks in the AG long before that happens, which means that
+	 * we must compute the max height based on what the btree will look
+	 * like if it consumes almost all the blocks in the AG due to maximal
+	 * sharing factor.
+	 */
+	return xfs_btree_compute_maxlevels_size(XFS_MAX_CRC_AG_BLOCKS,
+			minrecs[1]);
+}
+
 /* Compute the maximum height of an rmap btree. */
 unsigned int
 xfs_rmapbt_compute_maxlevels(
