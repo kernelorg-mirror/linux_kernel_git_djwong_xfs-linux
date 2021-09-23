@@ -1969,7 +1969,14 @@ xfs_init_btree_zones(void)
 	z[XFS_BTNUM_REFC].maxlevels	= xfs_refcountbt_absolute_maxlevels();
 
 	for_each_xfs_btnum(btnum) {
-		ASSERT(z[btnum].maxlevels <= XFS_BTREE_CUR_ZONE_MAXLEVELS);
+		if (z[btnum].name == NULL)
+			continue;
+		ASSERT(z[btnum].maxlevels >= 1);
+		z[btnum].zone = kmem_cache_create(z[btnum].name,
+				xfs_btree_cur_sizeof(z[btnum].maxlevels),
+				0, 0, NULL);
+		if (!z[btnum].zone)
+			return -ENOMEM;
 	}
 
 	/* struct copies for btree types that share zones */
@@ -1977,6 +1984,20 @@ xfs_init_btree_zones(void)
 	z[XFS_BTNUM_FINO] = z[XFS_BTNUM_INO];
 
 	return 0;
+}
+
+STATIC void
+xfs_destroy_btree_zones(void)
+{
+	struct xfs_btree_cur_zone	*z = xfs_btree_cur_zones;
+	xfs_btnum_t			btnum;
+
+	/* don't free shared zones */
+	z[XFS_BTNUM_CNT].zone = NULL;
+	z[XFS_BTNUM_FINO].zone = NULL;
+
+	for_each_xfs_btnum(btnum)
+		kmem_cache_destroy(z[btnum].zone);
 }
 
 STATIC int __init
@@ -1998,12 +2019,6 @@ xfs_init_zones(void)
 
 	error = xfs_init_btree_zones();
 	if (error)
-		goto out_destroy_bmap_free_item_zone;
-
-	xfs_btree_cur_zone = kmem_cache_create("xfs_btree_cur",
-			xfs_btree_cur_sizeof(XFS_BTREE_CUR_ZONE_MAXLEVELS),
-			0, 0, NULL);
-	if (!xfs_btree_cur_zone)
 		goto out_destroy_bmap_free_item_zone;
 
 	xfs_da_state_zone = kmem_cache_create("xfs_da_state",
@@ -2141,7 +2156,7 @@ xfs_init_zones(void)
  out_destroy_da_state_zone:
 	kmem_cache_destroy(xfs_da_state_zone);
  out_destroy_btree_cur_zone:
-	kmem_cache_destroy(xfs_btree_cur_zone);
+	xfs_destroy_btree_zones();
  out_destroy_bmap_free_item_zone:
 	kmem_cache_destroy(xfs_bmap_free_item_zone);
  out_destroy_log_ticket_zone:
@@ -2173,7 +2188,7 @@ xfs_destroy_zones(void)
 	kmem_cache_destroy(xfs_trans_zone);
 	kmem_cache_destroy(xfs_ifork_zone);
 	kmem_cache_destroy(xfs_da_state_zone);
-	kmem_cache_destroy(xfs_btree_cur_zone);
+	xfs_destroy_btree_zones();
 	kmem_cache_destroy(xfs_bmap_free_item_zone);
 	kmem_cache_destroy(xfs_log_ticket_zone);
 }

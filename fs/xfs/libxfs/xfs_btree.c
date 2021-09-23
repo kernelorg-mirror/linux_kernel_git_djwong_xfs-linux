@@ -26,7 +26,6 @@
 /*
  * Cursor allocation zone.
  */
-kmem_zone_t	*xfs_btree_cur_zone;
 struct xfs_btree_cur_zone xfs_btree_cur_zones[XFS_BTNUM_MAX] = {
 	[XFS_BTNUM_BNO]		= { .name = "xfs_alloc_btree_cur" },
 	[XFS_BTNUM_INO]		= { .name = "xfs_ialloc_btree_cur" },
@@ -364,6 +363,7 @@ xfs_btree_del_cursor(
 	struct xfs_btree_cur	*cur,		/* btree cursor */
 	int			error)		/* del because of error */
 {
+	struct xfs_btree_cur_zone *bczone = &xfs_btree_cur_zones[cur->bc_btnum];
 	int			i;		/* btree level */
 
 	/*
@@ -386,10 +386,10 @@ xfs_btree_del_cursor(
 		kmem_free(cur->bc_ops);
 	if (!(cur->bc_flags & XFS_BTREE_LONG_PTRS) && cur->bc_ag.pag)
 		xfs_perag_put(cur->bc_ag.pag);
-	if (cur->bc_maxlevels > XFS_BTREE_CUR_ZONE_MAXLEVELS)
+	if (cur->bc_maxlevels > bczone->maxlevels)
 		kmem_free(cur);
 	else
-		kmem_cache_free(xfs_btree_cur_zone, cur);
+		kmem_cache_free(bczone->zone, cur);
 }
 
 /*
@@ -5021,12 +5021,12 @@ xfs_btree_alloc_cursor(
 {
 	struct xfs_btree_cur	*cur;
 	unsigned int		maxlevels = xfs_btree_maxlevels(mp, btnum);
+	struct xfs_btree_cur_zone *bczone = &xfs_btree_cur_zones[btnum];
 
-	if (maxlevels > XFS_BTREE_CUR_ZONE_MAXLEVELS)
+	if (maxlevels > bczone->maxlevels)
 		cur = kmem_zalloc(xfs_btree_cur_sizeof(maxlevels), KM_NOFS);
 	else
-		cur = kmem_cache_zalloc(xfs_btree_cur_zone,
-				GFP_NOFS | __GFP_NOFAIL);
+		cur = kmem_cache_zalloc(bczone->zone, GFP_NOFS | __GFP_NOFAIL);
 	cur->bc_tp = tp;
 	cur->bc_mp = mp;
 	cur->bc_btnum = btnum;
