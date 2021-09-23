@@ -27,10 +27,9 @@
 /*
  * Cursor allocation zone.
  */
-kmem_zone_t	*xfs_btree_cur_zone;
-
 struct xfs_btree_cur_cache {
 	const char		*name;
+	kmem_zone_t		*cache;
 	unsigned short		maxlevels;
 	bool			alias;
 };
@@ -374,6 +373,7 @@ xfs_btree_del_cursor(
 	struct xfs_btree_cur	*cur,		/* btree cursor */
 	int			error)		/* del because of error */
 {
+	struct xfs_btree_cur_cache *cc = &xfs_btree_cur_caches[cur->bc_btnum];
 	int			i;		/* btree level */
 
 	/*
@@ -396,7 +396,7 @@ xfs_btree_del_cursor(
 		kmem_free(cur->bc_ops);
 	if (!(cur->bc_flags & XFS_BTREE_LONG_PTRS) && cur->bc_ag.pag)
 		xfs_perag_put(cur->bc_ag.pag);
-	kmem_cache_free(xfs_btree_cur_zone, cur);
+	kmem_cache_free(cc->cache, cur);
 }
 
 /*
@@ -5329,10 +5329,11 @@ xfs_btree_alloc_cursor(
 {
 	struct xfs_btree_cur	*cur;
 	unsigned int		maxlevels = xfs_btree_maxlevels(mp, btnum);
+	struct xfs_btree_cur_cache *cc = &xfs_btree_cur_caches[btnum];
 
-	ASSERT(maxlevels <= XFS_BTREE_CUR_ZONE_MAXLEVELS);
+	ASSERT(maxlevels <= cc->maxlevels);
 
-	cur = kmem_cache_zalloc(xfs_btree_cur_zone, GFP_NOFS | __GFP_NOFAIL);
+	cur = kmem_cache_zalloc(cc->cache, GFP_NOFS | __GFP_NOFAIL);
 	cur->bc_tp = tp;
 	cur->bc_mp = mp;
 	cur->bc_btnum = btnum;
@@ -5390,6 +5391,12 @@ xfs_btree_create_cursor_cache(
 	unsigned int				maxlevels)
 {
 	struct xfs_btree_cur_cache		*cc;
+	kmem_zone_t				*cache;
+
+	cache = kmem_cache_create(name, xfs_btree_cur_sizeof(maxlevels), 0, 0,
+			NULL);
+	if (!cache)
+		return -ENOMEM;
 
 	cc = &xfs_btree_cur_caches[btnum];
 
@@ -5398,6 +5405,7 @@ xfs_btree_create_cursor_cache(
 	cc->name = name;
 	cc->maxlevels = maxlevels;
 	cc->alias = false;
+	cc->cache = cache;
 
 	return 0;
 }
@@ -5421,8 +5429,26 @@ xfs_btree_alias_cursor_cache(
 	cd->name = cs->name;
 	cd->maxlevels = cs->maxlevels;
 	cd->alias = true;
+	cd->cache = cs->cache;
 
 	return 0;
+}
+
+/* Destroy all btree cursor caches. */
+void
+xfs_btree_destroy_cursor_caches(void)
+{
+	struct xfs_btree_cur_cache	*cc = xfs_btree_cur_caches;
+	unsigned int			i = 0;
+
+	for (; i < ARRAY_SIZE(xfs_btree_cur_caches); i--, cc++) {
+		cc->name = NULL;
+		cc->maxlevels = 0;
+		if (!cc->alias && cc->cache)
+			kmem_cache_destroy(cc->cache);
+		cc->alias = NULL;
+		cc->cache = NULL;
+	}
 }
 
 /* Return the maximum possible height for a given type of btree. */

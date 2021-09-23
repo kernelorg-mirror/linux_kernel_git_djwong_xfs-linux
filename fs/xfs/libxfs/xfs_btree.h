@@ -13,8 +13,6 @@ struct xfs_trans;
 struct xfs_ifork;
 struct xfs_perag;
 
-extern kmem_zone_t	*xfs_btree_cur_zone;
-
 /*
  * Generic key, ptr and record wrapper structures.
  *
@@ -91,12 +89,6 @@ uint32_t xfs_btree_magic(int crc, xfs_btnum_t btnum);
 	XFS_STATS_INC_OFF((cur)->bc_mp, (cur)->bc_statoff + __XBTS_ ## stat)
 #define XFS_BTREE_STATS_ADD(cur, stat, val)	\
 	XFS_STATS_ADD_OFF((cur)->bc_mp, (cur)->bc_statoff + __XBTS_ ## stat, val)
-
-/*
- * The btree cursor zone hands out cursors that can handle up to this many
- * levels.  This is the known maximum for all btree types.
- */
-#define XFS_BTREE_CUR_ZONE_MAXLEVELS	(9)
 
 struct xfs_btree_ops {
 	/* size of the key and record structures */
@@ -599,5 +591,6 @@ int __init xfs_btree_create_cursor_cache(xfs_btnum_t btnum, const char *name,
 		unsigned int maxlevels);
 int __init xfs_btree_alias_cursor_cache(xfs_btnum_t btnum, xfs_btnum_t src);
 unsigned int xfs_btree_absolute_maxlevels(xfs_btnum_t btnum);
+void xfs_btree_destroy_cursor_caches(void);
 
 #endif	/* __XFS_BTREE_H__ */
