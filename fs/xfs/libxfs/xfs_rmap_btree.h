@@ -60,4 +60,6 @@ extern xfs_extlen_t xfs_rmapbt_max_size(struct xfs_mount *mp,
 extern int xfs_rmapbt_calc_reserves(struct xfs_mount *mp, struct xfs_trans *tp,
 		struct xfs_perag *pag, xfs_extlen_t *ask, xfs_extlen_t *used);
 
+int __init xfs_rmapbt_create_cursor_cache(void);
+
 #endif /* __XFS_RMAP_BTREE_H__ */

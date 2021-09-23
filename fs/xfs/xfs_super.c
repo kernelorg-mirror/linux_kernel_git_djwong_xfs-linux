@@ -38,6 +38,12 @@
 #include "xfs_pwork.h"
 #include "xfs_ag.h"
 #include "xfs_swapext_item.h"
+#include "xfs_btree.h"
+#include "xfs_alloc_btree.h"
+#include "xfs_ialloc_btree.h"
+#include "xfs_bmap_btree.h"
+#include "xfs_rmap_btree.h"
+#include "xfs_refcount_btree.h"
 
 #include <linux/magic.h>
 #include <linux/fs_context.h>
@@ -2007,8 +2013,34 @@ static struct file_system_type xfs_fs_type = {
 MODULE_ALIAS_FS("xfs");
 
 STATIC int __init
+xfs_init_btree_caches(void)
+{
+	int				error;
+
+	error = xfs_allocbt_create_cursor_cache();
+	if (error)
+		return error;
+	error = xfs_inobt_create_cursor_cache();
+	if (error)
+		return error;
+	error = xfs_bmbt_create_cursor_cache();
+	if (error)
+		return error;
+	error = xfs_rmapbt_create_cursor_cache();
+	if (error)
+		return error;
+	error = xfs_refcountbt_create_cursor_cache();
+	if (error)
+		return error;
+
+	return 0;
+}
+
+STATIC int __init
 xfs_init_zones(void)
 {
+	int			error;
+
 	xfs_log_ticket_zone = kmem_cache_create("xfs_log_ticket",
 						sizeof(struct xlog_ticket),
 						0, 0, NULL);
@@ -2020,6 +2052,10 @@ xfs_init_zones(void)
 					0, 0, NULL);
 	if (!xfs_bmap_free_item_zone)
 		goto out_destroy_log_ticket_zone;
+
+	error = xfs_init_btree_caches();
+	if (error)
+		goto out_destroy_bmap_free_item_zone;
 
 	xfs_btree_cur_zone = kmem_cache_create("xfs_btree_cur",
 			xfs_btree_cur_sizeof(XFS_BTREE_CUR_ZONE_MAXLEVELS),

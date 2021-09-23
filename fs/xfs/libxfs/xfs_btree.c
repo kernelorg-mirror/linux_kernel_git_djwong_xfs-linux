@@ -29,6 +29,14 @@
  */
 kmem_zone_t	*xfs_btree_cur_zone;
 
+struct xfs_btree_cur_cache {
+	const char		*name;
+	unsigned short		maxlevels;
+	bool			alias;
+};
+
+static struct xfs_btree_cur_cache xfs_btree_cur_caches[XFS_BTNUM_MAX];
+
 /*
  * Btree magic numbers.
  */
@@ -5331,4 +5339,96 @@ xfs_btree_alloc_cursor(
 	cur->bc_maxlevels = maxlevels;
 
 	return cur;
+}
+
+/*
+ * Compute absolute minrecs for leaf and node btree blocks.  Callers should set
+ * BTREE_LONG_PTRS and BTREE_OVERLAPPING as they would for regular cursors.
+ * Set BTREE_CRC_BLOCKS if the btree type is supported /only/ on V5 or newer
+ * filesystems.
+ */
+void __init
+xfs_btree_absolute_minrecs(
+	unsigned int		*minrecs,
+	unsigned int		bc_flags,
+	unsigned int		leaf_recbytes,
+	unsigned int		node_recbytes)
+{
+	unsigned int		min_recbytes;
+
+	/*
+	 * If this btree type is supported on V4, we use the smaller V4 min
+	 * block size along with the V4 header size.  If the btree type is only
+	 * supported on V5, use the (twice as large) V5 min block size along
+	 * with the V5 header size.
+	 */
+	if (!(bc_flags & XFS_BTREE_CRC_BLOCKS)) {
+		if (bc_flags & XFS_BTREE_LONG_PTRS)
+			min_recbytes = XFS_MIN_BLOCKSIZE -
+							XFS_BTREE_LBLOCK_LEN;
+		else
+			min_recbytes = XFS_MIN_BLOCKSIZE -
+							XFS_BTREE_SBLOCK_LEN;
+	} else if (bc_flags & XFS_BTREE_LONG_PTRS) {
+		min_recbytes = XFS_MIN_CRC_BLOCKSIZE - XFS_BTREE_LBLOCK_CRC_LEN;
+	} else {
+		min_recbytes = XFS_MIN_CRC_BLOCKSIZE - XFS_BTREE_SBLOCK_CRC_LEN;
+	}
+
+	if (bc_flags & XFS_BTREE_OVERLAPPING)
+		node_recbytes <<= 1;
+
+	minrecs[0] = min_recbytes / (2 * leaf_recbytes);
+	minrecs[1] = min_recbytes / (2 * node_recbytes);
+}
+
+/* Set up a btree cursor cache for a given btree type. */
+int __init
+xfs_btree_create_cursor_cache(
+	xfs_btnum_t				btnum,
+	const char				*name,
+	unsigned int				maxlevels)
+{
+	struct xfs_btree_cur_cache		*cc;
+
+	cc = &xfs_btree_cur_caches[btnum];
+
+	ASSERT(cc->maxlevels == 0);
+
+	cc->name = name;
+	cc->maxlevels = maxlevels;
+	cc->alias = false;
+
+	return 0;
+}
+
+/* Set up a btree cursor cache to reuse the cache of another btree type. */
+int __init
+xfs_btree_alias_cursor_cache(
+	xfs_btnum_t				btnum,
+	xfs_btnum_t				src)
+{
+	struct xfs_btree_cur_cache		*cd;
+	const struct xfs_btree_cur_cache	*cs;
+
+
+	cd = &xfs_btree_cur_caches[btnum];
+	cs = &xfs_btree_cur_caches[src];
+
+	ASSERT(cd->maxlevels == 0);
+	ASSERT(cs->maxlevels > 0);
+
+	cd->name = cs->name;
+	cd->maxlevels = cs->maxlevels;
+	cd->alias = true;
+
+	return 0;
+}
+
+/* Return the maximum possible height for a given type of btree. */
+unsigned int
+xfs_btree_absolute_maxlevels(
+	xfs_btnum_t				btnum)
+{
+	return xfs_btree_cur_caches[btnum].maxlevels;
 }

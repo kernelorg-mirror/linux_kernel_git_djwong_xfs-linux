@@ -409,6 +409,27 @@ xfs_refcountbt_maxrecs(
 			   sizeof(xfs_refcount_ptr_t));
 }
 
+static inline __init unsigned int
+xfs_refcountbt_absolute_maxlevels(void)
+{
+	unsigned int		minrecs[2];
+
+	xfs_btree_absolute_minrecs(minrecs, XFS_BTREE_CRC_BLOCKS,
+			sizeof(struct xfs_refcount_rec),
+			sizeof(struct xfs_refcount_key) +
+						sizeof(xfs_refcount_ptr_t));
+
+	return xfs_btree_compute_maxlevels(minrecs, XFS_MAX_CRC_AG_BLOCKS);
+}
+
+int __init
+xfs_refcountbt_create_cursor_cache(void)
+{
+	return xfs_btree_create_cursor_cache(XFS_BTNUM_REFC,
+			"xfs_refcountbt_cur",
+			xfs_refcountbt_absolute_maxlevels());
+}
+
 /* Compute the maximum height of a refcount btree. */
 void
 xfs_refcountbt_compute_maxlevels(
