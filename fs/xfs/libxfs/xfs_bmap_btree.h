@@ -112,4 +112,7 @@ extern unsigned long long xfs_bmbt_calc_size(struct xfs_mount *mp,
 
 unsigned int xfs_bmbt_absolute_maxlevels(void);
 
+int __init xfs_bmbt_init_cur_cache(void);
+void xfs_bmbt_destroy_cur_cache(void);
+
 #endif	/* __XFS_BMAP_BTREE_H__ */

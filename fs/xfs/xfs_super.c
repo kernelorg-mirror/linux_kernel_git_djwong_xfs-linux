@@ -37,6 +37,13 @@
 #include "xfs_reflink.h"
 #include "xfs_pwork.h"
 #include "xfs_ag.h"
+#include "xfs_btree.h"
+#include "xfs_alloc_btree.h"
+#include "xfs_ialloc_btree.h"
+#include "xfs_bmap_btree.h"
+#include "xfs_rmap_btree.h"
+#include "xfs_refcount_btree.h"
+
 
 #include <linux/magic.h>
 #include <linux/fs_context.h>
@@ -1951,8 +1958,44 @@ static struct file_system_type xfs_fs_type = {
 MODULE_ALIAS_FS("xfs");
 
 STATIC int __init
+xfs_init_btree_cur_caches(void)
+{
+	int				error;
+
+	error = xfs_allocbt_init_cur_cache();
+	if (error)
+		return error;
+	error = xfs_inobt_init_cur_cache();
+	if (error)
+		return error;
+	error = xfs_bmbt_init_cur_cache();
+	if (error)
+		return error;
+	error = xfs_rmapbt_init_cur_cache();
+	if (error)
+		return error;
+	error = xfs_refcountbt_init_cur_cache();
+	if (error)
+		return error;
+
+	return 0;
+}
+
+STATIC void
+xfs_destroy_btree_cur_caches(void)
+{
+	xfs_allocbt_destroy_cur_cache();
+	xfs_inobt_destroy_cur_cache();
+	xfs_bmbt_destroy_cur_cache();
+	xfs_rmapbt_destroy_cur_cache();
+	xfs_refcountbt_destroy_cur_cache();
+}
+
+STATIC int __init
 xfs_init_zones(void)
 {
+	int		error;
+
 	xfs_log_ticket_zone = kmem_cache_create("xfs_log_ticket",
 						sizeof(struct xlog_ticket),
 						0, 0, NULL);
@@ -1965,10 +2008,8 @@ xfs_init_zones(void)
 	if (!xfs_bmap_free_item_zone)
 		goto out_destroy_log_ticket_zone;
 
-	xfs_btree_cur_zone = kmem_cache_create("xfs_btree_cur",
-			xfs_btree_cur_sizeof(XFS_BTREE_CUR_ZONE_MAXLEVELS),
-			0, 0, NULL);
-	if (!xfs_btree_cur_zone)
+	error = xfs_init_btree_cur_caches();
+	if (error)
 		goto out_destroy_bmap_free_item_zone;
 
 	xfs_da_state_zone = kmem_cache_create("xfs_da_state",
@@ -2106,7 +2147,7 @@ xfs_init_zones(void)
  out_destroy_da_state_zone:
 	kmem_cache_destroy(xfs_da_state_zone);
  out_destroy_btree_cur_zone:
-	kmem_cache_destroy(xfs_btree_cur_zone);
+	xfs_destroy_btree_cur_caches();
  out_destroy_bmap_free_item_zone:
 	kmem_cache_destroy(xfs_bmap_free_item_zone);
  out_destroy_log_ticket_zone:
@@ -2138,7 +2179,7 @@ xfs_destroy_zones(void)
 	kmem_cache_destroy(xfs_trans_zone);
 	kmem_cache_destroy(xfs_ifork_zone);
 	kmem_cache_destroy(xfs_da_state_zone);
-	kmem_cache_destroy(xfs_btree_cur_zone);
+	xfs_destroy_btree_cur_caches();
 	kmem_cache_destroy(xfs_bmap_free_item_zone);
 	kmem_cache_destroy(xfs_log_ticket_zone);
 }

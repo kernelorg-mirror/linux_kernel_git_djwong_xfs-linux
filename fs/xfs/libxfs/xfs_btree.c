@@ -24,11 +24,6 @@
 #include "xfs_ag.h"
 
 /*
- * Cursor allocation zone.
- */
-kmem_zone_t	*xfs_btree_cur_zone;
-
-/*
  * Btree magic numbers.
  */
 static const uint32_t xfs_magics[2][XFS_BTNUM_MAX] = {
@@ -379,7 +374,7 @@ xfs_btree_del_cursor(
 		kmem_free(cur->bc_ops);
 	if (!(cur->bc_flags & XFS_BTREE_LONG_PTRS) && cur->bc_ag.pag)
 		xfs_perag_put(cur->bc_ag.pag);
-	kmem_cache_free(xfs_btree_cur_zone, cur);
+	kmem_cache_free(cur->bc_cache, cur);
 }
 
 /*
