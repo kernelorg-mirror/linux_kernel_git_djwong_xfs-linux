@@ -592,4 +592,12 @@ struct xfs_btree_cur *xfs_btree_alloc_cursor(struct xfs_mount *mp,
 		struct xfs_trans *tp, xfs_btnum_t btnum);
 unsigned int xfs_btree_maxlevels(struct xfs_mount *mp, xfs_btnum_t btnum);
 
+void __init xfs_btree_absolute_minrecs(unsigned int *minrecs,
+		unsigned int bc_flags, unsigned int leaf_recbytes,
+		unsigned int node_recbytes);
+int __init xfs_btree_create_cursor_cache(xfs_btnum_t btnum, const char *name,
+		unsigned int maxlevels);
+int __init xfs_btree_alias_cursor_cache(xfs_btnum_t btnum, xfs_btnum_t src);
+unsigned int xfs_btree_absolute_maxlevels(xfs_btnum_t btnum);
+
 #endif	/* __XFS_BTREE_H__ */

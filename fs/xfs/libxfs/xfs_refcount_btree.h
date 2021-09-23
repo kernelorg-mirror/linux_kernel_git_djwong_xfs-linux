@@ -66,4 +66,6 @@ extern int xfs_refcountbt_calc_reserves(struct xfs_mount *mp,
 void xfs_refcountbt_commit_staged_btree(struct xfs_btree_cur *cur,
 		struct xfs_trans *tp, struct xfs_buf *agbp);
 
+int __init xfs_refcountbt_create_cursor_cache(void);
+
 #endif	/* __XFS_REFCOUNT_BTREE_H__ */

@@ -52,6 +52,8 @@ void xfs_bmbt_commit_staged_btree(struct xfs_btree_cur *cur,
 extern unsigned long long xfs_bmbt_calc_size(struct xfs_mount *mp,
 		unsigned long long len);
 
+int __init xfs_bmbt_create_cursor_cache(void);
+
 /*
  * Btree block header size depends on a superblock flag.
  */

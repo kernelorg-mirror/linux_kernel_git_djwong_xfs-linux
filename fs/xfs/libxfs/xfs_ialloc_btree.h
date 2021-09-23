@@ -76,4 +76,6 @@ int xfs_inobt_cur(struct xfs_mount *mp, struct xfs_trans *tp,
 void xfs_inobt_commit_staged_btree(struct xfs_btree_cur *cur,
 		struct xfs_trans *tp, struct xfs_buf *agbp);
 
+int __init xfs_inobt_create_cursor_cache(void);
+
 #endif	/* __XFS_IALLOC_BTREE_H__ */
