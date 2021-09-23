@@ -601,4 +601,7 @@ xfs_btree_alloc_cursor(
 	return cur;
 }
 
+void xfs_btree_absolute_minrecs(unsigned int *minrecs, unsigned int bc_flags,
+		unsigned int leaf_recbytes, unsigned int node_recbytes);
+
 #endif	/* __XFS_BTREE_H__ */

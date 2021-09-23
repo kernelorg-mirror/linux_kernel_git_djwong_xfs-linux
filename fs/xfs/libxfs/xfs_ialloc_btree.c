@@ -542,6 +542,25 @@ xfs_inobt_maxrecs(
 	return blocklen / (sizeof(xfs_inobt_key_t) + sizeof(xfs_inobt_ptr_t));
 }
 
+/* Compute the max possible height of the maximally sized inode btree. */
+unsigned int
+xfs_inobt_absolute_maxlevels(void)
+{
+	unsigned int		minrecs[2];
+	unsigned long long	max_ag_inodes;
+
+	/*
+	 * For the absolute maximum, pretend that we can fill an entire AG
+	 * completely full of inodes except for the AG headers.
+	 */
+	max_ag_inodes = (XFS_MAX_AG_BYTES - (4 * BBSIZE)) / XFS_DINODE_MIN_SIZE;
+
+	xfs_btree_absolute_minrecs(minrecs, 0, sizeof(xfs_inobt_rec_t),
+			sizeof(xfs_inobt_key_t) + sizeof(xfs_inobt_ptr_t));
+
+	return xfs_btree_compute_maxlevels(minrecs, max_ag_inodes);
+}
+
 /*
  * Convert the inode record holemask to an inode allocation bitmap. The inode
  * allocation bitmap is inode granularity and specifies whether an inode is
