@@ -19,6 +19,7 @@
 #include "xfs_errortag.h"
 #include "xfs_error.h"
 #include "xfs_ag.h"
+#include "scrub/xfile.h"
 
 static struct kmem_cache *xfs_buf_cache;
 
@@ -859,7 +860,8 @@ xfs_buf_readahead_map(
 {
 	struct xfs_buf		*bp;
 
-	if (bdi_read_congested(target->bt_bdev->bd_disk->bdi))
+	if ((target->bt_flags & XFS_BUFTARG_IN_MEMORY) ||
+	    bdi_read_congested(target->bt_bdev->bd_disk->bdi))
 		return;
 
 	xfs_buf_read_map(target, map, nmaps,
@@ -1513,6 +1515,36 @@ next_chunk:
 
 }
 
+static inline void
+xfs_buf_ioapply_in_memory(
+	struct xfs_buf		*bp)
+{
+	struct xfile		*xfile = bp->b_target->bt_xfile;
+	loff_t			pos = BBTOB(xfs_buf_daddr(bp));
+	size_t			size = BBTOB(bp->b_length);
+	int			error;
+
+	atomic_inc(&bp->b_io_remaining);
+
+	if (bp->b_map_count > 1) {
+		/* We don't need or support multi-map buffers. */
+		ASSERT(0);
+		error = -EIO;
+	} else if (bp->b_flags & XBF_WRITE) {
+		error = xfile_obj_store(xfile, bp->b_addr, size, pos);
+	} else {
+		error = xfile_obj_load(xfile, bp->b_addr, size, pos);
+	}
+	if (error)
+		cmpxchg(&bp->b_io_error, 0, error);
+
+	if (!bp->b_error && xfs_buf_is_vmapped(bp) && (bp->b_flags & XBF_READ))
+		invalidate_kernel_vmap_range(bp->b_addr, xfs_buf_vmap_len(bp));
+
+	if (atomic_dec_and_test(&bp->b_io_remaining) == 1)
+		xfs_buf_ioend(bp);
+}
+
 STATIC void
 _xfs_buf_ioapply(
 	struct xfs_buf	*bp)
@@ -1569,6 +1601,11 @@ _xfs_buf_ioapply(
 
 	/* we only use the buffer cache for meta-data */
 	op |= REQ_META;
+
+	if (bp->b_target->bt_flags & XFS_BUFTARG_IN_MEMORY) {
+		xfs_buf_ioapply_in_memory(bp);
+		return;
+	}
 
 	/*
 	 * Walk all the vectors issuing IO on them. Set up the initial offset
@@ -1922,7 +1959,8 @@ xfs_free_buftarg(
 	if (btp->bt_flags & XFS_BUFTARG_SELF_CACHED)
 		rhashtable_destroy(&btp->bt_bufhash);
 
-	blkdev_issue_flush(btp->bt_bdev);
+	if (!(btp->bt_flags & XFS_BUFTARG_IN_MEMORY))
+		blkdev_issue_flush(btp->bt_bdev);
 
 	kmem_free(btp);
 }
@@ -1966,12 +2004,13 @@ xfs_setsize_buftarg_early(
 static struct xfs_buftarg *
 __xfs_alloc_buftarg(
 	struct xfs_mount	*mp,
-	unsigned int		flags)
+	unsigned int		flags,
+	xfs_km_flags_t		km_flags)
 {
 	struct xfs_buftarg	*btp;
 	int			error;
 
-	btp = kmem_zalloc(sizeof(*btp), KM_NOFS);
+	btp = kmem_zalloc(sizeof(*btp), KM_NOFS | km_flags);
 	if (!btp)
 		return NULL;
 
@@ -2027,7 +2066,7 @@ xfs_alloc_buftarg(
 {
 	struct xfs_buftarg	*btp;
 
-	btp = __xfs_alloc_buftarg(mp, 0);
+	btp = __xfs_alloc_buftarg(mp, 0, 0);
 	if (!btp)
 		return NULL;
 
@@ -2043,6 +2082,31 @@ xfs_alloc_buftarg(
 error_free:
 	xfs_free_buftarg(btp);
 	return NULL;
+}
+
+/* Allocate a buffer cache target for a memory-backed file. */
+struct xfs_buftarg *
+xfs_alloc_memory_buftarg(
+	struct xfs_mount	*mp,
+	struct xfile		*xfile)
+{
+	struct xfs_buftarg	*btp;
+
+	btp = __xfs_alloc_buftarg(mp,
+			XFS_BUFTARG_SELF_CACHED | XFS_BUFTARG_IN_MEMORY,
+			KM_MAYFAIL);
+	if (!btp)
+		return NULL;
+
+	btp->bt_xfile = xfile;
+	btp->bt_dev = (dev_t)-1U;
+
+	btp->bt_meta_sectorsize = SECTOR_SIZE;
+	btp->bt_meta_sectormask = SECTOR_SIZE - 1;
+	btp->bt_logical_sectorsize = SECTOR_SIZE;
+	btp->bt_logical_sectormask = SECTOR_SIZE - 1;
+
+	return btp;
 }
 
 /*
