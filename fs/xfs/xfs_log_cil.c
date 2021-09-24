@@ -578,7 +578,8 @@ xlog_discard_busy_extents(
 		trace_xfs_discard_extent(mp, busyp->agno, busyp->bno,
 					 busyp->length);
 
-		error = __blkdev_issue_discard(mp->m_ddev_targp->bt_bdev,
+		error = __blkdev_issue_discard(
+				xfs_buftarg_bdev(mp->m_ddev_targp),
 				XFS_AGB_TO_DADDR(mp, busyp->agno, busyp->bno),
 				XFS_FSB_TO_BB(mp, busyp->length),
 				GFP_NOFS, 0, &bio);
@@ -951,7 +952,7 @@ xlog_cil_push_work(
 	 * the tail LSN *before* we issue the flush.
 	 */
 	preflush_tail_lsn = atomic64_read(&log->l_tail_lsn);
-	xfs_flush_bdev_async(&bio, log->l_mp->m_ddev_targp->bt_bdev,
+	xfs_flush_bdev_async(&bio, xfs_buftarg_bdev(log->l_mp->m_ddev_targp),
 				&bdev_flush);
 
 	/*

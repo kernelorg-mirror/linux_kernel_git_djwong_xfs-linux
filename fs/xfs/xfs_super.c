@@ -338,8 +338,10 @@ xfs_buftarg_is_dax(
 	struct super_block	*sb,
 	struct xfs_buftarg	*bt)
 {
-	return dax_supported(bt->bt_daxdev, bt->bt_bdev, sb->s_blocksize, 0,
-			bdev_nr_sectors(bt->bt_bdev));
+	struct block_device	*bdev = xfs_buftarg_bdev(bt);
+
+	return dax_supported(bt->bt_daxdev, bdev, sb->s_blocksize, 0,
+			bdev_nr_sectors(bdev));
 }
 
 STATIC int
@@ -375,7 +377,7 @@ xfs_close_devices(
 	struct dax_device *dax_ddev = mp->m_ddev_targp->bt_daxdev;
 
 	if (mp->m_logdev_targp && mp->m_logdev_targp != mp->m_ddev_targp) {
-		struct block_device *logdev = mp->m_logdev_targp->bt_bdev;
+		struct block_device *logdev = xfs_buftarg_bdev(mp->m_logdev_targp);
 		struct dax_device *dax_logdev = mp->m_logdev_targp->bt_daxdev;
 
 		xfs_free_buftarg(mp->m_logdev_targp);
@@ -383,7 +385,7 @@ xfs_close_devices(
 		fs_put_dax(dax_logdev);
 	}
 	if (mp->m_rtdev_targp) {
-		struct block_device *rtdev = mp->m_rtdev_targp->bt_bdev;
+		struct block_device *rtdev = xfs_buftarg_bdev(mp->m_rtdev_targp);
 		struct dax_device *dax_rtdev = mp->m_rtdev_targp->bt_daxdev;
 
 		xfs_free_buftarg(mp->m_rtdev_targp);
