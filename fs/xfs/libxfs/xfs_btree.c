@@ -29,7 +29,7 @@
  */
 struct xfs_btree_cur_cache {
 	const char		*name;
-	kmem_zone_t		*cache;
+	struct kmem_cache		*cache;
 	unsigned short		maxlevels;
 	bool			alias;
 };
@@ -5391,7 +5391,7 @@ xfs_btree_create_cursor_cache(
 	unsigned int				maxlevels)
 {
 	struct xfs_btree_cur_cache		*cc;
-	kmem_zone_t				*cache;
+	struct kmem_cache				*cache;
 
 	cache = kmem_cache_create(name, xfs_btree_cur_sizeof(maxlevels), 0, 0,
 			NULL);

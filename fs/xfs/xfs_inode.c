@@ -40,7 +40,7 @@
 #include "xfs_health.h"
 #include "xfs_imeta.h"
 
-kmem_zone_t *xfs_inode_zone;
+struct kmem_cache *xfs_inode_zone;
 
 /*
  * These two are wrapper routines around the xfs_ilock() routine used to

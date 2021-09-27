@@ -28,7 +28,7 @@
 #include "xfs_bmap.h"
 #include "xfs_health.h"
 
-extern kmem_zone_t	*xfs_bmap_free_item_zone;
+extern struct kmem_cache	*xfs_bmap_free_item_zone;
 
 struct workqueue_struct *xfs_alloc_wq;
 

@@ -39,7 +39,7 @@
 #include "xfs_health.h"
 #include "xfs_inode_util.h"
 
-kmem_zone_t		*xfs_bmap_free_item_zone;
+struct kmem_cache		*xfs_bmap_free_item_zone;
 
 /*
  * Miscellaneous helper functions
