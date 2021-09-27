@@ -27,7 +27,7 @@
 #include "xfs_errortag.h"
 #include "xfs_health.h"
 
-kmem_zone_t *xfs_ifork_zone;
+struct kmem_cache *xfs_ifork_zone;
 
 void
 xfs_init_local_fork(
