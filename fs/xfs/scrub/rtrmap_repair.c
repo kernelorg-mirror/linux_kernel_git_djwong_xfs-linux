@@ -23,7 +23,6 @@
 #include "xfs_icache.h"
 #include "xfs_bmap.h"
 #include "xfs_bmap_btree.h"
-#include "xfs_iwalk.h"
 #include "xfs_quota.h"
 #include "xfs_rtalloc.h"
 #include "xfs_ag.h"
@@ -37,6 +36,7 @@
 #include "scrub/bitmap.h"
 #include "scrub/xfarray.h"
 #include "scrub/xfile.h"
+#include "scrub/iscan.h"
 
 /*
  * Realtime Reverse Mapping Btree Repair
@@ -84,6 +84,9 @@ struct xrep_rtrmap {
 
 	/* bitmap of old rtrmapbt blocks */
 	struct xbitmap		old_rtrmapbt_blocks;
+
+	/* inode scan cursor */
+	struct xchk_iscan	iscan;
 
 	/* get_record()'s position in the free space record array. */
 	uint64_t		iter;
@@ -165,10 +168,6 @@ xrep_rtrmap_stash(
 	int			error = 0;
 
 	if (xchk_should_terminate(sc, &error))
-		return error;
-
-	error = xrep_rtrmap_check_mapping(sc, &rmap);
-	if (error)
 		return error;
 
 	trace_xrep_rtrmap_found(sc->mp, &rmap);
@@ -339,37 +338,14 @@ xrep_rtrmap_scan_dfork(
 /* Record reverse mappings for a file. */
 STATIC int
 xrep_rtrmap_scan_inode(
-	struct xfs_mount		*mp,
-	struct xfs_trans		*tp,
-	xfs_ino_t			ino,
-	void				*data)
+	struct xrep_rtrmap	*rr,
+	struct xfs_inode	*ip)
 {
-	struct xrep_rtrmap		*rr = data;
-	struct xfs_inode		*ip;
-	int				error;
+	unsigned int		lock_mode;
+	int			error = 0;
 
-	if (xrep_is_rtmeta_ino(rr->sc, ino))
-		return 0;
-
-	/* Grab inode and lock it so we can scan it. */
-	error = xfs_iget(mp, rr->sc->tp, ino, 0, 0, &ip);
-	if (error == -ENOENT)
-		xfs_emerg(mp, "%s: iget of ino 0x%llx returned ENOENT?!",
-				__func__, ino);
-	if (error)
-		return error;
-
-	/*
-	 * The fs is frozen, which means that nobody should be holding a data
-	 * file's ILOCK /and/ waiting for the rt metadata inodes.  However,
-	 * this is technically an ABBA deadlock vector, so we have to use the
-	 * deadlock-avoidant locking routine to avoid tripping up lockdep.  We
-	 * avoid modifying the inode's incore extent tree, so we can use a
-	 * shared lock here.
-	 */
-	error = xchk_ilock_inverted(ip, XFS_ILOCK_SHARED);
-	if (error)
-		goto out_rele;
+	xfs_ilock(ip, XFS_IOLOCK_SHARED | XFS_MMAPLOCK_SHARED);
+	lock_mode = xfs_ilock_data_map_shared(ip);
 
 	/* Check the data fork if it's on the realtime device. */
 	if (XFS_IS_REALTIME_INODE(ip)) {
@@ -378,10 +354,9 @@ xrep_rtrmap_scan_inode(
 			goto out_unlock;
 	}
 
+	xchk_iscan_visit(&rr->iscan, ip);
 out_unlock:
-	xfs_iunlock(ip, XFS_ILOCK_SHARED);
-out_rele:
-	xchk_irele(rr->sc, ip);
+	xfs_iunlock(ip, XFS_IOLOCK_SHARED | XFS_MMAPLOCK_SHARED | lock_mode);
 	return error;
 }
 
@@ -530,18 +505,44 @@ xrep_rtrmap_find_rmaps(
 	struct xrep_rtrmap	*rr)
 {
 	struct xfs_scrub	*sc = rr->sc;
+	struct xchk_iscan	*iscan = &rr->iscan;
 	struct xfs_perag	*pag;
 	xfs_agnumber_t		agno;
 	int			error;
 
 	xrep_rt_btcur_init(sc, &sc->sr);
 	error = xrep_rtrmap_find_refcount_rmaps(rr);
-	if (error)
-		goto end_rtscan;
-
-	error = xfs_iwalk(sc->mp, sc->tp, 0, 0, xrep_rtrmap_scan_inode, 0, rr);
-end_rtscan:
 	xchk_rt_btcur_free(&sc->sr);
+	if (error)
+		return error;
+
+	xchk_rt_unlock(sc, &sc->sr);
+	while ((error = xchk_iscan_advance(sc, iscan)) == 1) {
+		struct xfs_inode	*ip;
+
+		if (xrep_is_rtmeta_ino(rr->sc, iscan->cursor_ino))
+			continue;
+
+		error = xchk_iscan_iget(sc, iscan, &ip);
+		if (error == -EAGAIN) {
+			delay(HZ / 10);
+			continue;
+		}
+		if (error)
+			break;
+
+		error = xrep_rtrmap_scan_inode(rr, ip);
+		xchk_irele(sc, ip);
+		if (error)
+			break;
+
+		if (xchk_should_terminate(sc, &error))
+			break;
+	}
+	if (error)
+		return error;
+
+	error = xchk_rt_lock(sc, &sc->sr);
 	if (error)
 		return error;
 
@@ -612,7 +613,12 @@ xrep_rtrmap_get_record(
 	irec->rm_startblock = rec.startblock;
 	irec->rm_blockcount = rec.blockcount;
 	irec->rm_owner = rec.owner;
-	return xfs_rmap_irec_offset_unpack(rec.offset, irec);
+
+	error = xfs_rmap_irec_offset_unpack(rec.offset, irec);
+	if (error)
+		return error;
+
+	return xrep_rtrmap_check_mapping(rr->sc, irec);
 }
 
 /* Feed one of the new btree blocks to the bulk loader. */
@@ -783,6 +789,7 @@ xrep_rtrmapbt(
 		error = PTR_ERR(rr->rtrmap_records);
 		goto out_bitmap;
 	}
+	xchk_iscan_start(&rr->iscan, 20);
 
 	/* Collect rmaps for realtime files. */
 	error = xrep_rtrmap_find_rmaps(rr);
@@ -803,6 +810,7 @@ xrep_rtrmapbt(
 	error = xrep_rtrmap_remove_old_tree(rr);
 
 out_records:
+	xchk_iscan_finish(&rr->iscan);
 	xfarray_destroy(rr->rtrmap_records);
 out_bitmap:
 	xbitmap_destroy(&rr->old_rtrmapbt_blocks);
