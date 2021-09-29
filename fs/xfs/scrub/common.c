@@ -522,10 +522,7 @@ xchk_ag_intents_pending(
 	return intents > 0;
 }
 
-/*
- * Grab all the headers for an AG, and wait until there aren't any pending
- * intents.
- */
+/* Grab a reference to the AG so it can't go away, then lock the AG. */
 int
 xchk_ag_read_headers(
 	struct xfs_scrub	*sc,
@@ -533,18 +530,33 @@ xchk_ag_read_headers(
 	struct xchk_ag		*sa)
 {
 	struct xfs_mount	*mp = sc->mp;
-	int			error;
 
 	ASSERT(!sa->pag);
 	sa->pag = xfs_perag_get(mp, agno);
 	if (!sa->pag)
 		return -ENOENT;
 
+	return xchk_ag_lock(sc);
+}
+
+/* Lock the AG headers and wait for pending intents to drain. */
+int
+xchk_ag_lock(
+	struct xfs_scrub	*sc)
+{
+	struct xchk_ag		*sa = &sc->sa;
+	int			error = 0;
+
+	ASSERT(sa->pag != NULL);
+	ASSERT(sa->agi_bp == NULL);
+	ASSERT(sa->agf_bp == NULL);
+	ASSERT(sa->agfl_bp == NULL);
+
 	do {
 		if (xchk_should_terminate(sc, &error))
 			break;
 
-		error = __xchk_ag_read_headers(sc, agno, sa);
+		error = __xchk_ag_read_headers(sc, sa->pag->pag_agno, sa);
 		if (error)
 			break;
 

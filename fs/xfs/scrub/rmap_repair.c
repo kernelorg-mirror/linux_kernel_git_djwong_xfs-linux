@@ -27,7 +27,6 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_refcount.h"
 #include "xfs_refcount_btree.h"
-#include "xfs_iwalk.h"
 #include "xfs_ag.h"
 #include "xfs_rtrmap_btree.h"
 #include "xfs_rtrefcount_btree.h"
@@ -40,6 +39,7 @@
 #include "scrub/bitmap.h"
 #include "scrub/xfarray.h"
 #include "scrub/xfile.h"
+#include "scrub/iscan.h"
 
 /*
  * Reverse Mapping Btree Repair
@@ -172,6 +172,9 @@ struct xrep_rmap {
 	/* get_record()'s position in the free space record array. */
 	uint64_t		iter;
 
+	/* inode scan cursor */
+	struct xchk_iscan	iscan;
+
 	/* bnobt/cntbt contribution to btreeblks */
 	xfs_agblock_t		freesp_btblocks;
 };
@@ -271,10 +274,6 @@ xrep_rmap_stash(
 	int			error = 0;
 
 	if (xchk_should_terminate(sc, &error))
-		return error;
-
-	error = xrep_rmap_check_mapping(sc, &rmap);
-	if (error)
 		return error;
 
 	trace_xrep_rmap_found(sc->mp, sc->sa.pag->pag_agno, &rmap);
@@ -617,24 +616,13 @@ xrep_rmap_scan_ifork(
 /* Record reverse mappings for a file. */
 STATIC int
 xrep_rmap_scan_inode(
-	struct xfs_mount		*mp,
-	struct xfs_trans		*tp,
-	xfs_ino_t			ino,
-	void				*data)
+	struct xrep_rmap	*rr,
+	struct xfs_inode	*ip)
 {
-	struct xrep_rmap		*rr = data;
-	struct xfs_inode		*ip;
-	unsigned int			lock_mode;
-	int				error;
+	unsigned int		lock_mode;
+	int			error;
 
-	/* Grab inode and lock it so we can scan it. */
-	error = xfs_iget(mp, rr->sc->tp, ino, 0, 0, &ip);
-	if (error == -ENOENT)
-		xfs_emerg(mp, "%s: iget of ino 0x%llx returned ENOENT?!",
-				__func__, ino);
-	if (error)
-		return error;
-
+	xfs_ilock(ip, XFS_IOLOCK_SHARED | XFS_MMAPLOCK_SHARED);
 	lock_mode = xfs_ilock_data_map_shared(ip);
 
 	/* Check the data fork. */
@@ -649,9 +637,9 @@ xrep_rmap_scan_inode(
 
 	/* COW fork extents are "owned" by the refcount btree. */
 
+	xchk_iscan_visit(&rr->iscan, ip);
 out_unlock:
-	xfs_iunlock(ip, lock_mode);
-	xchk_irele(rr->sc, ip);
+	xfs_iunlock(ip, XFS_IOLOCK_SHARED | XFS_MMAPLOCK_SHARED | lock_mode);
 	return error;
 }
 
@@ -907,32 +895,64 @@ xrep_rmap_find_rmaps(
 	struct xrep_rmap	*rr)
 {
 	struct xfs_scrub	*sc = rr->sc;
+	struct xchk_iscan	*iscan = &rr->iscan;
+	struct xchk_ag		*sa = &sc->sa;
 	int			error;
 
+	/* Find all the per-AG metadata. */
 	xrep_ag_btcur_init(sc, &sc->sa);
 
-	/* Iterate all AGs for inodes rmaps. */
-	error = xfs_iwalk(sc->mp, sc->tp, 0, 0, xrep_rmap_scan_inode, 0, rr);
-	if (error)
-		goto out;
-
-	/* Find all the other per-AG metadata. */
 	error = xrep_rmap_find_inode_rmaps(rr);
 	if (error)
-		goto out;
+		goto end_agscan;
 
 	error = xrep_rmap_find_refcount_rmaps(rr);
 	if (error)
-		goto out;
+		goto end_agscan;
 
 	error = xrep_rmap_find_agheader_rmaps(rr);
 	if (error)
-		goto out;
+		goto end_agscan;
 
 	error = xrep_rmap_find_log_rmaps(rr);
-out:
+end_agscan:
 	xchk_ag_btcur_free(&sc->sa);
-	return error;
+	if (error)
+		return error;
+
+	/* Unlock the AG headers in preparation to scan the whole fs. */
+	xfs_trans_brelse(sc->tp, sa->agfl_bp);
+	xfs_trans_brelse(sc->tp, sa->agf_bp);
+	xfs_trans_brelse(sc->tp, sa->agi_bp);
+	sa->agfl_bp = NULL;
+	sa->agf_bp = NULL;
+	sa->agi_bp = NULL;
+
+	/* Iterate all AGs for inodes rmaps. */
+	while ((error = xchk_iscan_advance(sc, iscan)) == 1) {
+		struct xfs_inode	*ip;
+
+		error = xchk_iscan_iget(sc, iscan, &ip);
+		if (error == -EAGAIN) {
+			delay(HZ / 10);
+			continue;
+		}
+		if (error)
+			break;
+
+		error = xrep_rmap_scan_inode(rr, ip);
+		xchk_irele(sc, ip);
+		if (error)
+			break;
+
+		if (xchk_should_terminate(sc, &error))
+			break;
+	}
+	if (error)
+		return error;
+
+	/* Relock the AG headers so that we can build the new btree. */
+	return xchk_ag_lock(sc);
 }
 
 /* Section (II): Reserving space for new rmapbt and setting free space bitmap */
@@ -1147,7 +1167,11 @@ xrep_rmap_get_record(
 	irec->rm_startblock = rec.startblock;
 	irec->rm_blockcount = rec.blockcount;
 	irec->rm_owner = rec.owner;
-	return xfs_rmap_irec_offset_unpack(rec.offset, irec);
+	error = xfs_rmap_irec_offset_unpack(rec.offset, irec);
+	if (error)
+		return error;
+
+	return xrep_rmap_check_mapping(rr->sc, irec);
 }
 
 /* Feed one of the new btree blocks to the bulk loader. */
@@ -1249,7 +1273,11 @@ xrep_rmap_build_new_tree(
 
 	/* Add all observed rmap records. */
 	rr->iter = 0;
+	sc->sa.bno_cur = xfs_allocbt_init_cursor(sc->mp, sc->tp, sc->sa.agf_bp,
+			sc->sa.pag, XFS_BTNUM_BNO);
 	error = xfs_btree_bload(rr->cur, &rr->rmap_bload, rr);
+	xfs_btree_del_cursor(sc->sa.bno_cur, error);
+	sc->sa.bno_cur = NULL;
 	if (error)
 		goto err_level;
 
@@ -1405,6 +1433,7 @@ xrep_rmapbt(
 		error = PTR_ERR(rr->rmap_records);
 		goto out_rr;
 	}
+	xchk_iscan_start(&rr->iscan, 20);
 
 	/*
 	 * Collect rmaps for everything in this AG that isn't space metadata.
@@ -1423,6 +1452,7 @@ xrep_rmapbt(
 	error = xrep_rmap_remove_old_tree(rr);
 
 out_records:
+	xchk_iscan_finish(&rr->iscan);
 	xfarray_destroy(rr->rmap_records);
 out_rr:
 	kmem_free(rr);
