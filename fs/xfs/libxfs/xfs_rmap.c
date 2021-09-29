@@ -264,6 +264,9 @@ xfs_rmap_get_rec(
 		if (cur->bc_btnum == XFS_BTNUM_RMAP &&
 		    !xfs_rmapbt_mem_verify_rec(cur, irec))
 			goto out_bad_rec;
+		if (cur->bc_btnum == XFS_BTNUM_RTRMAP &&
+		    !xfs_rtrmapbt_mem_verify_rec(cur, irec))
+			goto out_bad_rec;
 	} else if (cur->bc_btnum == XFS_BTNUM_RTRMAP) {
 		if (!xfs_verify_rtbno(mp, irec->rm_startblock))
 			goto out_bad_rec;
