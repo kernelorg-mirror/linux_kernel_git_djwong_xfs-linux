@@ -11,6 +11,7 @@
 #include "xfs_mount.h"
 #include "xfs_defer.h"
 #include "xfs_btree.h"
+#include "xfs_btree_mem.h"
 #include "xfs_bit.h"
 #include "xfs_log_format.h"
 #include "xfs_trans.h"
@@ -34,9 +35,9 @@
 #include "scrub/trace.h"
 #include "scrub/repair.h"
 #include "scrub/bitmap.h"
-#include "scrub/xfarray.h"
 #include "scrub/xfile.h"
 #include "scrub/iscan.h"
+#include "scrub/xfbtree.h"
 
 /*
  * Realtime Reverse Mapping Btree Repair
@@ -74,17 +75,6 @@ xrep_setup_rtrmapbt(
 	return xchk_fs_freeze(sc);
 }
 
-/*
- * Packed rmap record.  The UNWRITTEN flags are hidden in the upper bits of
- * offset, just like the on-disk record.
- */
-struct xrep_rtrmap_extent {
-	xfs_rtblock_t	startblock;
-	xfs_filblks_t	blockcount;
-	uint64_t	owner;
-	uint64_t	offset;
-} __packed;
-
 /* Context for collecting rmaps */
 struct xrep_rtrmap {
 	/* new rtrmapbt information */
@@ -92,7 +82,9 @@ struct xrep_rtrmap {
 	struct xfs_btree_bload	rtrmap_bload;
 
 	/* rmap records generated from primary metadata */
-	struct xfarray		*rtrmap_records;
+	struct xfbtree		*rtrmap_btree;
+	/* in-memory btree cursor for the ->get_blocks walk */
+	struct xfs_btree_cur	*mcur;
 
 	struct xfs_scrub	*sc;
 
@@ -102,40 +94,9 @@ struct xrep_rtrmap {
 	/* inode scan cursor */
 	struct xchk_iscan	iscan;
 
-	/* get_record()'s position in the free space record array. */
-	uint64_t		iter;
+	/* Number of records we're staging in the new btree. */
+	uint64_t		nr_records;
 };
-
-/* Compare two rtrmapbt extents. */
-static int
-xrep_rtrmap_extent_cmp(
-	const void			*a,
-	const void			*b)
-{
-	const struct xrep_rtrmap_extent	*ap = a;
-	const struct xrep_rtrmap_extent	*bp = b;
-	struct xfs_rmap_irec		ar = {
-		.rm_startblock		= ap->startblock,
-		.rm_blockcount		= ap->blockcount,
-		.rm_owner		= ap->owner,
-	};
-	struct xfs_rmap_irec		br = {
-		.rm_startblock		= bp->startblock,
-		.rm_blockcount		= bp->blockcount,
-		.rm_owner		= bp->owner,
-	};
-	int				error;
-
-	error = xfs_rmap_irec_offset_unpack(ap->offset, &ar);
-	if (error)
-		ASSERT(error == 0);
-
-	error = xfs_rmap_irec_offset_unpack(bp->offset, &br);
-	if (error)
-		ASSERT(error == 0);
-
-	return xfs_rmap_compare(&ar, &br);
-}
 
 /* Make sure there's nothing funny about this mapping. */
 STATIC int
@@ -166,11 +127,6 @@ xrep_rtrmap_stash(
 	uint64_t		offset,
 	unsigned int		flags)
 {
-	struct xrep_rtrmap_extent	rre = {
-		.startblock	= startblock,
-		.blockcount	= blockcount,
-		.owner		= owner,
-	};
 	struct xfs_rmap_irec	rmap = {
 		.rm_startblock	= startblock,
 		.rm_blockcount	= blockcount,
@@ -179,6 +135,8 @@ xrep_rtrmap_stash(
 		.rm_flags	= flags,
 	};
 	struct xfs_scrub	*sc = rr->sc;
+	struct xfs_btree_cur	*mcur;
+	struct xfs_buf		*mhead_bp;
 	int			error = 0;
 
 	if (xchk_should_terminate(sc, &error))
@@ -186,8 +144,23 @@ xrep_rtrmap_stash(
 
 	trace_xrep_rtrmap_found(sc->mp, &rmap);
 
-	rre.offset = xfs_rmap_irec_offset_pack(&rmap);
-	return xfarray_append(rr->rtrmap_records, &rre);
+	/* Add entry to in-memory btree. */
+	error = xfbtree_head_read_buf(rr->rtrmap_btree, sc->tp, &mhead_bp);
+	if (error)
+		return error;
+
+	mcur = xfs_rtrmapbt_mem_cursor(sc->mp, sc->tp, mhead_bp,
+			rr->rtrmap_btree);
+	error = xfs_rmap_map_raw(mcur, &rmap);
+	xfs_btree_del_cursor(mcur, error);
+	if (error)
+		goto out_cancel;
+
+	return xfbtree_trans_commit(rr->rtrmap_btree, sc->tp);
+
+out_cancel:
+	xfbtree_trans_cancel(rr->rtrmap_btree, sc->tp);
+	return error;
 }
 
 /* Finding all file and bmbt extents. */
@@ -513,6 +486,24 @@ out_bitmap:
 	return error;
 }
 
+/* Count and check all collected records. */
+STATIC int
+xrep_rtrmap_check_record(
+	struct xfs_btree_cur		*cur,
+	const struct xfs_rmap_irec	*rec,
+	void				*priv)
+{
+	struct xrep_rtrmap		*rr = priv;
+	int				error;
+
+	error = xrep_rtrmap_check_mapping(rr->sc, rec);
+	if (error)
+		return error;
+
+	rr->nr_records++;
+	return 0;
+}
+
 /* Generate all the reverse-mappings for the realtime device. */
 STATIC int
 xrep_rtrmap_find_rmaps(
@@ -521,6 +512,8 @@ xrep_rtrmap_find_rmaps(
 	struct xfs_scrub	*sc = rr->sc;
 	struct xchk_iscan	*iscan = &rr->iscan;
 	struct xfs_perag	*pag;
+	struct xfs_buf		*mhead_bp;
+	struct xfs_btree_cur	*mcur;
 	xfs_agnumber_t		agno;
 	int			error;
 
@@ -596,7 +589,25 @@ xrep_rtrmap_find_rmaps(
 		}
 	}
 
-	return 0;
+	/*
+	 * Now that we have everything locked again, we need to count the
+	 * number of rmap records stashed in the btree.  This should reflect
+	 * all actively-owned rt files in the filesystem.  At the same time,
+	 * check all our records before we start building a new btree, which
+	 * requires the rtbitmap lock.
+	 */
+	error = xfbtree_head_read_buf(rr->rtrmap_btree, NULL, &mhead_bp);
+	if (error)
+		return error;
+
+	mcur = xfs_rtrmapbt_mem_cursor(rr->sc->mp, NULL, mhead_bp,
+			rr->rtrmap_btree);
+	rr->nr_records = 0;
+	error = xfs_rmap_query_all(mcur, xrep_rtrmap_check_record, rr);
+	xfs_btree_del_cursor(mcur, error);
+	xfs_buf_relse(mhead_bp);
+
+	return error;
 }
 
 /* Building the new rtrmap btree. */
@@ -607,24 +618,23 @@ xrep_rtrmap_get_record(
 	struct xfs_btree_cur	*cur,
 	void			*priv)
 {
-	struct xrep_rtrmap_extent	rec;
-	struct xfs_rmap_irec	*irec = &cur->bc_rec.r;
 	struct xrep_rtrmap	*rr = priv;
+	int			stat = 0;
 	int			error;
 
-	error = xfarray_load_next(rr->rtrmap_records, &rr->iter, &rec);
+	error = xfs_btree_increment(rr->mcur, 0, &stat);
 	if (error)
 		return error;
+	if (!stat)
+		return -EFSCORRUPTED;
 
-	irec->rm_startblock = rec.startblock;
-	irec->rm_blockcount = rec.blockcount;
-	irec->rm_owner = rec.owner;
-
-	error = xfs_rmap_irec_offset_unpack(rec.offset, irec);
+	error = xfs_rmap_get_rec(rr->mcur, &cur->bc_rec.r, &stat);
 	if (error)
 		return error;
+	if (!stat)
+		return -EFSCORRUPTED;
 
-	return xrep_rtrmap_check_mapping(rr->sc, irec);
+	return 0;
 }
 
 /* Feed one of the new btree blocks to the bulk loader. */
@@ -664,21 +674,13 @@ xrep_rtrmap_build_new_tree(
 	struct xfs_scrub	*sc = rr->sc;
 	struct xfs_mount	*mp = sc->mp;
 	struct xfs_btree_cur	*cur;
-	uint64_t		nr_records;
+	struct xfs_buf		*mhead_bp;
 	int			error;
 
 	rr->rtrmap_bload.get_record = xrep_rtrmap_get_record;
 	rr->rtrmap_bload.claim_block = xrep_rtrmap_claim_block;
 	rr->rtrmap_bload.iroot_size = xrep_rtrmap_iroot_size;
 	xrep_bload_estimate_slack(sc, &rr->rtrmap_bload);
-
-	/*
-	 * Sort the rmap records by startblock or else the btree records
-	 * will be in the wrong order.
-	 */
-	error = xfarray_sort(rr->rtrmap_records, xrep_rtrmap_extent_cmp);
-	if (error)
-		return error;
 
 	/*
 	 * Prepare to construct the new btree by reserving disk space for the
@@ -691,11 +693,9 @@ xrep_rtrmap_build_new_tree(
 	cur = xfs_rtrmapbt_stage_cursor(sc->mp, mp->m_rrmapip,
 			&rr->new_btree_info.ifake);
 
-	nr_records = xfarray_length(rr->rtrmap_records);
-
 	/* Compute how many blocks we'll need for the rmaps collected. */
 	error = xfs_btree_bload_compute_geometry(cur, &rr->rtrmap_bload,
-			nr_records);
+			rr->nr_records);
 	if (error)
 		goto err_cur;
 
@@ -719,12 +719,25 @@ xrep_rtrmap_build_new_tree(
 	if (error)
 		goto err_cur;
 
-	/* Add all observed rmap records. */
-	rr->new_btree_info.ifake.if_fork->if_format = XFS_DINODE_FMT_RMAP;
-	rr->iter = 0;
-	error = xfs_btree_bload(cur, &rr->rtrmap_bload, rr);
+	/*
+	 * Create a cursor to the in-memory btree so that we can bulk load the
+	 * new btree.
+	 */
+	error = xfbtree_head_read_buf(rr->rtrmap_btree, NULL, &mhead_bp);
 	if (error)
 		goto err_cur;
+
+	rr->mcur = xfs_rtrmapbt_mem_cursor(mp, NULL, mhead_bp,
+			rr->rtrmap_btree);
+	error = xfs_btree_goto_left_edge(rr->mcur);
+	if (error)
+		goto err_mcur;
+
+	/* Add all observed rmap records. */
+	rr->new_btree_info.ifake.if_fork->if_format = XFS_DINODE_FMT_RMAP;
+	error = xfs_btree_bload(cur, &rr->rtrmap_bload, rr);
+	if (error)
+		goto err_mcur;
 
 	/*
 	 * Install the new rtrmap btree in the inode.  After this point the old
@@ -734,11 +747,24 @@ xrep_rtrmap_build_new_tree(
 	xfs_rtrmapbt_commit_staged_btree(cur, sc->tp);
 	xrep_inode_set_nblocks(rr->sc, rr->new_btree_info.ifake.if_blocks);
 	xfs_btree_del_cursor(cur, 0);
+	xfs_btree_del_cursor(rr->mcur, 0);
+	rr->mcur = NULL;
+	xfs_buf_relse(mhead_bp);
+
+	/*
+	 * Now that we've written the new btree to disk, we don't need to keep
+	 * updating the in-memory btree.  Abort the scan to stop live updates.
+	 */
+	xchk_iscan_abort(&rr->iscan);
 
 	/* Dispose of any unused blocks and the accounting information. */
 	xrep_newbt_destroy(&rr->new_btree_info, error);
+
 	return xrep_roll_trans(sc);
 
+err_mcur:
+	xfs_btree_del_cursor(rr->mcur, error);
+	xfs_buf_relse(mhead_bp);
 err_cur:
 	xfs_btree_del_cursor(cur, error);
 	xrep_newbt_destroy(&rr->new_btree_info, error);
@@ -789,8 +815,8 @@ xrep_rtrmapbt(
 	xbitmap_init(&rr->old_rtrmapbt_blocks);
 
 	/* Set up some storage */
-	error = xfarray_create(sc->mp, "rtrmap records",
-			sizeof(struct xrep_rtrmap_extent), &rr->rtrmap_records);
+	error = xfs_rtrmapbt_mem_create(sc->mp, "rtrmap records btree",
+			&rr->rtrmap_btree);
 	if (error)
 		goto out_bitmap;
 
@@ -818,7 +844,7 @@ xrep_rtrmapbt(
 
 out_records:
 	xchk_iscan_finish(&rr->iscan);
-	xfarray_destroy(rr->rtrmap_records);
+	xfbtree_destroy(rr->rtrmap_btree);
 out_bitmap:
 	xbitmap_destroy(&rr->old_rtrmapbt_blocks);
 	kmem_free(rr);
