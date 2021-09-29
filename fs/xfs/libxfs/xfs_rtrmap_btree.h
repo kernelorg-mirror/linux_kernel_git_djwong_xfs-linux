@@ -193,4 +193,10 @@ struct xfs_imeta_end;
 int xfs_rtrmapbt_create(struct xfs_trans **tpp, struct xfs_imeta_end *ic,
 		struct xfs_inode **ipp);
 
+struct xfbtree;
+struct xfs_btree_cur *xfs_rtrmapbt_mem_cursor(struct xfs_mount *mp,
+		struct xfs_trans *tp, struct xfs_buf *mhead_bp,
+		struct xfbtree *xfbtree);
+struct xfbtree *xfs_rtrmapbt_mem_create(struct xfs_mount *mp, const char *name);
+
 #endif	/* __XFS_RTRMAP_BTREE_H__ */
