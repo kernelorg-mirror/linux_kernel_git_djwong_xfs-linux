@@ -127,16 +127,6 @@ xrep_setup_ag_rmapbt(
 {
 	int			error;
 
-	/*
-	 * Freeze out anything that can lock an inode.  We reconstruct
-	 * the rmapbt by reading inode bmaps with the AGF held, which is
-	 * only safe w.r.t. ABBA deadlocks if we're the only ones locking
-	 * inodes.
-	 */
-	error = xchk_fs_freeze(sc);
-	if (error)
-		return error;
-
 	/* Check the AG number and set up the scrub context. */
 	error = xchk_setup_fs(sc);
 	if (error)
