@@ -36,20 +36,6 @@ xchk_setup_rtrmapbt(
 	struct xfs_mount	*mp = sc->mp;
 	int			error = 0;
 
-#ifdef CONFIG_XFS_ONLINE_REPAIR
-	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
-		/*
-		 * Freeze out anything that can lock an inode.  We reconstruct
-		 * the rtrmapbt by reading inode bmaps with the rtrmapbt inode
-		 * locked, which is only safe w.r.t. ABBA deadlocks if we're
-		 * the only ones locking inodes.
-		 */
-		error = xchk_fs_freeze(sc);
-		if (error)
-			return error;
-	}
-#endif
-
 	error = xchk_setup_fs(sc);
 	if (error)
 		return error;
