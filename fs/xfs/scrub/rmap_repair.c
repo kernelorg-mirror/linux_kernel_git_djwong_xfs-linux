@@ -120,20 +120,6 @@
  * We use the 'xrep_rmap' prefix for all the rmap functions.
  */
 
-/* Set us up to repair reverse mapping btrees. */
-int
-xrep_setup_ag_rmapbt(
-	struct xfs_scrub	*sc)
-{
-	/*
-	 * Freeze out anything that can lock an inode.  We reconstruct
-	 * the rmapbt by reading inode bmaps with the AGF held, which is
-	 * only safe w.r.t. ABBA deadlocks if we're the only ones locking
-	 * inodes.
-	 */
-	return xchk_fs_freeze(sc);
-}
-
 /* Context for collecting rmaps */
 struct xrep_rmap {
 	/* new rmapbt information */
