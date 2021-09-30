@@ -275,6 +275,11 @@ typedef struct xfs_mount {
 	/* online file link count check stuff */
 	struct xfs_hook_chain	m_nlink_delta_hooks;
 
+#ifdef CONFIG_XFS_RT
+	/* online rt rmap repair stuff */
+	struct xfs_hook_chain	m_rtrmap_update_hooks;
+#endif
+
 #if IS_ENABLED(CONFIG_XFS_ONLINE_SCRUB) && IS_ENABLED(CONFIG_XFS_RT)
 	/*
 	 * Counter of live intents.  We track the number of log intent items
