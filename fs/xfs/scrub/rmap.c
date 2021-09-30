@@ -27,14 +27,6 @@ int
 xchk_setup_ag_rmapbt(
 	struct xfs_scrub	*sc)
 {
-	if (xchk_could_repair(sc)) {
-		int		error;
-
-		error = xrep_setup_ag_rmapbt(sc);
-		if (error)
-			return error;
-	}
-
 	return xchk_setup_ag_btree(sc, false);
 }
 

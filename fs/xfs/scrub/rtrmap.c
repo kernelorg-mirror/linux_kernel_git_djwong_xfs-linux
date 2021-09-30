@@ -36,12 +36,6 @@ xchk_setup_rtrmapbt(
 	struct xfs_mount	*mp = sc->mp;
 	int			error;
 
-	if (xchk_could_repair(sc)) {
-		error = xrep_setup_rtrmapbt(sc);
-		if (error)
-			return error;
-	}
-
 	error = xchk_setup_fs(sc);
 	if (error)
 		return error;

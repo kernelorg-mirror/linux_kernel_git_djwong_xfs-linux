@@ -75,13 +75,11 @@ int xrep_ino_dqattach(struct xfs_scrub *sc);
 int xrep_reset_perag_resv(struct xfs_scrub *sc);
 int xrep_bmap(struct xfs_scrub *sc, int whichfork, bool allow_unwritten);
 int xrep_metadata_inode_forks(struct xfs_scrub *sc);
-int xrep_setup_ag_rmapbt(struct xfs_scrub *sc);
 int xrep_setup_rtsummary(struct xfs_scrub *sc, unsigned int *resblks);
 int xrep_setup_xattr(struct xfs_scrub *sc);
 int xrep_setup_directory(struct xfs_scrub *sc);
 int xrep_setup_parent(struct xfs_scrub *sc);
 int xrep_setup_rtbitmap(struct xfs_scrub *sc, unsigned int *resblks);
-int xrep_setup_rtrmapbt(struct xfs_scrub *sc);
 int xrep_setup_nlinks(struct xfs_scrub *sc, unsigned int *buf_bytes);
 
 int xrep_xattr_reset_fork(struct xfs_scrub *sc, struct xfs_inode *ip);
@@ -274,11 +272,9 @@ xrep_setup_nothing(
 	return 0;
 }
 #define xrep_setup_ag_allocbt		xrep_setup_nothing
-#define xrep_setup_ag_rmapbt		xrep_setup_nothing
 #define xrep_setup_xattr		xrep_setup_nothing
 #define xrep_setup_directory		xrep_setup_nothing
 #define xrep_setup_parent		xrep_setup_nothing
-#define xrep_setup_rtrmapbt		xrep_setup_nothing
 
 static inline int
 xrep_setup_rtsummary(struct xfs_scrub *sc, unsigned int *whatever)

@@ -61,20 +61,6 @@
  * We use the 'xrep_rtrmap' prefix for all the rmap functions.
  */
 
-/* Set us up to repair rt reverse mapping btrees. */
-int
-xrep_setup_rtrmapbt(
-	struct xfs_scrub	*sc)
-{
-	/*
-	 * Freeze out anything that can lock an inode.  We reconstruct the
-	 * rtrmapbt by reading inode bmaps with the rt rmap btree inode locked,
-	 * which is only safe w.r.t. ABBA deadlocks if we're the only ones
-	 * locking inodes.
-	 */
-	return xchk_fs_freeze(sc);
-}
-
 /* Context for collecting rmaps */
 struct xrep_rtrmap {
 	/* new rtrmapbt information */
