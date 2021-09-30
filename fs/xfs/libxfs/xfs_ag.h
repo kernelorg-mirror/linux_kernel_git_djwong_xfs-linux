@@ -113,6 +113,9 @@ struct xfs_perag {
 	 * inconsistencies.
 	 */
 	struct xfs_drain	pag_intents;
+
+	/* online rmap repair stuff */
+	struct xfs_hook_chain	pag_rmap_update_hooks;
 #endif /* __KERNEL__ */
 };
 
