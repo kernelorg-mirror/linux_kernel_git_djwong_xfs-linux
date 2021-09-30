@@ -335,6 +335,9 @@ typedef struct xfs_mount {
 	struct xfs_hook_chain	m_nlink_delta_hooks;
 
 #ifdef CONFIG_XFS_RT
+	/* online rt rmap repair stuff */
+	struct xfs_hook_chain	m_rtrmap_update_hooks;
+
 	/*
 	 * We use xfs_drain to track the number of deferred log intent items
 	 * that have been queued (but not yet processed) so that waiters (e.g.
