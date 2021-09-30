@@ -192,6 +192,10 @@ void xfs_rmap_finish_one_cleanup(struct xfs_trans *tp,
 		struct xfs_btree_cur *rcur, int error);
 int xfs_rmap_finish_one(struct xfs_trans *tp, struct xfs_rmap_intent *ri,
 		struct xfs_btree_cur **pcur);
+int __xfs_rmap_finish_intent(struct xfs_btree_cur *rcur,
+		enum xfs_rmap_intent_type op, xfs_fsblock_t startblock,
+		xfs_filblks_t blockcount, const struct xfs_owner_info *oinfo,
+		bool unwritten);
 int xfs_rmap_lookup_le_range(struct xfs_btree_cur *cur, xfs_fsblock_t bno,
 		uint64_t owner, uint64_t offset, unsigned int flags,
 		struct xfs_rmap_irec *irec, int	*stat);
@@ -224,5 +228,17 @@ extern struct kmem_cache	*xfs_rmap_intent_cache;
 
 int __init xfs_rmap_intent_init_cache(void);
 void xfs_rmap_intent_destroy_cache(void);
+
+/*
+ * Parameters for tracking reverse mapping changes.  The hook function arg
+ * parameter is enum xfs_rmap_intent_type, and the rest is below.
+ */
+struct xfs_rmap_update_params {
+	struct xfs_trans		*tp;
+	xfs_fsblock_t			startblock;
+	xfs_filblks_t			blockcount;
+	struct xfs_owner_info		oinfo;
+	bool				unwritten;
+};
 
 #endif	/* __XFS_RMAP_H__ */

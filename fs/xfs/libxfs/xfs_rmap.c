@@ -812,6 +812,33 @@ out_error:
 	return error;
 }
 
+/* Call a hook to capture deferred rmapbt updates in real time. */
+#ifdef CONFIG_XFS_LIVE_HOOKS
+static inline void
+xfs_rmap_update_hook(
+	struct xfs_trans		*tp,
+	struct xfs_perag		*pag,
+	enum xfs_rmap_intent_type	op,
+	xfs_fsblock_t			startblock,
+	xfs_filblks_t			blockcount,
+	bool				unwritten,
+	const struct xfs_owner_info	*oinfo)
+{
+	struct xfs_rmap_update_params	p = {
+		.tp			= tp,
+		.startblock		= startblock,
+		.blockcount		= blockcount,
+		.unwritten		= unwritten,
+		.oinfo			= *oinfo, /* struct copy */
+	};
+
+	if (pag)
+		xfs_hook_call(&pag->pag_rmap_update_hooks, op, &p);
+}
+#else
+# define xfs_rmap_update_hook(t, p, o, s, b, u, oi)	do { } while(0)
+#endif /* CONFIG_XFS_LIVE_HOOKS */
+
 /*
  * Remove a reference to an extent in the rmap btree.
  */
@@ -832,7 +859,7 @@ xfs_rmap_free(
 		return 0;
 
 	cur = xfs_rmapbt_init_cursor(mp, tp, agbp, pag);
-
+	xfs_rmap_update_hook(tp, pag, XFS_RMAP_UNMAP, bno, len, false, oinfo);
 	error = xfs_rmap_unmap(cur, bno, len, false, oinfo);
 
 	xfs_btree_del_cursor(cur, error);
@@ -1076,6 +1103,7 @@ xfs_rmap_alloc(
 		return 0;
 
 	cur = xfs_rmapbt_init_cursor(mp, tp, agbp, pag);
+	xfs_rmap_update_hook(tp, pag, XFS_RMAP_MAP, bno, len, false, oinfo);
 	error = xfs_rmap_map(cur, bno, len, false, oinfo);
 
 	xfs_btree_del_cursor(cur, error);
@@ -2559,40 +2587,60 @@ xfs_rmap_finish_one(
 			ri->ri_bmap.br_startoff);
 	unwritten = ri->ri_bmap.br_state == XFS_EXT_UNWRITTEN;
 
-	switch (ri->ri_type) {
+	xfs_rmap_update_hook(tp, pag, ri->ri_type, bno,
+			ri->ri_bmap.br_blockcount, unwritten, &oinfo);
+	error = __xfs_rmap_finish_intent(rcur, ri->ri_type, bno,
+			ri->ri_bmap.br_blockcount, &oinfo, unwritten);
+out_drop:
+	if (pag)
+		xfs_perag_put(pag);
+	return error;
+}
+
+/* Complete an rmap operation. */
+int
+__xfs_rmap_finish_intent(
+	struct xfs_btree_cur		*rcur,
+	enum xfs_rmap_intent_type	op,
+	xfs_fsblock_t			startblock,
+	xfs_filblks_t			blockcount,
+	const struct xfs_owner_info	*oinfo,
+	bool				unwritten)
+{
+	int				error;
+
+	switch (op) {
 	case XFS_RMAP_ALLOC:
 	case XFS_RMAP_MAP:
-		error = xfs_rmap_map(rcur, bno, ri->ri_bmap.br_blockcount,
-				unwritten, &oinfo);
+		error = xfs_rmap_map(rcur, startblock, blockcount, unwritten,
+				oinfo);
 		break;
 	case XFS_RMAP_MAP_SHARED:
-		error = xfs_rmap_map_shared(rcur, bno,
-				ri->ri_bmap.br_blockcount, unwritten, &oinfo);
+		error = xfs_rmap_map_shared(rcur, startblock, blockcount,
+				unwritten, oinfo);
 		break;
 	case XFS_RMAP_FREE:
 	case XFS_RMAP_UNMAP:
-		error = xfs_rmap_unmap(rcur, bno, ri->ri_bmap.br_blockcount,
-				unwritten, &oinfo);
+		error = xfs_rmap_unmap(rcur, startblock, blockcount, unwritten,
+				oinfo);
 		break;
 	case XFS_RMAP_UNMAP_SHARED:
-		error = xfs_rmap_unmap_shared(rcur, bno,
-				ri->ri_bmap.br_blockcount, unwritten, &oinfo);
+		error = xfs_rmap_unmap_shared(rcur, startblock, blockcount,
+				unwritten, oinfo);
 		break;
 	case XFS_RMAP_CONVERT:
-		error = xfs_rmap_convert(rcur, bno, ri->ri_bmap.br_blockcount,
-				!unwritten, &oinfo);
+		error = xfs_rmap_convert(rcur, startblock, blockcount,
+				!unwritten, oinfo);
 		break;
 	case XFS_RMAP_CONVERT_SHARED:
-		error = xfs_rmap_convert_shared(rcur, bno,
-				ri->ri_bmap.br_blockcount, !unwritten, &oinfo);
+		error = xfs_rmap_convert_shared(rcur, startblock, blockcount,
+				!unwritten, oinfo);
 		break;
 	default:
 		ASSERT(0);
 		error = -EFSCORRUPTED;
 	}
-out_drop:
-	if (pag)
-		xfs_perag_put(pag);
+
 	return error;
 }
 
