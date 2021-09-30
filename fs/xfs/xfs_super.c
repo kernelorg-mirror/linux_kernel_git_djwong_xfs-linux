@@ -2012,6 +2012,9 @@ static int xfs_init_fs_context(
 #if IS_ENABLED(CONFIG_XFS_ONLINE_SCRUB)
 	xfs_hook_init(&mp->m_nlink_mod_hooks);
 #endif
+#if IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) && IS_ENABLED(CONFIG_XFS_RT)
+	xfs_hook_init(&mp->m_rtrmap_mod_hooks);
+#endif
 
 	/*
 	 * Copy binary VFS mount flags we are interested in.

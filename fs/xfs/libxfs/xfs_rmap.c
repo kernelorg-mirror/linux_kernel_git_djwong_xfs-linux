@@ -827,6 +827,10 @@ xfs_rmap_call_hook(
 
 	if (pag)
 		xfs_hook_call(&pag->pag_rmap_mod_hooks, op, &p);
+#if IS_ENABLED(CONFIG_XFS_RT)
+	else
+		xfs_hook_call(&tp->t_mountp->m_rtrmap_mod_hooks, op, &p);
+#endif /* XFS_RT */
 }
 #else
 # define xfs_rmap_call_hook(t, p, o, s, b, u, oi)	do { } while(0)

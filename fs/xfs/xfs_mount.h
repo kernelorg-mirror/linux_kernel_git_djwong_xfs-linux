@@ -264,6 +264,11 @@ typedef struct xfs_mount {
 	struct xfs_hook_chain	m_nlink_mod_hooks;
 #endif
 
+#if IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) && IS_ENABLED(CONFIG_XFS_RT)
+	/* online rt rmap repair stuff */
+	struct xfs_hook_chain	m_rtrmap_mod_hooks;
+#endif
+
 #if IS_ENABLED(CONFIG_XFS_ONLINE_SCRUB) && IS_ENABLED(CONFIG_XFS_RT)
 	/*
 	 * Counter of live intents.  We track the number of log intent items
