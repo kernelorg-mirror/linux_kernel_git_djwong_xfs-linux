@@ -263,6 +263,9 @@ xfs_initialize_perag(
 		init_waitqueue_head(&pag->pagb_wait);
 		pag->pagb_count = 0;
 		pag->pagb_tree = RB_ROOT;
+#ifdef CONFIG_XFS_ONLINE_REPAIR
+		xfs_hook_init(&pag->pag_rmap_mod_hooks);
+#endif
 
 		error = xfs_buf_hash_init(pag);
 		if (error)

@@ -84,4 +84,11 @@ xchk_iscan_visited(const struct xchk_iscan *iscan, struct xfs_inode *ip)
 	return iscan->__visited_ino >= ip->i_ino;
 }
 
+/* Decide if this inode (number) was previously scanned. */
+static inline bool
+xchk_iscan_visited_ino(const struct xchk_iscan *iscan, xfs_ino_t ino)
+{
+	return iscan->__visited_ino >= ino;
+}
+
 #endif /* __XFS_SCRUB_ISCAN_H__ */

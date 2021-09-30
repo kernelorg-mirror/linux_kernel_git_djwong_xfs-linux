@@ -114,6 +114,11 @@ struct xfs_perag {
 	atomic_t		pag_intents;
 	wait_queue_head_t	pag_intents_wq;
 #endif
+
+#ifdef CONFIG_XFS_ONLINE_REPAIR
+	/* online rmap repair stuff */
+	struct xfs_hook_chain	pag_rmap_mod_hooks;
+#endif
 };
 
 int xfs_initialize_perag(struct xfs_mount *mp, xfs_agnumber_t agcount,
