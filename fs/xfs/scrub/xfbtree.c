@@ -151,8 +151,9 @@ xfs_btree_mem_head_read_buf(
 {
 	struct xfs_mount		*mp = btp->bt_mount;
 
-	return xfs_trans_read_buf(mp, tp, btp, XFS_BTREE_MEM_HEAD_DADDR, 1, 0,
-			bpp, &xfs_btree_mem_head_buf_ops);
+	return xfs_trans_read_buf(mp, tp, btp, XFS_BTREE_MEM_HEAD_DADDR,
+			XFS_FSB_TO_BB(mp, 1), 0, bpp,
+			&xfs_btree_mem_head_buf_ops);
 }
 
 /* Return tree height from the in-memory btree head */
@@ -239,6 +240,9 @@ xfbtree_create(
 		goto err_xfile;
 	}
 
+	if (mp->m_bsize == PAGE_SIZE && (flags & XFBTREE_DIRECT_MAP))
+		xfbt->target->bt_flags |= XFS_BUFTARG_DIRECT_MAP;
+
 	xfbt->freespace = kmem_alloc(sizeof(struct xbitmap),
 			KM_NOFS | KM_MAYFAIL);
 	if (!xfbt->freespace) {
@@ -264,7 +268,8 @@ xfbtree_create(
 		goto err_freesp;
 
 	/* Initialize the in-memory btree header block. */
-	error = xfs_buf_get(xfbt->target, XFS_BTREE_MEM_HEAD_DADDR, 1, &bp);
+	error = xfs_buf_get(xfbt->target, XFS_BTREE_MEM_HEAD_DADDR,
+			XFS_FSB_TO_BB(mp, 1), &bp);
 	if (error)
 		goto err_freesp;
 

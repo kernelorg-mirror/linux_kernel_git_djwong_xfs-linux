@@ -88,5 +88,7 @@ xfbtree_free_block(struct xfs_btree_cur *cur, struct xfs_buf *bp)
 
 /* btree has long pointers */
 #define XFBTREE_CREATE_LONG_PTRS	(1U << 0)
+/* buffers should be directly mapped from memory */
+#define XFBTREE_DIRECT_MAP		(1U << 1)
 
 #endif /* __XFS_BTREE_MEM_H__ */

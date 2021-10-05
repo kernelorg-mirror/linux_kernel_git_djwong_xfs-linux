@@ -57,6 +57,10 @@ struct xfile_stat {
 int xfile_stat(struct xfile *xf, struct xfile_stat *statbuf);
 
 int xfile_dump(struct xfile *xf);
+int xfile_obj_get_page(struct xfile *xf, loff_t offset, unsigned int len,
+		struct page **pagep);
+int xfile_obj_put_page(struct xfile *xf, loff_t offset, unsigned int len,
+		struct page *page);
 #else
 static inline int
 xfile_obj_load(struct xfile *xf, void *buf, size_t count, loff_t offset)
@@ -66,6 +70,24 @@ xfile_obj_load(struct xfile *xf, void *buf, size_t count, loff_t offset)
 
 static inline int
 xfile_obj_store(struct xfile *xf, void *buf, size_t count, loff_t offset)
+{
+	return -EIO;
+}
+static inline int
+xfile_obj_get_page(
+	struct xfile	*xf,
+	loff_t		offset,
+	unsigned int	len,
+	struct page	**pagep)
+{
+	return -EIO;
+}
+static inline int
+xfile_obj_put_page(
+	struct xfile	*xf,
+	loff_t		offset,
+	unsigned int	len,
+	struct page	*page)
 {
 	return -EIO;
 }
