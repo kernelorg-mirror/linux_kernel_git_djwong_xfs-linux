@@ -921,6 +921,8 @@ DEFINE_XFILE_EVENT(xfile_pwrite);
 DEFINE_XFILE_EVENT(xfile_seek_data);
 DEFINE_XFILE_EVENT(xfile_discard);
 DEFINE_XFILE_EVENT(xfile_prealloc);
+DEFINE_XFILE_EVENT(xfile_obj_get_page);
+DEFINE_XFILE_EVENT(xfile_obj_put_page);
 
 TRACE_EVENT(xfarray_sort_stats,
 	TP_PROTO(struct xfarray *xfa, unsigned int max_stack_depth,

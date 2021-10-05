@@ -461,6 +461,13 @@ xfs_trans_dirty_buf(
 	ASSERT(atomic_read(&bip->bli_refcount) > 0);
 
 	/*
+	 * For buffers that are directly mapped to an in-memory file, mark the
+	 * pages dirty so that they'll be persisted properly.
+	 */
+	if (bp->b_target->bt_flags & XFS_BUFTARG_DIRECT_MAP)
+		xfs_buf_ioapply_direct_pages(bp, true);
+
+	/*
 	 * If we invalidated the buffer within this transaction, then
 	 * cancel the invalidation now that we're dirtying the buffer
 	 * again.  There are no races with the code in xfs_buf_item_unpin(),

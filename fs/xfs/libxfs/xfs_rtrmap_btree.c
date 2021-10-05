@@ -566,7 +566,7 @@ xfs_rtrmapbt_mem_create(
 	const char		*name)
 {
 	return xfbtree_create(mp, XFS_BTNUM_RTRMAP, &xfs_rtrmapbt_buf_ops,
-			XFBTREE_CREATE_LONG_PTRS, name);
+			XFBTREE_CREATE_LONG_PTRS | XFBTREE_DIRECT_MAP, name);
 }
 
 /*

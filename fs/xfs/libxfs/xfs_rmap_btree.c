@@ -551,8 +551,8 @@ xfs_rmapbt_mem_create(
 	struct xfs_mount	*mp,
 	const char		*name)
 {
-	return xfbtree_create(mp, XFS_BTNUM_RMAP, &xfs_rmapbt_buf_ops, 0,
-			name);
+	return xfbtree_create(mp, XFS_BTNUM_RMAP, &xfs_rmapbt_buf_ops,
+			XFBTREE_DIRECT_MAP, name);
 }
 
 /*
