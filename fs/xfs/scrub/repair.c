@@ -570,10 +570,21 @@ xrep_reap_block(
 	 * to run xfs_repair.
 	 */
 	if (has_other_rmap) {
+		trace_xrep_dispose_unmap_extent(sc->sa.pag, agbno, 1);
+
 		error = xfs_rmap_free(sc->tp, sc->sa.agf_bp, sc->sa.pag, agbno,
 				1, rs->oinfo);
-	} else if (rs->resv == XFS_AG_RESV_AGFL) {
-		xrep_reap_invalidate_block(sc, fsbno);
+		if (error)
+			return error;
+
+		goto roll_out;
+	}
+
+	trace_xrep_dispose_free_extent(sc->sa.pag, agbno, 1);
+
+	xrep_reap_invalidate_block(sc, fsbno);
+
+	if (rs->resv == XFS_AG_RESV_AGFL) {
 		error = xrep_put_freelist(sc, agbno);
 	} else {
 		/*
@@ -583,7 +594,6 @@ xrep_reap_block(
 		 * every 100 or so EFIs so that we don't exceed the log
 		 * reservation.
 		 */
-		xrep_reap_invalidate_block(sc, fsbno);
 		__xfs_bmap_add_free(sc->tp, fsbno, 1, rs->oinfo, false);
 		rs->deferred++;
 		need_roll = rs->deferred > 100;
@@ -591,6 +601,7 @@ xrep_reap_block(
 	if (error || !need_roll)
 		return error;
 
+roll_out:
 	rs->deferred = 0;
 	return xrep_roll_ag_trans(sc);
 }
