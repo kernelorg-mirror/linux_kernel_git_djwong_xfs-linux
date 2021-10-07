@@ -1210,6 +1210,40 @@ xrep_rmap_alloc_vextent(
 	if (error)
 		return error;
 
+	/*
+	 * If the transaction is dirty, we fixed the freelist either by moving
+	 * blocks from the free space btrees, or by removing blocks from the
+	 * AGFL and queueing an EFI to free the block.  Later on, we will need
+	 * to compare gaps in the new recordset against the block usage of all
+	 * OWN_AG owners in order to free the old btree's blocks, which means
+	 * that we can't have EFIs for former AGFL blocks attached to the
+	 * transaction when we commit the new btree.
+	 *
+	 * Therefore, log and hold all three AG headers so that we don't lose
+	 * our hold on the resources needed to commit the new btree, and call
+	 * defer_finish to commit anything that fix_freelist may have added to
+	 * the transaction.
+	 */
+	if (sc->tp->t_flags & XFS_TRANS_DIRTY) {
+		struct xfs_trans	*tp = sc->tp;
+		struct xfs_buf		*agfl_bp = sc->sa.agfl_bp;
+
+		xfs_ialloc_log_agi(tp, sc->sa.agi_bp, XFS_AGI_MAGICNUM);
+		xfs_alloc_log_agf(tp, sc->sa.agf_bp, XFS_AGF_MAGICNUM);
+		xfs_trans_buf_set_type(tp, agfl_bp, XFS_BLFT_AGFL_BUF);
+		xfs_trans_log_buf(tp, agfl_bp, 0, BBTOB(agfl_bp->b_length) - 1);
+
+		xfs_trans_bhold(tp, sc->sa.agi_bp);
+		xfs_trans_bhold(tp, sc->sa.agf_bp);
+		xfs_trans_bhold(tp, sc->sa.agfl_bp);
+
+		error = xfs_defer_finish(&sc->tp);
+		if (error)
+			return error;
+
+		args->tp = sc->tp;
+	}
+
 	return xfs_alloc_vextent(args);
 }
 
