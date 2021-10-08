@@ -508,7 +508,8 @@ xrep_reap_invalidate_block(
 
 	bp = xfs_buf_incore(sc->mp->m_ddev_targp,
 			XFS_FSB_TO_DADDR(sc->mp, fsbno),
-			XFS_FSB_TO_BB(sc->mp, 1), XBF_TRYLOCK);
+			XFS_FSB_TO_BB(sc->mp, 1),
+			XBF_TRYLOCK | _XBF_IGNORE_STALE);
 	if (!bp)
 		return;
 

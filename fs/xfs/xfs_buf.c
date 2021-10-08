@@ -471,7 +471,8 @@ _xfs_buf_obj_cmp(
 		 * reallocating a busy extent. Skip this buffer and
 		 * continue searching for an exact match.
 		 */
-		ASSERT(bp->b_flags & XBF_STALE);
+		if (!(map->bm_flags & XBM_IGNORE_STALE))
+			ASSERT(bp->b_flags & XBF_STALE);
 		return 1;
 	}
 	return 0;
@@ -534,6 +535,9 @@ xfs_buf_find(
 	struct xfs_buf_map	cmap = { .bm_bn = map[0].bm_bn };
 	xfs_daddr_t		eofs;
 	int			i;
+
+	if (flags & _XBF_IGNORE_STALE)
+		cmap.bm_flags |= XBM_IGNORE_STALE;
 
 	*found_bp = NULL;
 
