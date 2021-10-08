@@ -240,7 +240,7 @@ xfbtree_create(
 		goto err_xfile;
 	}
 
-	if (mp->m_bsize == PAGE_SIZE && (flags & XFBTREE_DIRECT_MAP))
+	if (flags & XFBTREE_DIRECT_MAP)
 		xfbt->target->bt_flags |= XFS_BUFTARG_DIRECT_MAP;
 
 	xfbt->freespace = kmem_alloc(sizeof(struct xbitmap),
