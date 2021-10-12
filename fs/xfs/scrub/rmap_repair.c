@@ -920,13 +920,28 @@ end_agscan:
 	if (error)
 		return error;
 
-	/* Unlock the AG headers in preparation to scan the whole fs. */
-	xfs_trans_brelse(sc->tp, sa->agfl_bp);
-	xfs_trans_brelse(sc->tp, sa->agf_bp);
-	xfs_trans_brelse(sc->tp, sa->agi_bp);
+	/*
+	 * Set up for a potentially lengthy filesystem scan by reducing our
+	 * transaction resource usage for the duration.  Specifically:
+	 *
+	 * Unlock the AG header buffers and cancel the transaction to release
+	 * the log grant space while we scan the filesystem.
+	 *
+	 * Create a new empty transaction to eliminate the possibility of the
+	 * inode scan deadlocking on cyclical metadata.
+	 *
+	 * We pass the empty transaction to the file scanning function to avoid
+	 * repeatedly cycling empty transactions.  This can be done even though
+	 * we take the IOLOCK to quiesce the file because empty transactions
+	 * do not take sb_internal.
+	 */
 	sa->agfl_bp = NULL;
 	sa->agf_bp = NULL;
 	sa->agi_bp = NULL;
+	xchk_trans_cancel(sc);
+	error = xchk_trans_alloc_empty(sc);
+	if (error)
+		return error;
 
 	/* Iterate all AGs for inodes rmaps. */
 	while ((error = xchk_iscan_advance(sc, iscan)) == 1) {
@@ -951,7 +966,14 @@ end_agscan:
 	if (error)
 		return error;
 
-	/* Relock the AG headers so that we can build the new btree. */
+	/*
+	 * Switch out for a real transaction and lock the AG headers in
+	 * preparation for building a new tree.
+	 */
+	xchk_trans_cancel(sc);
+	error = xchk_setup_fs(sc);
+	if (error)
+		return error;
 	return xchk_ag_lock(sc);
 }
 
