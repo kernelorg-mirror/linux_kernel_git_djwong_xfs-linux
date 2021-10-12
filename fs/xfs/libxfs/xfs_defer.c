@@ -19,6 +19,8 @@
 #include "xfs_icache.h"
 #include "xfs_log.h"
 
+static struct kmem_cache	*xfs_defer_pending_cache;
+
 /*
  * Deferred Operations in XFS
  *
@@ -365,7 +367,7 @@ xfs_defer_cancel_list(
 			ops->cancel_item(pwi);
 		}
 		ASSERT(dfp->dfp_count == 0);
-		kmem_free(dfp);
+		kmem_cache_free(xfs_defer_pending_cache, dfp);
 	}
 }
 
@@ -462,7 +464,7 @@ xfs_defer_finish_one(
 
 	/* Done with the dfp, free it. */
 	list_del(&dfp->dfp_list);
-	kmem_free(dfp);
+	kmem_cache_free(xfs_defer_pending_cache, dfp);
 out:
 	if (ops->finish_cleanup)
 		ops->finish_cleanup(tp, state, error);
@@ -596,8 +598,8 @@ xfs_defer_add(
 			dfp = NULL;
 	}
 	if (!dfp) {
-		dfp = kmem_alloc(sizeof(struct xfs_defer_pending),
-				KM_NOFS);
+		dfp = kmem_cache_zalloc(xfs_defer_pending_cache,
+				GFP_NOFS | __GFP_NOFAIL);
 		dfp->dfp_type = type;
 		dfp->dfp_intent = NULL;
 		dfp->dfp_done = NULL;
@@ -808,4 +810,21 @@ xfs_defer_resources_rele(
 	dres->dr_inos = 0;
 	dres->dr_bufs = 0;
 	dres->dr_ordered = 0;
+}
+
+int __init
+xfs_defer_init_cache(void)
+{
+	xfs_defer_pending_cache = kmem_cache_create("xfs_defer_pending",
+			sizeof(struct xfs_defer_pending),
+			0, 0, NULL);
+
+	return xfs_defer_pending_cache != NULL ? 0 : -ENOMEM;
+}
+
+void
+xfs_defer_destroy_cache(void)
+{
+	kmem_cache_destroy(xfs_defer_pending_cache);
+	xfs_defer_pending_cache = NULL;
 }

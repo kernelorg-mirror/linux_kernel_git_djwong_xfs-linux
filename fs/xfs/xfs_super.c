@@ -43,7 +43,10 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_rmap_btree.h"
 #include "xfs_refcount_btree.h"
-
+#include "xfs_defer.h"
+#include "xfs_rmap.h"
+#include "xfs_refcount.h"
+#include "xfs_bmap.h"
 
 #include <linux/magic.h>
 #include <linux/fs_context.h>
@@ -1992,6 +1995,36 @@ xfs_destroy_btree_cur_caches(void)
 }
 
 STATIC int __init
+xfs_init_defer_items_caches(void)
+{
+	int				error;
+
+	error = xfs_defer_init_cache();
+	if (error)
+		return error;
+	error = xfs_rmap_intent_init_cache();
+	if (error)
+		return error;
+	error = xfs_refcount_intent_init_cache();
+	if (error)
+		return error;
+	error = xfs_bmap_intent_init_cache();
+	if (error)
+		return error;
+
+	return 0;
+}
+
+STATIC void
+xfs_destroy_defer_items_caches(void)
+{
+	xfs_bmap_intent_destroy_cache();
+	xfs_refcount_intent_destroy_cache();
+	xfs_rmap_intent_destroy_cache();
+	xfs_defer_destroy_cache();
+}
+
+STATIC int __init
 xfs_init_caches(void)
 {
 	int		error;
@@ -2012,11 +2045,15 @@ xfs_init_caches(void)
 	if (error)
 		goto out_destroy_bmap_free_item_cache;
 
+	error = xfs_init_defer_items_caches();
+	if (error)
+		goto out_destroy_btree_cur_cache;
+
 	xfs_da_state_cache = kmem_cache_create("xfs_da_state",
 					      sizeof(struct xfs_da_state),
 					      0, 0, NULL);
 	if (!xfs_da_state_cache)
-		goto out_destroy_btree_cur_cache;
+		goto out_destroy_defer_item_cache;
 
 	xfs_ifork_cache = kmem_cache_create("xfs_ifork",
 					   sizeof(struct xfs_ifork),
@@ -2146,6 +2183,8 @@ xfs_init_caches(void)
 	kmem_cache_destroy(xfs_ifork_cache);
  out_destroy_da_state_cache:
 	kmem_cache_destroy(xfs_da_state_cache);
+ out_destroy_defer_item_cache:
+	xfs_destroy_defer_items_caches();
  out_destroy_btree_cur_cache:
 	xfs_destroy_btree_cur_caches();
  out_destroy_bmap_free_item_cache:
@@ -2179,6 +2218,7 @@ xfs_destroy_caches(void)
 	kmem_cache_destroy(xfs_trans_cache);
 	kmem_cache_destroy(xfs_ifork_cache);
 	kmem_cache_destroy(xfs_da_state_cache);
+	xfs_destroy_defer_items_caches();
 	xfs_destroy_btree_cur_caches();
 	kmem_cache_destroy(xfs_bmap_free_item_cache);
 	kmem_cache_destroy(xfs_log_ticket_cache);
