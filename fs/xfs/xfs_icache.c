@@ -1923,6 +1923,20 @@ xfs_inodegc_worker(
 }
 
 /*
+ * Run all currently queued inode inactivation work immediately, but do not
+ * wait for it to finish.
+ */
+void
+xfs_inodegc_start_flush(
+	struct xfs_mount	*mp)
+{
+	if (!xfs_is_inodegc_enabled(mp))
+		return;
+
+	xfs_inodegc_queue_all(mp);
+}
+
+/*
  * Force all currently queued inode inactivation work to run immediately, and
  * wait for the work to finish. Two pass - queue all the work first pass, wait
  * for it in a second pass.
