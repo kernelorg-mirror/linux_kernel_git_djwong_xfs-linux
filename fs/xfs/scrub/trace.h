@@ -16,8 +16,10 @@
 #include <linux/tracepoint.h>
 #include "xfs_bit.h"
 
+struct xfs_scrub;
 struct xfile;
 struct xfarray;
+struct xchk_iscan;
 
 /*
  * ftrace's __print_symbolic requires that all enum values be wrapped in the
@@ -830,7 +832,51 @@ TRACE_EVENT(xchk_rtsum_record_free,
 		  __entry->log,
 		  __entry->pos,
 		  __entry->v)
+);
+
+DECLARE_EVENT_CLASS(xchk_iscan_class,
+	TP_PROTO(struct xfs_mount *mp, struct xchk_iscan *iscan),
+	TP_ARGS(mp, iscan),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, cursor)
+		__field(xfs_ino_t, visited)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->cursor = iscan->cursor_ino;
+		__entry->visited = iscan->__visited_ino;
+	),
+	TP_printk("dev %d:%d iscan cursor 0x%llx visited 0x%llx",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->cursor, __entry->visited)
 )
+#define DEFINE_ISCAN_EVENT(name) \
+DEFINE_EVENT(xchk_iscan_class, name, \
+	TP_PROTO(struct xfs_mount *mp, struct xchk_iscan *iscan), \
+	TP_ARGS(mp, iscan))
+DEFINE_ISCAN_EVENT(xchk_iscan_move_cursor);
+DEFINE_ISCAN_EVENT(xchk_iscan_visit);
+
+TRACE_EVENT(xchk_iscan_iget,
+	TP_PROTO(struct xfs_mount *mp, struct xchk_iscan *iscan, int error),
+	TP_ARGS(mp, iscan, error),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, cursor)
+		__field(xfs_ino_t, visited)
+		__field(int, error)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->cursor = iscan->cursor_ino;
+		__entry->visited = iscan->__visited_ino;
+		__entry->error = error;
+	),
+	TP_printk("dev %d:%d iscan cursor 0x%llx visited 0x%llx error %d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->cursor, __entry->visited, __entry->error)
+);
 
 /* repair tracepoints */
 #if IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR)
