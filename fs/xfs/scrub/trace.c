@@ -17,6 +17,7 @@
 #include "scrub/scrub.h"
 #include "scrub/xfile.h"
 #include "scrub/xfarray.h"
+#include "scrub/iscan.h"
 
 /* Figure out which block the btree cursor was pointing to. */
 static inline xfs_fsblock_t
