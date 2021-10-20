@@ -53,8 +53,16 @@ int
 xchk_setup_nlinks(
 	struct xfs_scrub	*sc)
 {
-	sc->buf = kmem_zalloc(sizeof(struct xchk_nlink_ctrs),
-			KM_NOFS | KM_MAYFAIL);
+	unsigned int		buf_bytes = sizeof(struct xchk_nlink_ctrs);
+	int			error;
+
+	if (xchk_could_repair(sc)) {
+		error = xrep_setup_nlinks(sc, &buf_bytes);
+		if (error)
+			return error;
+	}
+
+	sc->buf = kmem_zalloc(buf_bytes, KM_NOFS | KM_MAYFAIL);
 	if (!sc->buf)
 		return -ENOMEM;
 
