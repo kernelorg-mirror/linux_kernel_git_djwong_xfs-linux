@@ -2206,6 +2206,29 @@ TRACE_EVENT(xrep_rtrefc_found,
 DEFINE_SCRUB_NLINK_DIFF_EVENT(xrep_nlinks_update_inode);
 DEFINE_SCRUB_NLINK_DIFF_EVENT(xrep_nlinks_unfixable_inode);
 
+TRACE_EVENT(xrep_nlinks_set_record,
+	TP_PROTO(struct xfs_mount *mp, xfs_ino_t ino,
+		 const struct xchk_nlink *obs),
+	TP_ARGS(mp, ino, obs),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(xfs_nlink_t, parent_nlinks)
+		__field(xfs_nlink_t, child_nlinks)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->ino = ino;
+		__entry->parent_nlinks = obs->parent;
+		__entry->child_nlinks = obs->child;
+	),
+	TP_printk("dev %d:%d ino 0x%llx parent_links %u child_links %u",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->parent_nlinks,
+		  __entry->child_nlinks)
+);
+
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
 
 #endif /* _TRACE_XFS_SCRUB_TRACE_H */
