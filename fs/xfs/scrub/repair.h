@@ -80,7 +80,7 @@ int xrep_setup_xattr(struct xfs_scrub *sc);
 int xrep_setup_directory(struct xfs_scrub *sc);
 int xrep_setup_parent(struct xfs_scrub *sc);
 int xrep_setup_rtbitmap(struct xfs_scrub *sc, unsigned int *resblks);
-int xrep_setup_nlinks(struct xfs_scrub *sc);
+int xrep_setup_nlinks(struct xfs_scrub *sc, unsigned int *buf_bytes);
 
 int xrep_xattr_reset_fork(struct xfs_scrub *sc, struct xfs_inode *ip);
 
@@ -288,7 +288,12 @@ xrep_setup_xattr(
 
 #define xrep_setup_directory		xrep_setup_xattr
 #define xrep_setup_parent		xrep_setup_xattr
-#define xrep_setup_nlinks		xrep_setup_xattr
+
+static inline int
+xrep_setup_nlinks(struct xfs_scrub *sc, unsigned int *buf_bytes)
+{
+	return 0;
+}
 
 #define xrep_revalidate_allocbt		(NULL)
 #define xrep_revalidate_iallocbt	(NULL)
