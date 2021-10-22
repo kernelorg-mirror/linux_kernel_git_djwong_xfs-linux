@@ -1467,3 +1467,98 @@ xfs_hook_call(
 	return srcu_notifier_call_chain(&chain->head, val, priv);
 }
 #endif /* CONFIG_XFS_LIVE_HOOKS */
+
+#ifdef CONFIG_XFS_ONLINE_SCRUB
+# ifdef CONFIG_XFS_RT
+static inline void
+xfs_rt_bump_intents(
+	struct xfs_mount	*mp)
+{
+	trace_xfs_rt_bump_intents(mp, __return_address);
+
+	atomic_inc(&mp->m_rt_intents);
+}
+
+static inline void
+xfs_rt_drop_intents(
+	struct xfs_mount	*mp)
+{
+	trace_xfs_rt_drop_intents(mp, __return_address);
+
+	ASSERT(atomic_read(&mp->m_rt_intents) > 0);
+
+	if (atomic_dec_and_test(&mp->m_rt_intents))
+		wake_up(&mp->m_rt_intents_wq);
+}
+
+int
+xfs_rt_wait_intents(
+	struct xfs_mount	*mp)
+{
+	trace_xfs_rt_wait_intents(mp, __return_address);
+
+	return wait_event_killable(mp->m_rt_intents_wq,
+			atomic_read(&mp->m_rt_intents) == 0);
+}
+# else
+static inline void xfs_rt_bump_intents(struct xfs_mount *mp) { }
+static inline void xfs_rt_drop_intents(struct xfs_mount *mp) { }
+# endif /* CONFIG_XFS_RT */
+
+static inline void
+xfs_ag_bump_intents(
+	struct xfs_mount	*mp,
+	xfs_agnumber_t		agno)
+{
+	struct xfs_perag	*pag = xfs_perag_get(mp, agno);
+
+	trace_xfs_perag_bump_intents(pag, __return_address);
+
+	atomic_inc(&pag->pag_intents);
+	xfs_perag_put(pag);
+}
+
+static inline void
+xfs_ag_drop_intents(
+	struct xfs_mount	*mp,
+	xfs_agnumber_t		agno)
+{
+	struct xfs_perag	*pag = xfs_perag_get(mp, agno);
+
+	trace_xfs_perag_drop_intents(pag, __return_address);
+
+	ASSERT(atomic_read(&pag->pag_intents) > 0);
+
+	if (atomic_dec_and_test(&pag->pag_intents))
+		wake_up(&pag->pag_intents_wq);
+	xfs_perag_put(pag);
+}
+
+void
+xfs_fs_bump_intents(struct xfs_mount *mp, bool isrt, xfs_fsblock_t fsb)
+{
+	if (isrt)
+		xfs_rt_bump_intents(mp);
+	else
+		xfs_ag_bump_intents(mp, XFS_FSB_TO_AGNO(mp, fsb));
+}
+
+void
+xfs_fs_drop_intents(struct xfs_mount *mp, bool isrt, xfs_fsblock_t fsb)
+{
+	if (isrt)
+		xfs_rt_drop_intents(mp);
+	else
+		xfs_ag_drop_intents(mp, XFS_FSB_TO_AGNO(mp, fsb));
+}
+
+int
+xfs_perag_wait_intents(
+	struct xfs_perag	*pag)
+{
+	trace_xfs_perag_wait_intents(pag, __return_address);
+
+	return wait_event_killable(pag->pag_intents_wq,
+			atomic_read(&pag->pag_intents) == 0);
+}
+#endif /* CONFIG_XFS_ONLINE_SCRUB */
