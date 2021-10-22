@@ -484,7 +484,35 @@ want_ag_read_header_failure(
  *
  * The headers should be released by xchk_ag_free, but as a fail safe we attach
  * all the buffers we grab to the scrub transaction so they'll all be freed
- * when we cancel it.  Returns ENOENT if we can't grab the perag structure.
+ * when we cancel it.
+ */
+static inline int
+__xchk_ag_read_headers(
+	struct xfs_scrub	*sc,
+	xfs_agnumber_t		agno,
+	struct xchk_ag		*sa)
+{
+	struct xfs_mount	*mp = sc->mp;
+	int			error;
+
+	error = xfs_ialloc_read_agi(mp, sc->tp, agno, &sa->agi_bp);
+	if (error && want_ag_read_header_failure(sc, XFS_SCRUB_TYPE_AGI))
+		return error;
+
+	error = xfs_alloc_read_agf(mp, sc->tp, agno, 0, &sa->agf_bp);
+	if (error && want_ag_read_header_failure(sc, XFS_SCRUB_TYPE_AGF))
+		return error;
+
+	error = xfs_alloc_read_agfl(mp, sc->tp, agno, &sa->agfl_bp);
+	if (error && want_ag_read_header_failure(sc, XFS_SCRUB_TYPE_AGFL))
+		return error;
+
+	return 0;
+}
+
+/*
+ * Grab all the headers for an AG, and wait until there aren't any pending
+ * intents.  Returns -ENOENT if we can't grab the perag structure.
  */
 int
 xchk_ag_read_headers(
@@ -502,29 +530,72 @@ xchk_ag_read_headers(
 	return xchk_ag_lock(sc);
 }
 
-/* Lock the AG headers. */
+/* Lock the AG headers, waiting for pending intents to drain. */
 int
 xchk_ag_lock(
 	struct xfs_scrub	*sc)
 {
-	struct xfs_mount	*mp = sc->mp;
 	struct xchk_ag		*sa = &sc->sa;
-	xfs_agnumber_t		agno = sa->pag->pag_agno;
-	int			error;
+	int			error = 0;
 
-	error = xfs_ialloc_read_agi(mp, sc->tp, agno, &sa->agi_bp);
-	if (error && want_ag_read_header_failure(sc, XFS_SCRUB_TYPE_AGI))
-		return error;
+	ASSERT(sa->pag != NULL);
+	ASSERT(sa->agi_bp == NULL);
+	ASSERT(sa->agf_bp == NULL);
+	ASSERT(sa->agfl_bp == NULL);
 
-	error = xfs_alloc_read_agf(mp, sc->tp, agno, 0, &sa->agf_bp);
-	if (error && want_ag_read_header_failure(sc, XFS_SCRUB_TYPE_AGF))
-		return error;
+	do {
+		if (xchk_should_terminate(sc, &error))
+			return error;
 
-	error = xfs_alloc_read_agfl(mp, sc->tp, agno, &sa->agfl_bp);
-	if (error && want_ag_read_header_failure(sc, XFS_SCRUB_TYPE_AGFL))
-		return error;
+		error = __xchk_ag_read_headers(sc, sa->pag->pag_agno, sa);
+		if (error)
+			return error;
 
-	return 0;
+		/*
+		 * Decide if this AG is quiet enough for all metadata to be
+		 * consistent with each other.  XFS allows the AG header buffer
+		 * locks to cycle across transaction rolls while processing
+		 * chains of deferred ops, which means that there could be
+		 * other threads in the middle of processing a chain of
+		 * deferred ops.  For regular operations we are careful about
+		 * ordering operations to prevent collisions between threads
+		 * (which is why we don't need a per-AG lock), but scrub and
+		 * repair have to serialize against chained operations.
+		 *
+		 * We just locked all the AG headers buffers; now take a look
+		 * to see if there are any intents in progress.  If there are,
+		 * drop the AG headers and wait for the intents to drain.
+		 * Since we hold all the AG header locks for the duration of
+		 * the scrub, this is the only time we have to sample the
+		 * intents counter; any threads increasing it after this point
+		 * can't possibly be in the middle of a chain of AG metadata
+		 * updates.
+		 *
+		 * Obviously, this should be slanted against scrub and in favor
+		 * of runtime threads.
+		 */
+		if (!xfs_drain_busy(&sa->pag->pag_intents))
+			return 0;
+
+		if (sa->agfl_bp) {
+			xfs_trans_brelse(sc->tp, sa->agfl_bp);
+			sa->agfl_bp = NULL;
+		}
+
+		if (sa->agf_bp) {
+			xfs_trans_brelse(sc->tp, sa->agf_bp);
+			sa->agf_bp = NULL;
+		}
+
+		if (sa->agi_bp) {
+			xfs_trans_brelse(sc->tp, sa->agi_bp);
+			sa->agi_bp = NULL;
+		}
+
+		error = xfs_perag_drain_intents(sa->pag);
+	} while (!error);
+
+	return error;
 }
 
 /* Release all the AG btree cursors. */
@@ -653,15 +724,63 @@ xchk_ag_init(
 	return 0;
 }
 
-/* Lock everything we need to work on realtime metadata. */
-void
+#ifdef CONFIG_XFS_RT
+/* Lock everything we need to work on realtime metadata and wait for intents. */
+int
+xchk_rt_lock(
+	struct xfs_scrub	*sc,
+	struct xchk_rt		*sr)
+{
+	int			error = 0;
+
+	do {
+		if (xchk_should_terminate(sc, &error))
+			return error;
+
+		xfs_rtlock(NULL, sc->mp, XFS_RTLOCK_ALL);
+
+		/*
+		 * Decide if the RT volume is quiet enough for all metadata to
+		 * be consistent with each other.  Regular file IO doesn't get
+		 * to lock all the rt inodes at the same time, which means that
+		 * there could be other threads in the middle of processing a
+		 * chain of deferred ops.
+		 *
+		 * We just locked all the rt inodes; now take a look to see if
+		 * there are any rt intents in progress.  If there are, drop
+		 * the rt inode locks and wait for the intents to drain.  Since
+		 * we hold the rt inode locks for the duration of the scrub,
+		 * this is the only time we have to sample the intents counter;
+		 * any threads increasing it after this point can't possibly be
+		 * in the middle of a chain of rt metadata updates.
+		 *
+		 * Obviously, this should be slanted against scrub and in favor
+		 * of runtime threads.
+		 */
+		if (!xfs_drain_busy(&sc->mp->m_rt_intents)) {
+			sr->locked = true;
+			return 0;
+		}
+
+		xfs_rtunlock(sc->mp, XFS_RTLOCK_ALL);
+
+		error = xfs_rt_drain_intents(sc->mp);
+	} while (!error);
+
+	return error;
+}
+#else
+/* Lock everything we need to work on realtime metadata and wait for intents. */
+int
 xchk_rt_lock(
 	struct xfs_scrub	*sc,
 	struct xchk_rt		*sr)
 {
 	xfs_rtlock(NULL, sc->mp, XFS_RTLOCK_ALL);
 	sr->locked = true;
+	return 0;
 }
+#endif /* CONFIG_XFS_RT */
 
 /*
  * For scrubbing a realtime file, grab all the in-core resources we'll need to
@@ -669,14 +788,17 @@ xchk_rt_lock(
  * metadata inodes.  Callers must not join these inodes to the transaction
  * with non-zero lockflags or concurrency problems will result.
  */
-void
+int
 xchk_rt_init(
 	struct xfs_scrub	*sc,
 	struct xchk_rt		*sr)
 {
 	struct xfs_mount	*mp = sc->mp;
+	int			error;
 
-	xchk_rt_lock(sc, sr);
+	error = xchk_rt_lock(sc, sr);
+	if (error)
+		return error;
 
 	if (xfs_has_rtrmapbt(mp))
 		sr->rmap_cur = xfs_rtrmapbt_init_cursor(mp, sc->tp,
@@ -685,6 +807,8 @@ xchk_rt_init(
 	if (xfs_has_reflink(mp))
 		sr->refc_cur = xfs_rtrefcountbt_init_cursor(mp, sc->tp,
 				mp->m_rrefcountip);
+
+	return 0;
 }
 
 /*

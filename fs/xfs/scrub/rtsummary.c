@@ -71,8 +71,7 @@ xchk_setup_rtsummary(
 	if (error)
 		return error;
 
-	xchk_rt_init(sc, &sc->sr);
-	return 0;
+	return xchk_rt_init(sc, &sc->sr);
 }
 
 /* Update the summary file to reflect the free extent that we've accumulated. */

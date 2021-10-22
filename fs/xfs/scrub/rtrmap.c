@@ -50,8 +50,7 @@ xchk_setup_rtrmapbt(
 	if (error)
 		return error;
 
-	xchk_rt_init(sc, &sc->sr);
-	return 0;
+	return xchk_rt_init(sc, &sc->sr);
 }
 
 /* Realtime reverse mapping. */

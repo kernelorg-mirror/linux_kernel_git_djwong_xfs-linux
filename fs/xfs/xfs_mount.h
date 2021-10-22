@@ -74,6 +74,63 @@ int xfs_hook_call(struct xfs_hook_chain *chain, unsigned long val, void *priv);
 #endif
 
 /*
+ * Passive drain mechanism.  This data structure tracks a count of some items
+ * and contains a waitqueue for callers who would like to wake up when the
+ * count hits zero.
+ */
+struct xfs_drain {
+#ifdef CONFIG_XFS_DRAIN_INTENTS
+	/* Number of items pending in some part of the filesystem. */
+	atomic_t		dr_count;
+
+	/* Queue to wait for dri_count to go to zero */
+	struct wait_queue_head	dr_waiters;
+#endif /* CONFIG_XFS_DRAIN_INTENTS */
+};
+
+#ifdef CONFIG_XFS_DRAIN_INTENTS
+# ifdef CONFIG_XFS_RT
+int xfs_rt_drain_intents(struct xfs_mount *mp);
+# else
+#  define xfs_rt_wait_intents(mp)		(-ENOSYS)
+# endif /* CONFIG_XFS_RT */
+
+int xfs_perag_drain_intents(struct xfs_perag *pag);
+
+void xfs_fs_bump_intents(struct xfs_mount *mp, bool isrt, xfs_fsblock_t fsb);
+void xfs_fs_drop_intents(struct xfs_mount *mp, bool isrt, xfs_fsblock_t fsb);
+
+/* Are there work items pending? */
+static inline bool xfs_drain_busy(struct xfs_drain *dr)
+{
+	return atomic_read(&dr->dr_count) > 0;
+}
+
+static inline void xfs_drain_init(struct xfs_drain *dr)
+{
+	atomic_set(&dr->dr_count, 0);
+	init_waitqueue_head(&dr->dr_waiters);
+}
+
+static inline void xfs_drain_free(struct xfs_drain *dr)
+{
+	ASSERT(atomic_read(&dr->dr_count) == 0);
+}
+#else
+static inline void
+xfs_fs_bump_intents(struct xfs_mount *mp, bool isrt, xfs_fsblock_t fsb)
+{
+}
+
+static inline void
+xfs_fs_drop_intents(struct xfs_mount *mp, bool isrt, xfs_fsblock_t fsb)
+{
+}
+# define xfs_drain_init(dr)
+# define xfs_drain_free(dr)
+#endif /* CONFIG_XFS_DRAIN_INTENTS */
+
+/*
  * Per-cpu deferred inode inactivation GC lists.
  */
 struct xfs_inodegc {
@@ -276,6 +333,17 @@ typedef struct xfs_mount {
 
 	/* online file link count check stuff */
 	struct xfs_hook_chain	m_nlink_delta_hooks;
+
+#ifdef CONFIG_XFS_RT
+	/*
+	 * We use xfs_drain to track the number of deferred log intent items
+	 * that have been queued (but not yet processed) so that waiters (e.g.
+	 * scrub) will not lock resources when other threads are in the middle
+	 * of processing a chain of intent items only to find momentary
+	 * inconsistencies.
+	 */
+	struct xfs_drain	m_rt_intents;
+#endif /* CONFIG_XFS_RT */
 } xfs_mount_t;
 
 #define M_IGEO(mp)		(&(mp)->m_ino_geo)

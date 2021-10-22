@@ -33,8 +33,7 @@ xchk_setup_rtrefcountbt(
 	if (error)
 		return error;
 
-	xchk_rt_init(sc, &sc->sr);
-	return 0;
+	return xchk_rt_init(sc, &sc->sr);
 }
 
 /* Realtime Reference count btree scrubber. */

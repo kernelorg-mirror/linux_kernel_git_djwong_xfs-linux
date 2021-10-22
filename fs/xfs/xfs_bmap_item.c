@@ -342,6 +342,21 @@ xfs_bmap_update_create_done(
 	return &xfs_trans_get_bud(tp, BUI_ITEM(intent))->bud_item;
 }
 
+static inline void
+xfs_bmap_drop_intents(
+	struct xfs_mount		*mp,
+	const struct xfs_bmap_intent	*bi,
+	xfs_fsblock_t			orig_startblock)
+{
+	bool				rt;
+
+	if (!xfs_has_rmapbt(mp))
+		return;
+
+	rt = xfs_ifork_is_realtime(bi->bi_owner, bi->bi_whichfork);
+	xfs_fs_drop_intents(mp, rt, orig_startblock);
+}
+
 /* Process a deferred rmap update. */
 STATIC int
 xfs_bmap_update_finish_item(
@@ -351,14 +366,25 @@ xfs_bmap_update_finish_item(
 	struct xfs_btree_cur		**state)
 {
 	struct xfs_bmap_intent		*bi;
+	struct xfs_mount		*mp = tp->t_mountp;
+	xfs_fsblock_t			orig_startblock;
 	int				error;
 
 	bi = container_of(item, struct xfs_bmap_intent, bi_list);
+	orig_startblock = bi->bi_bmap.br_startblock;
 	error = xfs_trans_log_finish_bmap_update(tp, BUD_ITEM(done), bi);
 	if (!error && bi->bi_bmap.br_blockcount > 0) {
 		ASSERT(bi->bi_type == XFS_BMAP_UNMAP);
 		return -EAGAIN;
 	}
+
+	/*
+	 * Drop our intent counter reference now that we've either queued a
+	 * deferred rmap intent or failed.  Be careful to use the original
+	 * startblock since the finishing functions can update the intent
+	 * state.
+	 */
+	xfs_bmap_drop_intents(mp, bi, orig_startblock);
 	kmem_cache_free(xfs_bmap_intent_cache, bi);
 	return error;
 }
@@ -371,15 +397,39 @@ xfs_bmap_update_abort_intent(
 	xfs_bui_release(BUI_ITEM(intent));
 }
 
-/* Cancel a deferred rmap update. */
+/* Cancel a deferred bmap update. */
 STATIC void
 xfs_bmap_update_cancel_item(
+	struct xfs_mount		*mp,
 	struct list_head		*item)
 {
 	struct xfs_bmap_intent		*bi;
 
 	bi = container_of(item, struct xfs_bmap_intent, bi_list);
+	xfs_bmap_drop_intents(mp, bi, bi->bi_bmap.br_startblock);
 	kmem_cache_free(xfs_bmap_intent_cache, bi);
+}
+
+/* Add a deferred bmap update. */
+STATIC void
+xfs_bmap_update_add_item(
+	struct xfs_mount		*mp,
+	const struct list_head		*item)
+{
+	const struct xfs_bmap_intent	*bi;
+	bool				rt;
+
+	bi = container_of(item, struct xfs_bmap_intent, bi_list);
+
+	/*
+	 * Grab an intent counter reference on behalf of the deferred rmap
+	 * intent item that we will queue when we finish this bmap work.
+	 */
+	if (!xfs_has_rmapbt(mp))
+		return;
+
+	rt = xfs_ifork_is_realtime(bi->bi_owner, bi->bi_whichfork);
+	xfs_fs_bump_intents(mp, rt, bi->bi_bmap.br_startblock);
 }
 
 const struct xfs_defer_op_type xfs_bmap_update_defer_type = {
@@ -389,6 +439,7 @@ const struct xfs_defer_op_type xfs_bmap_update_defer_type = {
 	.create_done	= xfs_bmap_update_create_done,
 	.finish_item	= xfs_bmap_update_finish_item,
 	.cancel_item	= xfs_bmap_update_cancel_item,
+	.add_item	= xfs_bmap_update_add_item,
 };
 
 /* Is this recovered BUI ok? */

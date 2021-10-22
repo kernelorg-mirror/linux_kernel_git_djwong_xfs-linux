@@ -2767,6 +2767,44 @@ DEFINE_FREE_EXTENT_DEFERRED_EVENT(xfs_agfl_free_deferred);
 DEFINE_FREE_EXTENT_DEFERRED_EVENT(xfs_extent_free_defer);
 DEFINE_FREE_EXTENT_DEFERRED_EVENT(xfs_extent_free_deferred);
 
+DECLARE_EVENT_CLASS(xfs_defer_pending_item_class,
+	TP_PROTO(struct xfs_mount *mp, struct xfs_defer_pending *dfp,
+		 void *item),
+	TP_ARGS(mp, dfp, item),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(int, type)
+		__field(void *, intent)
+		__field(void *, item)
+		__field(char, committed)
+		__field(int, nr)
+	),
+	TP_fast_assign(
+		__entry->dev = mp ? mp->m_super->s_dev : 0;
+		__entry->type = dfp->dfp_type;
+		__entry->intent = dfp->dfp_intent;
+		__entry->item = item;
+		__entry->committed = dfp->dfp_done != NULL;
+		__entry->nr = dfp->dfp_count;
+	),
+	TP_printk("dev %d:%d optype %d intent %p item %p committed %d nr %d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->type,
+		  __entry->intent,
+		  __entry->item,
+		  __entry->committed,
+		  __entry->nr)
+)
+#define DEFINE_DEFER_PENDING_ITEM_EVENT(name) \
+DEFINE_EVENT(xfs_defer_pending_item_class, name, \
+	TP_PROTO(struct xfs_mount *mp, struct xfs_defer_pending *dfp, \
+		 void *item), \
+	TP_ARGS(mp, dfp, item))
+
+DEFINE_DEFER_PENDING_ITEM_EVENT(xfs_defer_add_item);
+DEFINE_DEFER_PENDING_ITEM_EVENT(xfs_defer_cancel_item);
+DEFINE_DEFER_PENDING_ITEM_EVENT(xfs_defer_finish_item);
+
 /* rmap tracepoints */
 DECLARE_EVENT_CLASS(xfs_rmap_class,
 	TP_PROTO(struct xfs_btree_cur *cur,
@@ -4930,6 +4968,70 @@ TRACE_EVENT(xfs_growfs_check_rtgeom,
 		  __entry->logblocks,
 		  __entry->min_logfsbs)
 );
+
+#ifdef CONFIG_XFS_DRAIN_INTENTS
+DECLARE_EVENT_CLASS(xfs_perag_intents_class,
+	TP_PROTO(struct xfs_perag *pag, void *caller_ip),
+	TP_ARGS(pag, caller_ip),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_agnumber_t, agno)
+		__field(long, nr_intents)
+		__field(void *, caller_ip)
+	),
+	TP_fast_assign(
+		__entry->dev = pag->pag_mount->m_super->s_dev;
+		__entry->agno = pag->pag_agno;
+		__entry->nr_intents = atomic_read(&pag->pag_intents.dr_count);
+		__entry->caller_ip = caller_ip;
+	),
+	TP_printk("dev %d:%d agno 0x%x intents %ld caller %pS",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->agno,
+		  __entry->nr_intents,
+		  __entry->caller_ip)
+);
+
+#define DEFINE_PERAG_INTENTS_EVENT(name)	\
+DEFINE_EVENT(xfs_perag_intents_class, name,					\
+	TP_PROTO(struct xfs_perag *pag, void *caller_ip), \
+	TP_ARGS(pag, caller_ip))
+DEFINE_PERAG_INTENTS_EVENT(xfs_perag_bump_intents);
+DEFINE_PERAG_INTENTS_EVENT(xfs_perag_drop_intents);
+DEFINE_PERAG_INTENTS_EVENT(xfs_perag_wait_intents);
+
+# ifdef CONFIG_XFS_RT
+DECLARE_EVENT_CLASS(xfs_rt_intents_class,
+	TP_PROTO(struct xfs_mount *mp, void *caller_ip),
+	TP_ARGS(mp, caller_ip),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(dev_t, rtdev)
+		__field(long, nr_intents)
+		__field(void *, caller_ip)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->rtdev = mp->m_rtdev_targp->bt_dev;
+		__entry->nr_intents = atomic_read(&mp->m_rt_intents.dr_count);
+		__entry->caller_ip = caller_ip;
+	),
+	TP_printk("dev %d:%d rtdev %d:%d intents %ld caller %pS",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  MAJOR(__entry->rtdev), MINOR(__entry->rtdev),
+		  __entry->nr_intents,
+		  __entry->caller_ip)
+);
+
+#define DEFINE_RT_INTENTS_EVENT(name)	\
+DEFINE_EVENT(xfs_rt_intents_class, name,					\
+	TP_PROTO(struct xfs_mount *mp, void *caller_ip), \
+	TP_ARGS(mp, caller_ip))
+DEFINE_RT_INTENTS_EVENT(xfs_rt_bump_intents);
+DEFINE_RT_INTENTS_EVENT(xfs_rt_drop_intents);
+DEFINE_RT_INTENTS_EVENT(xfs_rt_wait_intents);
+# endif /* CONFIG_XFS_RT */
+#endif /* CONFIG_XFS_DRAIN_INTENTS */
 
 #endif /* _TRACE_XFS_H */
 

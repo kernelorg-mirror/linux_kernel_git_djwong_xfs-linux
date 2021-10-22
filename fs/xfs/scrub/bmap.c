@@ -318,7 +318,12 @@ xchk_bmap_rt_iextent_xref(
 	struct xchk_bmap_info	*info,
 	struct xfs_bmbt_irec	*irec)
 {
-	xchk_rt_init(info->sc, &info->sc->sr);
+	int			error;
+
+	error = xchk_rt_init(info->sc, &info->sc->sr);
+	if (!xchk_fblock_process_error(info->sc, info->whichfork,
+			irec->br_startoff, &error))
+		goto out_free;
 
 	xchk_xref_is_used_rt_space(info->sc, irec->br_startblock,
 			irec->br_blockcount);
@@ -336,6 +341,7 @@ xchk_bmap_rt_iextent_xref(
 		break;
 	}
 
+out_free:
 	xchk_rt_btcur_free(&info->sc->sr);
 	xchk_rt_unlock(info->sc, &info->sc->sr);
 }

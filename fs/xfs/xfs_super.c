@@ -726,6 +726,9 @@ xfs_mount_free(
 
 	ASSERT(!mutex_is_locked(&mp->m_scrub_freeze));
 	mutex_destroy(&mp->m_scrub_freeze);
+#ifdef CONFIG_XFS_RT
+	xfs_drain_free(&mp->m_rt_intents);
+#endif
 
 	kmem_free(mp);
 }
@@ -1967,6 +1970,10 @@ static int xfs_init_fs_context(
 	mp = kmem_alloc(sizeof(struct xfs_mount), KM_ZERO);
 	if (!mp)
 		return -ENOMEM;
+
+#ifdef CONFIG_XFS_RT
+	xfs_drain_init(&mp->m_rt_intents);
+#endif
 
 	spin_lock_init(&mp->m_sb_lock);
 	spin_lock_init(&mp->m_agirotor_lock);

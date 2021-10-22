@@ -364,9 +364,12 @@ xfs_refcount_update_finish_item(
 	struct xfs_btree_cur		**state)
 {
 	struct xfs_refcount_intent	*ri;
+	struct xfs_mount		*mp = tp->t_mountp;
+	xfs_fsblock_t			orig_startblock;
 	int				error;
 
 	ri = container_of(item, struct xfs_refcount_intent, ri_list);
+	orig_startblock = ri->ri_startblock;
 	error = xfs_trans_log_finish_refcount_update(tp, CUD_ITEM(done), ri,
 			state);
 
@@ -376,6 +379,13 @@ xfs_refcount_update_finish_item(
 		       ri->ri_type == XFS_REFCOUNT_DECREASE);
 		return -EAGAIN;
 	}
+
+	/*
+	 * Drop our intent counter reference now that we've finished all the
+	 * work or failed.  Be careful to use the original startblock because
+	 * the finishing functions can update the intent state.
+	 */
+	xfs_fs_drop_intents(mp, ri->ri_realtime, orig_startblock);
 	kmem_cache_free(xfs_refcount_intent_cache, ri);
 	return error;
 }
@@ -391,12 +401,26 @@ xfs_refcount_update_abort_intent(
 /* Cancel a deferred refcount update. */
 STATIC void
 xfs_refcount_update_cancel_item(
+	struct xfs_mount		*mp,
 	struct list_head		*item)
 {
 	struct xfs_refcount_intent	*ri;
 
 	ri = container_of(item, struct xfs_refcount_intent, ri_list);
+	xfs_fs_drop_intents(mp, ri->ri_realtime, ri->ri_startblock);
 	kmem_cache_free(xfs_refcount_intent_cache, ri);
+}
+
+/* Add a deferred refcount update. */
+STATIC void
+xfs_refcount_update_add_item(
+	struct xfs_mount		*mp,
+	const struct list_head		*item)
+{
+	const struct xfs_refcount_intent *ri;
+
+	ri = container_of(item, struct xfs_refcount_intent, ri_list);
+	xfs_fs_bump_intents(mp, ri->ri_realtime, ri->ri_startblock);
 }
 
 const struct xfs_defer_op_type xfs_refcount_update_defer_type = {
@@ -407,6 +431,7 @@ const struct xfs_defer_op_type xfs_refcount_update_defer_type = {
 	.finish_item	= xfs_refcount_update_finish_item,
 	.finish_cleanup = xfs_refcount_finish_one_cleanup,
 	.cancel_item	= xfs_refcount_update_cancel_item,
+	.add_item	= xfs_refcount_update_add_item,
 };
 
 /* Is this recovered CUI ok? */

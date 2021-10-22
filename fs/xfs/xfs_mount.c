@@ -1510,3 +1510,97 @@ xfs_hook_call(
 	return srcu_notifier_call_chain(&chain->head, val, priv);
 }
 #endif /* CONFIG_XFS_LIVE_HOOKS */
+
+#ifdef CONFIG_XFS_DRAIN_INTENTS
+static inline void xfs_drain_bump(struct xfs_drain *dr)
+{
+	atomic_inc(&dr->dr_count);
+}
+
+static inline void xfs_drain_drop(struct xfs_drain *dr)
+{
+	ASSERT(atomic_read(&dr->dr_count) > 0);
+
+	if (atomic_dec_and_test(&dr->dr_count))
+		wake_up(&dr->dr_waiters);
+}
+
+static inline int xfs_drain_wait(struct xfs_drain *dr)
+{
+	return wait_event_killable(dr->dr_waiters,
+			atomic_read(&dr->dr_count) == 0);
+}
+
+#ifdef CONFIG_XFS_RT
+# define xfs_rt_drain_bump(dr)	xfs_drain_bump(dr)
+# define xfs_rt_drain_drop(dr)	xfs_drain_drop(dr)
+
+/*
+ * Wait for the pending intent count for realtime metadata to hit zero.
+ * Callers must not hold any rt metadata inode locks.
+ */
+int
+xfs_rt_drain_intents(
+	struct xfs_mount	*mp)
+{
+	trace_xfs_rt_wait_intents(mp, __return_address);
+	return xfs_drain_wait(&mp->m_rt_intents);
+}
+#else
+# define trace_xfs_rt_bump_intents(...)
+# define trace_xfs_rt_drop_intents(...)
+# define xfs_rt_drain_bump(dr)
+# define xfs_rt_drain_drop(dr)
+#endif /* CONFIG_XFS_RT */
+
+/* Add an item to the pending count. */
+void
+xfs_fs_bump_intents(
+	struct xfs_mount	*mp,
+	bool			isrt,
+	xfs_fsblock_t		fsb)
+{
+	struct xfs_perag	*pag;
+
+	if (isrt) {
+		trace_xfs_rt_bump_intents(mp, __return_address);
+		xfs_rt_drain_bump(&mp->m_rt_intents);
+		return;
+	}
+
+	pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, fsb));
+	trace_xfs_perag_bump_intents(pag, __return_address);
+	xfs_drain_bump(&pag->pag_intents);
+	xfs_perag_put(pag);
+}
+
+/* Remove an item from the pending count. */
+void
+xfs_fs_drop_intents(struct xfs_mount *mp, bool isrt, xfs_fsblock_t fsb)
+{
+	struct xfs_perag	*pag;
+
+	if (isrt) {
+		trace_xfs_rt_drop_intents(mp, __return_address);
+		xfs_rt_drain_drop(&mp->m_rt_intents);
+		return;
+	}
+
+	pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, fsb));
+	trace_xfs_perag_drop_intents(pag, __return_address);
+	xfs_drain_drop(&pag->pag_intents);
+	xfs_perag_put(pag);
+}
+
+/*
+ * Wait for the pending intent count for AG metadata to hit zero.
+ * Callers must not hold any AG header buffers.
+ */
+int
+xfs_perag_drain_intents(
+	struct xfs_perag	*pag)
+{
+	trace_xfs_perag_wait_intents(pag, __return_address);
+	return xfs_drain_wait(&pag->pag_intents);
+}
+#endif /* CONFIG_XFS_DRAIN_INTENTS */
