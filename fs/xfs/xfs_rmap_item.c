@@ -411,11 +411,13 @@ xfs_rmap_update_finish_item(
 	struct xfs_btree_cur		**state)
 {
 	struct xfs_rmap_intent		*ri;
+	struct xfs_mount		*mp = tp->t_mountp;
 	int				error;
 
 	ri = container_of(item, struct xfs_rmap_intent, ri_list);
 	error = xfs_trans_log_finish_rmap_update(tp, RUD_ITEM(done), ri,
 			state);
+	xfs_fs_drop_intents(mp, ri->ri_realtime, ri->ri_bmap.br_startblock);
 	kmem_cache_free(xfs_rmap_intent_cache, ri);
 	return error;
 }
@@ -431,12 +433,26 @@ xfs_rmap_update_abort_intent(
 /* Cancel a deferred rmap update. */
 STATIC void
 xfs_rmap_update_cancel_item(
+	struct xfs_mount		*mp,
 	struct list_head		*item)
 {
 	struct xfs_rmap_intent		*ri;
 
 	ri = container_of(item, struct xfs_rmap_intent, ri_list);
+	xfs_fs_drop_intents(mp, ri->ri_realtime, ri->ri_bmap.br_startblock);
 	kmem_cache_free(xfs_rmap_intent_cache, ri);
+}
+
+/* Add a deferred rmap update. */
+STATIC void
+xfs_rmap_update_add_item(
+	struct xfs_mount		*mp,
+	const struct list_head		*item)
+{
+	const struct xfs_rmap_intent	*ri;
+
+	ri = container_of(item, struct xfs_rmap_intent, ri_list);
+	xfs_fs_bump_intents(mp, ri->ri_realtime, ri->ri_bmap.br_startblock);
 }
 
 const struct xfs_defer_op_type xfs_rmap_update_defer_type = {
@@ -447,6 +463,7 @@ const struct xfs_defer_op_type xfs_rmap_update_defer_type = {
 	.finish_item	= xfs_rmap_update_finish_item,
 	.finish_cleanup = xfs_rmap_finish_one_cleanup,
 	.cancel_item	= xfs_rmap_update_cancel_item,
+	.add_item	= xfs_rmap_update_add_item,
 };
 
 /* Is this recovered RUI ok? */

@@ -583,7 +583,9 @@ xrep_rtrmap_find_rmaps(
 	error = xchk_setup_fs(sc);
 	if (error)
 		return error;
-	xchk_rt_lock(sc, &sc->sr);
+	error = xchk_rt_lock(sc, &sc->sr);
+	if (error)
+		return error;
 
 	/* Scan for old rtrmap blocks. */
 	for_each_perag(sc->mp, agno, pag) {

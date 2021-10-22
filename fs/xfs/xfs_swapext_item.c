@@ -346,12 +346,21 @@ xfs_swapext_abort_intent(
 /* Cancel a deferred swapext update. */
 STATIC void
 xfs_swapext_cancel_item(
+	struct xfs_mount		*mp,
 	struct list_head		*item)
 {
 	struct xfs_swapext_intent	*sxi;
 
 	sxi = container_of(item, struct xfs_swapext_intent, sxi_list);
 	kmem_free(sxi);
+}
+
+/* Add a deferred swapext update. */
+STATIC void
+xfs_swapext_add_item(
+	struct xfs_mount		*mp,
+	const struct list_head		*item)
+{
 }
 
 const struct xfs_defer_op_type xfs_swapext_defer_type = {
@@ -361,6 +370,7 @@ const struct xfs_defer_op_type xfs_swapext_defer_type = {
 	.create_done	= xfs_swapext_create_done,
 	.finish_item	= xfs_swapext_finish_item,
 	.cancel_item	= xfs_swapext_cancel_item,
+	.add_item	= xfs_swapext_add_item,
 };
 
 /* Is this recovered SXI ok? */
