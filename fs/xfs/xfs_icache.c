@@ -505,11 +505,6 @@ xfs_iget_cache_hit(
 	if (error)
 		goto out_error;
 
-	/* Skip inodes that have no vfs state. */
-	if ((flags & XFS_IGET_INCORE) &&
-	    (ip->i_flags & XFS_IRECLAIMABLE))
-		goto out_skip;
-
 	/* The inode fits the selection criteria; process it. */
 	if (ip->i_flags & XFS_IRECLAIMABLE) {
 		/* Drops i_flags_lock and RCU read lock. */
@@ -530,8 +525,7 @@ xfs_iget_cache_hit(
 	if (lock_flags != 0)
 		xfs_ilock(ip, lock_flags);
 
-	if (!(flags & XFS_IGET_INCORE))
-		xfs_iflags_clear(ip, XFS_ISTALE);
+	xfs_iflags_clear(ip, XFS_ISTALE);
 	XFS_STATS_INC(mp, xs_ig_found);
 
 	return 0;
@@ -732,10 +726,6 @@ again:
 			goto out_error_or_again;
 	} else {
 		rcu_read_unlock();
-		if (flags & XFS_IGET_INCORE) {
-			error = -ENODATA;
-			goto out_error_or_again;
-		}
 		XFS_STATS_INC(mp, xs_ig_missed);
 
 		error = xfs_iget_cache_miss(mp, pag, tp, ino, &ip,
@@ -756,7 +746,7 @@ again:
 	return 0;
 
 out_error_or_again:
-	if (!(flags & XFS_IGET_INCORE) && error == -EAGAIN) {
+	if (error == -EAGAIN) {
 		delay(1);
 		goto again;
 	}
