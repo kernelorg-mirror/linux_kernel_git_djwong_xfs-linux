@@ -25,11 +25,14 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_trans_space.h"
 #include "xfs_symlink_remote.h"
+#include "xfs_swapext.h"
+#include "xfs_xchgrange.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
 #include "scrub/repair.h"
+#include "scrub/tempfile.h"
 
 /*
  * Symbolic Link Repair
@@ -39,6 +42,42 @@
  * the first NULL byte and reinitialize the target.  Zero-length symlinks are
  * turned into links to the current dir.
  */
+
+/* Set us up to repair the rtsummary file. */
+int
+xrep_setup_symlink(
+	struct xfs_scrub	*sc,
+	unsigned int		*resblks)
+{
+	struct xfs_mount	*mp = sc->mp;
+	unsigned long long	blocks;
+	int			error;
+
+	error = xrep_tempfile_create(sc, S_IFLNK);
+	if (error)
+		return error;
+
+	/*
+	 * If we're doing a repair, we reserve enough blocks to write out a
+	 * completely new symlink file, plus twice as many blocks as we would
+	 * need if we can only allocate one block per data fork mapping.  This
+	 * should cover the preallocation of the temporary file and swapping
+	 * the extent mappings.
+	 *
+	 * We cannot use xfs_swapext_estimate because we have not yet
+	 * constructed the replacement rtsummary and therefore do not know how
+	 * many extents it will use.  By the time we do, we will have a dirty
+	 * transaction (which we cannot drop because we cannot drop the
+	 * rtsummary ILOCK) and cannot ask for more reservation.
+	 */
+	blocks = xfs_symlink_blocks(sc->mp, XFS_SYMLINK_MAXLEN);
+	blocks += xfs_bmbt_calc_size(mp, blocks) * 2;
+	if (blocks > UINT_MAX)
+		return -EOPNOTSUPP;
+
+	*resblks += blocks;
+	return 0;
+}
 
 /* Try to salvage the pathname from rmt blocks. */
 STATIC int
@@ -62,7 +101,7 @@ xrep_symlink_salvage_remote(
 	int			error;
 
 	/* We'll only read until the buffer is full. */
-	len = min_t(loff_t, i_size_read(VFS_I(ip)), XFS_SYMLINK_MAXLEN);
+	len = min_t(loff_t, ip->i_disk_size, XFS_SYMLINK_MAXLEN);
 	fsblocks = xfs_symlink_blocks(sc->mp, len);
 	error = xfs_bmapi_read(ip, 0, fsblocks, mval, &nmaps, 0);
 	if (error)
@@ -107,7 +146,7 @@ xrep_symlink_salvage_remote(
 	}
 
 	/* Ensure we have a zero at the end, and /some/ contents. */
-	if (offset == 0)
+	if (offset == 0 || target_buf[0] == 0)
 		sprintf(target_buf, ".");
 	else
 		target_buf[offset] = 0;
@@ -123,64 +162,212 @@ xrep_symlink_salvage_inline(
 	struct xfs_scrub	*sc)
 {
 	struct xfs_inode	*ip = sc->ip;
+	char			*target_buf = sc->buf;
 	struct xfs_ifork	*ifp;
 
 	ifp = XFS_IFORK_PTR(ip, XFS_DATA_FORK);
 	if (ifp->if_u1.if_data)
-		strncpy(sc->buf, ifp->if_u1.if_data, XFS_IFORK_DSIZE(ip));
-	if (strlen(sc->buf) == 0)
-		sprintf(sc->buf, ".");
+		strncpy(target_buf, ifp->if_u1.if_data, XFS_IFORK_DSIZE(ip));
+	if (target_buf[0] == 0)
+		sprintf(target_buf, ".");
 }
 
-/* Reset an inline symlink to its fresh configuration. */
-STATIC void
-xrep_symlink_truncate_inline(
-	struct xfs_inode	*ip)
-{
-	struct xfs_ifork	*ifp = XFS_IFORK_PTR(ip, XFS_DATA_FORK);
-
-	xfs_idestroy_fork(ifp);
-	memset(ifp, 0, sizeof(struct xfs_ifork));
-	ifp->if_format = XFS_DINODE_FMT_EXTENTS;
-	ifp->if_nextents = 0;
-}
-
-/*
- * Salvage an inline symlink's contents and reset data fork.
- * Returns with the inode joined to the transaction.
- */
+/* Salvage whatever we can of the target. */
 STATIC int
-xrep_symlink_inline(
+xrep_symlink_salvage(
 	struct xfs_scrub	*sc)
 {
-	/* Salvage whatever link target information we can find. */
-	xrep_symlink_salvage_inline(sc);
+	if (sc->ip->i_df.if_format == XFS_DINODE_FMT_LOCAL) {
+		xrep_symlink_salvage_inline(sc);
+	} else {
+		int		error = xrep_symlink_salvage_remote(sc);
 
-	/* Truncate the symlink. */
-	xrep_symlink_truncate_inline(sc->ip);
+		if (error)
+			return error;
+	}
 
-	xfs_trans_ijoin(sc->tp, sc->ip, 0);
+	trace_xrep_symlink_salvage_target(sc->ip, sc->buf, strlen(sc->buf));
 	return 0;
 }
 
 /*
- * Salvage an inline symlink's contents and reset data fork.
- * Returns with the inode joined to the transaction.
+ * Prepare both links' data forks for extent swapping.  Promote the tempfile
+ * from local format to extents format, and if the file being repaired has a
+ * short format data fork, turn it into an empty extent list.
  */
 STATIC int
-xrep_symlink_remote(
-	struct xfs_scrub	*sc)
+xrep_symlink_swap_prep(
+	struct xfs_scrub	*sc,
+	bool			temp_local,
+	bool			ip_local)
 {
 	int			error;
 
-	/* Salvage whatever link target information we can find. */
-	error = xrep_symlink_salvage_remote(sc);
+	/*
+	 * If the temp link is in shortform format, convert that to a remote
+	 * target so that we can use the atomic extent swap.
+	 */
+	if (temp_local) {
+		int		logflags = XFS_ILOG_CORE;
+
+		error = xfs_bmap_local_to_extents(sc->tp, sc->tempip, 1,
+				&logflags, XFS_DATA_FORK,
+				xfs_symlink_local_to_remote);
+		if (error)
+			return error;
+
+		xfs_trans_log_inode(sc->tp, sc->ip, 0);
+
+		error = xfs_defer_finish(&sc->tp);
+		if (error)
+			return error;
+	}
+
+	/*
+	 * If the file being repaired had a shortform data fork, convert that
+	 * to an empty extent list in preparation for the atomic extent swap.
+	 */
+	if (ip_local) {
+		struct xfs_ifork	*ifp;
+
+		ifp = XFS_IFORK_PTR(sc->ip, XFS_DATA_FORK);
+		xfs_idestroy_fork(ifp);
+		ifp->if_format = XFS_DINODE_FMT_EXTENTS;
+		ifp->if_nextents = 0;
+		ifp->if_bytes = 0;
+		ifp->if_u1.if_root = NULL;
+		ifp->if_height = 0;
+
+		xfs_trans_log_inode(sc->tp, sc->ip,
+				XFS_ILOG_CORE | XFS_ILOG_DDATA);
+	}
+
+	return 0;
+}
+
+/*
+ * Change the owner field of every block in the data fork to match the link
+ * being repaired.
+ */
+STATIC int
+xrep_symlink_swap_owner(
+	struct xfs_scrub		*sc)
+{
+	struct xfs_bmbt_irec		map;
+	struct xfs_mount		*mp = sc->mp;
+	struct xfs_buf			*bp;
+	struct xfs_dsymlink_hdr		*dsl;
+	xfs_fileoff_t			offset = 0;
+	xfs_fileoff_t			end = XFS_MAX_FILEOFF;
+	int				nmap;
+	int				error;
+
+	if (!xfs_has_crc(mp))
+		return 0;
+
+	for (offset = 0;
+	     offset < end;
+	     offset = map.br_startoff + map.br_blockcount) {
+		nmap = 1;
+		error = xfs_bmapi_read(sc->tempip, offset, end - offset,
+				&map, &nmap, 0);
+		if (error)
+			return error;
+		if (nmap != 1)
+			return -EFSCORRUPTED;
+		if (!xfs_bmap_is_written_extent(&map))
+			continue;
+
+		error = xfs_trans_read_buf(mp, sc->tp, mp->m_ddev_targp,
+				XFS_FSB_TO_DADDR(mp, map.br_startblock),
+				XFS_FSB_TO_BB(mp, map.br_blockcount),
+				0, &bp, &xfs_symlink_buf_ops);
+		if (error)
+			return error;
+
+		dsl = bp->b_addr;
+		dsl->sl_owner = cpu_to_be64(sc->ip->i_ino);
+
+		xfs_trans_ordered_buf(sc->tp, bp);
+		xfs_trans_brelse(sc->tp, bp);
+	}
+
+	return 0;
+}
+
+/* Swap the temporary link's data fork with the one being repaired. */
+STATIC int
+xrep_symlink_swap(
+	struct xfs_scrub	*sc)
+{
+	struct xfs_swapext_req	req;
+	struct xfs_swapext_res	res;
+	bool			ip_local, temp_local;
+	int			error;
+
+	error = xrep_tempfile_swapext_prep(sc, XFS_DATA_FORK, &req, &res);
 	if (error)
 		return error;
 
-	/* Truncate the symlink. */
-	xfs_trans_ijoin(sc->tp, sc->ip, 0);
-	return xfs_itruncate_extents(&sc->tp, sc->ip, XFS_DATA_FORK, 0);
+	error = xrep_tempfile_swapext_trans_alloc(sc, &res);
+	if (error)
+		return error;
+
+	ip_local = sc->ip->i_df.if_format == XFS_DINODE_FMT_LOCAL;
+	temp_local = sc->tempip->i_df.if_format == XFS_DINODE_FMT_LOCAL;
+
+	/*
+	 * If the both links have a local format data fork and the rebuilt
+	 * remote data would fit in the repaired file's data fork, copy the
+	 * contents from the tempfile and declare ourselves done.
+	 */
+	if (ip_local && temp_local &&
+	    sc->tempip->i_disk_size <= XFS_IFORK_DSIZE(sc->ip)) {
+		xrep_tempfile_copyout_local(sc, XFS_DATA_FORK);
+		return 0;
+	}
+
+	/* Otherwise, make sure both data forks are in block-mapping mode. */
+	error = xrep_symlink_swap_prep(sc, temp_local, ip_local);
+	if (error)
+		return error;
+
+	/* Rewrite the owner field of all dir blocks in the temporary file. */
+	error = xrep_symlink_swap_owner(sc);
+	if (error)
+		return error;
+
+	return xfs_swapext(&sc->tp, &req);
+}
+
+/*
+ * Free all the remote blocks and reset the data fork.  The caller must join
+ * the inode to the transaction.  This function returns with the inode joined
+ * to a clean scrub transaction.
+ */
+STATIC int
+xrep_symlink_reset_fork(
+	struct xfs_scrub	*sc)
+{
+	struct xfs_ifork	*ifp = XFS_IFORK_PTR(sc->tempip, XFS_DATA_FORK);
+	int			error;
+
+	/* Unmap all the remote target buffers. */
+	if (xfs_ifork_has_extents(ifp)) {
+		error = xrep_reap_fork(sc, sc->tempip, XFS_DATA_FORK);
+		if (error)
+			return error;
+	}
+
+	trace_xrep_symlink_reset_fork(sc->tempip);
+
+	/* Reset the temp link to have the same dummy content. */
+	xfs_idestroy_fork(ifp);
+	error = xfs_symlink_write_target(sc->tp, sc->tempip, ".", 1, 0, 0);
+	if (error)
+		return error;
+
+	return xrep_roll_trans(sc);
 }
 
 /*
@@ -188,44 +375,77 @@ xrep_symlink_remote(
  * the transaction.
  */
 STATIC int
-xrep_symlink_reinitialize(
+xrep_symlink_rebuild(
 	struct xfs_scrub	*sc)
 {
+	char			*target_buf = sc->buf;
 	xfs_fsblock_t		fs_blocks;
 	unsigned int		target_len;
 	unsigned int		resblks;
-	unsigned int		quota_flags = XFS_QMOPT_RES_REGBLKS;
 	int			error;
 
 	/* How many blocks do we need? */
-	target_len = strlen(sc->buf);
+	target_len = strlen(target_buf);
 	ASSERT(target_len != 0);
 	if (target_len == 0 || target_len > XFS_SYMLINK_MAXLEN)
 		return -EFSCORRUPTED;
 
-	if (sc->flags & XCHK_TRY_HARDER)
-		quota_flags |= XFS_QMOPT_FORCE_RES;
+	trace_xrep_symlink_rebuild(sc->ip);
 
-	/* Set up to reinitialize the target. */
+	xfs_trans_ijoin(sc->tp, sc->tempip, 0);
+
+	/* Reserve resources to reinitialize the target. */
 	fs_blocks = xfs_symlink_blocks(sc->mp, target_len);
 	resblks = XFS_SYMLINK_SPACE_RES(sc->mp, target_len, fs_blocks);
-	error = xfs_trans_reserve_quota_nblks(sc->tp, sc->ip, resblks, 0,
-			quota_flags);
-	if (error == -EDQUOT || error == -ENOSPC) {
-		/* Let xchk_teardown release everything, and try harder. */
-		return -EDEADLOCK;
-	}
+	error = xfs_trans_reserve_quota_nblks(sc->tp, sc->tempip, resblks, 0,
+			false);
 	if (error)
 		return error;
 
-	/* Try to write the new target back out. */
-	error = xfs_symlink_write_target(sc->tp, sc->ip, sc->buf, target_len,
-			fs_blocks, resblks);
+	/* Erase the dummy target set up by the tempfile initialization. */
+	xfs_idestroy_fork(&sc->tempip->i_df);
+	sc->tempip->i_df.if_bytes = 0;
+	sc->tempip->i_df.if_format = XFS_DINODE_FMT_EXTENTS;
+
+	/* Write the salvaged target to the temporary link. */
+	error = xfs_symlink_write_target(sc->tp, sc->tempip, target_buf,
+			target_len, fs_blocks, resblks);
 	if (error)
 		return error;
 
-	/* Finish up any block mapping activities. */
-	return xfs_defer_finish(&sc->tp);
+	/*
+	 * Commit the repair transaction so that we can use the atomic extent
+	 * swap helper functions to compute the correct block reservations and
+	 * re-lock the inodes.
+	 *
+	 * We still hold IOLOCK_EXCL (aka i_rwsem) which will prevent symlink
+	 * access until we're ready for the swap operation.
+	 */
+	error = xrep_trans_commit(sc);
+	if (error)
+		return error;
+
+	/* Last chance to abort before we start committing fixes. */
+	if (xchk_should_terminate(sc, &error))
+		return error;
+
+	xchk_iunlock(sc, XFS_ILOCK_EXCL);
+	xrep_tempfile_iunlock(sc, XFS_ILOCK_EXCL);
+
+	/*
+	 * Swap the temp link's data fork with the file being repaired.  This
+	 * recreates the transaction and re-takes the ILOCK in the scrub
+	 * context.
+	 */
+	error = xrep_symlink_swap(sc);
+	if (error)
+		return error;
+
+	/*
+	 * Release the old symlink blocks and reset the data fork of the temp
+	 * link to an empty shortform link.
+	 */
+	return xrep_symlink_reset_fork(sc);
 }
 
 /* Repair a symbolic link. */
@@ -235,19 +455,26 @@ xrep_symlink(
 {
 	int			error;
 
+	/* We require the rmapbt to rebuild anything. */
+	if (!xfs_has_rmapbt(sc->mp))
+		return -EOPNOTSUPP;
+
 	error = xfs_qm_dqattach_locked(sc->ip, false);
 	if (error)
 		return error;
 
-	/* Salvage whatever we can of the target. */
-	*((char *)sc->buf) = 0;
-	if (sc->ip->i_df.if_format == XFS_DINODE_FMT_LOCAL)
-		error = xrep_symlink_inline(sc);
-	else
-		error = xrep_symlink_remote(sc);
+	/*
+	 * Cycle the ILOCK here so that we can lock both the file we're
+	 * repairing as well as the tempfile we created earlier.
+	 */
+	if (sc->ilock_flags & XFS_ILOCK_EXCL)
+		xchk_iunlock(sc, XFS_ILOCK_EXCL);
+	xrep_tempfile_ilock_two(sc, XFS_ILOCK_EXCL);
+
+	error = xrep_symlink_salvage(sc);
 	if (error)
 		return error;
 
 	/* Now reset the target. */
-	return xrep_symlink_reinitialize(sc);
+	return xrep_symlink_rebuild(sc);
 }

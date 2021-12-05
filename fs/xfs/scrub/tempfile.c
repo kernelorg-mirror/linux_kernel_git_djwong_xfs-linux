@@ -22,6 +22,7 @@
 #include "xfs_swapext.h"
 #include "xfs_defer.h"
 #include "xfs_swapext.h"
+#include "xfs_symlink_remote.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/repair.h"
@@ -115,6 +116,10 @@ xrep_tempfile_create(
 
 	if (is_dir) {
 		error = xfs_dir_init(tp, sc->tempip, dp);
+		if (error)
+			goto out_trans_cancel;
+	} else if (S_ISLNK(VFS_I(sc->tempip)->i_mode)) {
+		error = xfs_symlink_write_target(tp, sc->tempip, ".", 1, 0, 0);
 		if (error)
 			goto out_trans_cancel;
 	}
@@ -433,10 +438,11 @@ xrep_tempfile_swapext_prep_request(
 		req->req_flags |= XFS_SWAP_REQ_SET_SIZES;
 
 	/*
-	 * If we're repairing xattrs or directories, always try to convert ip2
-	 * to short format after swapping.
+	 * If we're repairing symlinks, xattrs, or directories, always try to
+	 * convert ip2 to short format after swapping.
 	 */
-	if (whichfork == XFS_ATTR_FORK || S_ISDIR(VFS_I(sc->ip)->i_mode))
+	if (whichfork == XFS_ATTR_FORK || S_ISDIR(VFS_I(sc->ip)->i_mode) ||
+	    S_ISLNK(VFS_I(sc->ip)->i_mode))
 		req->req_flags |= XFS_SWAP_REQ_FILE2_CVT_SF;
 
 	return 0;
