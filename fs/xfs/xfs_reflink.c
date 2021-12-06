@@ -749,7 +749,9 @@ xfs_reflink_end_cow(
 }
 
 /*
- * Free leftover CoW reservations that didn't get cleaned out.
+ * Free leftover CoW reservations that didn't get cleaned out.  This function
+ * does not coordinate with cached inode COW forks, which means that callers
+ * must ensure there are no COW staging extents attached to any cached inodes.
  */
 int
 xfs_reflink_recover_cow(
