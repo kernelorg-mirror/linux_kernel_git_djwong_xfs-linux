@@ -919,6 +919,34 @@ xfs_mountfs(
 	}
 
 	/*
+	 * Recover any CoW staging blocks that are still referenced by the
+	 * ondisk refcount metadata.  The ondisk metadata does not track which
+	 * inode created the staging extent, which means that we don't have an
+	 * easy means to figure out if a given staging extent is referenced by
+	 * a cached inode or is a leftover from a previous unclean shutdown,
+	 * short of scanning the entire inode cache to construct a bitmap of
+	 * actually stale extents.
+	 *
+	 * During mount, we know that zero files have been exposed to user
+	 * modifications, which means that there cannot possibly be any live
+	 * staging extents.  Therefore, it is safe to free them all right now,
+	 * even if we're performing a readonly mount.
+	 *
+	 * This cannot be deferred this to rw remount time if we're performing
+	 * a readonly mount (as XFS once did) until there's an interlock with
+	 * cached inodes.
+	 */
+	if (!xfs_has_norecovery(mp)) {
+		error = xfs_reflink_recover_cow(mp);
+		if (error) {
+			xfs_err(mp,
+	"Error %d recovering leftover CoW allocations.", error);
+			xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_INCORE);
+			goto out_quota;
+		}
+	}
+
+	/*
 	 * Now we are mounted, reserve a small amount of unused space for
 	 * privileged transactions. This is needed so that transaction
 	 * space required for critical operations can dip into this pool
@@ -935,15 +963,6 @@ xfs_mountfs(
 		if (error)
 			xfs_warn(mp,
 	"Unable to allocate reserve blocks. Continuing without reserve pool.");
-
-		/* Recover any CoW blocks that never got remapped. */
-		error = xfs_reflink_recover_cow(mp);
-		if (error) {
-			xfs_err(mp,
-	"Error %d recovering leftover CoW allocations.", error);
-			xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_INCORE);
-			goto out_quota;
-		}
 
 		/* Reserve AG blocks for future btree expansion. */
 		error = xfs_fs_reserve_ag_blocks(mp);
