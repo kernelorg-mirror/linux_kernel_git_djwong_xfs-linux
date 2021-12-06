@@ -10,6 +10,7 @@
 #include "xfs_log_format.h"
 #include "xfs_trans_resv.h"
 #include "xfs_mount.h"
+#include "xfs_inode.h"
 #include "xfs_errortag.h"
 #include "xfs_error.h"
 #include "xfs_trans.h"
@@ -20,6 +21,7 @@
 #include "xfs_sysfs.h"
 #include "xfs_sb.h"
 #include "xfs_health.h"
+#include "xfs_reflink.h"
 
 struct kmem_cache	*xfs_log_ticket_cache;
 
@@ -847,8 +849,27 @@ xfs_log_mount_finish(
 	/* Make sure the log is dead if we're returning failure. */
 	ASSERT(!error || xlog_is_shutdown(log));
 
-	return error;
+	if (error)
+		return error;
+
+	/*
+	 * Recover any CoW staging blocks that are still referenced by the
+	 * ondisk refcount metadata.  During mount there cannot be any live
+	 * staging extents as we have not permitted any user modifications.
+	 * Therefore, it is safe to free them all right now, even on a
+	 * read-only mount.
+	 */
+	error = xfs_reflink_recover_cow(mp);
+	if (error) {
+		xfs_err(mp, "Error %d recovering leftover CoW allocations.",
+				error);
+		xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_INCORE);
+		return error;
+	}
+
+	return 0;
 }
+
 
 /*
  * The mount has failed. Cancel the recovery if it hasn't completed and destroy
