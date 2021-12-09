@@ -129,6 +129,7 @@ struct xfs_scrub {
 
 /* XCHK state flags grow up from zero, XREP state flags grown down from 2^31 */
 #define XCHK_TRY_HARDER		(1 << 0)  /* can't get resources, try again */
+#define XCHK_HAVE_FREEZE_PROT	(1 << 1)  /* do we have freeze protection? */
 #define XCHK_REAPING_DISABLED	(1 << 2)  /* background block reaping paused */
 #define XCHK_FS_FROZEN		(1 << 3)  /* we froze the fs to do things */
 
@@ -235,14 +236,5 @@ void xchk_xref_is_not_shared_rt(struct xfs_scrub *sc, xfs_rtblock_t bno,
 # define xchk_xref_is_rt_cow_staging(sc, bno, len) do { } while (0)
 # define xchk_xref_is_not_shared_rt(sc, bno, len) do { } while (0)
 #endif
-
-struct xchk_fscounters {
-	uint64_t		icount;
-	uint64_t		ifree;
-	uint64_t		fdblocks;
-	uint64_t		frextents;
-	unsigned long long	icount_min;
-	unsigned long long	icount_max;
-};
 
 #endif	/* __XFS_SCRUB_SCRUB_H__ */

@@ -25,6 +25,7 @@
 #include "scrub/common.h"
 #include "scrub/trace.h"
 #include "scrub/repair.h"
+#include "scrub/fscounters.h"
 
 /*
  * FS Summary Counters
@@ -54,7 +55,7 @@ xrep_fscounters(
 	 * the filesystem, so there shouldn't be anyone else trying to modify
 	 * these counters.
 	 */
-	ASSERT(sc->flags & XCHK_FS_FROZEN);
+	ASSERT(fsc->frozen);
 	percpu_counter_set(&mp->m_icount, fsc->icount);
 	percpu_counter_set(&mp->m_ifree, fsc->ifree);
 	percpu_counter_set(&mp->m_fdblocks, fsc->fdblocks);

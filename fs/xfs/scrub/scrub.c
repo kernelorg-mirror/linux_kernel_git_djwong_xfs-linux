@@ -184,7 +184,8 @@ xchk_teardown(
 
 		if (!error && err2)
 			error = err2;
-	} else if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) {
+	} else if (sc->flags & XCHK_HAVE_FREEZE_PROT) {
+		sc->flags &= ~XCHK_HAVE_FREEZE_PROT;
 		mnt_drop_write_file(sc->file);
 	}
 	if (sc->flags & XCHK_REAPING_DISABLED)
@@ -596,6 +597,8 @@ retry_op:
 		error = mnt_want_write_file(sc->file);
 		if (error)
 			goto out_sc;
+
+		sc->flags |= XCHK_HAVE_FREEZE_PROT;
 	}
 
 	/* Set up for the operation. */

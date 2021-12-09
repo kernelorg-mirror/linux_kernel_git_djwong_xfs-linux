@@ -1336,8 +1336,10 @@ xchk_fs_freeze(
 	if (!(sc->sm->sm_flags & XFS_SCRUB_IFLAG_FREEZE_OK))
 		return -EUSERS;
 
-	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR)
+	if (sc->flags & ~XCHK_HAVE_FREEZE_PROT) {
+		sc->flags &= ~XCHK_HAVE_FREEZE_PROT;
 		mnt_drop_write_file(sc->file);
+	}
 
 	mutex_lock(&sc->mp->m_scrub_freeze);
 

@@ -16,9 +16,11 @@
 #include "xfs_ag.h"
 #include "xfs_rtalloc.h"
 #include "xfs_inode.h"
+#include "xfs_icache.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
+#include "scrub/fscounters.h"
 
 /*
  * FS Summary Counters
@@ -43,10 +45,6 @@
  * structures as quickly as it can.  We snapshot the percpu counters before and
  * after this operation and use the difference in counter values to guess at
  * our tolerance for mismatch between expected and actual counter values.
- *
- * NOTE: If the calling application has permitted us to repair the counters,
- * we /must/ prevent all other filesystem activity by freezing it.  Since we've
- * frozen the filesystem, we can require an exact match.
  */
 
 /*
@@ -115,6 +113,130 @@ xchk_fscount_warmup(
 	return error;
 }
 
+#define SB_FREEZE_EXCLUSIVE	(SB_FREEZE_COMPLETE + 1)
+
+/*
+ * We couldn't stabilize the filesystem long enough to sample all the variables
+ * that comprise the summary counters and compare them to the percpu counters.
+ * We need to disable all writer threads, which means taking the first two
+ * freeze levels to put userspace to sleep, and the third freeze level to
+ * prevent background threads from starting new transactions.
+ */
+STATIC int
+xchk_fscounters_freeze(
+	struct xfs_scrub	*sc)
+{
+	struct xchk_fscounters	*fsc = sc->buf;
+	struct xfs_mount	*mp = sc->mp;
+	struct super_block	*sb = mp->m_super;
+	int			level;
+	int			error = 0;
+
+	if (sc->flags & XCHK_HAVE_FREEZE_PROT) {
+		sc->flags &= ~XCHK_HAVE_FREEZE_PROT;
+		mnt_drop_write_file(sc->file);
+	}
+
+	/* Wait until we're ready to freeze or give up. */
+	down_write(&sb->s_umount);
+	while (sb->s_writers.frozen != SB_UNFROZEN) {
+		up_write(&sb->s_umount);
+
+		if (xchk_should_terminate(sc, &error))
+			return error;
+
+		delay(HZ / 10);
+		down_write(&sb->s_umount);
+	}
+
+	if (sb_rdonly(sb)) {
+		sb->s_writers.frozen = SB_FREEZE_EXCLUSIVE;
+		goto done;
+	}
+
+	sb->s_writers.frozen = SB_FREEZE_WRITE;
+	/* Release s_umount to preserve sb_start_write -> s_umount ordering */
+	up_write(&sb->s_umount);
+	percpu_down_write(sb->s_writers.rw_sem + SB_FREEZE_WRITE - 1);
+	down_write(&sb->s_umount);
+
+	/* Now we go and block page faults... */
+	sb->s_writers.frozen = SB_FREEZE_PAGEFAULT;
+	percpu_down_write(sb->s_writers.rw_sem + SB_FREEZE_PAGEFAULT - 1);
+
+	/*
+	 * All writers are done so after syncing there won't be dirty data.
+	 * Let xfs_fs_sync_fs flush dirty data so the VFS won't start writeback
+	 * and to disable the background gc workers.
+	 */
+	sync_filesystem(sb);
+
+	/* Now wait for internal filesystem counter */
+	sb->s_writers.frozen = SB_FREEZE_FS;
+	percpu_down_write(sb->s_writers.rw_sem + SB_FREEZE_FS - 1);
+
+	/*
+	 * We do not need to quiesce the log to check the summary counters, so
+	 * skip the call to xfs_fs_freeze here.  To prevent anyone else from
+	 * unfreezing us, set the VFS freeze level to one higher than
+	 * FREEZE_COMPLETE.
+	 */
+	sb->s_writers.frozen = SB_FREEZE_EXCLUSIVE;
+	for (level = SB_FREEZE_LEVELS - 1; level >= 0; level--)
+		percpu_rwsem_release(sb->s_writers.rw_sem + level, 0, _THIS_IP_);
+done:
+	fsc->frozen = true;
+	up_write(&sb->s_umount);
+	return 0;
+}
+
+/* Thaw the filesystem after checking or repairing fscounters. */
+STATIC void
+xchk_fscounters_cleanup(
+	void			*buf)
+{
+	struct xchk_fscounters	*fsc = buf;
+	struct xfs_scrub	*sc = fsc->sc;
+	struct xfs_mount	*mp = sc->mp;
+	struct super_block	*sb = mp->m_super;
+	int			level;
+
+	if (!fsc->frozen)
+		return;
+
+	down_write(&sb->s_umount);
+	if (sb->s_writers.frozen != SB_FREEZE_EXCLUSIVE) {
+		/* somebody snuck in and unfroze us? */
+		ASSERT(0);
+		up_write(&sb->s_umount);
+		return;
+	}
+
+	if (sb_rdonly(sb)) {
+		sb->s_writers.frozen = SB_UNFROZEN;
+		goto out;
+	}
+
+	for (level = 0; level < SB_FREEZE_LEVELS; ++level)
+		percpu_rwsem_acquire(sb->s_writers.rw_sem + level, 0, _THIS_IP_);
+
+	/*
+	 * We didn't call xfs_fs_freeze, so we can't call xfs_fs_thaw.  Start
+	 * the background gc workers if they were running before we froze.
+	 */
+	xfs_blockgc_start(mp);
+	xfs_inodegc_start(mp);
+
+	sb->s_writers.frozen = SB_UNFROZEN;
+	for (level = SB_FREEZE_LEVELS - 1; level >= 0; level--)
+		percpu_up_write(sb->s_writers.rw_sem + level);
+out:
+	wake_up(&sb->s_writers.wait_unfrozen);
+	fsc->frozen = false;
+	up_write(&sb->s_umount);
+	return;
+}
+
 int
 xchk_setup_fscounters(
 	struct xfs_scrub	*sc)
@@ -125,7 +247,9 @@ xchk_setup_fscounters(
 	sc->buf = kmem_zalloc(sizeof(struct xchk_fscounters), 0);
 	if (!sc->buf)
 		return -ENOMEM;
+	sc->buf_cleanup = xchk_fscounters_cleanup;
 	fsc = sc->buf;
+	fsc->sc = sc;
 
 	xfs_icount_range(sc->mp, &fsc->icount_min, &fsc->icount_max);
 
@@ -135,10 +259,9 @@ xchk_setup_fscounters(
 		return error;
 
 	/*
-	 * Pause background reclaim while we're scrubbing to reduce the
-	 * likelihood of background perturbations to the counters throwing off
-	 * our calculations.  If a previous check failed and userspace told us
-	 * to freeze the fs, do that instead.
+	 * Pause all writer activity in the filesystem while we're scrubbing to
+	 * reduce the likelihood of background perturbations to the counters
+	 * throwing off our calculations.
 	 *
 	 * If we're repairing, we need to prevent any other thread from
 	 * changing the global fs summary counters while we're repairing them.
@@ -146,14 +269,12 @@ xchk_setup_fscounters(
 	 * reclaim and purge all inactive inodes.
 	 */
 	if ((sc->flags & XCHK_TRY_HARDER) || xchk_could_repair(sc)) {
-		error = xchk_fs_freeze(sc);
+		error = xchk_fscounters_freeze(sc);
 		if (error)
 			return error;
-	} else {
-		xchk_stop_reaping(sc);
 	}
 
-	return xchk_trans_alloc(sc, 0);
+	return xchk_trans_alloc_empty(sc);
 }
 
 /* Count free space btree blocks manually for pre-lazysbcount filesystems. */
@@ -328,7 +449,7 @@ xchk_fscount_check_frextents(
 			mp->m_sb.sb_frextents);
 
 	if (fsc->frextents != mp->m_sb.sb_frextents) {
-		if (sc->flags & XCHK_FS_FROZEN)
+		if (fsc->frozen)
 			xchk_set_corrupt(sc);
 		else
 			error = -EDEADLOCK;
@@ -420,7 +541,6 @@ xchk_fscounters(
 	struct xfs_mount	*mp = sc->mp;
 	struct xchk_fscounters	*fsc = sc->buf;
 	int64_t			icount, ifree, fdblocks;
-	bool			frozen = sc->flags & XCHK_FS_FROZEN;
 	bool			try_again = false;
 	int			error;
 
@@ -461,14 +581,14 @@ xchk_fscounters(
 	 */
 	if (!xchk_fscount_within_range(sc, icount, &mp->m_icount,
 				fsc->icount)) {
-		if (frozen)
+		if (fsc->frozen)
 			xchk_set_corrupt(sc);
 		else
 			try_again = true;
 	}
 
 	if (!xchk_fscount_within_range(sc, ifree, &mp->m_ifree, fsc->ifree)) {
-		if (frozen)
+		if (fsc->frozen)
 			xchk_set_corrupt(sc);
 		else
 			try_again = true;
@@ -476,7 +596,7 @@ xchk_fscounters(
 
 	if (!xchk_fscount_within_range(sc, fdblocks, &mp->m_fdblocks,
 			fsc->fdblocks)) {
-		if (frozen)
+		if (fsc->frozen)
 			xchk_set_corrupt(sc);
 		else
 			try_again = true;
