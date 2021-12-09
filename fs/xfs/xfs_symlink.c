@@ -24,21 +24,20 @@
 #include "xfs_ialloc.h"
 #include "xfs_health.h"
 #include "xfs_symlink_remote.h"
+#include "xfs_error.h"
 
 /* ----- Kernel only functions below ----- */
 
 int
 xfs_readlink(
-	struct xfs_inode *ip,
-	char		*link)
+	struct xfs_inode	*ip,
+	char			*link)
 {
-	struct xfs_mount *mp = ip->i_mount;
-	xfs_fsize_t	pathlen;
-	int		error = 0;
+	struct xfs_mount	*mp = ip->i_mount;
+	xfs_fsize_t		pathlen;
+	int			error = 0;
 
 	trace_xfs_readlink(ip);
-
-	ASSERT(ip->i_df.if_format != XFS_DINODE_FMT_LOCAL);
 
 	if (xfs_is_shutdown(mp))
 		return -EIO;
@@ -59,8 +58,20 @@ xfs_readlink(
 		goto out;
 	}
 
+	if (ip->i_df.if_format == XFS_DINODE_FMT_LOCAL) {
+		/*
+		 * The VFS crashes on a NULL pointer, so return -EFSCORRUPTED
+		 * if if_data is junk.
+		 */
+		if (XFS_IS_CORRUPT(ip->i_mount, !ip->i_df.if_u1.if_data)) {
+			xfs_inode_mark_sick(ip, XFS_SICK_INO_SYMLINK);
+			return error;
+		}
 
-	error = xfs_symlink_remote_read(ip, link);
+		memcpy(link, ip->i_df.if_u1.if_data, pathlen + 1);
+	} else {
+		error = xfs_symlink_remote_read(ip, link);
+	}
 
  out:
 	xfs_iunlock(ip, XFS_ILOCK_SHARED);

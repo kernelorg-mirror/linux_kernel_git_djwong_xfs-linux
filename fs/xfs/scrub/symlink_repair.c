@@ -225,16 +225,7 @@ xrep_symlink_reinitialize(
 		return error;
 
 	/* Finish up any block mapping activities. */
-	error = xfs_defer_finish(&sc->tp);
-	if (error)
-		return error;
-
-	/*
-	 * Set the correct VFS inode operations.  We hold all inode locks, so
-	 * this should be safe against other threads.
-	 */
-	xfs_setup_iops(sc->ip);
-	return 0;
+	return xfs_defer_finish(&sc->tp);
 }
 
 /* Repair a symbolic link. */
