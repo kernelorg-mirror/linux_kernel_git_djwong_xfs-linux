@@ -23,6 +23,7 @@
 #include "xfs_trans.h"
 #include "xfs_ialloc.h"
 #include "xfs_health.h"
+#include "xfs_symlink_remote.h"
 
 /* ----- Kernel only functions below ----- */
 int
