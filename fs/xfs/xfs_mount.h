@@ -324,12 +324,6 @@ typedef struct xfs_mount {
 	unsigned int		*m_errortag;
 	struct xfs_kobj		m_errortag_kobj;
 #endif
-	/*
-	 * Only allow one thread to initiate a repair freeze at a time.  We
-	 * also use this to block userspace from changing the freeze state
-	 * while a repair freeze is in progress.
-	 */
-	struct mutex		m_scrub_freeze;
 
 	/* online file link count check stuff */
 	struct xfs_hook_chain	m_nlink_delta_hooks;

@@ -131,7 +131,6 @@ struct xfs_scrub {
 #define XCHK_TRY_HARDER		(1 << 0)  /* can't get resources, try again */
 #define XCHK_HAVE_FREEZE_PROT	(1 << 1)  /* do we have freeze protection? */
 #define XCHK_REAPING_DISABLED	(1 << 2)  /* background block reaping paused */
-#define XCHK_FS_FROZEN		(1 << 3)  /* we froze the fs to do things */
 
 /* uses atomic metadata file content exchange */
 #define XREP_ATOMIC_EXCHANGE	(1 << 29)

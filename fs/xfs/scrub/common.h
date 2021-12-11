@@ -219,7 +219,5 @@ static inline bool xchk_could_repair(const struct xfs_scrub *sc)
 int xchk_metadata_inode_forks(struct xfs_scrub *sc);
 void xchk_stop_reaping(struct xfs_scrub *sc);
 void xchk_start_reaping(struct xfs_scrub *sc);
-int xchk_fs_freeze(struct xfs_scrub *sc);
-int xchk_fs_thaw(struct xfs_scrub *sc);
 
 #endif	/* __XFS_SCRUB_COMMON_H__ */

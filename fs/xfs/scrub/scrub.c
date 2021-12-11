@@ -179,12 +179,7 @@ xchk_teardown(
 		xfs_xchg_range_rele_log_assist(sc->mp);
 		sc->flags &= ~XREP_ATOMIC_EXCHANGE;
 	}
-	if (sc->flags & XCHK_FS_FROZEN) {
-		int		err2 = xchk_fs_thaw(sc);
-
-		if (!error && err2)
-			error = err2;
-	} else if (sc->flags & XCHK_HAVE_FREEZE_PROT) {
+	if (sc->flags & XCHK_HAVE_FREEZE_PROT) {
 		sc->flags &= ~XCHK_HAVE_FREEZE_PROT;
 		mnt_drop_write_file(sc->file);
 	}
