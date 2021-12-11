@@ -430,7 +430,7 @@ xfs_buf_item_format(
 	if (bip->bli_flags & XFS_BLI_INODE_BUF) {
 		if (xfs_has_v3inodes(lip->li_mountp) ||
 		    !((bip->bli_flags & XFS_BLI_INODE_ALLOC_BUF) &&
-		      xfs_log_item_in_current_chkpt(lip)))
+		      __xfs_log_item_in_current_chkpt(lip)))
 			bip->__bli_format.blf_flags |= XFS_BLF_INODE_BUF;
 		bip->bli_flags &= ~XFS_BLI_INODE_BUF;
 	}
