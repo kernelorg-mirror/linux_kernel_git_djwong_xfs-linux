@@ -1441,10 +1441,10 @@ out_shutdown:
  * transaction commit process when deciding what to format into the item.
  */
 bool
-xfs_log_item_in_current_chkpt(
-	struct xfs_log_item *lip)
+__xfs_log_item_in_current_chkpt(
+	struct xfs_log_item	*lip)
 {
-	struct xfs_cil_ctx *ctx = lip->li_mountp->m_log->l_cilp->xc_ctx;
+	struct xfs_cil_ctx	*ctx = lip->li_mountp->m_log->l_cilp->xc_ctx;
 
 	if (list_empty(&lip->li_cil))
 		return false;
@@ -1455,6 +1455,25 @@ xfs_log_item_in_current_chkpt(
 	 * current sequence, we're in a new checkpoint.
 	 */
 	return lip->li_seq == ctx->sequence;
+}
+
+/*
+ * Check if the current log item was first committed in this sequence.
+ * This version locks out CIL flushes, but can only be used to gather
+ * a rough estimate of the answer.
+ */
+bool
+xfs_log_item_in_current_chkpt(
+	struct xfs_log_item	*lip)
+{
+	struct xfs_cil		*cil = lip->li_mountp->m_log->l_cilp;
+	bool			ret;
+
+	down_read(&cil->xc_ctx_lock);
+	ret = __xfs_log_item_in_current_chkpt(lip);
+	up_read(&cil->xc_ctx_lock);
+
+	return ret;
 }
 
 /*
