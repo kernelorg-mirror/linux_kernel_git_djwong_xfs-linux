@@ -507,8 +507,9 @@ xfs_readdir(
 	size_t			bufsize)
 {
 	struct xfs_da_args	args = { NULL };
-	int			rval;
-	int			v;
+	unsigned int		lock_mode;
+	int			error;
+	int			isblock;
 
 	trace_xfs_readdir(dp);
 
@@ -522,14 +523,19 @@ xfs_readdir(
 	args.geo = dp->i_mount->m_dir_geo;
 	args.trans = tp;
 
-	if (dp->i_df.if_format == XFS_DINODE_FMT_LOCAL)
-		rval = xfs_dir2_sf_getdents(&args, ctx);
-	else if ((rval = xfs_dir2_isblock(&args, &v)))
-		;
-	else if (v)
-		rval = xfs_dir2_block_getdents(&args, ctx);
-	else
-		rval = xfs_dir2_leaf_getdents(&args, ctx, bufsize);
+	lock_mode = xfs_ilock_data_map_shared(dp);
+	if (dp->i_df.if_format == XFS_DINODE_FMT_LOCAL) {
+		xfs_iunlock(dp, lock_mode);
+		return xfs_dir2_sf_getdents(&args, ctx);
+	}
 
-	return rval;
+	error = xfs_dir2_isblock(&args, &isblock);
+	xfs_iunlock(dp, lock_mode);
+	if (error)
+		return error;
+
+	if (isblock)
+		return xfs_dir2_block_getdents(&args, ctx);
+
+	return xfs_dir2_leaf_getdents(&args, ctx, bufsize);
 }
