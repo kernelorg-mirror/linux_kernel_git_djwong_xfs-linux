@@ -171,7 +171,6 @@ xchk_parent_validate(
 	struct xfs_scrub	*sc,
 	xfs_ino_t		parent_ino)
 {
-	struct xfs_mount	*mp = sc->mp;
 	struct xfs_inode	*dp = NULL;
 	xfs_nlink_t		expected_nlink;
 	xfs_nlink_t		nlink;
@@ -201,7 +200,7 @@ xchk_parent_validate(
 	 * -EFSCORRUPTED or -EFSBADCRC then the parent is corrupt which is a
 	 *  cross referencing error.  Any other error is an operational error.
 	 */
-	error = xfs_iget(mp, sc->tp, parent_ino, XFS_IGET_UNTRUSTED, 0, &dp);
+	error = xchk_iget(sc, parent_ino, &dp);
 	if (error == -EINVAL || error == -ENOENT) {
 		error = -EFSCORRUPTED;
 		xchk_fblock_process_error(sc, XFS_DATA_FORK, 0, &error);
@@ -266,7 +265,7 @@ xchk_parent_validate(
 out_unlock:
 	xfs_iunlock(dp, XFS_IOLOCK_SHARED);
 out_rele:
-	xfs_irele(dp);
+	xchk_irele(sc, dp);
 	return error;
 }
 
