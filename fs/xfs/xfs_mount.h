@@ -97,8 +97,8 @@ int xfs_rt_drain_intents(struct xfs_mount *mp);
 
 int xfs_perag_drain_intents(struct xfs_perag *pag);
 
-void xfs_fs_bump_intents(struct xfs_mount *mp, xfs_fsblock_t fsb);
-void xfs_fs_drop_intents(struct xfs_mount *mp, xfs_fsblock_t fsb);
+void xfs_fs_bump_intents(struct xfs_mount *mp, bool isrt, xfs_fsblock_t fsb);
+void xfs_fs_drop_intents(struct xfs_mount *mp, bool isrt, xfs_fsblock_t fsb);
 
 /* Are there work items pending? */
 static inline bool xfs_drain_busy(struct xfs_drain *dr)
@@ -118,12 +118,12 @@ static inline void xfs_drain_free(struct xfs_drain *dr)
 }
 #else
 static inline void
-xfs_fs_bump_intents(struct xfs_mount *mp, xfs_fsblock_t fsb)
+xfs_fs_bump_intents(struct xfs_mount *mp, bool isrt, xfs_fsblock_t fsb)
 {
 }
 
 static inline void
-xfs_fs_drop_intents(struct xfs_mount *mp, xfs_fsblock_t fsb)
+xfs_fs_drop_intents(struct xfs_mount *mp, bool isrt, xfs_fsblock_t fsb)
 {
 }
 # define xfs_drain_init(dr)
