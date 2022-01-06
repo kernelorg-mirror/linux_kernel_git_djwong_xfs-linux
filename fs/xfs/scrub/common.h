@@ -151,6 +151,7 @@ xchk_ag_init_existing(
 
 int xchk_rt_init(struct xfs_scrub *sc, struct xchk_rt *sr);
 void xchk_rt_btcur_free(struct xchk_rt *sr);
+int xchk_rt_lock(struct xfs_scrub *sc, struct xchk_rt *sr);
 void xchk_rt_unlock(struct xfs_scrub *sc, struct xchk_rt *sr);
 int xchk_ag_read_headers(struct xfs_scrub *sc, xfs_agnumber_t agno,
 		struct xchk_ag *sa);
