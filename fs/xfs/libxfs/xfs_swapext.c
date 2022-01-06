@@ -20,6 +20,8 @@
 #include "xfs_trace.h"
 #include "xfs_bmap_btree.h"
 #include "xfs_trans_space.h"
+#include "xfs_errortag.h"
+#include "xfs_error.h"
 
 struct kmem_cache	*xfs_swapext_intent_cache;
 
@@ -417,6 +419,9 @@ xfs_swapext_finish_one(
 		if (error)
 			return error;
 	}
+
+	if (XFS_TEST_ERROR(false, tp->t_mountp, XFS_ERRTAG_SWAPEXT_FINISH_ONE))
+		return -EIO;
 
 	/* If we still have work to do, ask for a new transaction. */
 	if (sxi_has_more_swap_work(sxi) || sxi_has_postop_work(sxi)) {
