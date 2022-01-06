@@ -60,7 +60,7 @@ xchk_symlink(
 	}
 
 	/* Remote symlink; must read the contents. */
-	error = xfs_readlink_bmap_ilocked(sc->ip, sc->buf);
+	error = xfs_symlink_remote_read(sc->ip, sc->buf);
 	if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, 0, &error))
 		goto out;
 	if (strnlen(sc->buf, XFS_SYMLINK_MAXLEN) < len)
