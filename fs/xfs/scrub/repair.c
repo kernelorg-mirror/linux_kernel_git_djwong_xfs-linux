@@ -2090,6 +2090,10 @@ bool
 xrep_will_attempt(
 	struct xfs_scrub	*sc)
 {
+	/* Userspace asked us to rebuild the structure regardless. */
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_FORCE_REBUILD)
+		return true;
+
 	/* Let debug users force us into the repair routines. */
 	if (XFS_TEST_ERROR(false, sc->mp, XFS_ERRTAG_FORCE_SCRUB_REPAIR))
 		return true;
