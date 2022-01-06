@@ -121,6 +121,48 @@ out:
 }
 
 /*
+ * Try to iolock the parent dir @dp in shared mode and the child dir @sc->ip
+ * exclusively.
+ */
+STATIC int
+xchk_parent_lock_two_dirs(
+	struct xfs_scrub	*sc,
+	struct xfs_inode	*dp)
+{
+	int			error = 0;
+
+	/* Callers shouldn't do this, but protect ourselves anyway. */
+	if (dp == sc->ip) {
+		ASSERT(dp != sc->ip);
+		return -EINVAL;
+	}
+
+	xfs_iunlock(sc->ip, sc->ilock_flags);
+	sc->ilock_flags = 0;
+	while (true) {
+		if (xchk_should_terminate(sc, &error))
+			return error;
+
+		/*
+		 * Normal XFS takes the IOLOCK before grabbing a transaction.
+		 * Scrub holds a transaction, which means that we can't block
+		 * on either IOLOCK.
+		 */
+		if (xfs_ilock_nowait(dp, XFS_IOLOCK_SHARED)) {
+			if (xfs_ilock_nowait(sc->ip, XFS_IOLOCK_EXCL)) {
+				sc->ilock_flags = XFS_IOLOCK_EXCL;
+				break;
+			}
+			xfs_iunlock(dp, XFS_IOLOCK_SHARED);
+		}
+
+		delay(1);
+	}
+
+	return 0;
+}
+
+/*
  * Given the inode number of the alleged parent of the inode being
  * scrubbed, try to validate that the parent has exactly one directory
  * entry pointing back to the inode being scrubbed.
@@ -128,8 +170,7 @@ out:
 STATIC int
 xchk_parent_validate(
 	struct xfs_scrub	*sc,
-	xfs_ino_t		dnum,
-	bool			*try_again)
+	xfs_ino_t		parent_ino)
 {
 	struct xfs_mount	*mp = sc->mp;
 	struct xfs_inode	*dp = NULL;
@@ -137,15 +178,13 @@ xchk_parent_validate(
 	xfs_nlink_t		nlink;
 	int			error = 0;
 
-	*try_again = false;
-
 	if (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
-		goto out;
+		return 0;
 
 	/* '..' must not point to ourselves. */
-	if (sc->ip->i_ino == dnum) {
+	if (sc->ip->i_ino == parent_ino) {
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, 0);
-		goto out;
+		return 0;
 	}
 
 	/*
@@ -155,106 +194,80 @@ xchk_parent_validate(
 	expected_nlink = VFS_I(sc->ip)->i_nlink == 0 ? 0 : 1;
 
 	/*
-	 * Grab this parent inode.  We release the inode before we
-	 * cancel the scrub transaction.  Since we're don't know a
-	 * priori that releasing the inode won't trigger eofblocks
-	 * cleanup (which allocates what would be a nested transaction)
-	 * if the parent pointer erroneously points to a file, we
-	 * can't use DONTCACHE here because DONTCACHE inodes can trigger
-	 * immediate inactive cleanup of the inode.
+	 * Grab the parent directory inode.  This must be released before we
+	 * cancel the scrub transaction.
 	 *
 	 * If _iget returns -EINVAL or -ENOENT then the parent inode number is
 	 * garbage and the directory is corrupt.  If the _iget returns
 	 * -EFSCORRUPTED or -EFSBADCRC then the parent is corrupt which is a
 	 *  cross referencing error.  Any other error is an operational error.
 	 */
-	error = xfs_iget(mp, sc->tp, dnum, XFS_IGET_UNTRUSTED, 0, &dp);
+	error = xfs_iget(mp, sc->tp, parent_ino, XFS_IGET_UNTRUSTED, 0, &dp);
 	if (error == -EINVAL || error == -ENOENT) {
 		error = -EFSCORRUPTED;
 		xchk_fblock_process_error(sc, XFS_DATA_FORK, 0, &error);
-		goto out;
+		return error;
 	}
 	if (!xchk_fblock_xref_process_error(sc, XFS_DATA_FORK, 0, &error))
-		goto out;
+		return error;
 	if (dp == sc->ip || !S_ISDIR(VFS_I(dp)->i_mode)) {
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, 0);
 		goto out_rele;
 	}
 
 	/*
-	 * We prefer to keep the inode locked while we lock and search
-	 * its alleged parent for a forward reference.  If we can grab
-	 * the iolock, validate the pointers and we're done.  We must
-	 * use nowait here to avoid an ABBA deadlock on the parent and
-	 * the child inodes.
+	 * We prefer to keep the inode locked while we lock and search its
+	 * alleged parent for a forward reference.  If we can grab the iolock
+	 * of the alleged parent, then we can move ahead to counting dirents
+	 * and checking nlinks.
+	 *
+	 * However, if we fail to iolock the alleged parent while holding the
+	 * child iolock, we have no way to tell if a blocking lock() would
+	 * result in an ABBA deadlock.  Release the lock on the child, then
+	 * try to lock the alleged parent and trylock the child.
 	 */
-	if (xfs_ilock_nowait(dp, XFS_IOLOCK_SHARED)) {
-		error = xchk_parent_count_parent_dentries(sc, dp, &nlink);
-		if (!xchk_fblock_xref_process_error(sc, XFS_DATA_FORK, 0,
-				&error))
+	if (!xfs_ilock_nowait(dp, XFS_IOLOCK_SHARED)) {
+		error = xchk_parent_lock_two_dirs(sc, dp);
+		if (error)
+			goto out_rele;
+
+		/*
+		 * Now that we've locked out updates to the child directory,
+		 * re-sample the expected nlink and the '..' dirent.
+		 */
+		expected_nlink = VFS_I(sc->ip)->i_nlink == 0 ? 0 : 1;
+
+		error = xfs_dir_lookup(sc->tp, sc->ip, &xfs_name_dotdot,
+				&parent_ino, NULL);
+		if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, 0, &error))
 			goto out_unlock;
-		if (nlink != expected_nlink)
-			xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, 0);
-		goto out_unlock;
+
+		/*
+		 * After relocking the child directory, the '..' entry points
+		 * to a different parent than before.  This means someone moved
+		 * the child elsewhere in the directory tree, which means that
+		 * the parent link is now correct and we're done.
+		 */
+		if (parent_ino != dp->i_ino)
+			goto out_unlock;
 	}
 
-	/*
-	 * The game changes if we get here.  We failed to lock the parent,
-	 * so we're going to try to verify both pointers while only holding
-	 * one lock so as to avoid deadlocking with something that's actually
-	 * trying to traverse down the directory tree.
-	 */
-	xfs_iunlock(sc->ip, sc->ilock_flags);
-	sc->ilock_flags = 0;
-	error = xchk_ilock_inverted(dp, XFS_IOLOCK_SHARED);
-	if (error)
-		goto out_rele;
-
-	/* Go looking for our dentry. */
+	/* Look for a directory entry in the parent pointing to the child. */
 	error = xchk_parent_count_parent_dentries(sc, dp, &nlink);
 	if (!xchk_fblock_xref_process_error(sc, XFS_DATA_FORK, 0, &error))
 		goto out_unlock;
 
-	/* Drop the parent lock, relock this inode. */
-	xfs_iunlock(dp, XFS_IOLOCK_SHARED);
-	error = xchk_ilock_inverted(sc->ip, XFS_IOLOCK_EXCL);
-	if (error)
-		goto out_rele;
-	sc->ilock_flags = XFS_IOLOCK_EXCL;
-
 	/*
-	 * If we're an unlinked directory, the parent /won't/ have a link
-	 * to us.  Otherwise, it should have one link.  We have to re-set
-	 * it here because we dropped the lock on sc->ip.
-	 */
-	expected_nlink = VFS_I(sc->ip)->i_nlink == 0 ? 0 : 1;
-
-	/* Look up '..' to see if the inode changed. */
-	error = xfs_dir_lookup(sc->tp, sc->ip, &xfs_name_dotdot, &dnum, NULL);
-	if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, 0, &error))
-		goto out_rele;
-
-	/* Drat, parent changed.  Try again! */
-	if (dnum != dp->i_ino) {
-		xfs_irele(dp);
-		*try_again = true;
-		return 0;
-	}
-	xfs_irele(dp);
-
-	/*
-	 * '..' didn't change, so check that there was only one entry
-	 * for us in the parent.
+	 * Ensure that the parent has as many links to the child as the child
+	 * thinks it has to the parent.
 	 */
 	if (nlink != expected_nlink)
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, 0);
-	return error;
 
 out_unlock:
 	xfs_iunlock(dp, XFS_IOLOCK_SHARED);
 out_rele:
 	xfs_irele(dp);
-out:
 	return error;
 }
 
@@ -264,10 +277,8 @@ xchk_parent(
 	struct xfs_scrub	*sc)
 {
 	struct xfs_mount	*mp = sc->mp;
-	xfs_ino_t		dnum;
-	bool			try_again;
-	int			tries = 0;
-	int			error = 0;
+	xfs_ino_t		parent_ino;
+	int			error;
 
 	/*
 	 * If we're a directory, check that the '..' link points up to
@@ -279,7 +290,7 @@ xchk_parent(
 	/* We're not a special inode, are we? */
 	if (!xfs_verify_dir_ino(mp, sc->ip->i_ino)) {
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, 0);
-		goto out;
+		return 0;
 	}
 
 	/*
@@ -293,42 +304,22 @@ xchk_parent(
 	xfs_iunlock(sc->ip, XFS_ILOCK_EXCL | XFS_MMAPLOCK_EXCL);
 
 	/* Look up '..' */
-	error = xfs_dir_lookup(sc->tp, sc->ip, &xfs_name_dotdot, &dnum, NULL);
+	error = xfs_dir_lookup(sc->tp, sc->ip, &xfs_name_dotdot, &parent_ino,
+			NULL);
 	if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, 0, &error))
-		goto out;
-	if (!xfs_verify_dir_ino(mp, dnum)) {
+		return error;
+	if (!xfs_verify_dir_ino(mp, parent_ino)) {
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, 0);
-		goto out;
+		return 0;
 	}
 
 	/* Is this the root dir?  Then '..' must point to itself. */
 	if (sc->ip == mp->m_rootip) {
 		if (sc->ip->i_ino != mp->m_sb.sb_rootino ||
-		    sc->ip->i_ino != dnum)
+		    sc->ip->i_ino != parent_ino)
 			xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, 0);
-		goto out;
+		return 0;
 	}
 
-	do {
-		error = xchk_parent_validate(sc, dnum, &try_again);
-		if (error)
-			goto out;
-	} while (try_again && ++tries < 20);
-
-	/*
-	 * We gave it our best shot but failed, so mark this scrub
-	 * incomplete.  Userspace can decide if it wants to try again.
-	 */
-	if (try_again && tries == 20)
-		xchk_set_incomplete(sc);
-out:
-	/*
-	 * If we failed to lock the parent inode even after a retry, just mark
-	 * this scrub incomplete and return.
-	 */
-	if ((sc->flags & XCHK_TRY_HARDER) && error == -EDEADLOCK) {
-		error = 0;
-		xchk_set_incomplete(sc);
-	}
-	return error;
+	return xchk_parent_validate(sc, parent_ino);
 }
