@@ -39,6 +39,7 @@ union xfs_btree_key {
 	struct xfs_refcount_key		refc;
 	struct xfs_rtrmap_key		rtrmap;
 	struct xfs_rtrmap_key		__rtrmap_bigkey[2];
+	struct xfs_rtrefcount_key	rtrefc;
 };
 
 union xfs_btree_rec {
@@ -49,6 +50,7 @@ union xfs_btree_rec {
 	struct xfs_rmap_rec		rmap;
 	struct xfs_refcount_rec		refc;
 	struct xfs_rtrmap_rec		rtrmap;
+	struct xfs_rtrefcount_rec	rtrefc;
 };
 
 /*
@@ -183,6 +185,11 @@ union xfs_btree_irec {
 	struct xfs_refcount_irec	rc;
 };
 
+struct xbtree_refc {
+	unsigned int	nr_ops;		/* # record updates */
+	unsigned int	shape_changes;	/* # of extent splits */
+};
+
 /* Per-AG btree information. */
 struct xfs_btree_cur_ag {
 	struct xfs_perag		*pag;
@@ -191,10 +198,7 @@ struct xfs_btree_cur_ag {
 		struct xbtree_afakeroot	*afake;	/* for staging cursor */
 	};
 	union {
-		struct {
-			unsigned int	nr_ops;	/* # record updates */
-			unsigned int	shape_changes;	/* # of extent splits */
-		} refc;
+		struct xbtree_refc	refc;
 		struct {
 			bool		active;	/* allocation cursor state */
 		} abt;
@@ -214,6 +218,7 @@ struct xfs_btree_cur_ino {
 
 /* For extent swap, ignore owner check in verifier */
 #define	XFS_BTCUR_BMBT_INVALID_OWNER	(1 << 1)
+	struct xbtree_refc		refc;
 };
 
 /* In-memory btree information */
