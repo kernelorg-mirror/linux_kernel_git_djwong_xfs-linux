@@ -29,7 +29,7 @@ xfs_trim_extents(
 	xfs_daddr_t		minlen,
 	uint64_t		*blocks_trimmed)
 {
-	struct block_device	*bdev = mp->m_ddev_targp->bt_bdev;
+	struct block_device	*bdev = xfs_buftarg_bdev(mp->m_ddev_targp);
 	struct xfs_btree_cur	*cur;
 	struct xfs_buf		*agbp;
 	struct xfs_agf		*agf;
@@ -154,7 +154,8 @@ xfs_ioc_trim(
 	struct xfs_mount		*mp,
 	struct fstrim_range __user	*urange)
 {
-	struct request_queue	*q = bdev_get_queue(mp->m_ddev_targp->bt_bdev);
+	struct block_device	*bdev = xfs_buftarg_bdev(mp->m_ddev_targp);
+	struct request_queue	*q = bdev_get_queue(bdev);
 	unsigned int		granularity = q->limits.discard_granularity;
 	struct fstrim_range	range;
 	xfs_daddr_t		start, end, minlen;
