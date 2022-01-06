@@ -466,7 +466,7 @@ xrep_newbt_schedule_reap(
 
 	INIT_LIST_HEAD(&efi_item.xefi_list);
 	list_add(&efi_item.xefi_list, &items);
-	xfs_fs_bump_intents(xnr->sc->mp, resv->fsbno);
+	xfs_fs_bump_intents(xnr->sc->mp, false, resv->fsbno);
 	resv->efi = xfs_extent_free_defer_type.create_intent(xnr->sc->tp,
 			&items, 1, false);
 }
@@ -688,7 +688,7 @@ xrep_newbt_destroy(
 			goto junkit;
 
 		list_del(&resv->list);
-		xfs_fs_drop_intents(sc->mp, resv->fsbno);
+		xfs_fs_drop_intents(sc->mp, false, resv->fsbno);
 		kmem_free(resv);
 	}
 
@@ -701,7 +701,7 @@ junkit:
 	list_for_each_entry_safe(resv, n, &xnr->resv_list, list) {
 		xfs_extent_free_defer_type.abort_intent(resv->efi);
 		list_del(&resv->list);
-		xfs_fs_drop_intents(sc->mp, resv->fsbno);
+		xfs_fs_drop_intents(sc->mp, false, resv->fsbno);
 		kmem_free(resv);
 	}
 
