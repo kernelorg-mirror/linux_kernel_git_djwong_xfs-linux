@@ -81,8 +81,7 @@ retry:
 		 * IOLOCK or MMAPLOCK with a transaction in hand.
 		 */
 		if (agi_bp) {
-			xfs_trans_cancel(sc->tp);
-			sc->tp = NULL;
+			xchk_trans_cancel(sc);
 			agi_bp = NULL;
 		}
 
