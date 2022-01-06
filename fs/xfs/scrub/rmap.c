@@ -77,8 +77,8 @@ xchk_rmapbt_xref_refc(
 	struct xfs_scrub	*sc,
 	struct xfs_rmap_irec	*irec)
 {
-	xfs_agblock_t		fbno;
-	xfs_extlen_t		flen;
+	xfs_fsblock_t		fbno;
+	xfs_filblks_t		flen;
 	bool			non_inode;
 	bool			is_bmbt;
 	bool			is_attr;
