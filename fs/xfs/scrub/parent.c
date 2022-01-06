@@ -139,8 +139,7 @@ xchk_parent_lock_two_dirs(
 		return -EINVAL;
 	}
 
-	xfs_iunlock(sc->ip, sc->ilock_flags);
-	sc->ilock_flags = 0;
+	xchk_iunlock(sc, sc->ilock_flags);
 	while (true) {
 		if (xchk_should_terminate(sc, &error))
 			goto out_relock;
@@ -151,10 +150,8 @@ xchk_parent_lock_two_dirs(
 		 * on either IOLOCK.
 		 */
 		if (xfs_ilock_nowait(dp, XFS_IOLOCK_SHARED)) {
-			if (xfs_ilock_nowait(sc->ip, XFS_IOLOCK_EXCL)) {
-				sc->ilock_flags = XFS_IOLOCK_EXCL;
+			if (xchk_ilock_nowait(sc, XFS_IOLOCK_EXCL))
 				break;
-			}
 			xfs_iunlock(dp, XFS_IOLOCK_SHARED);
 		}
 
@@ -168,8 +165,7 @@ xchk_parent_lock_two_dirs(
 
 	return 0;
 out_relock:
-	xfs_ilock(sc->ip, XFS_IOLOCK_EXCL);
-	sc->ilock_flags |= XFS_IOLOCK_EXCL;
+	xchk_ilock(sc, XFS_IOLOCK_EXCL);
 	return error;
 }
 
@@ -310,8 +306,7 @@ xchk_parent(
 	 * getting a write lock on i_rwsem.  Therefore, it is safe for us
 	 * to drop the ILOCK here in order to do directory lookups.
 	 */
-	sc->ilock_flags &= ~(XFS_ILOCK_EXCL | XFS_MMAPLOCK_EXCL);
-	xfs_iunlock(sc->ip, XFS_ILOCK_EXCL | XFS_MMAPLOCK_EXCL);
+	xchk_iunlock(sc, XFS_ILOCK_EXCL | XFS_MMAPLOCK_EXCL);
 
 	/* Look up '..' */
 	error = xfs_dir_lookup(sc->tp, sc->ip, &xfs_name_dotdot, &parent_ino,
