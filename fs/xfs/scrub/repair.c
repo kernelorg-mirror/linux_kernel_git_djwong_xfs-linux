@@ -42,6 +42,7 @@
 #include "scrub/trace.h"
 #include "scrub/repair.h"
 #include "scrub/bitmap.h"
+#include "scrub/xfile.h"
 
 /*
  * Attempt to repair some metadata, if the metadata is corrupt and userspace
@@ -167,9 +168,23 @@ int
 xrep_roll_trans(
 	struct xfs_scrub	*sc)
 {
+	int			error;
+
 	if (!sc->ip)
 		return xrep_roll_ag_trans(sc);
-	return xfs_trans_roll_inode(&sc->tp, sc->ip);
+
+	/*
+	 * Roll the transaction with the inode we're fixing and the temp inode,
+	 * so that neither can pin the log.
+	 *
+	 * XXX: does this really need to be in the rtsummary repair patch?
+	 */
+	if (sc->tempip)
+		xfs_trans_log_inode(sc->tp, sc->tempip, XFS_ILOG_CORE);
+	error = xfs_trans_roll_inode(&sc->tp, sc->ip);
+	if (sc->tempip)
+		xfs_trans_ijoin(sc->tp, sc->tempip, 0);
+	return error;
 }
 
 /*
