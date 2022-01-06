@@ -273,9 +273,11 @@ xfs_errortag_test(
 	if (!randfactor || prandom_u32() % randfactor)
 		return false;
 
+#if 0
 	xfs_warn_ratelimited(mp,
 "Injecting error (%s) at file %s, line %d, on filesystem \"%s\"",
 			expression, file, line, mp->m_super->s_id);
+#endif
 	return true;
 }
 
