@@ -14,14 +14,20 @@
 #include "xfs_inode.h"
 #include "xfs_ialloc.h"
 #include "xfs_quota.h"
+#include "xfs_bmap.h"
 #include "xfs_bmap_btree.h"
 #include "xfs_trans_space.h"
 #include "xfs_dir2.h"
 #include "xfs_xchgrange.h"
+#include "xfs_swapext.h"
+#include "xfs_defer.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
+#include "scrub/repair.h"
 #include "scrub/trace.h"
 #include "scrub/tempfile.h"
+#include "scrub/tempswap.h"
+#include "scrub/xfile.h"
 
 /*
  * Create a temporary file for reconstructing metadata, with the intention of
@@ -236,4 +242,358 @@ xrep_tempfile_rele(
 
 	xchk_irele(sc, sc->tempip);
 	sc->tempip = NULL;
+}
+
+/*
+ * Make sure that the given range of the data fork of the temporary file is
+ * mapped to written blocks.  The caller must ensure that both inodes are
+ * joined to the transaction.
+ */
+int
+xrep_tempfile_prealloc(
+	struct xfs_scrub	*sc,
+	xfs_fileoff_t		off,
+	xfs_filblks_t		len)
+{
+	xfs_fileoff_t		end = off + len;
+	int			error = 0;
+
+	ASSERT(sc->tempip != NULL);
+	ASSERT(!XFS_NOT_DQATTACHED(sc->mp, sc->tempip));
+
+	while (off < len) {
+		struct xfs_bmbt_irec	map;
+		int			nmaps = 1;
+
+		/*
+		 * If we have a real extent mapping this block then we're
+		 * in ok shape.
+		 */
+		error = xfs_bmapi_read(sc->tempip, off, end - off, &map, &nmaps,
+				XFS_DATA_FORK);
+		if (error)
+			break;
+
+		if (nmaps == 1 && xfs_bmap_is_written_extent(&map)) {
+			off += map.br_startblock;
+			continue;
+		}
+
+		/*
+		 * If we find a delalloc reservation then something is very
+		 * very wrong.  Bail out.
+		 */
+		if (map.br_startblock == DELAYSTARTBLOCK)
+			return -EFSCORRUPTED;
+
+		/*
+		 * Make sure this block has a real zeroed extent allocated to
+		 * it.
+		 */
+		nmaps = 1;
+		error = xfs_bmapi_write(sc->tp, sc->tempip, off, end - off,
+				XFS_BMAPI_CONVERT | XFS_BMAPI_ZERO, 0, &map,
+				&nmaps);
+		if (error)
+			break;
+
+		trace_xrep_tempfile_prealloc(sc, XFS_DATA_FORK, &map);
+
+		/* Commit new extent and all deferred work. */
+		error = xfs_defer_finish(&sc->tp);
+		if (error)
+			break;
+
+		off += map.br_startblock;
+	}
+
+	return error;
+}
+
+/*
+ * Write a number of bytes from the xfile into the temp file, one filesystem
+ * block at a time.  The caller must join both inodes to the transaction.
+ */
+int
+xrep_tempfile_copyin_xfile(
+	struct xfs_scrub		*sc,
+	const struct xfs_buf_ops	*ops,
+	enum xfs_blft			type,
+	xfs_fileoff_t			isize)
+{
+	LIST_HEAD(buffers_list);
+	struct xfs_mount		*mp = sc->mp;
+	struct xfs_buf			*bp;
+	xfs_fileoff_t			flush_mask;
+	xfs_rtblock_t			off = 0;
+	loff_t				pos = 0;
+	int				error = 0;
+
+	ASSERT(S_ISREG(VFS_I(sc->tempip)->i_mode));
+
+	/* Flush buffers to disk every 512K */
+	flush_mask = XFS_B_TO_FSBT(mp, (1U << 19)) - 1;
+
+	while (pos < isize) {
+		struct xfs_bmbt_irec	map;
+		int			nmaps = 1;
+		size_t			count;
+
+		/* Read block mapping for this file block. */
+		error = xfs_bmapi_read(sc->tempip, off, 1, &map, &nmaps, 0);
+		if (error)
+			goto out_err;
+		if (nmaps == 0 || !xfs_bmap_is_written_extent(&map)) {
+			error = -EFSCORRUPTED;
+			goto out_err;
+		}
+
+		/* Get the metadata buffer for this offset in the file. */
+		error = xfs_trans_get_buf(sc->tp, mp->m_ddev_targp,
+				XFS_FSB_TO_DADDR(mp, map.br_startblock),
+				mp->m_bsize, 0, &bp);
+		if (error)
+			goto out_err;
+		bp->b_ops = ops;
+		xfs_trans_buf_set_type(sc->tp, bp, type);
+
+		/* Read in a block's worth of data from the xfile. */
+		count = min_t(loff_t, isize - pos, mp->m_sb.sb_blocksize);
+		error = xfile_obj_load(sc->xfile, bp->b_addr, count, pos);
+		if (error) {
+			xfs_trans_brelse(sc->tp, bp);
+			goto out_err;
+		}
+
+		trace_xrep_tempfile_copyin_xfile(sc, XFS_DATA_FORK, &map);
+
+		/* Queue buffer, and flush if we have too much dirty data. */
+		xfs_buf_delwri_queue_here(bp, &buffers_list);
+		xfs_trans_brelse(sc->tp, bp);
+
+		if (!(off & flush_mask)) {
+			error = xfs_buf_delwri_submit(&buffers_list);
+			if (error)
+				goto out_err;
+		}
+
+		pos += mp->m_sb.sb_blocksize;
+		off++;
+	}
+
+	/*
+	 * Write the new blocks to disk.  If the ordered list isn't empty after
+	 * that, then something went wrong and we have to fail.  This should
+	 * never happen, but we'll check anyway.
+	 */
+	error = xfs_buf_delwri_submit(&buffers_list);
+	if (error)
+		goto out_err;
+
+	if (!list_empty(&buffers_list)) {
+		ASSERT(list_empty(&buffers_list));
+		error = -EIO;
+		goto out_err;
+	}
+
+	/* Set the new inode size, if needed. */
+	if (sc->tempip->i_disk_size != isize) {
+		sc->tempip->i_disk_size = isize;
+		i_size_write(VFS_I(sc->tempip), isize);
+		return xrep_tempfile_roll_trans(sc);
+	}
+
+	return 0;
+
+out_err:
+	xfs_buf_delwri_cancel(&buffers_list);
+	return error;
+}
+
+/*
+ * Roll a repair transaction involving the temporary file.  Caller must join
+ * both the temporary file and the file being scrubbed to the transaction.
+ * This function return with both inodes joined to a new scrub transaction,
+ * or the usual negative errno.
+ */
+int
+xrep_tempfile_roll_trans(
+	struct xfs_scrub	*sc)
+{
+	int			error;
+
+	xfs_trans_log_inode(sc->tp, sc->tempip, XFS_ILOG_CORE);
+	error = xrep_roll_trans(sc);
+	if (error)
+		return error;
+
+	xfs_trans_ijoin(sc->tp, sc->tempip, 0);
+	return 0;
+}
+
+/*
+ * Fill out the swapext request in preparation for swapping the contents of a
+ * metadata file that we've rebuilt in the temp file.
+ */
+STATIC int
+xrep_tempswap_prep_request(
+	struct xfs_scrub	*sc,
+	int			whichfork,
+	struct xrep_tempswap	*tx)
+{
+	struct xfs_swapext_req	*req = &tx->req;
+
+	memset(tx, 0, sizeof(struct xrep_tempswap));
+
+	/* COW forks don't exist on disk. */
+	if (whichfork == XFS_COW_FORK) {
+		ASSERT(0);
+		return -EINVAL;
+	}
+
+	/* Both files should have the relevant forks. */
+	if (!XFS_IFORK_PTR(sc->ip, whichfork) ||
+	    !XFS_IFORK_PTR(sc->tempip, whichfork)) {
+		ASSERT(0);
+		return -EINVAL;
+	}
+
+	/* Swap all mappings in both forks. */
+	req->ip1 = sc->tempip;
+	req->ip2 = sc->ip;
+	req->startoff1 = 0;
+	req->startoff2 = 0;
+	req->whichfork = whichfork;
+	req->blockcount = XFS_MAX_FILEOFF;
+	req->req_flags = 0;
+
+	/* Always swap sizes when we're swapping data fork mappings. */
+	if (whichfork == XFS_DATA_FORK)
+		req->req_flags |= XFS_SWAP_REQ_SET_SIZES;
+
+	/*
+	 * If we're repairing xattrs or directories, always try to convert ip2
+	 * to short format after swapping.
+	 */
+	if (whichfork == XFS_ATTR_FORK || S_ISDIR(VFS_I(sc->ip)->i_mode))
+		req->req_flags |= XFS_SWAP_REQ_CVT_INO2_SF;
+
+	return 0;
+}
+
+/*
+ * Obtain a quota reservation to make sure we don't hit EDQUOT.  We can skip
+ * this if quota enforcement is disabled or if both inodes' dquots are the
+ * same.  The qretry structure must be initialized to zeroes before the first
+ * call to this function.
+ */
+STATIC int
+xrep_tempswap_reserve_quota(
+	struct xfs_scrub		*sc,
+	const struct xrep_tempswap	*tx)
+{
+	struct xfs_trans		*tp = sc->tp;
+	const struct xfs_swapext_req	*req = &tx->req;
+	const struct xfs_swapext_res	*res = &tx->res;
+	int64_t				ddelta, rdelta;
+	int				error;
+
+	/*
+	 * Don't bother with a quota reservation if we're not enforcing them
+	 * or the two inodes have the same dquots.
+	 */
+	if (!XFS_IS_QUOTA_ON(tp->t_mountp) || req->ip1 == req->ip2 ||
+	    (req->ip1->i_udquot == req->ip2->i_udquot &&
+	     req->ip1->i_gdquot == req->ip2->i_gdquot &&
+	     req->ip1->i_pdquot == req->ip2->i_pdquot))
+		return 0;
+
+	/*
+	 * Quota reservation for each file comes from two sources.  First, we
+	 * need to account for any net gain in mapped blocks during the swap.
+	 * Second, we need reservation for the gross gain in mapped blocks so
+	 * that we don't trip over any quota block reservation assertions.  We
+	 * must reserve the gross gain because the quota code subtracts from
+	 * bcount the number of blocks that we unmap; it does not add that
+	 * quantity back to the quota block reservation.
+	 */
+	ddelta = max_t(int64_t, 0, res->ip2_bcount - res->ip1_bcount);
+	rdelta = max_t(int64_t, 0, res->ip2_rtbcount - res->ip1_rtbcount);
+	error = xfs_trans_reserve_quota_nblks(tp, req->ip1,
+			ddelta + res->ip1_bcount, rdelta + res->ip1_rtbcount,
+			true);
+	if (error)
+		return error;
+
+	ddelta = max_t(int64_t, 0, res->ip1_bcount - res->ip2_bcount);
+	rdelta = max_t(int64_t, 0, res->ip1_rtbcount - res->ip2_rtbcount);
+	return xfs_trans_reserve_quota_nblks(tp, req->ip2,
+			ddelta + res->ip2_bcount, rdelta + res->ip2_rtbcount,
+			true);
+}
+
+/*
+ * Prepare an existing transaction for a swap.  The caller must hold
+ * the ILOCK of both the inode being repaired and the temporary file.
+ * Only use this when those ILOCKs cannot be dropped.
+ *
+ * Fill out the swapext request and resource estimation structures in
+ * preparation for swapping the contents of a metadata file that we've rebuilt
+ * in the temp file, then reserve space and quota to the transaction.
+ */
+int
+xrep_tempswap_trans_reserve(
+	struct xfs_scrub	*sc,
+	int			whichfork,
+	struct xrep_tempswap	*tx)
+{
+	int			error;
+
+	ASSERT(sc->tp != NULL);
+	ASSERT(xfs_isilocked(sc->ip, XFS_ILOCK_EXCL));
+	ASSERT(xfs_isilocked(sc->tempip, XFS_ILOCK_EXCL));
+
+	error = xrep_tempswap_prep_request(sc, whichfork, tx);
+	if (error)
+		return error;
+
+	error = xfs_swapext_estimate(&tx->req, &tx->res);
+	if (error)
+		return error;
+
+	error = xfs_trans_reserve_more(sc->tp, tx->res.resblks, 0);
+	if (error)
+		return error;
+
+	return xrep_tempswap_reserve_quota(sc, tx);
+}
+
+/* Swap forks between the file being repaired and the temporary file. */
+int
+xrep_tempswap_contents(
+	struct xfs_scrub	*sc,
+	struct xrep_tempswap	*tx)
+{
+	int			error;
+
+	xfs_swapext(sc->tp, &tx->req);
+	error = xfs_defer_finish(&sc->tp);
+	if (error)
+		return error;
+
+	/*
+	 * If we swapped the ondisk sizes of two metadata files, we must swap
+	 * the incore sizes as well.  Since online fsck doesn't use swapext on
+	 * the data forks of user-accessible files, the two sizes are always
+	 * the same, so we don't need to log the inodes.
+	 */
+	if (tx->req.req_flags & XFS_SWAP_REQ_SET_SIZES) {
+		loff_t	temp;
+
+		temp = i_size_read(VFS_I(sc->ip));
+		i_size_write(VFS_I(sc->ip), i_size_read(VFS_I(sc->tempip)));
+		i_size_write(VFS_I(sc->tempip), temp);
+	}
+
+	return 0;
 }
