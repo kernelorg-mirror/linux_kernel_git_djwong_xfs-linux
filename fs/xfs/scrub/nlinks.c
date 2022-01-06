@@ -26,6 +26,7 @@
 #include "scrub/nlinks.h"
 #include "scrub/trace.h"
 #include "scrub/readdir.h"
+#include "scrub/tempfile.h"
 
 /*
  * Live Inode Link Count Checking
@@ -143,6 +144,13 @@ xchk_nlinks_live_update(
 	 */
 	if (action == XFS_BACKREF_NLINK_DELTA)
 		scan_dir = p->ip;
+
+	/*
+	 * Ignore temporary directories being used to stage dir repairs, since
+	 * we don't bump the link counts of the children.
+	 */
+	if (xrep_is_tempfile(scan_dir))
+		return NOTIFY_DONE;
 
 	/* Ignore the live update if the directory hasn't been scanned yet. */
 	if (!xchk_iscan_want_live_update(&xnc->collect_iscan, scan_dir->i_ino))
@@ -310,6 +318,13 @@ xchk_nlinks_collect_dir(
 	struct xfs_scrub	*sc = xnc->sc;
 	unsigned int		lock_mode;
 	int			error = 0;
+
+	/*
+	 * Ignore temporary directories being used to stage dir repairs, since
+	 * we don't bump the link counts of the children.
+	 */
+	if (xrep_is_tempfile(dp))
+		return 0;
 
 	/* Prevent anyone from changing this directory while we walk it. */
 	xfs_ilock(dp, XFS_IOLOCK_SHARED);
@@ -526,6 +541,14 @@ xchk_nlinks_compare_inode(
 	uint64_t		total_links;
 	unsigned int		actual_nlink;
 	int			error;
+
+	/*
+	 * Ignore temporary files being used to stage repairs, since we assume
+	 * they're correct for non-directories, and the directory repair code
+	 * doesn't bump the link counts for the children.
+	 */
+	if (xrep_is_tempfile(ip))
+		return 0;
 
 	xfs_ilock(ip, XFS_ILOCK_SHARED);
 	mutex_lock(&xnc->lock);
