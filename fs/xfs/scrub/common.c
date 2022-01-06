@@ -34,6 +34,7 @@
 #include "scrub/trace.h"
 #include "scrub/repair.h"
 #include "scrub/health.h"
+#include "scrub/tempfile.h"
 
 /* Common code for the metadata scrubbers. */
 
@@ -1029,7 +1030,10 @@ xchk_setup_inode_contents(
 	if (error)
 		return error;
 
-	/* Got the inode, lock it and we're ready to go. */
+	/*
+	 * Prepare to scrub the file contents by locking out IO and page
+	 * faults.
+	 */
 	xchk_ilock(sc, XFS_IOLOCK_EXCL | XFS_MMAPLOCK_EXCL);
 	error = xchk_trans_alloc(sc, resblks);
 	if (error)
