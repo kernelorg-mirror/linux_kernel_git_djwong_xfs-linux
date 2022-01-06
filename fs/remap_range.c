@@ -28,18 +28,18 @@
  */
 static int generic_remap_checks(struct file *file_in, loff_t pos_in,
 				struct file *file_out, loff_t pos_out,
-				loff_t *req_count, unsigned int remap_flags)
+				loff_t *req_count, unsigned int remap_flags,
+				unsigned int blocksize)
 {
 	struct inode *inode_in = file_in->f_mapping->host;
 	struct inode *inode_out = file_out->f_mapping->host;
 	uint64_t count = *req_count;
 	uint64_t bcount;
 	loff_t size_in, size_out;
-	loff_t bs = inode_out->i_sb->s_blocksize;
 	int ret;
 
 	/* The start of both ranges must be aligned to an fs block. */
-	if (!IS_ALIGNED(pos_in, bs) || !IS_ALIGNED(pos_out, bs))
+	if (!IS_ALIGNED(pos_in, blocksize) || !IS_ALIGNED(pos_out, blocksize))
 		return -EINVAL;
 
 	/* Ensure offsets don't wrap. */
@@ -72,10 +72,10 @@ static int generic_remap_checks(struct file *file_in, loff_t pos_in,
 	 * already confirmed the starting offsets' block alignment.
 	 */
 	if (pos_in + count == size_in) {
-		bcount = ALIGN(size_in, bs) - pos_in;
+		bcount = ALIGN(size_in, blocksize) - pos_in;
 	} else {
-		if (!IS_ALIGNED(count, bs))
-			count = ALIGN_DOWN(count, bs);
+		if (!IS_ALIGNED(count, blocksize))
+			count = ALIGN_DOWN(count, blocksize);
 		bcount = count;
 	}
 
@@ -123,9 +123,10 @@ static int generic_remap_check_len(struct inode *inode_in,
 				   struct inode *inode_out,
 				   loff_t pos_out,
 				   loff_t *len,
-				   unsigned int remap_flags)
+				   unsigned int remap_flags,
+				   unsigned int blocksize)
 {
-	u64 blkmask = i_blocksize(inode_in) - 1;
+	u64 blkmask = blocksize - 1;
 	loff_t new_len = *len;
 
 	if ((*len & blkmask) == 0)
@@ -277,9 +278,9 @@ out_error:
  * If there's an error, then the usual negative error code is returned.
  * Otherwise returns 0 with *len set to the request length.
  */
-int generic_remap_file_range_prep(struct file *file_in, loff_t pos_in,
-				  struct file *file_out, loff_t pos_out,
-				  loff_t *len, unsigned int remap_flags)
+int __generic_remap_file_range_prep(struct file *file_in, loff_t pos_in,
+		struct file *file_out, loff_t pos_out, loff_t *len,
+		unsigned int remap_flags, unsigned int blocksize)
 {
 	struct inode *inode_in = file_inode(file_in);
 	struct inode *inode_out = file_inode(file_out);
@@ -314,7 +315,7 @@ int generic_remap_file_range_prep(struct file *file_in, loff_t pos_in,
 
 	/* Check that we don't violate system file offset limits. */
 	ret = generic_remap_checks(file_in, pos_in, file_out, pos_out, len,
-			remap_flags);
+			remap_flags, blocksize);
 	if (ret)
 		return ret;
 
@@ -348,7 +349,7 @@ int generic_remap_file_range_prep(struct file *file_in, loff_t pos_in,
 	}
 
 	ret = generic_remap_check_len(inode_in, inode_out, pos_out, len,
-			remap_flags);
+			remap_flags, blocksize);
 	if (ret)
 		return ret;
 
@@ -357,6 +358,16 @@ int generic_remap_file_range_prep(struct file *file_in, loff_t pos_in,
 		ret = file_modified(file_out);
 
 	return ret;
+}
+EXPORT_SYMBOL(__generic_remap_file_range_prep);
+
+int generic_remap_file_range_prep(struct file *file_in, loff_t pos_in,
+		struct file *file_out, loff_t pos_out, loff_t *len,
+		unsigned int remap_flags)
+{
+	return __generic_remap_file_range_prep(file_in, pos_in, file_out,
+			pos_out, len, remap_flags,
+			file_inode(file_out)->i_sb->s_blocksize);
 }
 EXPORT_SYMBOL(generic_remap_file_range_prep);
 
