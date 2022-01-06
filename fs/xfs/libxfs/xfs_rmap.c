@@ -832,6 +832,10 @@ xfs_rmap_update_hook(
 
 	if (pag)
 		xfs_hook_call(&pag->pag_rmap_update_hooks, op, &p);
+#ifdef CONFIG_XFS_RT
+	else
+		xfs_hook_call(&tp->t_mountp->m_rtrmap_update_hooks, op, &p);
+#endif
 }
 #else
 # define xfs_rmap_update_hook(t, p, o, s, b, u, oi)	do { } while(0)
