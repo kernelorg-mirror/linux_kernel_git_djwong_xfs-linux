@@ -147,7 +147,9 @@ int xfs_rtfile_convert_unwritten(struct xfs_inode *ip, loff_t pos,
 		uint64_t len);
 
 #define XFS_RTLOCK_ALLOC	(1 << 0) /* rt allocation */
-#define XFS_RTLOCK_ALL		(XFS_RTLOCK_ALLOC)
+#define XFS_RTLOCK_RMAP		(1 << 1) /* rmap operations */
+#define XFS_RTLOCK_ALL		(XFS_RTLOCK_ALLOC | \
+				 XFS_RTLOCK_RMAP)
 
 void xfs_rtlock(struct xfs_trans *tp, struct xfs_mount *mp,
 		unsigned int rtlock_flags);
