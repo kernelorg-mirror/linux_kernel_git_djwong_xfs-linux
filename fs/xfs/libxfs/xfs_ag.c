@@ -193,6 +193,7 @@ xfs_free_perag(
 		spin_unlock(&mp->m_perag_lock);
 		ASSERT(pag);
 		ASSERT(atomic_read(&pag->pag_ref) == 0);
+		xfs_drain_free(&pag->pag_intents);
 
 		cancel_delayed_work_sync(&pag->pag_blockgc_work);
 		xfs_iunlink_destroy(pag);
@@ -255,6 +256,7 @@ xfs_initialize_perag(
 		spin_lock_init(&pag->pag_state_lock);
 		INIT_DELAYED_WORK(&pag->pag_blockgc_work, xfs_blockgc_worker);
 		INIT_RADIX_TREE(&pag->pag_ici_root, GFP_ATOMIC);
+		xfs_drain_init(&pag->pag_intents);
 		init_waitqueue_head(&pag->pagb_wait);
 		pag->pagb_count = 0;
 		pag->pagb_tree = RB_ROOT;
@@ -284,6 +286,7 @@ xfs_initialize_perag(
 out_hash_destroy:
 	xfs_buf_hash_destroy(pag);
 out_remove_pag:
+	xfs_drain_free(&pag->pag_intents);
 	radix_tree_delete(&mp->m_perag_tree, index);
 out_free_pag:
 	kmem_free(pag);
@@ -294,6 +297,7 @@ out_unwind_new_pags:
 		if (!pag)
 			break;
 		xfs_buf_hash_destroy(pag);
+		xfs_drain_free(&pag->pag_intents);
 		xfs_iunlink_destroy(pag);
 		kmem_free(pag);
 	}
