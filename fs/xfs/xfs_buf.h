@@ -78,6 +78,7 @@ typedef unsigned int xfs_buf_flags_t;
  */
 #define XFS_BSTATE_DISPOSE	 (1 << 0)	/* buffer being discarded */
 #define XFS_BSTATE_IN_FLIGHT	 (1 << 1)	/* I/O in flight */
+#define XFS_BSTATE_CACHED	 (1 << 2)	/* cached buffer */
 
 /*
  * The xfs_buftarg contains 2 notions of "sector size" -
@@ -98,10 +99,15 @@ typedef struct xfs_buftarg {
 	struct dax_device	*bt_daxdev;
 	u64			bt_dax_part_off;
 	struct xfs_mount	*bt_mount;
+	unsigned int		bt_flags;
 	unsigned int		bt_meta_sectorsize;
 	size_t			bt_meta_sectormask;
 	size_t			bt_logical_sectorsize;
 	size_t			bt_logical_sectormask;
+
+	/* self-caching buftargs */
+	spinlock_t		bt_hashlock;
+	struct rhashtable	bt_bufhash;
 
 	/* LRU control structures */
 	struct shrinker		bt_shrinker;
@@ -110,6 +116,9 @@ typedef struct xfs_buftarg {
 	struct percpu_counter	bt_io_count;
 	struct ratelimit_state	bt_ioerror_rl;
 } xfs_buftarg_t;
+
+/* the xfs_buftarg indexes buffers via bt_buf_hash */
+#define XFS_BUFTARG_SELF_CACHED	(1U << 0)
 
 #define XB_PAGES	2
 
