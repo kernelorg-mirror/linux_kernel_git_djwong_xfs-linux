@@ -221,15 +221,15 @@ xchk_xref_has_no_owner(
 	xfs_agblock_t		bno,
 	xfs_extlen_t		len)
 {
-	bool			has_rmap;
+	enum xfs_btree_keyfill	keyfill;
 	int			error;
 
 	if (!sc->sa.rmap_cur || xchk_skip_xref(sc->sm))
 		return;
 
-	error = xfs_rmap_has_record(sc->sa.rmap_cur, bno, len, &has_rmap);
+	error = xfs_rmap_scan_keyfill(sc->sa.rmap_cur, bno, len, &keyfill);
 	if (!xchk_should_check_xref(sc, &error, &sc->sa.rmap_cur))
 		return;
-	if (has_rmap)
+	if (keyfill != XFS_BTREE_KEYFILL_EMPTY)
 		xchk_btree_xref_set_corrupt(sc, sc->sa.rmap_cur, 0);
 }
