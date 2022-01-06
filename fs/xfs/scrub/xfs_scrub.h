@@ -8,8 +8,10 @@
 
 #ifndef CONFIG_XFS_ONLINE_SCRUB
 # define xfs_scrub_metadata(file, sm)	(-ENOTTY)
+# define xfs_scrubv_metadata(file, vhead)	(-ENOTTY)
 #else
 int xfs_scrub_metadata(struct file *file, struct xfs_scrub_metadata *sm);
+int xfs_scrubv_metadata(struct file *file, struct xfs_scrub_vec_head *vhead);
 #endif /* CONFIG_XFS_ONLINE_SCRUB */
 
 #endif	/* __XFS_SCRUB_H__ */
