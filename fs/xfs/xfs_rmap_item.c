@@ -293,11 +293,19 @@ xfs_rmap_update_diff_items(
 	struct xfs_mount		*mp = priv;
 	struct xfs_rmap_intent		*ra;
 	struct xfs_rmap_intent		*rb;
+	xfs_agnumber_t			a_ag, b_ag;
 
 	ra = container_of(a, struct xfs_rmap_intent, ri_list);
 	rb = container_of(b, struct xfs_rmap_intent, ri_list);
-	return  XFS_FSB_TO_AGNO(mp, ra->ri_bmap.br_startblock) -
-		XFS_FSB_TO_AGNO(mp, rb->ri_bmap.br_startblock);
+	if (ra->ri_realtime)
+		a_ag = NULLAGNUMBER;
+	else
+		a_ag = XFS_FSB_TO_AGNO(mp, ra->ri_bmap.br_startblock);
+	if (rb->ri_realtime)
+		b_ag = NULLAGNUMBER;
+	else
+		b_ag = XFS_FSB_TO_AGNO(mp, rb->ri_bmap.br_startblock);
+	return a_ag - b_ag;
 }
 
 /* Log rmap updates in the intent item. */
@@ -359,6 +367,8 @@ xfs_rmap_update_log_item(
 		map->me_flags |= XFS_RMAP_EXTENT_UNWRITTEN;
 	if (rmap->ri_whichfork == XFS_ATTR_FORK)
 		map->me_flags |= XFS_RMAP_EXTENT_ATTR_FORK;
+	if (rmap->ri_realtime)
+		map->me_flags |= XFS_RMAP_EXTENT_REALTIME;
 }
 
 static struct xfs_log_item *
@@ -408,7 +418,7 @@ xfs_rmap_update_finish_item(
 	error = xfs_trans_log_finish_rmap_update(tp, RUD_ITEM(done), ri,
 			state);
 
-	xfs_fs_drop_intents(mp, false, ri->ri_bmap.br_startblock);
+	xfs_fs_drop_intents(mp, ri->ri_realtime, ri->ri_bmap.br_startblock);
 	kmem_cache_free(xfs_rmap_intent_cache, ri);
 	return error;
 }
@@ -430,7 +440,7 @@ xfs_rmap_update_cancel_item(
 	struct xfs_rmap_intent		*rmap;
 
 	rmap = container_of(item, struct xfs_rmap_intent, ri_list);
-	xfs_fs_drop_intents(mp, false, rmap->ri_bmap.br_startblock);
+	xfs_fs_drop_intents(mp, rmap->ri_realtime, rmap->ri_bmap.br_startblock);
 	kmem_cache_free(xfs_rmap_intent_cache, rmap);
 }
 
@@ -443,7 +453,7 @@ xfs_rmap_update_add_item(
 	const struct xfs_rmap_intent	*ri;
 
 	ri = container_of(item, struct xfs_rmap_intent, ri_list);
-	xfs_fs_bump_intents(mp, false, ri->ri_bmap.br_startblock);
+	xfs_fs_bump_intents(mp, ri->ri_realtime, ri->ri_bmap.br_startblock);
 }
 
 const struct xfs_defer_op_type xfs_rmap_update_defer_type = {
@@ -538,6 +548,7 @@ xfs_rui_item_recover(
 		map = &ruip->rui_format.rui_extents[i];
 		fake.ri_whichfork = (map->me_flags & XFS_RMAP_EXTENT_ATTR_FORK) ?
 				XFS_ATTR_FORK : XFS_DATA_FORK;
+		fake.ri_realtime = !!(map->me_flags & XFS_RMAP_EXTENT_REALTIME);
 		switch (map->me_flags & XFS_RMAP_EXTENT_TYPE_MASK) {
 		case XFS_RMAP_EXTENT_MAP:
 			fake.ri_type = XFS_RMAP_MAP;
