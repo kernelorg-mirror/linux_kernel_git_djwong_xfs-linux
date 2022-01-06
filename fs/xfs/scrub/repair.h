@@ -82,6 +82,7 @@ int xrep_setup_rtsummary(struct xfs_scrub *sc, unsigned int *resblks,
 int xrep_setup_xattr(struct xfs_scrub *sc);
 int xrep_setup_directory(struct xfs_scrub *sc);
 int xrep_setup_parent(struct xfs_scrub *sc);
+int xrep_setup_nlinks(struct xfs_scrub *sc, unsigned int *buf_bytes);
 
 int xrep_xattr_reset_fork(struct xfs_scrub *sc);
 
@@ -271,6 +272,11 @@ xrep_setup_rtsummary(
 	struct xfs_scrub	*sc,
 	unsigned int		*whatever,
 	size_t			*dontcare)
+{
+	return 0;
+}
+
+static inline int xrep_setup_nlinks(struct xfs_scrub *sc, unsigned int *x)
 {
 	return 0;
 }
