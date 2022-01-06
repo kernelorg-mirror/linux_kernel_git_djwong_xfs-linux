@@ -1429,3 +1429,48 @@ xfs_perag_drain_intents(
 	return xfs_drain_wait(&pag->pag_intents);
 }
 #endif /* CONFIG_XFS_DRAIN_INTENTS */
+
+#ifdef CONFIG_XFS_LIVE_HOOKS
+/* Initialize a notifier chain. */
+void
+xfs_hook_init(
+	struct xfs_hook_chain	*chain)
+{
+	srcu_init_notifier_head(&chain->head);
+}
+
+/* Make it so a function gets called whenever we hit a certain hook point. */
+int
+xfs_hook_add(
+	struct xfs_hook_chain	*chain,
+	struct notifier_block	*hook,
+	notifier_fn_t		fn)
+{
+	hook->notifier_call = fn;
+	return srcu_notifier_chain_register(&chain->head, hook);
+}
+
+/* Remove a previously installed hook. */
+void
+xfs_hook_del(
+	struct xfs_hook_chain	*chain,
+	struct notifier_block	*hook)
+{
+	if (!hook->notifier_call)
+		return;
+
+	srcu_notifier_chain_unregister(&chain->head, hook);
+	rcu_barrier();
+	hook->notifier_call = NULL;
+}
+
+/* Call a hook.  Returns the NOTIFY_* value returned by the last hook. */
+int
+xfs_hook_call(
+	struct xfs_hook_chain	*chain,
+	unsigned long		val,
+	void			*priv)
+{
+	return srcu_notifier_call_chain(&chain->head, val, priv);
+}
+#endif /* CONFIG_XFS_LIVE_HOOKS */

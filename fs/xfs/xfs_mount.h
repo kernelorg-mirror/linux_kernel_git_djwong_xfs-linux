@@ -56,6 +56,23 @@ struct xfs_error_cfg {
 	long		retry_timeout;	/* in jiffies, -1 = infinite */
 };
 
+struct xfs_hook_chain {
+#ifdef CONFIG_XFS_LIVE_HOOKS
+	struct srcu_notifier_head	head;
+#endif
+};
+
+#ifdef CONFIG_XFS_LIVE_HOOKS
+void xfs_hook_init(struct xfs_hook_chain *chain);
+int xfs_hook_add(struct xfs_hook_chain *chain, struct notifier_block *hook,
+		 notifier_fn_t fn);
+void xfs_hook_del(struct xfs_hook_chain *chain, struct notifier_block *hook);
+int xfs_hook_call(struct xfs_hook_chain *chain, unsigned long val, void *priv);
+#else
+# define xfs_hook_init(chain)
+# define xfs_hook_call(chain, val, priv)	(NOTIFY_DONE)
+#endif
+
 /*
  * Passive drain mechanism.  This data structure tracks a count of some items
  * and contains a waitqueue for callers who would like to wake up when the
