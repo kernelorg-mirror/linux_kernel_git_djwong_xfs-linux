@@ -98,6 +98,15 @@ int xrep_setup_inode(struct xfs_scrub *sc, struct xfs_imap *imap);
 void xrep_ag_btcur_init(struct xfs_scrub *sc, struct xchk_ag *sa);
 int xrep_ag_init(struct xfs_scrub *sc, struct xfs_perag *pag,
 		struct xchk_ag *sa);
+void xrep_rt_btcur_init(struct xfs_scrub *sc, struct xchk_rt *sr);
+
+#ifdef CONFIG_XFS_RT
+int xrep_require_rtext_inuse(struct xfs_scrub *sc, xfs_rtblock_t rtbno,
+		xfs_filblks_t len);
+#else
+# define xrep_require_rtext_inuse(sc, rtbno, len)	(-ENOSYS)
+#endif
+bool xrep_is_rtmeta_ino(struct xfs_scrub *sc, xfs_ino_t ino);
 
 /* Metadata revalidators */
 
