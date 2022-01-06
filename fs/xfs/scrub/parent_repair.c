@@ -281,6 +281,44 @@ out_rele:
 	return error;
 }
 
+/* Check the dentry cache to see if knows of a parent for the scrub target. */
+xfs_ino_t
+xrep_parent_from_dcache(
+	struct xfs_scrub	*sc)
+{
+	struct inode		*pip = NULL;
+	struct dentry		*dentry, *parent;
+	xfs_ino_t		ret = NULLFSINO;
+
+	dentry = d_find_alias(VFS_I(sc->ip));
+	if (!dentry)
+		goto out;
+
+	parent = dget_parent(dentry);
+	if (!parent)
+		goto out_dput;
+
+	if (parent->d_sb != sc->ip->i_mount->m_super) {
+		dput(parent);
+		goto out_dput;
+	}
+
+	pip = igrab(d_inode(parent));
+	dput(parent);
+
+	if (S_ISDIR(pip->i_mode)) {
+		trace_xrep_findparent_from_dcache(sc->ip, XFS_I(pip)->i_ino);
+		ret = XFS_I(pip)->i_ino;
+	}
+
+	xchk_irele(sc, XFS_I(pip));
+
+out_dput:
+	dput(dentry);
+out:
+	return ret;
+}
+
 /*
  * Scan the entire filesystem looking for a parent inode.
  *
@@ -383,6 +421,12 @@ xrep_parent(
 	if (sick & XFS_SICK_INO_DIR)
 		return -EFSCORRUPTED;
 
+	/* Does the VFS dcache have an answer for us? */
+	parent_ino = xrep_parent_from_dcache(sc);
+	error = xrep_parent_confirm(sc, &parent_ino);
+	if (!error && parent_ino != NULLFSINO)
+		goto reset_parent;
+
 	/* Scan the entire filesystem for a parent. */
 	error = xrep_parent_scan(sc, &parent_ino);
 	if (error)
@@ -390,6 +434,7 @@ xrep_parent(
 	if (parent_ino == NULLFSINO)
 		return -EFSCORRUPTED;
 
+reset_parent:
 	/* If the '..' entry is already set to the parent inode, we're done. */
 	curr_parent = xrep_dotdot_lookup(sc);
 	if (curr_parent != NULLFSINO && curr_parent == parent_ino)
