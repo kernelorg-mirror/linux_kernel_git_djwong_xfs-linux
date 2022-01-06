@@ -88,6 +88,25 @@ int xrep_ag_init(struct xfs_scrub *sc, struct xfs_perag *pag,
 int xrep_revalidate_allocbt(struct xfs_scrub *sc);
 int xrep_revalidate_iallocbt(struct xfs_scrub *sc);
 
+/* Buffer cache scan context. */
+struct xrep_buf_scan {
+	/* Disk address for the buffers we want to scan. */
+	xfs_daddr_t		daddr;
+
+	/* Maximum number of sectors to scan. */
+	xfs_daddr_t		max_sectors;
+
+	/* Each round, increment the search length by this number of sectors. */
+	xfs_daddr_t		daddr_step;
+
+	/* Internal scan state; initialize to zero. */
+	xfs_daddr_t		__sector_count;
+};
+
+xfs_daddr_t xrep_max_buf_sectors(struct xfs_mount *mp, xfs_extlen_t fsblocks);
+struct xfs_buf *xrep_buf_scan_advance(struct xfs_mount *mp,
+		struct xrep_buf_scan *scan);
+
 /* Metadata repairers */
 
 int xrep_probe(struct xfs_scrub *sc);
