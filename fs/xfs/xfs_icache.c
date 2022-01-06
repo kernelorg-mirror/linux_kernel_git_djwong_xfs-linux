@@ -770,23 +770,23 @@ out_error_or_again:
 }
 
 /*
- * "Is this a cached inode that's also allocated?"
+ * Decide if this is this a cached inode that's also allocated.  The caller
+ * must hold the AGI buffer lock to prevent inodes from being allocated or
+ * freed.
  *
- * Look up an inode by number in the given file system.  If the inode is
- * in cache and isn't in purgatory, return 1 if the inode is allocated
- * and 0 if it is not.  For all other cases (not in cache, being torn
- * down, etc.), return a negative error code.
+ * Look up an inode by number in the given file system.  If the inode number
+ * is invalid, return -EINVAL.  If the inode is not in cache, return -ENODATA.
+ * If the inode is in an intermediate state (new, being reclaimed, reused) then
+ * return -EAGAIN.
  *
- * The caller has to prevent inode allocation and freeing activity,
- * presumably by locking the AGI buffer.   This is to ensure that an
- * inode cannot transition from allocated to freed until the caller is
- * ready to allow that.  If the inode is in an intermediate state (new,
- * reclaimable, or being reclaimed), -EAGAIN will be returned; if the
- * inode is not in the cache, -ENOENT will be returned.  The caller must
- * deal with these scenarios appropriately.
+ * Otherwise, the incore inode is the one we want, and it is either live,
+ * somewhere in the inactivation machinery, or reclaimable.  The inode is
+ * allocated if i_mode is nonzero.  In all three cases, the cached inode will
+ * be more up to date than the ondisk inode buffer, so we must use the incore
+ * i_mode.
  *
- * This is a specialized use case for the online scrubber; if you're
- * reading this, you probably want xfs_iget.
+ * This is a specialized use case for the online fsck; if you're reading this,
+ * you probably want xfs_iget.
  */
 int
 xfs_icache_inode_is_allocated(
@@ -796,15 +796,97 @@ xfs_icache_inode_is_allocated(
 	bool			*inuse)
 {
 	struct xfs_inode	*ip;
+	struct xfs_perag	*pag;
+	xfs_agino_t		agino;
 	int			error;
 
-	error = xfs_iget(mp, tp, ino, XFS_IGET_INCORE, 0, &ip);
-	if (error)
-		return error;
+	/* reject inode numbers outside existing AGs */
+	if (!ino || XFS_INO_TO_AGNO(mp, ino) >= mp->m_sb.sb_agcount)
+		return -EINVAL;
 
-	*inuse = !!(VFS_I(ip)->i_mode);
-	xfs_irele(ip);
-	return 0;
+	/* get the perag structure and ensure that it's inode capable */
+	pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, ino));
+	agino = XFS_INO_TO_AGINO(mp, ino);
+
+	rcu_read_lock();
+	ip = radix_tree_lookup(&pag->pag_ici_root, agino);
+	if (!ip) {
+		/* cache miss */
+		error = -ENODATA;
+		goto out_pag;
+	}
+
+	/*
+	 * If the inode number doesn't match, the incore inode got reused
+	 * during an RCU grace period and the radix tree hasn't been updated.
+	 * This isn't the inode we want.
+	 */
+	error = -ENODATA;
+	spin_lock(&ip->i_flags_lock);
+	if (ip->i_ino != ino)
+		goto out_skip;
+
+	trace_xfs_icache_inode_is_allocated(ip);
+
+	/*
+	 * We have an incore inode that matches the inode we want, and the
+	 * caller holds the AGI buffer.
+	 *
+	 * If the incore inode is INEW, there are several possibilities:
+	 *
+	 * For a file that is being created, note that we allocate the ondisk
+	 * inode before allocating, initializing, and adding the incore inode
+	 * to the radix tree.
+	 *
+	 * If the incore inode is being recycled, the inode has to be allocated
+	 * because we don't allow freed inodes to be recycled.
+	 *
+	 * If the inode is queued for inactivation, it should still be
+	 * allocated.
+	 *
+	 * If the incore inode is undergoing inactivation, either it is before
+	 * the point where it would get freed ondisk (in which case i_mode is
+	 * still nonzero), or it has already been freed, in which case i_mode
+	 * is zero.  We don't take the ILOCK here, but difree and dialloc
+	 * require the AGI, which we do hold.
+	 *
+	 * If the inode is anywhere in the reclaim mechanism, we know that it's
+	 * still ok to query i_mode because we don't allow uncached inode
+	 * updates.
+	 *
+	 * If the incore inode is live (i.e. referenced from the dcache), the
+	 * ondisk inode had better be allocated.  This is the most trivial
+	 * case.
+	 */
+#ifdef DEBUG
+	if (ip->i_flags & XFS_INEW) {
+		/* created on disk already or recycling */
+		ASSERT(VFS_I(ip)->i_mode != 0);
+	}
+
+	if ((ip->i_flags & XFS_NEED_INACTIVE) &&
+	    !(ip->i_flags & XFS_INACTIVATING)) {
+		/* definitely before difree */
+		ASSERT(VFS_I(ip)->i_mode != 0);
+	}
+
+	/* XFS_INACTIVATING and XFS_IRECLAIMABLE could be either state */
+
+	if (!(ip->i_flags & (XFS_NEED_INACTIVE | XFS_INEW | XFS_IRECLAIMABLE |
+			     XFS_INACTIVATING))) {
+		/* live inode */
+		ASSERT(VFS_I(ip)->i_mode != 0);
+	}
+#endif
+	*inuse = VFS_I(ip)->i_mode != 0;
+	error = 0;
+
+out_skip:
+	spin_unlock(&ip->i_flags_lock);
+out_pag:
+	rcu_read_unlock();
+	xfs_perag_put(pag);
+	return error;
 }
 
 /*
