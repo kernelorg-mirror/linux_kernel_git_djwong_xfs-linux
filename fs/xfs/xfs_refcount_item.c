@@ -393,7 +393,7 @@ xfs_refcount_update_finish_item(
 	 * work or failed.  Be careful to use the original startblock because
 	 * the finishing functions can update the intent state.
 	 */
-	xfs_fs_drop_intents(mp, orig_startblock);
+	xfs_fs_drop_intents(mp, false, orig_startblock);
 	kmem_cache_free(xfs_refcount_intent_cache, refc);
 	return error;
 }
@@ -415,7 +415,7 @@ xfs_refcount_update_cancel_item(
 	struct xfs_refcount_intent	*refc;
 
 	refc = container_of(item, struct xfs_refcount_intent, ri_list);
-	xfs_fs_drop_intents(mp, refc->ri_startblock);
+	xfs_fs_drop_intents(mp, false, refc->ri_startblock);
 	kmem_cache_free(xfs_refcount_intent_cache, refc);
 }
 
@@ -428,7 +428,7 @@ xfs_refcount_update_add_item(
 	const struct xfs_refcount_intent *ri;
 
 	ri = container_of(item, struct xfs_refcount_intent, ri_list);
-	xfs_fs_bump_intents(mp, ri->ri_startblock);
+	xfs_fs_bump_intents(mp, false, ri->ri_startblock);
 }
 
 const struct xfs_defer_op_type xfs_refcount_update_defer_type = {
