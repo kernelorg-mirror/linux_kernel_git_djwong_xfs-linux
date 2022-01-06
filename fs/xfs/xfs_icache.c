@@ -749,7 +749,7 @@ again:
 	return 0;
 
 out_error_or_again:
-	if (error == -EAGAIN) {
+	if (error == -EAGAIN && !(flags & XFS_IGET_NOWAIT)) {
 		delay(1);
 		goto again;
 	}
@@ -1923,6 +1923,20 @@ xfs_inodegc_worker(
 		xfs_iflags_set(ip, XFS_INACTIVATING);
 		xfs_inodegc_inactivate(ip);
 	}
+}
+
+/*
+ * Run all currently queued inode inactivation work immediately, but do not
+ * wait for it to finish.
+ */
+void
+xfs_inodegc_start_flush(
+	struct xfs_mount	*mp)
+{
+	if (!xfs_is_inodegc_enabled(mp))
+		return;
+
+	xfs_inodegc_queue_all(mp);
 }
 
 /*
