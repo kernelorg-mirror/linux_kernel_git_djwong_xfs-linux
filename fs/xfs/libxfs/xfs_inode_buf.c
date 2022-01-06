@@ -371,6 +371,12 @@ xfs_dinode_verify_fork(
 			return __this_address;
 		}
 		break;
+	case XFS_DINODE_FMT_RMAP:
+		if (!xfs_has_rtrmapbt(mp))
+			return __this_address;
+		if (!(dip->di_flags2 & cpu_to_be64(XFS_DIFLAG2_METADATA)))
+			return __this_address;
+		break;
 	default:
 		return __this_address;
 	}
