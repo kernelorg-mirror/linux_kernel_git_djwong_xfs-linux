@@ -772,6 +772,13 @@ xchk_iget_check_handle(
 	struct xfs_scrub	*sc,
 	struct xfs_inode	*ip)
 {
+	/*
+	 * Only the directories in the metadata directory tree can be scrubbed
+	 * by handle -- files must be checked through a scrub type.
+	 */
+	if (xfs_is_metadata_inode(ip) && !S_ISDIR(VFS_I(ip)->i_mode))
+		return false;
+
 	/* Generation must match to scrub by handle. */
 	if (VFS_I(ip)->i_generation == sc->sm->sm_gen)
 		return true;
