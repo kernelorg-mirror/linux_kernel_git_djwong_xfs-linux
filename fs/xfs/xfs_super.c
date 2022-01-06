@@ -727,6 +727,9 @@ xfs_mount_free(
 {
 	kfree(mp->m_rtname);
 	kfree(mp->m_logname);
+#ifdef CONFIG_XFS_RT
+	xfs_drain_free(&mp->m_rt_intents);
+#endif
 	kmem_free(mp);
 }
 
@@ -1906,10 +1909,19 @@ static int xfs_init_fs_context(
 	struct fs_context	*fc)
 {
 	struct xfs_mount	*mp;
+	int			error = 0;
 
 	mp = kmem_alloc(sizeof(struct xfs_mount), KM_ZERO);
 	if (!mp)
 		return -ENOMEM;
+
+#ifdef CONFIG_XFS_RT
+	error = xfs_drain_init(&mp->m_rt_intents);
+	if (error) {
+		kmem_free(mp);
+		return error;
+	}
+#endif
 
 	spin_lock_init(&mp->m_sb_lock);
 	spin_lock_init(&mp->m_agirotor_lock);
@@ -1949,7 +1961,7 @@ static int xfs_init_fs_context(
 	fc->s_fs_info = mp;
 	fc->ops = &xfs_context_ops;
 
-	return 0;
+	return error;
 }
 
 static struct file_system_type xfs_fs_type = {

@@ -665,20 +665,79 @@ xchk_ag_init(
 	return 0;
 }
 
-/*
- * For scrubbing a realtime file, grab all the in-core resources we'll need to
- * check the realtime metadata, which means taking the ILOCK of the realtime
- * metadata inodes.  Callers must not join these inodes to the transaction
- * with non-zero lockflags or concurrency problems will result.
- */
-int
-xchk_rt_init(
+#ifdef CONFIG_XFS_RT
+/* Lock all the realtime metadata inode ILOCKs and wait for intents. */
+static int
+xchk_rt_lock(
+	struct xfs_scrub	*sc,
+	struct xchk_rt		*sr)
+{
+	int			error = 0;
+
+	do {
+		if (xchk_should_terminate(sc, &error))
+			return error;
+
+		xfs_rtlock(NULL, sc->mp, XFS_RTLOCK_ALL);
+
+		/*
+		 * Decide if the RT volume is quiet enough for all metadata to
+		 * be consistent with each other.  Regular file IO doesn't get
+		 * to lock all the rt inodes at the same time, which means that
+		 * there could be other threads in the middle of processing a
+		 * chain of deferred ops.
+		 *
+		 * We just locked all the rt inodes; now take a look to see if
+		 * there are any rt intents in progress.  If there are, drop
+		 * the rt inode locks and wait for the intents to drain.  Since
+		 * we hold the rt inode locks for the duration of the scrub,
+		 * this is the only time we have to sample the intents counter;
+		 * any threads increasing it after this point can't possibly be
+		 * in the middle of a chain of rt metadata updates.
+		 *
+		 * Obviously, this should be slanted against scrub and in favor
+		 * of runtime threads.
+		 */
+		if (!xfs_drain_busy(&sc->mp->m_rt_intents)) {
+			sr->locked = true;
+			return 0;
+		}
+
+		xfs_rtunlock(sc->mp, XFS_RTLOCK_ALL);
+
+		error = xfs_rt_drain_intents(sc->mp);
+		if (error == -ERESTARTSYS)
+			error = -EINTR;
+	} while (!error);
+
+	return error;
+}
+#else
+/* Lock all the realtime metadata inode ILOCKs. */
+static int
+xchk_rt_lock(
 	struct xfs_scrub	*sc,
 	struct xchk_rt		*sr)
 {
 	xfs_rtlock(NULL, sc->mp, XFS_RTLOCK_ALL);
 	sr->locked = true;
 	return 0;
+}
+#endif /* CONFIG_XFS_RT */
+
+/*
+ * For scrubbing a realtime file, grab all the in-core resources we'll need to
+ * check the realtime metadata, which means taking the ILOCK of the realtime
+ * metadata inodes and waiting for intents to drain.  Callers must not join
+ * these inodes to the transaction with non-zero lockflags or concurrency
+ * problems will result.
+ */
+int
+xchk_rt_init(
+	struct xfs_scrub	*sc,
+	struct xchk_rt		*sr)
+{
+	return xchk_rt_lock(sc, sr);
 }
 
 /*
