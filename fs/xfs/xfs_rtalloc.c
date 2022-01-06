@@ -904,6 +904,61 @@ xfs_alloc_rsum_cache(
  * Visible (exported) functions.
  */
 
+/* Add a metadata inode for a realtime volume. */
+static int
+xfs_growfsrt_imeta_create(
+	struct xfs_mount		*mp,
+	const struct xfs_imeta_path	*path,
+	struct xfs_inode		**ipp)
+{
+	struct xfs_imeta_update		upd;
+	struct xfs_trans		*tp;
+	struct xfs_inode		*ip = NULL;
+	int				error;
+
+	error = xfs_imeta_ensure_dirpath(mp, path);
+	if (error)
+		return error;
+
+	error = xfs_imeta_start_update(mp, path, &upd);
+	if (error)
+		return error;
+
+	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_imeta_create,
+			xfs_imeta_create_space_res(mp), 0, 0, &tp);
+	if (error)
+		goto out_end;
+
+	if (path == &XFS_IMETA_RTRMAPBT) {
+		error = xfs_rtrmapbt_create(&tp, &upd, &ip);
+	} else {
+		ASSERT(0);
+		error = -EIO;
+	}
+	if (error)
+		goto out_cancel;
+
+	error = xfs_trans_commit(tp);
+	if (error)
+		goto out_end;
+
+	xfs_imeta_end_update(mp, &upd, error);
+	xfs_finish_inode_setup(ip);
+	*ipp = ip;
+	return 0;
+
+out_cancel:
+	xfs_trans_cancel(tp);
+out_end:
+	/* Have to finish setting up the inode to ensure it's deleted. */
+	if (ip) {
+		xfs_finish_inode_setup(ip);
+		xfs_irele(ip);
+	}
+	xfs_imeta_end_update(mp, &upd, error);
+	return error;
+}
+
 /*
  * Check that changes to the realtime geometry won't affect the minimum
  * log size, which would cause the fs to become unusable.
@@ -1010,7 +1065,7 @@ xfs_growfs_rt(
 		return -EINVAL;
 
 	/* Unsupported realtime features. */
-	if (xfs_has_rmapbt(mp) || xfs_has_reflink(mp))
+	if ((!xfs_has_metadir(mp) && xfs_has_rmapbt(mp)) || xfs_has_reflink(mp))
 		return -EOPNOTSUPP;
 
 	nrblocks = in->newblocks;
@@ -1051,6 +1106,14 @@ xfs_growfs_rt(
 			in->extsize, nrextents, nrbmblocks, nrextslog);
 	if (error)
 		return error;
+
+	/* Add the realtime rmap inode. */
+	if (xfs_has_rmapbt(mp) && !mp->m_rrmapip) {
+		error = xfs_growfsrt_imeta_create(mp, &XFS_IMETA_RTRMAPBT,
+				&mp->m_rrmapip);
+		if (error)
+			return error;
+	}
 
 	/*
 	 * Get the old block counts for bitmap and summary inodes.
