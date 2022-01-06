@@ -1396,9 +1396,13 @@ static inline int xfs_drain_wait(struct xfs_drain *dr)
 void
 xfs_fs_bump_intents(
 	struct xfs_mount	*mp,
+	bool			isrt,
 	xfs_fsblock_t		fsb)
 {
 	struct xfs_perag	*pag;
+
+	if (isrt)
+		return;
 
 	pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, fsb));
 	trace_xfs_perag_bump_intents(pag, __return_address);
@@ -1410,9 +1414,13 @@ xfs_fs_bump_intents(
 void
 xfs_fs_drop_intents(
 	struct xfs_mount	*mp,
+	bool			isrt,
 	xfs_fsblock_t		fsb)
 {
 	struct xfs_perag	*pag;
+
+	if (isrt)
+		return;
 
 	pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, fsb));
 	trace_xfs_perag_drop_intents(pag, __return_address);
