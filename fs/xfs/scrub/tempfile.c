@@ -773,3 +773,14 @@ xrep_tempfile_copyout_local(
 	ilog_flags |= xfs_ilog_fdata(whichfork);
 	xfs_trans_log_inode(sc->tp, sc->ip, ilog_flags);
 }
+
+/* Decide if a given XFS inode is a temporary file for a repair. */
+bool
+xrep_is_tempfile(
+	struct xfs_inode	*ip)
+{
+	if (IS_PRIVATE(VFS_I(ip)) && !(VFS_I(ip)->i_opflags & IOP_XATTR))
+		return true;
+
+	return false;
+}
