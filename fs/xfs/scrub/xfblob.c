@@ -15,8 +15,8 @@
 /*
  * XFS Blob Storage
  * ================
- * Stores and retrieves blobs using a memfd object.  Objects are appended to
- * the file and the offset is returned as a magic cookie for retrieval.
+ * Stores and retrieves blobs using an xfile.  Objects are appended to the file
+ * and the offset is returned as a magic cookie for retrieval.
  */
 
 #define XB_KEY_MAGIC	0xABAADDAD
