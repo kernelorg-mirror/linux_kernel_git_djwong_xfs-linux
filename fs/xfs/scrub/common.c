@@ -1071,7 +1071,8 @@ xchk_irele(
 		spin_lock(&VFS_I(ip)->i_lock);
 		VFS_I(ip)->i_state &= ~I_DONTCACHE;
 		spin_unlock(&VFS_I(ip)->i_lock);
-	} else if (atomic_read(&VFS_I(ip)->i_count) == 1) {
+	} else if (!(sc->sm->sm_flags & XFS_SCRUB_IFLAG_RETAIN_INODES) &&
+		   atomic_read(&VFS_I(ip)->i_count) == 1) {
 		/*
 		 * If this is the last reference to the inode and the caller
 		 * permits it, set DONTCACHE to avoid thrashing.
