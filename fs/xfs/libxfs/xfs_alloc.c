@@ -2541,12 +2541,12 @@ xfs_defer_agfl_block(
  * The list is maintained sorted (by block number).
  */
 void
-__xfs_free_extent_later(
+xfs_free_extent_later(
 	struct xfs_trans		*tp,
 	xfs_fsblock_t			bno,
 	xfs_filblks_t			len,
 	const struct xfs_owner_info	*oinfo,
-	bool				skip_discard)
+	unsigned int			flags)
 {
 	struct xfs_extent_free_item	*new;		/* new element */
 #ifdef DEBUG
@@ -2564,6 +2564,7 @@ __xfs_free_extent_later(
 	ASSERT(agbno < mp->m_sb.sb_agblocks);
 	ASSERT(len < mp->m_sb.sb_agblocks);
 	ASSERT(agbno + len <= mp->m_sb.sb_agblocks);
+	ASSERT(!(flags & ~XFS_FREE_EXTENT_ALL_FLAGS));
 #endif
 	ASSERT(xfs_extfree_item_cache != NULL);
 
@@ -2571,7 +2572,7 @@ __xfs_free_extent_later(
 			       GFP_KERNEL | __GFP_NOFAIL);
 	new->xefi_startblock = bno;
 	new->xefi_blockcount = (xfs_extlen_t)len;
-	if (skip_discard)
+	if (flags & XFS_FREE_EXTENT_SKIP_DISCARD)
 		new->xefi_flags |= XFS_EFI_SKIP_DISCARD;
 	if (oinfo) {
 		ASSERT(oinfo->oi_offset == 0);
