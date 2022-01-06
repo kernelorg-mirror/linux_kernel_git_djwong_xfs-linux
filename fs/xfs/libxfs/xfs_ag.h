@@ -33,13 +33,13 @@ struct xfs_perag {
 	struct xfs_mount *pag_mount;	/* owner filesystem */
 	xfs_agnumber_t	pag_agno;	/* AG this structure belongs to */
 	atomic_t	pag_ref;	/* perag reference count */
-	char		pagf_init;	/* this agf's entry is initialized */
-	char		pagi_init;	/* this agi's entry is initialized */
-	char		pagf_metadata;	/* the agf is preferred to be metadata */
-	char		pagi_inodeok;	/* The agi is ok for inodes */
+	uint8_t		pagf_init:1;	/* this agf's entry is initialized */
+	uint8_t		pagi_init:1;	/* this agi's entry is initialized */
+	uint8_t		pagf_metadata:1; /* the agf is preferred to be metadata */
+	uint8_t		pagi_inodeok:1;	/* The agi is ok for inodes */
+	uint8_t		pagf_agflreset:1; /* agfl requires reset before use */
 	uint8_t		pagf_levels[XFS_BTNUM_AGF];
 					/* # of levels in bno & cnt btree */
-	bool		pagf_agflreset; /* agfl requires reset before use */
 	uint32_t	pagf_flcount;	/* count of blocks in freelist */
 	xfs_extlen_t	pagf_freeblks;	/* total free blocks */
 	xfs_extlen_t	pagf_longest;	/* longest free space */
