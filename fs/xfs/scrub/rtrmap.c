@@ -210,3 +210,43 @@ xchk_rtrmapbt(
 	return xchk_btree(sc, sc->sr.rmap_cur, xchk_rtrmapbt_rec, &oinfo,
 			&cr);
 }
+
+/* xref check that the extent has no realtime reverse mapping at all */
+void
+xchk_xref_has_no_rt_owner(
+	struct xfs_scrub	*sc,
+	xfs_rtblock_t		bno,
+	xfs_filblks_t		len)
+{
+	enum xfs_btree_keyfill	keyfill;
+	int			error;
+
+	if (!sc->sr.rmap_cur || xchk_skip_xref(sc->sm))
+		return;
+
+	error = xfs_rmap_scan_keyfill(sc->sr.rmap_cur, bno, len, &keyfill);
+	if (!xchk_should_check_xref(sc, &error, &sc->sr.rmap_cur))
+		return;
+	if (keyfill != XFS_BTREE_KEYFILL_EMPTY)
+		xchk_btree_xref_set_corrupt(sc, sc->sr.rmap_cur, 0);
+}
+
+/* xref check that the extent is completely mapped */
+void
+xchk_xref_has_rt_owner(
+	struct xfs_scrub	*sc,
+	xfs_rtblock_t		bno,
+	xfs_filblks_t		len)
+{
+	enum xfs_btree_keyfill	keyfill;
+	int			error;
+
+	if (!sc->sr.rmap_cur || xchk_skip_xref(sc->sm))
+		return;
+
+	error = xfs_rmap_scan_keyfill(sc->sr.rmap_cur, bno, len, &keyfill);
+	if (!xchk_should_check_xref(sc, &error, &sc->sr.rmap_cur))
+		return;
+	if (keyfill != XFS_BTREE_KEYFILL_FULL)
+		xchk_btree_xref_set_corrupt(sc, sc->sr.rmap_cur, 0);
+}

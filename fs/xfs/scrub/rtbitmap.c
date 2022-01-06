@@ -9,13 +9,17 @@
 #include "xfs_format.h"
 #include "xfs_trans_resv.h"
 #include "xfs_mount.h"
+#include "xfs_btree.h"
 #include "xfs_log_format.h"
 #include "xfs_trans.h"
 #include "xfs_rtalloc.h"
 #include "xfs_inode.h"
 #include "xfs_bmap.h"
+#include "xfs_rmap.h"
+#include "xfs_rtrmap_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
+#include "scrub/btree.h"
 
 /* Set us up with the realtime metadata locked. */
 int
@@ -37,6 +41,34 @@ xchk_setup_rtbitmap(
 
 /* Realtime bitmap. */
 
+struct xchk_rtbitmap {
+	struct xfs_scrub	*sc;
+
+	/* The next free rt block that we expect to see. */
+	xfs_rtblock_t		next_free_rtblock;
+};
+
+/* Cross-reference rtbitmap entries with other metadata. */
+STATIC void
+xchk_rtbitmap_xref(
+	struct xchk_rtbitmap	*rtb,
+	xfs_rtblock_t		startblock,
+	xfs_rtblock_t		blockcount)
+{
+	struct xfs_scrub	*sc = rtb->sc;
+
+	if (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
+		return;
+
+	xchk_xref_has_no_rt_owner(sc, startblock, blockcount);
+
+	if (rtb->next_free_rtblock < startblock)
+		xchk_xref_has_rt_owner(sc, rtb->next_free_rtblock,
+				startblock - rtb->next_free_rtblock);
+
+	rtb->next_free_rtblock = startblock + blockcount;
+}
+
 /* Scrub a free extent record from the realtime bitmap. */
 STATIC int
 xchk_rtbitmap_rec(
@@ -45,7 +77,8 @@ xchk_rtbitmap_rec(
 	const struct xfs_rtalloc_rec *rec,
 	void			*priv)
 {
-	struct xfs_scrub	*sc = priv;
+	struct xchk_rtbitmap	*rtb = priv;
+	struct xfs_scrub	*sc = rtb->sc;
 	xfs_rtblock_t		startblock;
 	xfs_rtblock_t		blockcount;
 
@@ -54,6 +87,12 @@ xchk_rtbitmap_rec(
 
 	if (!xfs_verify_rtext(mp, startblock, blockcount))
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, 0);
+
+	xchk_rtbitmap_xref(rtb, startblock, blockcount);
+
+	if (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
+		return -ECANCELED;
+
 	return 0;
 }
 
@@ -97,12 +136,18 @@ int
 xchk_rtbitmap(
 	struct xfs_scrub	*sc)
 {
+	struct xchk_rtbitmap	rtb = {
+		.sc		= sc,
+		.next_free_rtblock = 0,
+	};
+	struct xfs_mount	*mp = sc->mp;
+	xfs_rtblock_t		last_rblock;
 	int			error;
 
 	/* Is the size of the rtbitmap correct? */
-	if (sc->mp->m_rbmip->i_disk_size !=
-	    XFS_FSB_TO_B(sc->mp, sc->mp->m_sb.sb_rbmblocks)) {
-		xchk_ino_set_corrupt(sc, sc->mp->m_rbmip->i_ino);
+	if (mp->m_rbmip->i_disk_size !=
+	    XFS_FSB_TO_B(mp, mp->m_sb.sb_rbmblocks)) {
+		xchk_ino_set_corrupt(sc, mp->m_rbmip->i_ino);
 		return 0;
 	}
 
@@ -115,10 +160,19 @@ xchk_rtbitmap(
 	if (error || (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT))
 		return error;
 
-	error = xfs_rtalloc_query_all(sc->mp, sc->tp, xchk_rtbitmap_rec, sc);
+	error = xfs_rtalloc_query_all(sc->mp, sc->tp, xchk_rtbitmap_rec, &rtb);
 	if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, 0, &error))
 		goto out;
 
+	/*
+	 * Check that the are rmappings for all rt extents between the end of
+	 * the last free extent we saw and the last possible extent in the rt
+	 * volume.
+	 */
+	last_rblock = rounddown_64(mp->m_sb.sb_rblocks, mp->m_sb.sb_rextsize);
+	if (rtb.next_free_rtblock < last_rblock)
+		xchk_xref_has_rt_owner(sc, rtb.next_free_rtblock,
+				last_rblock - rtb.next_free_rtblock);
 out:
 	return error;
 }
