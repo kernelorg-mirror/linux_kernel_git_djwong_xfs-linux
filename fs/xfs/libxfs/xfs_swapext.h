@@ -128,6 +128,7 @@ int xfs_swapext_finish_one(struct xfs_trans *tp,
 
 int xfs_swapext_check_extents(struct xfs_mount *mp,
 		const struct xfs_swapext_req *req);
+bool xfs_swapext_need_rt_conversion(struct xfs_inode *ip);
 
 void xfs_swapext(struct xfs_trans *tp, const struct xfs_swapext_req *req);
 
