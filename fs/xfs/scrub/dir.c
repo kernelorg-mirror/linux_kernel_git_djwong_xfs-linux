@@ -838,8 +838,7 @@ xchk_directory(
 	 * _dir_lookup routines, which do their own ILOCK locking.
 	 */
 	oldpos = 0;
-	sc->ilock_flags &= ~XFS_ILOCK_EXCL;
-	xfs_iunlock(sc->ip, XFS_ILOCK_EXCL);
+	xchk_iunlock(sc, XFS_ILOCK_EXCL);
 	while (true) {
 		error = xfs_readdir(sc->tp, sc->ip, &sdc.dir_iter, bufsize);
 		if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, 0,
