@@ -125,7 +125,7 @@ xrep_rtrmap_check_mapping(
 
 	/* Make sure this isn't free space. */
 	return xrep_require_rtext_inuse(sc, rec->rm_startblock,
-			rec->rm_blockcount);
+			rec->rm_blockcount, false);
 }
 
 /* Store a reverse-mapping record. */
