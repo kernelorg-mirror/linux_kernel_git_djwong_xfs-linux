@@ -538,7 +538,10 @@ xrep_newbt_alloc_blocks(
 			.resv		= xnr->resv,
 		};
 
-		error = xfs_alloc_vextent(&args);
+		if (xnr->alloc_vextent)
+			error = xnr->alloc_vextent(sc, &args);
+		else
+			error = xfs_alloc_vextent(&args);
 		if (error)
 			return error;
 		if (args.fsbno == NULLFSBLOCK)
@@ -869,7 +872,7 @@ xrep_bload_estimate_slack(
 int
 xrep_fix_freelist(
 	struct xfs_scrub	*sc,
-	bool			can_shrink)
+	int			alloc_flags)
 {
 	struct xfs_alloc_arg	args = {0};
 
@@ -879,8 +882,7 @@ xrep_fix_freelist(
 	args.alignment = 1;
 	args.pag = sc->sa.pag;
 
-	return xfs_alloc_fix_freelist(&args,
-			can_shrink ? 0 : XFS_ALLOC_FLAG_NOSHRINK);
+	return xfs_alloc_fix_freelist(&args, alloc_flags);
 }
 
 /*
@@ -894,7 +896,7 @@ xrep_put_freelist(
 	int			error;
 
 	/* Make sure there's space on the freelist. */
-	error = xrep_fix_freelist(sc, true);
+	error = xrep_fix_freelist(sc, 0);
 	if (error)
 		return error;
 
@@ -1026,10 +1028,14 @@ xrep_agextent_reap(
 		*want_roll = true;
 		break;
 	case XFS_AG_RESV_IGNORE:
+	case XFS_AG_RESV_RMAPBT:
 		/*
 		 * bnobt/cntbt blocks are counted as free space, so we pass
 		 * XFS_AG_RESV_IGNORE when reaping the old free space btree
 		 * blocks to avoid changing fdblocks.
+		 *
+		 * rmapbt blocks are also counted as free space, but they have
+		 * their own per-AG reservation type.
 		 */
 		error = __xfs_free_extent(sc->tp, fsbno, aglen, rs->oinfo,
 				rs->resv, true);
