@@ -500,6 +500,9 @@ xfs_rui_validate_map(
 	if (!xfs_verify_fileext(mp, rmap->me_startoff, rmap->me_len))
 		return false;
 
+	if (rmap->me_flags & XFS_RMAP_EXTENT_REALTIME)
+		return xfs_verify_rtext(mp, rmap->me_startblock, rmap->me_len);
+
 	return xfs_verify_fsbext(mp, rmap->me_startblock, rmap->me_len);
 }
 
