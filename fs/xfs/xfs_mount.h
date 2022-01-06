@@ -382,6 +382,9 @@ typedef struct xfs_mount {
 	 * inconsistencies.
 	 */
 	struct xfs_drain	m_rt_intents;
+
+	/* Hook to feed rt rmapbt updates to an active online repair. */
+	struct xfs_hooks	m_rtrmap_update_hooks;
 #endif /* CONFIG_XFS_RT */
 } xfs_mount_t;
 
