@@ -905,6 +905,57 @@ xfs_alloc_rsum_cache(
  */
 
 /*
+ * Check that changes to the realtime geometry won't affect the minimum
+ * log size, which would cause the fs to become unusable.
+ */
+int
+xfs_growfs_check_rtgeom(
+	const struct xfs_mount	*mp,
+	xfs_rfsblock_t		dblocks,
+	xfs_rfsblock_t		rblocks,
+	xfs_agblock_t		rextsize,
+	xfs_rtblock_t		rextents,
+	xfs_extlen_t		rbmblocks,
+	uint8_t			rextslog)
+{
+	struct xfs_mount	*fake_mp;
+	int			min_logfsbs;
+
+	fake_mp = kmem_alloc(sizeof(struct xfs_mount), KM_MAYFAIL);
+	if (!fake_mp)
+		return -ENOMEM;
+
+	/*
+	 * Create a dummy xfs_mount with the new rt geometry, and compute the
+	 * new minimum log size.  This ensures that the log is big enough to
+	 * handle the larger transactions that we could start sending.
+	 */
+	memcpy(fake_mp, mp, sizeof(struct xfs_mount));
+
+	fake_mp->m_sb.sb_dblocks = dblocks;
+	fake_mp->m_sb.sb_rblocks = rblocks;
+	fake_mp->m_sb.sb_rextents = rextents;
+	fake_mp->m_sb.sb_rextsize = rextsize;
+	fake_mp->m_sb.sb_rbmblocks = rbmblocks;
+	fake_mp->m_sb.sb_rextslog = rextslog;
+	if (rblocks > 0)
+		fake_mp->m_features |= XFS_FEAT_REALTIME;
+
+	xfs_rtrmapbt_compute_maxlevels(fake_mp);
+
+	xfs_trans_resv_calc(fake_mp, M_RES(fake_mp));
+	min_logfsbs = xfs_log_calc_minimum_size(fake_mp);
+	trace_xfs_growfs_check_rtgeom(mp, min_logfsbs);
+
+	kmem_free(fake_mp);
+
+	if (mp->m_sb.sb_logblocks < min_logfsbs)
+		return -ENOSPC;
+
+	return 0;
+}
+
+/*
  * Grow the realtime area of the filesystem.
  */
 int
@@ -994,6 +1045,13 @@ xfs_growfs_rt(
 	 */
 	if (nrsumblocks > (mp->m_sb.sb_logblocks >> 1))
 		return -EINVAL;
+
+	/* Make sure the new fs size won't cause problems with the log. */
+	error = xfs_growfs_check_rtgeom(mp, mp->m_sb.sb_dblocks, nrblocks,
+			in->extsize, nrextents, nrbmblocks, nrextslog);
+	if (error)
+		return error;
+
 	/*
 	 * Get the old block counts for bitmap and summary inodes.
 	 * These can't change since other growfs callers are locked out.
@@ -1134,8 +1192,12 @@ error_cancel:
 		if (error)
 			break;
 
-		/* Ensure the mount RT feature flag is now set. */
+		/*
+		 * Ensure the mount RT feature flag is now set, and compute new
+		 * maxlevels for rt btrees.
+		 */
 		mp->m_features |= XFS_FEAT_REALTIME;
+		xfs_rtrmapbt_compute_maxlevels(mp);
 	}
 	if (error)
 		goto out_free;
