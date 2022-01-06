@@ -2249,12 +2249,16 @@ xrep_dotdot_lookup(
 }
 
 #ifdef CONFIG_XFS_RT
-/* Ensure that all rt blocks in the given range are not marked free. */
+/*
+ * Ensure that all rt blocks in the given range are not marked free or
+ * misaligned.
+ */
 int
 xrep_require_rtext_inuse(
 	struct xfs_scrub	*sc,
 	xfs_rtblock_t		rtbno,
-	xfs_filblks_t		len)
+	xfs_filblks_t		len,
+	bool			must_align)
 {
 	struct xfs_mount	*mp = sc->mp;
 	xfs_rtblock_t		startext;
@@ -2265,7 +2269,12 @@ xrep_require_rtext_inuse(
 
 	/* Round the starting rt extent down and the end rt extent up. */
 	startext = div_u64_rem(rtbno, mp->m_sb.sb_rextsize, &mod);
+	if (must_align && mod != 0)
+		return -EFSCORRUPTED;
+
 	endext = div_u64_rem(rtbno + len - 1, mp->m_sb.sb_rextsize, &mod);
+	if (must_align && mod != mp->m_sb.sb_rextsize - 1)
+		return -EFSCORRUPTED;
 
 	error = xfs_rtalloc_extent_is_free(mp, sc->tp, startext,
 			endext - startext + 1, &is_free);
@@ -2295,6 +2304,8 @@ xrep_is_rtmeta_ino(
 
 	/* Newer rt metadata files are not guaranteed to exist */
 	if (sc->mp->m_rrmapip && ino == sc->mp->m_rrmapip->i_ino)
+		return true;
+	if (sc->mp->m_rrefcountip && ino == sc->mp->m_rrefcountip->i_ino)
 		return true;
 
 	return false;
