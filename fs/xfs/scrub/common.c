@@ -30,6 +30,7 @@
 #include "xfs_quota.h"
 #include "xfs_error.h"
 #include "xfs_swapext.h"
+#include "xfs_rtalloc.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -675,8 +676,7 @@ xchk_rt_init(
 	struct xfs_scrub	*sc,
 	struct xchk_rt		*sr)
 {
-	xfs_ilock(sc->mp->m_rbmip, XFS_ILOCK_EXCL | XFS_ILOCK_RTBITMAP);
-	xfs_ilock(sc->mp->m_rsumip, XFS_ILOCK_EXCL | XFS_ILOCK_RTSUM);
+	xfs_rtlock(NULL, sc->mp, XFS_RTLOCK_ALL);
 	sr->locked = true;
 	return 0;
 }
@@ -693,8 +693,7 @@ xchk_rt_unlock(
 	if (!sr->locked)
 		return;
 
-	xfs_iunlock(sc->mp->m_rsumip, XFS_ILOCK_EXCL);
-	xfs_iunlock(sc->mp->m_rbmip, XFS_ILOCK_EXCL);
+	xfs_rtunlock(sc->mp, XFS_RTLOCK_ALL);
 	sr->locked = false;
 }
 
