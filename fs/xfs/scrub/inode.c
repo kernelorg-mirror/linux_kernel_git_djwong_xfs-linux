@@ -105,6 +105,12 @@ retry:
 		break;
 	default:
 		/* Treat everything else as an operational error. */
+		xchk_whine(mp, "type %s agno 0x%x agbno 0x%x error %d ret_ip %pS",
+				xchk_type_string(sc->sm->sm_type),
+				XFS_INO_TO_AGNO(mp, sc->sm->sm_ino),
+				XFS_INO_TO_AGBNO(mp, sc->sm->sm_ino),
+				error,
+				__return_address);
 		trace_xchk_op_error(sc, agno,
 				XFS_INO_TO_AGBNO(mp, sc->sm->sm_ino),
 				error, __return_address);
