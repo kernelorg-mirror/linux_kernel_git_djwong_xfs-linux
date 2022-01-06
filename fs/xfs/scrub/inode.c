@@ -164,14 +164,12 @@ got_inode:
 	 * Join the inode to the scrub context, lock the inode, and allocate
 	 * a transaction, in the customary order.
 	 */
-	sc->ilock_flags = XFS_IOLOCK_EXCL | XFS_MMAPLOCK_EXCL;
-	xfs_ilock(sc->ip, sc->ilock_flags);
+	xchk_ilock(sc, XFS_IOLOCK_EXCL | XFS_MMAPLOCK_EXCL);
 	error = xchk_trans_alloc(sc, 0);
 	if (error)
 		return error;
 
-	sc->ilock_flags |= XFS_ILOCK_EXCL;
-	xfs_ilock(sc->ip, XFS_ILOCK_EXCL);
+	xchk_ilock(sc, XFS_ILOCK_EXCL);
 	return 0;
 }
 
