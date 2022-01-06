@@ -706,6 +706,7 @@ DEFINE_EVENT(xrep_extent_class, name, \
 	TP_ARGS(pag, agbno, len))
 DEFINE_REPAIR_EXTENT_EVENT(xrep_dispose_unmap_extent);
 DEFINE_REPAIR_EXTENT_EVENT(xrep_dispose_free_extent);
+DEFINE_REPAIR_EXTENT_EVENT(xrep_agextent_reap_binval);
 DEFINE_REPAIR_EXTENT_EVENT(xrep_agfl_insert);
 
 DECLARE_EVENT_CLASS(xrep_rmap_class,
