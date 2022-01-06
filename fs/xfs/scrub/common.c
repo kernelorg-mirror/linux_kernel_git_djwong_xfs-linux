@@ -30,6 +30,7 @@
 #include "xfs_error.h"
 #include "xfs_rtalloc.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_rtrefcount_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -756,6 +757,10 @@ xchk_rt_init(
 		sr->rmap_cur = xfs_rtrmapbt_init_cursor(mp, sc->tp,
 				mp->m_rrmapip);
 
+	if (xfs_has_reflink(mp))
+		sr->refc_cur = xfs_rtrefcountbt_init_cursor(mp, sc->tp,
+				mp->m_rrefcountip);
+
 	return 0;
 }
 
@@ -770,7 +775,10 @@ xchk_rt_btcur_free(
 {
 	if (sr->rmap_cur)
 		xfs_btree_del_cursor(sr->rmap_cur, XFS_BTREE_ERROR);
+	if (sr->refc_cur)
+		xfs_btree_del_cursor(sr->refc_cur, XFS_BTREE_ERROR);
 
+	sr->refc_cur = NULL;
 	sr->rmap_cur = NULL;
 }
 
