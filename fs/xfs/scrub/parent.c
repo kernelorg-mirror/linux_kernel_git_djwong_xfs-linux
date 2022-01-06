@@ -17,6 +17,7 @@
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/readdir.h"
+#include "scrub/parent.h"
 
 /* Set us up to scrub parents. */
 int
@@ -69,7 +70,7 @@ xchk_parent_actor(
  * exclusively.  We'll wait up to 5 seconds before returning -EBUSY to signal
  * to userspace that it should try again.
  */
-STATIC int
+int
 xchk_parent_lock_two_dirs(
 	struct xfs_scrub	*sc,
 	struct xfs_inode	*dp)
