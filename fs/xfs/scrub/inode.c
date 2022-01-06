@@ -43,7 +43,10 @@ xchk_setup_inode(
 
 	/* We want to scan the opened inode, so lock it and exit. */
 	if (sc->sm->sm_ino == 0 || sc->sm->sm_ino == ip_in->i_ino) {
-		sc->ip = ip_in;
+		error = xchk_install_inode(sc, ip_in);
+		if (error)
+			return error;
+
 		goto got_inode;
 	}
 
