@@ -85,6 +85,7 @@ int xrep_setup_xattr(struct xfs_scrub *sc);
 int xrep_setup_directory(struct xfs_scrub *sc);
 int xrep_setup_parent(struct xfs_scrub *sc);
 int xrep_setup_nlinks(struct xfs_scrub *sc, unsigned int *buf_bytes);
+int xrep_setup_symlink(struct xfs_scrub *sc, unsigned int *resblks);
 
 int xrep_xattr_reset_fork(struct xfs_scrub *sc);
 
@@ -141,6 +142,7 @@ int xrep_fscounters(struct xfs_scrub *sc);
 int xrep_xattr(struct xfs_scrub *sc);
 int xrep_directory(struct xfs_scrub *sc);
 int xrep_parent(struct xfs_scrub *sc);
+int xrep_symlink(struct xfs_scrub *sc);
 
 #ifdef CONFIG_XFS_QUOTA
 int xrep_quota(struct xfs_scrub *sc);
@@ -283,6 +285,11 @@ static inline int xrep_setup_nlinks(struct xfs_scrub *sc, unsigned int *x)
 	return 0;
 }
 
+static inline int xrep_setup_symlink(struct xfs_scrub *sc, unsigned int *x)
+{
+	return 0;
+}
+
 #define xrep_revalidate_allocbt		(NULL)
 #define xrep_revalidate_iallocbt	(NULL)
 
@@ -306,6 +313,7 @@ static inline int xrep_setup_nlinks(struct xfs_scrub *sc, unsigned int *x)
 #define xrep_xattr			xrep_notsupported
 #define xrep_directory			xrep_notsupported
 #define xrep_parent			xrep_notsupported
+#define xrep_symlink			xrep_notsupported
 
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
