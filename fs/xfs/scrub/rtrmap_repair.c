@@ -27,6 +27,7 @@
 #include "xfs_quota.h"
 #include "xfs_rtalloc.h"
 #include "xfs_ag.h"
+#include "xfs_refcount.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
@@ -415,6 +416,98 @@ xrep_rtrmap_scan_ag(
 	return error;
 }
 
+struct xrep_rtrmap_stash_run {
+	struct xrep_rtrmap	*rr;
+	uint64_t		owner;
+};
+
+static int
+xrep_rtrmap_stash_run(
+	uint64_t			start,
+	uint64_t			len,
+	void				*priv)
+{
+	struct xrep_rtrmap_stash_run	*rsr = priv;
+	struct xrep_rtrmap		*rr = rsr->rr;
+
+	return xrep_rtrmap_stash(rr, start, len, rsr->owner, 0, 0);
+}
+
+/*
+ * Emit rmaps for every extent of bits set in the bitmap.  Caller must ensure
+ * that the ranges are in units of FS blocks.
+ */
+STATIC int
+xrep_rtrmap_stash_bitmap(
+	struct xrep_rtrmap		*rr,
+	struct xbitmap			*bitmap,
+	const struct xfs_owner_info	*oinfo)
+{
+	struct xrep_rtrmap_stash_run	rsr = {
+		.rr			= rr,
+		.owner			= oinfo->oi_owner,
+	};
+
+	return xbitmap_walk(bitmap, xrep_rtrmap_stash_run, &rsr);
+}
+
+/* Record a CoW staging extent. */
+STATIC int
+xrep_rtrmap_walk_cowblocks(
+	struct xfs_btree_cur		*cur,
+	const union xfs_btree_rec	*rec,
+	void				*priv)
+{
+	struct xbitmap			*bitmap = priv;
+	struct xfs_refcount_irec	refc;
+	xfs_fsblock_t			fsbno;
+
+	xfs_refcount_btrec_to_irec(cur, rec, &refc);
+	if (refc.rc_refcount != 1)
+		return -EFSCORRUPTED;
+
+	fsbno = refc.rc_startblock - XFS_RTREFC_COW_START;
+	return xbitmap_set(bitmap, fsbno, refc.rc_blockcount);
+}
+
+/*
+ * Collect rmaps for the blocks containing the refcount btree, and all CoW
+ * staging extents.
+ */
+STATIC int
+xrep_rtrmap_find_refcount_rmaps(
+	struct xrep_rtrmap	*rr)
+{
+	struct xbitmap		cow_blocks;		/* COWBIT */
+	union xfs_btree_irec	low;
+	union xfs_btree_irec	high;
+	struct xfs_scrub	*sc = rr->sc;
+	int			error;
+
+	if (!xfs_has_rtreflink(sc->mp))
+		return 0;
+
+	xbitmap_init(&cow_blocks);
+
+	/* Collect rmaps for CoW staging extents. */
+	memset(&low, 0, sizeof(low));
+	low.rc.rc_startblock = XFS_RTREFC_COW_START;
+	memset(&high, 0xFF, sizeof(high));
+	error = xfs_btree_query_range(sc->sr.refc_cur, &low, &high,
+			xrep_rtrmap_walk_cowblocks, &cow_blocks);
+	if (error)
+		goto out_bitmap;
+
+	/* Generate rmaps for everything. */
+	error = xrep_rtrmap_stash_bitmap(rr, &cow_blocks, &XFS_RMAP_OINFO_COW);
+	if (error)
+		goto out_bitmap;
+
+out_bitmap:
+	xbitmap_destroy(&cow_blocks);
+	return error;
+}
+
 /* Count and check all collected records. */
 STATIC int
 xrep_rtrmap_check_record(
@@ -445,6 +538,13 @@ xrep_rtrmap_find_rmaps(
 	struct xfs_btree_cur	*mcur;
 	xfs_agnumber_t		agno;
 	int			error;
+
+	/* Find CoW staging extents. */
+	xrep_rt_btcur_init(sc, &sc->sr);
+	error = xrep_rtrmap_find_refcount_rmaps(rr);
+	xchk_rt_btcur_free(&sc->sr);
+	if (error)
+		return error;
 
 	/*
 	 * Set up for a potentially lengthy filesystem scan by reducing our
