@@ -852,8 +852,13 @@ xfs_reflink_recover_cow(
 			break;
 		}
 	}
+	if (error)
+		return error;
 
-	return error;
+	if (xfs_has_realtime(mp))
+		return xfs_refcount_recover_cow_leftovers(mp, NULL);
+
+	return 0;
 }
 
 /*
