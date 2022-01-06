@@ -265,8 +265,13 @@ xchk_setup_fscounters(
 	 * Pause all writer activity in the filesystem while we're scrubbing to
 	 * reduce the likelihood of background perturbations to the counters
 	 * throwing off our calculations.
+	 *
+	 * If we're repairing, we need to prevent any other thread from
+	 * changing the global fs summary counters while we're repairing them.
+	 * This requires the fs to be frozen, which will disable background
+	 * reclaim and purge all inactive inodes.
 	 */
-	if (sc->flags & XCHK_TRY_HARDER) {
+	if ((sc->flags & XCHK_TRY_HARDER) || xchk_could_repair(sc)) {
 		error = xchk_fscounters_freeze(sc);
 		if (error)
 			return error;
@@ -507,6 +512,10 @@ xchk_fscount_within_range(
 	/* Exact matches are always ok. */
 	if (curr_value == expected)
 		return true;
+
+	/* We require exact matches when repair is running. */
+	if (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR)
+		return false;
 
 	min_value = min(old_value, curr_value);
 	max_value = max(old_value, curr_value);
