@@ -78,6 +78,7 @@ int xrep_metadata_inode_forks(struct xfs_scrub *sc);
 int xrep_setup_ag_rmapbt(struct xfs_scrub *sc);
 int xrep_setup_rtsummary(struct xfs_scrub *sc, unsigned int *resblks);
 int xrep_setup_xattr(struct xfs_scrub *sc);
+int xrep_setup_directory(struct xfs_scrub *sc);
 
 int xrep_xattr_reset_fork(struct xfs_scrub *sc, struct xfs_inode *ip);
 
@@ -129,6 +130,7 @@ int xrep_bmap_attr(struct xfs_scrub *sc);
 int xrep_nlinks(struct xfs_scrub *sc);
 int xrep_fscounters(struct xfs_scrub *sc);
 int xrep_xattr(struct xfs_scrub *sc);
+int xrep_directory(struct xfs_scrub *sc);
 
 #ifdef CONFIG_XFS_QUOTA
 int xrep_quota(struct xfs_scrub *sc);
@@ -208,6 +210,7 @@ void xrep_bload_estimate_slack(struct xfs_scrub *sc,
 int xrep_newbt_relog_efis(struct xrep_newbt *xnr);
 
 bool xrep_buf_verify_struct(struct xfs_buf *bp, const struct xfs_buf_ops *ops);
+xfs_ino_t xrep_dotdot_lookup(struct xfs_scrub *sc);
 
 #else
 
@@ -248,12 +251,14 @@ xrep_setup_nothing(
 #define xrep_setup_ag_allocbt		xrep_setup_nothing
 #define xrep_setup_ag_rmapbt		xrep_setup_nothing
 #define xrep_setup_xattr		xrep_setup_nothing
+#define xrep_setup_directory		xrep_setup_nothing
 
 static inline int
 xrep_setup_rtsummary(struct xfs_scrub *sc, unsigned int *whatever)
 {
 	return 0;
 }
+
 
 #define xrep_revalidate_allocbt		(NULL)
 #define xrep_revalidate_iallocbt	(NULL)
@@ -276,6 +281,7 @@ xrep_setup_rtsummary(struct xfs_scrub *sc, unsigned int *whatever)
 #define xrep_fscounters			xrep_notsupported
 #define xrep_rtsummary			xrep_notsupported
 #define xrep_xattr			xrep_notsupported
+#define xrep_directory			xrep_notsupported
 
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
