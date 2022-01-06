@@ -166,6 +166,8 @@ xchk_rtrmapbt_rec(
 	bool				non_inode;
 	bool				is_bmbt;
 	bool				is_attr;
+	bool				is_unwritten;
+	bool				is_cow;
 	int				error;
 
 	error = xfs_rmap_btrec_to_irec(bs->cur, rec, &irec);
@@ -180,13 +182,22 @@ xchk_rtrmapbt_rec(
 
 	/* Check flags. */
 	non_inode = XFS_RMAP_NON_INODE_OWNER(irec.rm_owner);
+	is_cow = xfs_has_rtreflink(mp) &&
+		 irec.rm_owner == XFS_RMAP_OWN_COW;
 	is_bmbt = irec.rm_flags & XFS_RMAP_BMBT_BLOCK;
 	is_attr = irec.rm_flags & XFS_RMAP_ATTR_FORK;
+	is_unwritten = irec.rm_flags & XFS_RMAP_UNWRITTEN;
 
-	if (is_bmbt || non_inode || is_attr)
+	if (is_bmbt || (non_inode && !is_cow) || is_attr)
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 
-	if (!xfs_verify_ino(mp, irec.rm_owner))
+	if (is_cow && irec.rm_offset != 0)
+		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
+
+	if (is_unwritten && is_cow)
+		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
+
+	if (!non_inode && !xfs_verify_ino(mp, irec.rm_owner))
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 
 	if (bs->sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
