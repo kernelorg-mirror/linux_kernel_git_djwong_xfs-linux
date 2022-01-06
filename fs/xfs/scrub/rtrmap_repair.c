@@ -84,6 +84,9 @@ struct xrep_rtrmap {
 	struct xrep_newbt	new_btree_info;
 	struct xfs_btree_bload	rtrmap_bload;
 
+	/* lock for the xfbtree and xfile */
+	struct mutex		lock;
+
 	/* rmap records generated from primary metadata */
 	struct xfbtree		*rtrmap_btree;
 
@@ -91,6 +94,9 @@ struct xrep_rtrmap {
 
 	/* bitmap of old rtrmapbt blocks */
 	struct xbitmap		old_rtrmapbt_blocks;
+
+	/* Hooks into rtrmap update code. */
+	struct xfs_rmap_hook	hooks;
 
 	/* inode scan cursor */
 	struct xchk_iscan	iscan;
@@ -146,12 +152,16 @@ xrep_rtrmap_stash(
 	if (xchk_should_terminate(sc, &error))
 		return error;
 
+	if (xchk_iscan_aborted(&rr->iscan))
+		return -EFSCORRUPTED;
+
 	trace_xrep_rtrmap_found(sc->mp, &rmap);
 
 	/* Add entry to in-memory btree. */
+	mutex_lock(&rr->lock);
 	error = xfbtree_head_read_buf(rr->rtrmap_btree, sc->tp, &mhead_bp);
 	if (error)
-		return error;
+		goto out_abort;
 
 	mcur = xfs_rtrmapbt_mem_cursor(sc->mp, sc->tp, mhead_bp,
 			rr->rtrmap_btree);
@@ -160,10 +170,18 @@ xrep_rtrmap_stash(
 	if (error)
 		goto out_cancel;
 
-	return xfbtree_trans_commit(rr->rtrmap_btree, sc->tp);
+	error = xfbtree_trans_commit(rr->rtrmap_btree, sc->tp);
+	if (error)
+		goto out_abort;
+
+	mutex_unlock(&rr->lock);
+	return 0;
 
 out_cancel:
 	xfbtree_trans_cancel(rr->rtrmap_btree, sc->tp);
+out_abort:
+	xchk_iscan_abort(&rr->iscan);
+	mutex_unlock(&rr->lock);
 	return error;
 }
 
@@ -477,6 +495,13 @@ xrep_rtrmap_find_rmaps(
 	if (error)
 		return error;
 
+	/*
+	 * If a hook failed to update the in-memory btree, we lack the data to
+	 * continue the repair.
+	 */
+	if (xchk_iscan_aborted(&rr->iscan))
+		return -EFSCORRUPTED;
+
 	/* Scan for old rtrmap blocks. */
 	for_each_perag(sc->mp, agno, pag) {
 		error = xrep_rtrmap_scan_ag(rr, pag);
@@ -714,6 +739,80 @@ xrep_rtrmap_remove_old_tree(
 	return xrep_reset_imeta_reservation(rr->sc);
 }
 
+static inline bool
+xrep_rtrmapbt_want_live_update(
+	struct xchk_iscan		*iscan,
+	const struct xfs_owner_info	*oi)
+{
+	if (xchk_iscan_aborted(iscan))
+		return false;
+
+	/*
+	 * We scanned the CoW staging extents before we started the iscan, so
+	 * we need all the updates.
+	 */
+	if (XFS_RMAP_NON_INODE_OWNER(oi->oi_owner))
+		return true;
+
+	/* Ignore updates to files that the scanner hasn't visited yet. */
+	return xchk_iscan_want_live_update(iscan, oi->oi_owner);
+}
+
+/*
+ * Apply a rtrmapbt update from the regular filesystem into our shadow btree.
+ * We're running from the thread that owns the rtrmap ILOCK and is generating
+ * the update, so we must be careful about which parts of the struct
+ * xrep_rtrmap that we change.
+ */
+static int
+xrep_rtrmapbt_live_update(
+	struct xfs_hook			*update_hook,
+	unsigned long			action,
+	void				*data)
+{
+	struct xfs_rmap_update_params	*p = data;
+	struct xrep_rtrmap		*rr;
+	struct xfs_mount		*mp;
+	struct xfs_btree_cur		*mcur;
+	struct xfs_buf			*mhead_bp;
+	int				error;
+
+	rr = container_of(update_hook, struct xrep_rtrmap, hooks.update_hook);
+	mp = rr->sc->mp;
+
+	if (!xrep_rtrmapbt_want_live_update(&rr->iscan, &p->oinfo))
+		goto out_unlock;
+
+	trace_xrep_rtrmap_live_update(mp, action, p);
+
+	mutex_lock(&rr->lock);
+	error = xfbtree_head_read_buf(rr->rtrmap_btree, p->tp, &mhead_bp);
+	if (error)
+		goto out_abort;
+
+	mcur = xfs_rtrmapbt_mem_cursor(mp, p->tp, mhead_bp, rr->rtrmap_btree);
+	error = __xfs_rmap_finish_intent(mcur, action, p->startblock,
+			p->blockcount, &p->oinfo, p->unwritten);
+	xfs_btree_del_cursor(mcur, error);
+	if (error)
+		goto out_cancel;
+
+	error = xfbtree_trans_commit(rr->rtrmap_btree, p->tp);
+	if (error)
+		goto out_abort;
+
+	mutex_unlock(&rr->lock);
+	return NOTIFY_DONE;
+
+out_cancel:
+	xfbtree_trans_cancel(rr->rtrmap_btree, p->tp);
+out_abort:
+	xchk_iscan_abort(&rr->iscan);
+	mutex_unlock(&rr->lock);
+out_unlock:
+	return NOTIFY_DONE;
+}
+
 /* Repair the realtime rmap btree. */
 int
 xrep_rtrmapbt(
@@ -721,9 +820,6 @@ xrep_rtrmapbt(
 {
 	struct xrep_rtrmap	*rr;
 	int			error;
-
-	/* Functionality is not yet complete. */
-	return xrep_notsupported(sc);
 
 	/* Make sure any problems with the fork are fixed. */
 	error = xrep_metadata_inode_forks(sc);
@@ -735,6 +831,7 @@ xrep_rtrmapbt(
 		return -ENOMEM;
 	rr->sc = sc;
 
+	mutex_init(&rr->lock);
 	xbitmap_init(&rr->old_rtrmapbt_blocks);
 
 	/* Set up some storage */
@@ -746,29 +843,44 @@ xrep_rtrmapbt(
 	/* Retry iget every tenth of a second for up to 2 seconds. */
 	xchk_iscan_start(&rr->iscan, 2000, 100);
 
+	/*
+	 * Hook into live rtrmap operations so that we can update our in-memory
+	 * btree to reflect live changes on the filesystem.  Since we drop the
+	 * rtrmap ILOCK to scan all the inodes, we need this piece to avoid
+	 * installing a stale btree.
+	 */
+	xfs_hook_setup(&rr->hooks.update_hook, xrep_rtrmapbt_live_update);
+	error = xfs_rtrmap_hook_add(sc->mp, &rr->hooks);
+	if (error)
+		goto out_records;
+
 	/* Collect rmaps for realtime files. */
 	error = xrep_rtrmap_find_rmaps(rr);
 	if (error)
-		goto out_records;
+		goto out_hook;
 
 	xfs_trans_ijoin(sc->tp, sc->ip, 0);
 	error = xrep_ino_dqattach(sc);
 	if (error)
-		goto out_records;
+		goto out_hook;
 
 	/* Rebuild the rtrmap information. */
 	error = xrep_rtrmap_build_new_tree(rr);
 	if (error)
-		goto out_records;
+		goto out_hook;
 
 	/* Kill the old tree. */
 	error = xrep_rtrmap_remove_old_tree(rr);
 
+out_hook:
+	xchk_iscan_abort(&rr->iscan);
+	xfs_rtrmap_hook_del(sc->mp, &rr->hooks);
 out_records:
 	xchk_iscan_finish(&rr->iscan);
 	xfbtree_destroy(rr->rtrmap_btree);
 out_bitmap:
 	xbitmap_destroy(&rr->old_rtrmapbt_blocks);
+	mutex_destroy(&rr->lock);
 	kfree(rr);
 	return error;
 }
