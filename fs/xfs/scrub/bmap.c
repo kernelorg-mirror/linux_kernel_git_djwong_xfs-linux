@@ -696,6 +696,35 @@ xchk_bmap_check_rmaps(
 	return error;
 }
 
+/* Scrub a delalloc reservation from the incore extent map tree. */
+STATIC void
+xchk_bmap_iextent_delalloc(
+	struct xfs_inode	*ip,
+	struct xchk_bmap_info	*info,
+	struct xfs_bmbt_irec	*irec)
+{
+	struct xfs_mount	*mp = info->sc->mp;
+
+	/*
+	 * Check for out-of-order extents.  This record could have come
+	 * from the incore list, for which there is no ordering check.
+	 */
+	if (irec->br_startoff < info->lastoff)
+		xchk_fblock_set_corrupt(info->sc, info->whichfork,
+				irec->br_startoff);
+
+	if (!xfs_verify_fileext(mp, irec->br_startoff, irec->br_blockcount))
+		xchk_fblock_set_corrupt(info->sc, info->whichfork,
+				irec->br_startoff);
+
+	/* Make sure the extent points to a valid place. */
+	if (irec->br_blockcount > MAXEXTLEN)
+		xchk_fblock_set_corrupt(info->sc, info->whichfork,
+				irec->br_startoff);
+
+	info->lastoff = irec->br_startoff + irec->br_blockcount;
+}
+
 /*
  * Scrub an inode fork's block mappings.
  *
@@ -780,13 +809,18 @@ xchk_bmap(
 		if (xchk_should_terminate(sc, &error) ||
 		    (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT))
 			goto out;
-		if (isnullstartblock(irec.br_startblock))
-			continue;
+
 		if (irec.br_startoff >= endoff) {
 			xchk_fblock_set_corrupt(sc, whichfork,
 					irec.br_startoff);
 			goto out;
 		}
+
+		if (isnullstartblock(irec.br_startblock)) {
+			xchk_bmap_iextent_delalloc(ip, &info, &irec);
+			continue;
+		}
+
 		error = xchk_bmap_iextent(ip, &info, &irec);
 		if (error)
 			goto out;
