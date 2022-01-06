@@ -51,6 +51,7 @@ struct xbitmap;
 int xrep_fix_freelist(struct xfs_scrub *sc, int alloc_flags);
 int xrep_reap_extents(struct xfs_scrub *sc, struct xbitmap *exlist,
 		const struct xfs_owner_info *oinfo, enum xfs_ag_resv_type type);
+int xrep_reap_fork(struct xfs_scrub *sc, struct xfs_inode *ip, int whichfork);
 
 struct xrep_find_ag_btree {
 	/* in: rmap owner of the btree we're looking for */
