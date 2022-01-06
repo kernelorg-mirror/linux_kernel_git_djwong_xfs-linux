@@ -4916,34 +4916,100 @@ xfs_btree_diff_two_ptrs(
 	return (int64_t)be32_to_cpu(a->s) - be32_to_cpu(b->s);
 }
 
-/* If there's an extent, we're done. */
+struct xfs_btree_scan_keyfill {
+	/* Keys for the start and end of the range we want to know about. */
+	union xfs_btree_key	start_key;
+	union xfs_btree_key	end_key;
+
+	/* Highest record key we've seen so far. */
+	union xfs_btree_key	high_key;
+
+	enum xfs_btree_keyfill	outcome;
+};
+
 STATIC int
-xfs_btree_has_record_helper(
+xfs_btree_scan_keyfill_helper(
 	struct xfs_btree_cur		*cur,
 	const union xfs_btree_rec	*rec,
 	void				*priv)
 {
-	return -ECANCELED;
+	union xfs_btree_key		rec_key;
+	union xfs_btree_key		rec_high_key;
+	struct xfs_btree_scan_keyfill	*info = priv;
+	int64_t				res;
+
+	cur->bc_ops->init_key_from_rec(&rec_key, rec);
+
+	if (info->outcome == XFS_BTREE_KEYFILL_EMPTY) {
+		info->outcome = XFS_BTREE_KEYFILL_SPARSE;
+
+		/* Bail if the first record starts after the start key. */
+		res = cur->bc_ops->diff_two_keys(cur, &info->start_key,
+				&rec_key);
+		if (res < 0)
+			return -ECANCELED;
+	} else {
+		/* Bail if there's a gap with the previous record. */
+		if (cur->bc_ops->has_key_gap(cur, &info->high_key, &rec_key))
+			return -ECANCELED;
+	}
+
+	/* If the current record is higher than what we've seen, remember it. */
+	cur->bc_ops->init_high_key_from_rec(&rec_high_key, rec);
+	res = cur->bc_ops->diff_two_keys(cur, &rec_high_key, &info->high_key);
+	if (res > 0)
+		info->high_key = rec_high_key; /* struct copy */
+
+	return 0;
 }
 
-/* Is there a record covering a given range of keys? */
+/*
+ * Scan part of the keyspace of a btree and tell us if the area has no records,
+ * is fully mapped by records, or is partially filled.
+ */
 int
-xfs_btree_has_record(
+xfs_btree_scan_keyfill(
 	struct xfs_btree_cur		*cur,
 	const union xfs_btree_irec	*low,
 	const union xfs_btree_irec	*high,
-	bool				*exists)
+	enum xfs_btree_keyfill		*outcome)
 {
+	struct xfs_btree_scan_keyfill	info = {
+		.outcome		= XFS_BTREE_KEYFILL_EMPTY,
+	};
+	union xfs_btree_rec		rec;
+	int64_t				res;
 	int				error;
 
+	if (!cur->bc_ops->has_key_gap)
+		return -EOPNOTSUPP;
+
+	cur->bc_rec = *low;
+	cur->bc_ops->init_rec_from_cur(cur, &rec);
+	cur->bc_ops->init_key_from_rec(&info.start_key, &rec);
+
+	cur->bc_rec = *high;
+	cur->bc_ops->init_rec_from_cur(cur, &rec);
+	cur->bc_ops->init_key_from_rec(&info.end_key, &rec);
+
 	error = xfs_btree_query_range(cur, low, high,
-			&xfs_btree_has_record_helper, NULL);
-	if (error == -ECANCELED) {
-		*exists = true;
-		return 0;
-	}
-	*exists = false;
-	return error;
+			xfs_btree_scan_keyfill_helper, &info);
+	if (error == -ECANCELED)
+		goto out;
+	if (error)
+		return error;
+
+	if (info.outcome == XFS_BTREE_KEYFILL_EMPTY)
+		goto out;
+
+	/* Did the record set go at least as far as the end? */
+	res = cur->bc_ops->diff_two_keys(cur, &info.high_key, &info.end_key);
+	if (res >= 0)
+		info.outcome = XFS_BTREE_KEYFILL_FULL;
+
+out:
+	*outcome = info.outcome;
+	return 0;
 }
 
 /* Are there more records in this btree? */
