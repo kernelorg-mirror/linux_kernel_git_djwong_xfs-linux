@@ -602,7 +602,8 @@ xlog_discard_busy_extents(
 		trace_xfs_discard_extent(mp, busyp->agno, busyp->bno,
 					 busyp->length);
 
-		error = __blkdev_issue_discard(mp->m_ddev_targp->bt_bdev,
+		error = __blkdev_issue_discard(
+				xfs_buftarg_bdev(mp->m_ddev_targp),
 				XFS_AGB_TO_DADDR(mp, busyp->agno, busyp->bno),
 				XFS_FSB_TO_BB(mp, busyp->length),
 				GFP_NOFS, 0, &bio);

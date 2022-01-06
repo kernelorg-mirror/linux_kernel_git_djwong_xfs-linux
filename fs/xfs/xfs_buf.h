@@ -19,6 +19,7 @@
  *	Base types
  */
 struct xfs_buf;
+struct xfile;
 
 #define XFS_BUF_DADDR_NULL	((xfs_daddr_t) (-1LL))
 
@@ -95,7 +96,10 @@ typedef unsigned int xfs_buf_flags_t;
  */
 typedef struct xfs_buftarg {
 	dev_t			bt_dev;
-	struct block_device	*bt_bdev;
+	union {
+		struct block_device	*bt_bdev;
+		struct xfile		*bt_xfile;
+	};
 	struct dax_device	*bt_daxdev;
 	u64			bt_dax_part_off;
 	struct xfs_mount	*bt_mount;
@@ -119,6 +123,20 @@ typedef struct xfs_buftarg {
 
 /* the xfs_buftarg indexes buffers via bt_buf_hash */
 #define XFS_BUFTARG_SELF_CACHED	(1U << 0)
+
+/* in-memory buftarg via bt_xfile */
+#ifdef CONFIG_XFS_IN_MEMORY_FILE
+# define XFS_BUFTARG_IN_MEMORY	(1U << 1)
+#else
+# define XFS_BUFTARG_IN_MEMORY	(0)
+#endif
+
+static inline bool
+xfs_buftarg_in_memory(
+	struct xfs_buftarg	*btp)
+{
+	return btp->bt_flags & XFS_BUFTARG_IN_MEMORY;
+}
 
 #define XB_PAGES	2
 
@@ -362,13 +380,58 @@ xfs_buf_update_cksum(struct xfs_buf *bp, unsigned long cksum_offset)
  */
 struct xfs_buftarg *xfs_alloc_buftarg(struct xfs_mount *mp,
 		struct block_device *bdev);
+int xfs_alloc_memory_buftarg(struct xfs_mount *mp, struct xfile *xfile,
+		struct xfs_buftarg **btpp);
 extern void xfs_free_buftarg(struct xfs_buftarg *);
 extern void xfs_buftarg_wait(struct xfs_buftarg *);
 extern void xfs_buftarg_drain(struct xfs_buftarg *);
 extern int xfs_setsize_buftarg(struct xfs_buftarg *, unsigned int);
 
-#define xfs_getsize_buftarg(buftarg)	block_size((buftarg)->bt_bdev)
-#define xfs_readonly_buftarg(buftarg)	bdev_read_only((buftarg)->bt_bdev)
+static inline struct block_device *
+xfs_buftarg_bdev(struct xfs_buftarg *btp)
+{
+	if (btp->bt_flags & XFS_BUFTARG_IN_MEMORY)
+		return NULL;
+	return btp->bt_bdev;
+}
+
+static inline unsigned int
+xfs_getsize_buftarg(struct xfs_buftarg *btp)
+{
+	if (btp->bt_flags & XFS_BUFTARG_IN_MEMORY)
+		return SECTOR_SIZE;
+	return block_size(btp->bt_bdev);
+}
+
+static inline bool
+xfs_readonly_buftarg(struct xfs_buftarg *btp)
+{
+	if (btp->bt_flags & XFS_BUFTARG_IN_MEMORY)
+		return false;
+	return bdev_read_only(btp->bt_bdev);
+}
+
+static inline int
+xfs_buftarg_flush(struct xfs_buftarg *btp)
+{
+	if (btp->bt_flags & XFS_BUFTARG_IN_MEMORY)
+		return 0;
+	return blkdev_issue_flush(btp->bt_bdev);
+}
+
+static inline int
+xfs_buftarg_zeroout(
+	struct xfs_buftarg	*btp,
+	sector_t		sector,
+	sector_t		nr_sects,
+	gfp_t			gfp_mask,
+	unsigned		flags)
+{
+	if (btp->bt_flags & XFS_BUFTARG_IN_MEMORY)
+		return -EOPNOTSUPP;
+	return blkdev_issue_zeroout(btp->bt_bdev, sector, nr_sects, gfp_mask,
+			flags);
+}
 
 int xfs_buf_reverify(struct xfs_buf *bp, const struct xfs_buf_ops *ops);
 bool xfs_verify_magic(struct xfs_buf *bp, __be32 dmagic);
