@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0+
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2016 Oracle.  All Rights Reserved.
  * Author: Darrick J. Wong <darrick.wong@oracle.com>
@@ -14,11 +14,11 @@ struct xfs_bmbt_irec;
 struct xfs_refcount_irec;
 
 extern int xfs_refcount_lookup_le(struct xfs_btree_cur *cur,
-		xfs_agblock_t bno, int *stat);
+		xfs_fsblock_t bno, int *stat);
 extern int xfs_refcount_lookup_ge(struct xfs_btree_cur *cur,
-		xfs_agblock_t bno, int *stat);
+		xfs_fsblock_t bno, int *stat);
 extern int xfs_refcount_lookup_eq(struct xfs_btree_cur *cur,
-		xfs_agblock_t bno, int *stat);
+		xfs_fsblock_t bno, int *stat);
 extern int xfs_refcount_get_rec(struct xfs_btree_cur *cur,
 		struct xfs_refcount_irec *irec, int *stat);
 
@@ -38,8 +38,8 @@ enum xfs_refcount_intent_type {
 struct xfs_refcount_intent {
 	struct list_head			ri_list;
 	enum xfs_refcount_intent_type		ri_type;
-	xfs_extlen_t				ri_blockcount;
 	xfs_fsblock_t				ri_startblock;
+	xfs_filblks_t				ri_blockcount;
 };
 
 void xfs_refcount_increase_extent(struct xfs_trans *tp,
@@ -53,13 +53,13 @@ extern int xfs_refcount_finish_one(struct xfs_trans *tp,
 		struct xfs_refcount_intent *refc, struct xfs_btree_cur **pcur);
 
 extern int xfs_refcount_find_shared(struct xfs_btree_cur *cur,
-		xfs_agblock_t agbno, xfs_extlen_t aglen, xfs_agblock_t *fbno,
-		xfs_extlen_t *flen, bool find_end_of_shared);
+		xfs_fsblock_t bno, xfs_filblks_t aglen, xfs_fsblock_t *fbno,
+		xfs_filblks_t *flen, bool find_end_of_shared);
 
 void xfs_refcount_alloc_cow_extent(struct xfs_trans *tp, xfs_fsblock_t fsb,
-		xfs_extlen_t len);
+		xfs_filblks_t len);
 void xfs_refcount_free_cow_extent(struct xfs_trans *tp, xfs_fsblock_t fsb,
-		xfs_extlen_t len);
+		xfs_filblks_t len);
 extern int xfs_refcount_recover_cow_leftovers(struct xfs_mount *mp,
 		struct xfs_perag *pag);
 
@@ -76,7 +76,7 @@ extern int xfs_refcount_recover_cow_leftovers(struct xfs_mount *mp,
 #define XFS_REFCOUNT_ITEM_OVERHEAD	32
 
 extern int xfs_refcount_has_record(struct xfs_btree_cur *cur,
-		xfs_agblock_t bno, xfs_extlen_t len, bool *exists);
+		xfs_fsblock_t bno, xfs_filblks_t len, bool *exists);
 union xfs_btree_rec;
 extern void xfs_refcount_btrec_to_irec(const union xfs_btree_rec *rec,
 		struct xfs_refcount_irec *irec);
