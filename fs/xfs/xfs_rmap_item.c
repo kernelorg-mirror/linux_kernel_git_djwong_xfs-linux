@@ -431,7 +431,7 @@ xfs_rmap_update_finish_item(
 			rmap->ri_bmap.br_blockcount, rmap->ri_bmap.br_state,
 			state);
 
-	xfs_fs_drop_intents(mp, rmap->ri_bmap.br_startblock);
+	xfs_fs_drop_intents(mp, false, rmap->ri_bmap.br_startblock);
 	kmem_cache_free(xfs_rmap_intent_cache, rmap);
 	return error;
 }
@@ -453,7 +453,7 @@ xfs_rmap_update_cancel_item(
 	struct xfs_rmap_intent		*rmap;
 
 	rmap = container_of(item, struct xfs_rmap_intent, ri_list);
-	xfs_fs_drop_intents(mp, rmap->ri_bmap.br_startblock);
+	xfs_fs_drop_intents(mp, false, rmap->ri_bmap.br_startblock);
 	kmem_cache_free(xfs_rmap_intent_cache, rmap);
 }
 
@@ -466,7 +466,7 @@ xfs_rmap_update_add_item(
 	const struct xfs_rmap_intent	*ri;
 
 	ri = container_of(item, struct xfs_rmap_intent, ri_list);
-	xfs_fs_bump_intents(mp, ri->ri_bmap.br_startblock);
+	xfs_fs_bump_intents(mp, false, ri->ri_bmap.br_startblock);
 }
 
 const struct xfs_defer_op_type xfs_rmap_update_defer_type = {
