@@ -948,6 +948,47 @@ xfs_bumplink(
 	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
 }
 
+#ifdef CONFIG_XFS_LIVE_HOOKS
+static inline void
+xfs_nlink_delta(
+	struct xfs_inode		*dp,
+	struct xfs_inode		*ip,
+	enum xfs_nlink_delta_type	type,
+	int				delta)
+{
+	struct xfs_nlink_delta_params	p;
+	struct xfs_mount		*mp = ip->i_mount;
+
+	p.dp = dp;
+	p.ino = ip->i_ino;
+	p.delta = delta;
+
+	xfs_hook_call(&mp->m_nlink_delta_hooks, type, &p);
+}
+
+/* Call a hook to capture nlink updates in real time. */
+static inline void
+xfs_nlink_child_delta(
+	struct xfs_inode	*dp,
+	struct xfs_inode	*ip,
+	int			delta)
+{
+	xfs_nlink_delta(dp, ip, XFS_CHILD_NLINK_DELTA, delta);
+}
+
+/* Call a hook to capture nlink updates in real time. */
+void
+xfs_nlink_parent_delta(
+	struct xfs_inode	*dp,
+	struct xfs_inode	*ip,
+	int			delta)
+{
+	xfs_nlink_delta(dp, ip, XFS_PARENT_NLINK_DELTA, delta);
+}
+#else
+# define xfs_nlink_child_delta(dp, ip, delta)
+#endif /* CONFIG_XFS_LIVE_HOOKS */
+
 int
 xfs_create(
 	struct user_namespace	*mnt_userns,
@@ -1059,6 +1100,16 @@ xfs_create(
 			goto out_trans_cancel;
 
 		xfs_bumplink(tp, dp);
+	}
+
+	/*
+	 * Create ip with a reference from dp, and add '.' and '..' references
+	 * if it's a directory.
+	 */
+	xfs_nlink_parent_delta(dp, ip, 1);
+	if (is_dir) {
+		xfs_nlink_child_delta(ip, ip, 1);
+		xfs_nlink_child_delta(ip, dp, 1);
 	}
 
 	/*
@@ -1286,6 +1337,7 @@ xfs_link(
 	xfs_trans_log_inode(tp, tdp, XFS_ILOG_CORE);
 
 	xfs_bumplink(tp, sip);
+	xfs_nlink_parent_delta(tdp, sip, 1);
 
 	/*
 	 * If this is a synchronous mount, make sure that the
@@ -2839,6 +2891,16 @@ xfs_remove(
 	}
 
 	/*
+	 * Drop the link from dp to ip, and if ip was a directory, remove the
+	 * '.' and '..' references since we freed the directory.
+	 */
+	xfs_nlink_parent_delta(dp, ip, -1);
+	if (S_ISDIR(VFS_I(ip)->i_mode)) {
+		xfs_nlink_child_delta(ip, dp, -1);
+		xfs_nlink_child_delta(ip, ip, -1);
+	}
+
+	/*
 	 * If this is a synchronous mount, make sure that the
 	 * remove transaction goes to disk before returning to
 	 * the user.
@@ -3069,6 +3131,72 @@ xfs_rename_alloc_whiteout(
 	*wip = tmpfile;
 	return 0;
 }
+
+#ifdef CONFIG_XFS_LIVE_HOOKS
+static inline void
+xfs_rename_call_nlink_hooks(
+	struct xfs_inode	*src_dp,
+	struct xfs_inode	*src_ip,
+	struct xfs_inode	*target_dp,
+	struct xfs_inode	*target_ip,
+	struct xfs_inode	*wip,
+	unsigned int		flags)
+{
+	/* If we added a whiteout, add the reference from src_dp. */
+	if (wip)
+		xfs_nlink_parent_delta(src_dp, wip, 1);
+
+	/* Move the src_ip reference from src_dp to target_dp. */
+	xfs_nlink_parent_delta(src_dp, src_ip, -1);
+	xfs_nlink_parent_delta(target_dp, src_ip, 1);
+
+	/*
+	 * If src_ip is a dir, move its '..' reference from src_dp to
+	 * target_dp.
+	 */
+	if (S_ISDIR(VFS_I(src_ip)->i_mode)) {
+		xfs_nlink_child_delta(src_ip, src_dp, -1);
+		xfs_nlink_child_delta(src_ip, target_dp, 1);
+	}
+
+	if (!target_ip)
+		return;
+
+	if (flags & RENAME_EXCHANGE) {
+		/* Move the target_ip reference from target_dp to src_dp. */
+		xfs_nlink_parent_delta(target_dp, target_ip, -1);
+		xfs_nlink_parent_delta(src_dp, target_ip, 1);
+
+		/*
+		 * If target_ip is a dir, move its '..' reference from
+		 * target_dp to src_dp.
+		 */
+		if (S_ISDIR(VFS_I(target_ip)->i_mode)) {
+			xfs_nlink_child_delta(target_ip, target_dp, -1);
+			xfs_nlink_child_delta(target_ip, src_dp, 1);
+		}
+
+		return;
+	}
+
+	/* Drop target_ip's reference from target_dp. */
+	xfs_nlink_parent_delta(target_dp, target_ip, -1);
+
+	if (!S_ISDIR(VFS_I(target_ip)->i_mode))
+		return;
+
+	/*
+	 * If target_ip was a dir, drop the '.' and '..' references since that
+	 * was the last reference.
+	 */
+	ASSERT(VFS_I(target_ip)->i_nlink == 0);
+	xfs_nlink_child_delta(target_ip, target_dp, -1);
+	xfs_nlink_child_delta(target_ip, target_ip, -1);
+}
+#else
+# define xfs_rename_call_nlink_hooks(src_dp, src_ip, target_dp, \
+				     target_ip, wip, flags)
+#endif /* CONFIG_XFS_LIVE_HOOKS */
 
 /*
  * xfs_rename
@@ -3408,6 +3536,9 @@ xfs_rename(
 	xfs_trans_log_inode(tp, src_dp, XFS_ILOG_CORE);
 	if (new_parent)
 		xfs_trans_log_inode(tp, target_dp, XFS_ILOG_CORE);
+
+	xfs_rename_call_nlink_hooks(src_dp, src_ip, target_dp, target_ip, wip,
+			flags);
 
 	error = xfs_finish_rename(tp);
 	if (wip)
