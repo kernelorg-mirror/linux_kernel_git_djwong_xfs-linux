@@ -348,10 +348,13 @@ xfs_bmap_drop_intents(
 	const struct xfs_bmap_intent	*bi,
 	xfs_fsblock_t			orig_startblock)
 {
+	bool				isrt;
+
 	if (!xfs_has_rmapbt(mp))
 		return;
 
-	xfs_fs_drop_intents(mp, orig_startblock);
+	isrt = xfs_ifork_is_realtime(bi->bi_owner, bi->bi_whichfork);
+	xfs_fs_drop_intents(mp, isrt, orig_startblock);
 }
 
 /* Process a deferred rmap update. */
@@ -414,6 +417,7 @@ xfs_bmap_update_add_item(
 	const struct list_head		*item)
 {
 	const struct xfs_bmap_intent	*bi;
+	bool				isrt;
 
 	bi = container_of(item, struct xfs_bmap_intent, bi_list);
 
@@ -424,7 +428,8 @@ xfs_bmap_update_add_item(
 	if (!xfs_has_rmapbt(mp))
 		return;
 
-	xfs_fs_bump_intents(mp, bi->bi_bmap.br_startblock);
+	isrt = xfs_ifork_is_realtime(bi->bi_owner, bi->bi_whichfork);
+	xfs_fs_bump_intents(mp, isrt, bi->bi_bmap.br_startblock);
 }
 
 const struct xfs_defer_op_type xfs_bmap_update_defer_type = {
