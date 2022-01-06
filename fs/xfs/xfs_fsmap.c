@@ -26,6 +26,7 @@
 #include "xfs_rtalloc.h"
 #include "xfs_ag.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_rtrefcount_btree.h"
 
 /* Convert an xfs_fsmap to an fsmap. */
 static void
@@ -205,14 +206,16 @@ xfs_getfsmap_is_shared(
 	*stat = false;
 	if (!xfs_has_reflink(mp))
 		return 0;
+
 	/* rt files will have no perag structure */
 	if (!info->pag)
-		return 0;
+		cur = xfs_rtrefcountbt_init_cursor(mp, tp, mp->m_rrefcountip);
+	else
+		cur = xfs_refcountbt_init_cursor(mp, tp, info->agf_bp,
+				info->pag);
 
 	/* Are there any shared blocks here? */
 	flen = 0;
-	cur = xfs_refcountbt_init_cursor(mp, tp, info->agf_bp, info->pag);
-
 	error = xfs_refcount_find_shared(cur, rec->rm_startblock,
 			rec->rm_blockcount, &fbno, &flen, false);
 
