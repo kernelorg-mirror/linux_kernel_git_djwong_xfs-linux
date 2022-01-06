@@ -96,7 +96,9 @@ xchk_setup_quotacheck(
  * set the INCOMPLETE flag even when a negative errno is returned.  This care
  * must be taken with certain errno values (i.e. EFSBADCRC, EFSCORRUPTED,
  * ECANCELED) that are absorbed into a scrub state flag update by
- * xchk_*_process_error.
+ * xchk_*_process_error.  Scrub and repair share the same incore data
+ * structures, so the INCOMPLETE flag is critical to prevent a repair based on
+ * insufficient information.
  *
  * Because we are scanning a live filesystem, it's possible that another thread
  * will try to update the quota counters for an inode that we've already
@@ -397,11 +399,14 @@ xqcheck_collect_inode(
 
 	/* Figure out the data / rt device block counts. */
 	xfs_ilock(ip, XFS_IOLOCK_SHARED | XFS_MMAPLOCK_SHARED);
-	ilock_flags = xfs_ilock_data_map_shared(ip);
 	if (XFS_IS_REALTIME_INODE(ip)) {
+		ilock_flags = xfs_ilock_data_map_shared(ip);
 		error = xfs_iread_extents(tp, ip, XFS_DATA_FORK);
 		if (error)
 			goto out_abort;
+	} else {
+		ilock_flags = XFS_ILOCK_SHARED;
+		xfs_ilock(ip, ilock_flags);
 	}
 	xfs_inode_count_blocks(tp, ip, &nblks, &rtblks);
 
