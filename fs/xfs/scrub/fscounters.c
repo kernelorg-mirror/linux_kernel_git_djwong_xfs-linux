@@ -467,7 +467,7 @@ xchk_fscount_check_frextents(
 	}
 
 	fsc->frextents = 0;
-	xfs_ilock(sc->mp->m_rbmip, XFS_ILOCK_EXCL);
+	xfs_rtlock(NULL, sc->mp, XFS_RTLOCK_ALL);
 	error = xfs_rtalloc_query_all(sc->tp, xchk_fscount_add_frextent, fsc);
 	if (error){
 		xchk_set_incomplete(sc);
@@ -488,7 +488,7 @@ xchk_fscount_check_frextents(
 	spin_unlock(&mp->m_sb_lock);
 
 out_unlock:
-	xfs_iunlock(sc->mp->m_rbmip, XFS_ILOCK_EXCL);
+	xfs_rtunlock(sc->mp, XFS_RTLOCK_ALL);
 	return error;
 }
 #else
