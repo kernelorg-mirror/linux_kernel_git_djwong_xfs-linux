@@ -376,9 +376,11 @@ xchk_nlinks_collect(
 	int			error;
 
 	/* Count the rt and quota files that are rooted in the superblock. */
-	error = xchk_nlinks_metafiles(xnc);
-	if (error)
-		return error;
+	if (!xfs_has_metadir(sc->mp)) {
+		error = xchk_nlinks_metafiles(xnc);
+		if (error)
+			return error;
+	}
 
 	/*
 	 * Set up for a potentially lengthy filesystem scan by reducing our
@@ -483,7 +485,7 @@ xchk_nlinks_compare_inode(
 	if (!S_ISDIR(VFS_I(ip)->i_mode) && obs.child != 0)
 		xchk_ino_set_corrupt(sc, ip->i_ino);
 
-	if (ip == sc->mp->m_rootip) {
+	if (ip == sc->mp->m_rootip || ip == sc->mp->m_metadirip) {
 		/* Nothing should point to the directory tree roots. */
 		if (obs.parent != 0)
 			xchk_ino_set_corrupt(sc, ip->i_ino);
