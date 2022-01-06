@@ -23,6 +23,7 @@
 #include "scrub/common.h"
 #include "scrub/btree.h"
 #include "scrub/trace.h"
+#include "scrub/repair.h"
 
 /*
  * Grab total control of the inode metadata.  It doesn't matter here if
@@ -154,8 +155,11 @@ retry:
 	/*
 	 * We have allocated a scrub transaction and joined the AGI buffer to
 	 * it.  Mapping the inode succeeded, which means that there is an
-	 * ondisk inode that is corrupt enough that iget fails.
+	 * ondisk inode that is corrupt enough that iget fails.  Save the
+	 * mapping for repairs, if needed.
 	 */
+	if (xchk_could_repair(sc))
+		xrep_setup_inode(sc, &imap);
 	return 0;
 
 got_inode:
@@ -170,6 +174,8 @@ got_inode:
 		return error;
 
 	xchk_ilock(sc, XFS_ILOCK_EXCL);
+	if (xchk_could_repair(sc))
+		xrep_setup_inode(sc, NULL);
 	return 0;
 }
 
