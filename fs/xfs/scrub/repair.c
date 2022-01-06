@@ -1160,7 +1160,84 @@ xrep_agmeta_extent_reap(
 	return 0;
 }
 
-/* Dispose of every block of every extent in the bitmap. */
+/*
+ * Break a file metadata extent into sub-extents by fate (crosslinked, not
+ * crosslinked), and dispose of each sub-extent separately.  The extent must
+ * not cross an AG boundary.
+ */
+STATIC int
+xrep_imeta_extent_reap(
+	uint64_t		fsbno,
+	uint64_t		len,
+	void			*priv)
+{
+	struct xrep_reap_state	*rs = priv;
+	struct xfs_scrub	*sc = rs->sc;
+	xfs_agnumber_t		agno = XFS_FSB_TO_AGNO(sc->mp, fsbno);
+	xfs_agblock_t		agbno = XFS_FSB_TO_AGBNO(sc->mp, fsbno);
+	xfs_agblock_t		agbno_next = agbno + len;
+	int			error = 0;
+
+	ASSERT(len <= MAXEXTLEN);
+	ASSERT(sc->ip != NULL);
+	ASSERT(!sc->sa.pag);
+
+	/*
+	 * We're reaping blocks after repairing file metadata, which means that
+	 * we have to init the xchk_ag structure ourselves.
+	 */
+	sc->sa.pag = xfs_perag_get(sc->mp, agno);
+	if (!sc->sa.pag)
+		return -EFSCORRUPTED;
+
+	error = xfs_alloc_read_agf(sc->mp, sc->tp, agno, 0, &sc->sa.agf_bp);
+	if (error)
+		goto out_pag;
+
+	while (agbno < agbno_next) {
+		xfs_extlen_t	len;
+		bool		roll;
+		bool		crosslinked;
+
+		error = xrep_agextent_reap_find(rs, agbno, agbno_next,
+				&crosslinked, &len);
+		if (error)
+			goto out_agf;
+
+		error = xrep_agextent_reap(rs, agbno, len, crosslinked, &roll);
+		if (error)
+			goto out_agf;
+
+		if (roll) {
+			/*
+			 * Hold the AGF buffer across the transaction roll so
+			 * that we don't have to reattach it to the scrub
+			 * context.
+			 */
+			xfs_trans_bhold(sc->tp, sc->sa.agf_bp);
+			error = xfs_trans_roll_inode(&sc->tp, sc->ip);
+			xfs_trans_bjoin(sc->tp, sc->sa.agf_bp);
+			if (error)
+				goto out_agf;
+			rs->deferred = 0;
+		}
+
+		agbno += len;
+	}
+
+out_agf:
+	xfs_trans_brelse(sc->tp, sc->sa.agf_bp);
+	sc->sa.agf_bp = NULL;
+out_pag:
+	xfs_perag_put(sc->sa.pag);
+	sc->sa.pag = NULL;
+	return error;
+}
+
+/*
+ * Dispose of every block of every extent in the bitmap.  Do not use this for
+ * file data/attr extents.
+ */
 int
 xrep_reap_extents(
 	struct xfs_scrub		*sc,
@@ -1176,6 +1253,14 @@ xrep_reap_extents(
 	int				error;
 
 	ASSERT(xfs_has_rmapbt(sc->mp));
+
+	if (sc->ip != NULL) {
+		error = xbitmap_walk(bitmap, xrep_imeta_extent_reap, &rs);
+		if (error || rs.deferred == 0)
+			return error;
+
+		return xfs_trans_roll_inode(&sc->tp, sc->ip);
+	}
 
 	error = xbitmap_walk(bitmap, xrep_agmeta_extent_reap, &rs);
 	if (error || rs.deferred == 0)
