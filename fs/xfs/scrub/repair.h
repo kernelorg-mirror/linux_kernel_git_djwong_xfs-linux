@@ -84,6 +84,7 @@ int xrep_setup_directory(struct xfs_scrub *sc);
 int xrep_setup_parent(struct xfs_scrub *sc);
 int xrep_setup_nlinks(struct xfs_scrub *sc, unsigned int *buf_bytes);
 int xrep_setup_symlink(struct xfs_scrub *sc, unsigned int *resblks);
+int xrep_setup_rtbitmap(struct xfs_scrub *sc, unsigned int *resblks);
 
 int xrep_xattr_reset_fork(struct xfs_scrub *sc);
 
@@ -161,8 +162,10 @@ int xrep_quotacheck(struct xfs_scrub *sc);
 
 #ifdef CONFIG_XFS_RT
 int xrep_rtsummary(struct xfs_scrub *sc);
+int xrep_rtbitmap(struct xfs_scrub *sc);
 #else
 # define xrep_rtsummary			xrep_notsupported
+# define xrep_rtbitmap			xrep_notsupported
 #endif /* CONFIG_XFS_RT */
 
 struct xrep_newbt_resv {
@@ -297,6 +300,11 @@ static inline int xrep_setup_symlink(struct xfs_scrub *sc, unsigned int *x)
 	return 0;
 }
 
+static inline int xrep_setup_rtbitmap(struct xfs_scrub *sc, unsigned int *x)
+{
+	return 0;
+}
+
 #define xrep_revalidate_allocbt		(NULL)
 #define xrep_revalidate_iallocbt	(NULL)
 
@@ -321,6 +329,7 @@ static inline int xrep_setup_symlink(struct xfs_scrub *sc, unsigned int *x)
 #define xrep_directory			xrep_notsupported
 #define xrep_parent			xrep_notsupported
 #define xrep_symlink			xrep_notsupported
+#define xrep_rtbitmap			xrep_notsupported
 
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
