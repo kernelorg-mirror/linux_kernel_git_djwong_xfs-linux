@@ -23,6 +23,7 @@
 #include "xfs_bmap.h"
 #include "xfs_alloc.h"
 #include "xfs_buf.h"
+#include "xfs_swapext.h"
 
 static struct kmem_cache	*xfs_defer_pending_cache;
 
@@ -185,6 +186,7 @@ static const struct xfs_defer_op_type *defer_op_types[] = {
 	[XFS_DEFER_OPS_TYPE_RMAP]	= &xfs_rmap_update_defer_type,
 	[XFS_DEFER_OPS_TYPE_FREE]	= &xfs_extent_free_defer_type,
 	[XFS_DEFER_OPS_TYPE_AGFL_FREE]	= &xfs_agfl_free_defer_type,
+	[XFS_DEFER_OPS_TYPE_SWAPEXT]	= &xfs_swapext_defer_type,
 };
 
 /*
@@ -907,6 +909,9 @@ xfs_defer_init_item_caches(void)
 	error = xfs_extfree_intent_init_cache();
 	if (error)
 		goto err;
+	error = xfs_swapext_intent_init_cache();
+	if (error)
+		goto err;
 
 	return 0;
 err:
@@ -918,6 +923,7 @@ err:
 void
 xfs_defer_destroy_item_caches(void)
 {
+	xfs_swapext_intent_destroy_cache();
 	xfs_extfree_intent_destroy_cache();
 	xfs_bmap_intent_destroy_cache();
 	xfs_refcount_intent_destroy_cache();
