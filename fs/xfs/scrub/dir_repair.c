@@ -1110,12 +1110,39 @@ xrep_directory_scan_parent(
 	return parent_ino;
 }
 
+/*
+ * Look up '..' in the dentry cache and confirm that it's really the parent.
+ * Returns NULLFSINO if the dcache misses or if the hit is implausible.
+ */
+static inline xfs_ino_t
+xrep_directory_dcache_parent(
+	struct xrep_dir		*rd)
+{
+	struct xfs_scrub	*sc = rd->sc;
+	xfs_ino_t		parent_ino;
+	int			error;
+
+	parent_ino = xrep_parent_from_dcache(sc);
+	if (parent_ino == NULLFSINO)
+		return parent_ino;
+
+	error = xrep_parent_confirm(sc, &parent_ino);
+	if (error)
+		return NULLFSINO;
+
+	return parent_ino;
+}
+
 /* Try to find the parent of the directory being repaired. */
 STATIC int
 xrep_directory_find_parent(
 	struct xrep_dir		*rd)
 {
 	rd->parent_ino = xrep_directory_self_parent(rd);
+	if (rd->parent_ino != NULLFSINO)
+		return 0;
+
+	rd->parent_ino = xrep_directory_dcache_parent(rd);
 	if (rd->parent_ino != NULLFSINO)
 		return 0;
 
