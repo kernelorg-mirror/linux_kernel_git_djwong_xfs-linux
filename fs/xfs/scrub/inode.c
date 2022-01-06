@@ -23,6 +23,7 @@
 #include "scrub/common.h"
 #include "scrub/btree.h"
 #include "scrub/trace.h"
+#include "scrub/repair.h"
 
 /* Prepare the attached inode for scrubbing. */
 static inline int
@@ -154,8 +155,11 @@ xchk_setup_inode(
 	 * the AGI buffer to prevent anyone from allocating or freeing inodes.
 	 * This ensures that we preserve the inconsistency between the inobt
 	 * saying the inode is allocated and the icache being unable to load
-	 * the inode until we can flag the corruption in xchk_inode.
+	 * the inode until we can flag the corruption in xchk_inode.  Save the
+	 * mapping to make repairs to the ondisk inode buffer.
 	 */
+	if (xchk_could_repair(sc))
+		xrep_setup_inode(sc, &imap);
 	return 0;
 
 out_cancel:
