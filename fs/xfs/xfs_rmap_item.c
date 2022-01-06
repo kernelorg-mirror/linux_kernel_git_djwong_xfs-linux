@@ -315,7 +315,7 @@ STATIC void
 xfs_rmap_update_log_item(
 	struct xfs_trans		*tp,
 	struct xfs_rui_log_item		*ruip,
-	struct xfs_rmap_intent		*rmap)
+	struct xfs_rmap_intent		*ri)
 {
 	uint				next_extent;
 	struct xfs_map_extent		*map;
@@ -331,11 +331,11 @@ xfs_rmap_update_log_item(
 	next_extent = atomic_inc_return(&ruip->rui_next_extent) - 1;
 	ASSERT(next_extent < ruip->rui_format.rui_nextents);
 	map = &ruip->rui_format.rui_extents[next_extent];
-	map->me_owner = rmap->ri_owner;
-	map->me_startblock = rmap->ri_bmap.br_startblock;
-	map->me_startoff = rmap->ri_bmap.br_startoff;
-	map->me_len = rmap->ri_bmap.br_blockcount;
-	switch (rmap->ri_type) {
+	map->me_owner = ri->ri_owner;
+	map->me_startblock = ri->ri_bmap.br_startblock;
+	map->me_startoff = ri->ri_bmap.br_startoff;
+	map->me_len = ri->ri_bmap.br_blockcount;
+	switch (ri->ri_type) {
 	case XFS_RMAP_MAP:
 		map->me_flags = XFS_RMAP_EXTENT_MAP;
 		break;
@@ -365,11 +365,11 @@ xfs_rmap_update_log_item(
 		map->me_flags = 0;
 		break;
 	}
-	if (rmap->ri_bmap.br_state == XFS_EXT_UNWRITTEN)
+	if (ri->ri_bmap.br_state == XFS_EXT_UNWRITTEN)
 		map->me_flags |= XFS_RMAP_EXTENT_UNWRITTEN;
-	if (rmap->ri_whichfork == XFS_ATTR_FORK)
+	if (ri->ri_whichfork == XFS_ATTR_FORK)
 		map->me_flags |= XFS_RMAP_EXTENT_ATTR_FORK;
-	if (rmap->ri_realtime)
+	if (ri->ri_realtime)
 		map->me_flags |= XFS_RMAP_EXTENT_REALTIME;
 }
 
@@ -382,15 +382,15 @@ xfs_rmap_update_create_intent(
 {
 	struct xfs_mount		*mp = tp->t_mountp;
 	struct xfs_rui_log_item		*ruip = xfs_rui_init(mp, count);
-	struct xfs_rmap_intent		*rmap;
+	struct xfs_rmap_intent		*ri;
 
 	ASSERT(count > 0);
 
 	xfs_trans_add_item(tp, &ruip->rui_item);
 	if (sort)
 		list_sort(mp, items, xfs_rmap_update_diff_items);
-	list_for_each_entry(rmap, items, ri_list)
-		xfs_rmap_update_log_item(tp, ruip, rmap);
+	list_for_each_entry(ri, items, ri_list)
+		xfs_rmap_update_log_item(tp, ruip, ri);
 	return &ruip->rui_item;
 }
 
@@ -439,11 +439,12 @@ xfs_rmap_update_cancel_item(
 	struct xfs_mount		*mp,
 	struct list_head		*item)
 {
-	struct xfs_rmap_intent		*rmap;
+	struct xfs_rmap_intent		*ri;
 
-	rmap = container_of(item, struct xfs_rmap_intent, ri_list);
-	xfs_fs_drop_intents(mp, rmap->ri_realtime, rmap->ri_bmap.br_startblock);
-	kmem_cache_free(xfs_rmap_intent_cache, rmap);
+	ri = container_of(item, struct xfs_rmap_intent, ri_list);
+
+	xfs_fs_drop_intents(mp, ri->ri_realtime, ri->ri_bmap.br_startblock);
+	kmem_cache_free(xfs_rmap_intent_cache, ri);
 }
 
 /* Add a deferred rmap update. */
@@ -473,15 +474,15 @@ const struct xfs_defer_op_type xfs_rmap_update_defer_type = {
 static inline bool
 xfs_rui_validate_map(
 	struct xfs_mount		*mp,
-	struct xfs_map_extent		*rmap)
+	struct xfs_map_extent		*map)
 {
 	if (!xfs_has_rmapbt(mp))
 		return false;
 
-	if (rmap->me_flags & ~XFS_RMAP_EXTENT_FLAGS)
+	if (map->me_flags & ~XFS_RMAP_EXTENT_FLAGS)
 		return false;
 
-	switch (rmap->me_flags & XFS_RMAP_EXTENT_TYPE_MASK) {
+	switch (map->me_flags & XFS_RMAP_EXTENT_TYPE_MASK) {
 	case XFS_RMAP_EXTENT_MAP:
 	case XFS_RMAP_EXTENT_MAP_SHARED:
 	case XFS_RMAP_EXTENT_UNMAP:
@@ -495,17 +496,17 @@ xfs_rui_validate_map(
 		return false;
 	}
 
-	if (!XFS_RMAP_NON_INODE_OWNER(rmap->me_owner) &&
-	    !xfs_verify_ino(mp, rmap->me_owner))
+	if (!XFS_RMAP_NON_INODE_OWNER(map->me_owner) &&
+	    !xfs_verify_ino(mp, map->me_owner))
 		return false;
 
-	if (!xfs_verify_fileext(mp, rmap->me_startoff, rmap->me_len))
+	if (!xfs_verify_fileext(mp, map->me_startoff, map->me_len))
 		return false;
 
-	if (rmap->me_flags & XFS_RMAP_EXTENT_REALTIME)
-		return xfs_verify_rtext(mp, rmap->me_startblock, rmap->me_len);
+	if (map->me_flags & XFS_RMAP_EXTENT_REALTIME)
+		return xfs_verify_rtext(mp, map->me_startblock, map->me_len);
 
-	return xfs_verify_fsbext(mp, rmap->me_startblock, rmap->me_len);
+	return xfs_verify_fsbext(mp, map->me_startblock, map->me_len);
 }
 
 /*
@@ -625,18 +626,18 @@ xfs_rui_item_relog(
 {
 	struct xfs_rud_log_item		*rudp;
 	struct xfs_rui_log_item		*ruip;
-	struct xfs_map_extent		*extp;
+	struct xfs_map_extent		*map;
 	unsigned int			count;
 
 	count = RUI_ITEM(intent)->rui_format.rui_nextents;
-	extp = RUI_ITEM(intent)->rui_format.rui_extents;
+	map = RUI_ITEM(intent)->rui_format.rui_extents;
 
 	tp->t_flags |= XFS_TRANS_DIRTY;
 	rudp = xfs_trans_get_rud(tp, RUI_ITEM(intent));
 	set_bit(XFS_LI_DIRTY, &rudp->rud_item.li_flags);
 
 	ruip = xfs_rui_init(tp->t_mountp, count);
-	memcpy(ruip->rui_format.rui_extents, extp, count * sizeof(*extp));
+	memcpy(ruip->rui_format.rui_extents, map, count * sizeof(*map));
 	atomic_set(&ruip->rui_next_extent, count);
 	xfs_trans_add_item(tp, &ruip->rui_item);
 	set_bit(XFS_LI_DIRTY, &ruip->rui_item.li_flags);
