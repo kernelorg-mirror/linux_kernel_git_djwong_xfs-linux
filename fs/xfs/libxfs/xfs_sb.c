@@ -171,6 +171,9 @@ xfs_sb_version_to_features(
 		features |= XFS_FEAT_BIGTIME;
 	if (sbp->sb_features_incompat & XFS_SB_FEAT_INCOMPAT_NEEDSREPAIR)
 		features |= XFS_FEAT_NEEDSREPAIR;
+
+	if (sbp->sb_features_log_incompat & XFS_SB_FEAT_INCOMPAT_LOG_ATOMIC_SWAP)
+		features |= XFS_FEAT_ATOMIC_SWAP;
 	return features;
 }
 
@@ -1190,6 +1193,12 @@ xfs_fs_geometry(
 	} else {
 		geo->logsectsize = BBSIZE;
 	}
+	/*
+	 * Userspace can ask for atomic extent swapping if the fs is new enough
+	 * to support the underlying log items.
+	 */
+	if (xfs_can_logswap(mp))
+		geo->flags |= XFS_FSOP_GEOM_FLAGS_ATOMIC_SWAP;
 	geo->rtsectsize = sbp->sb_blocksize;
 	geo->dirblocksize = xfs_dir2_dirblock_bytes(sbp);
 
