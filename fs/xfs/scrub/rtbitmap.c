@@ -69,6 +69,7 @@ xchk_rtbitmap_xref(
 		return;
 
 	xchk_xref_has_no_rt_owner(sc, startblock, blockcount);
+	xchk_xref_is_not_shared_rt(sc, startblock, blockcount);
 
 	if (rtb->next_free_rtblock < startblock)
 		xchk_xref_has_rt_owner(sc, rtb->next_free_rtblock,
