@@ -33,6 +33,7 @@
 #include "scrub/parent.h"
 #include "scrub/readdir.h"
 #include "scrub/tempfile.h"
+#include "scrub/orphanage.h"
 
 struct xrep_findparent_info {
 	/* The directory currently being scanned. */
@@ -344,6 +345,33 @@ xrep_parent_scan(
 	return 0;
 }
 
+static inline struct xrep_orphanage_req *
+xrep_parent_orphanage_req(
+	struct xfs_scrub	*sc)
+{
+	return sc->buf;
+}
+
+static inline unsigned char *
+xrep_parent_orphanage_namebuf(
+	struct xfs_scrub	*sc)
+{
+	return (unsigned char *)(((struct xrep_orphanage_req *)sc->buf) + 1);
+}
+
+/* Set up for a parent repair. */
+int
+xrep_setup_parent(
+	struct xfs_scrub	*sc)
+{
+	/* We need a buffer for the orphanage request and a name buffer. */
+	sc->buf = kvmalloc(xrep_orphanage_req_sizeof(), XCHK_GFP_FLAGS);
+	if (!sc->buf)
+		return -ENOMEM;
+
+	return xrep_orphanage_try_create(sc);
+}
+
 /*
  * If we're the root of a directory tree, we are our own parent.  If we're an
  * unlinked directory, the parent /won't/ have a link to us.  Set the parent
@@ -401,6 +429,70 @@ xrep_parent_reset_dir(
 			spaceres);
 }
 
+/*
+ * Move the current file to the orphanage.
+ *
+ * Caller must hold IOLOCK_EXCL on @sc->ip, and no other inode locks.  Upon
+ * successful return, the scrub transaction will have enough extra reservation
+ * to make the move; it will hold IOLOCK_EXCL and ILOCK_EXCL of @sc->ip and the
+ * orphanage; and both inodes will be ijoined.
+ */
+STATIC int
+xrep_parent_move_to_orphanage(
+	struct xfs_scrub	*sc)
+{
+	struct xrep_orphanage_req *orph = xrep_parent_orphanage_req(sc);
+	unsigned char		*namebuf = xrep_parent_orphanage_namebuf(sc);
+	int			error;
+
+	/* No orphanage?  We can't fix this. */
+	if (!sc->orphanage)
+		return -EFSCORRUPTED;
+
+	/* If we can take the orphanage's iolock then we're ready to move. */
+	if (!xrep_orphanage_ilock_nowait(sc, XFS_IOLOCK_EXCL)) {
+		xfs_ino_t	orig_parent, new_parent;
+
+		/*
+		 * We may have to drop the lock on sc->ip to try to lock the
+		 * orphanage.  Therefore, look up the old dotdot entry for
+		 * sc->ip so that we can compare it after we re-lock sc->ip.
+		 */
+		orig_parent = xrep_dotdot_lookup(sc);
+
+		xchk_iunlock(sc, sc->ilock_flags);
+		error = xrep_orphanage_iolock_two(sc);
+		if (error)
+			return error;
+
+		/*
+		 * If the parent changed or the child was unlinked while the
+		 * child directory was unlocked, we don't need to move the
+		 * child to the orphanage after all.
+		 */
+		new_parent = xrep_dotdot_lookup(sc);
+
+		if (orig_parent != new_parent || VFS_I(sc->ip)->i_nlink == 0)
+			return 0;
+	}
+
+	/*
+	 * Move the directory to the orphanage, and let scrub teardown unlock
+	 * everything for us.
+	 */
+	xrep_orphanage_compute_blkres(sc, orph);
+
+	error = xrep_orphanage_compute_name(orph, namebuf);
+	if (error)
+		return error;
+
+	error = xrep_orphanage_adoption_prep(orph);
+	if (error)
+		return error;
+
+	return xrep_orphanage_adopt(orph);
+}
+
 int
 xrep_parent(
 	struct xfs_scrub	*sc)
@@ -433,7 +525,7 @@ xrep_parent(
 	if (error)
 		return error;
 	if (parent_ino == NULLFSINO)
-		return -EFSCORRUPTED;
+		return xrep_parent_move_to_orphanage(sc);
 
 reset_parent:
 	/* If the '..' entry is already set to the parent inode, we're done. */

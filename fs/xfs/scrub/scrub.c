@@ -28,6 +28,7 @@
 #include "scrub/health.h"
 #include "scrub/xfile.h"
 #include "scrub/tempfile.h"
+#include "scrub/orphanage.h"
 
 /*
  * Online Scrub and Repair
@@ -195,6 +196,7 @@ xchk_teardown(
 		sc->buf = NULL;
 	}
 	xrep_tempfile_rele(sc);
+	xrep_orphanage_rele(sc);
 	return error;
 }
 
