@@ -38,13 +38,30 @@ static inline int xfarray_append(struct xfarray *array, void *ptr)
 uint64_t xfarray_length(struct xfarray *array);
 int xfarray_load_next(struct xfarray *array, uint64_t *idx, void *rec);
 
+/*
+ * Iterate the non-null elements in a sparse xfarray.  Callers should
+ * initialize *idx to zero before the first call; on return, it will be set to
+ * one more than the index of the record that was retrieved.  Returns 1 if a
+ * record was retrieved, 0 if there weren't any more records, or a negative
+ * errno.
+ */
+static inline int
+xfarray_iter(
+	struct xfarray	*array,
+	uint64_t	*idx,
+	void		*rec)
+{
+	int ret = xfarray_load_next(array, idx, rec);
+
+	if (ret == -ENODATA)
+		return 0;
+	if (ret == 0)
+		return 1;
+	return ret;
+}
+
 typedef int (*xfarray_cmp_fn)(const void *a, const void *b);
 
 int xfarray_sort(struct xfarray *array, xfarray_cmp_fn cmp_fn);
-
-#define foreach_xfarray_item(array, i, rec) \
-	for ((i) = 0; (i) < xfarray_length((array)); (i)++) \
-		if (xfarray_load((array), (i), &(rec)) == 0 && \
-		    !xfarray_is_null((array), &(rec)))
 
 #endif /* __XFS_SCRUB_XFARRAY_H__ */
