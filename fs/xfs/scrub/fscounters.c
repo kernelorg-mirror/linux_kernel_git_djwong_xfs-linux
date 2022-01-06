@@ -14,6 +14,8 @@
 #include "xfs_health.h"
 #include "xfs_btree.h"
 #include "xfs_ag.h"
+#include "xfs_rtalloc.h"
+#include "xfs_inode.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -42,6 +44,16 @@
  * after this operation and use the difference in counter values to guess at
  * our tolerance for mismatch between expected and actual counter values.
  */
+
+struct xchk_fscounters {
+	struct xfs_scrub	*sc;
+	uint64_t		icount;
+	uint64_t		ifree;
+	uint64_t		fdblocks;
+	uint64_t		frextents;
+	unsigned long long	icount_min;
+	unsigned long long	icount_max;
+};
 
 /*
  * Since the expected value computation is lockless but only browses incore
@@ -120,6 +132,7 @@ xchk_setup_fscounters(
 	if (!sc->buf)
 		return -ENOMEM;
 	fsc = sc->buf;
+	fsc->sc = sc;
 
 	xfs_icount_range(sc->mp, &fsc->icount_min, &fsc->icount_max);
 
@@ -281,6 +294,76 @@ retry:
 	return 0;
 }
 
+#ifdef CONFIG_XFS_RT
+static inline int
+xchk_fscount_add_frextent(
+	struct xfs_trans		*tp,
+	const struct xfs_rtalloc_rec	*rec,
+	void				*priv)
+{
+	struct xchk_fscounters		*fsc = priv;
+	int				error = 0;
+
+	fsc->frextents += rec->ar_extcount;
+
+	xchk_should_terminate(fsc->sc, &error);
+	return error;
+}
+
+/*
+ * Calculate what the superblock free realtime extent count should be given the
+ * realtime bitmap.
+ */
+STATIC int
+xchk_fscount_check_frextents(
+	struct xfs_scrub	*sc,
+	struct xchk_fscounters	*fsc)
+{
+	struct xfs_mount	*mp = sc->mp;
+	int			error;
+
+	if (!xfs_has_realtime(mp)) {
+		if (mp->m_sb.sb_frextents != 0)
+			xchk_set_corrupt(sc);
+		return 0;
+	}
+
+	fsc->frextents = 0;
+	xfs_ilock(sc->mp->m_rbmip, XFS_ILOCK_EXCL);
+	error = xfs_rtalloc_query_all(sc->tp, xchk_fscount_add_frextent, fsc);
+	if (error){
+		xchk_set_incomplete(sc);
+		goto out_unlock;
+	}
+
+	spin_lock(&mp->m_sb_lock);
+
+	trace_xchk_fscounters_frextents_within_range(sc->mp, fsc->frextents,
+			mp->m_sb.sb_frextents);
+
+	if (fsc->frextents != mp->m_sb.sb_frextents)
+		xchk_set_corrupt(sc);
+	spin_unlock(&mp->m_sb_lock);
+
+out_unlock:
+	xfs_iunlock(sc->mp->m_rbmip, XFS_ILOCK_EXCL);
+	return error;
+}
+#else
+STATIC int
+xchk_fscount_check_frextents(
+	struct xfs_scrub	*sc,
+	struct xchk_fscounters	*fsc)
+{
+	struct xfs_mount	*mp = sc->mp;
+
+	if (mp->m_sb.sb_frextents != 0)
+		xchk_set_corrupt(sc);
+
+	return 0;
+}
+#endif /* CONFIG_XFS_RT */
+
 /*
  * Part 2: Comparing filesystem summary counters.  All we have to do here is
  * sum the percpu counters and compare them to what we've observed.
@@ -396,6 +479,11 @@ xchk_fscounters(
 	if (!xchk_fscount_within_range(sc, fdblocks, &mp->m_fdblocks,
 			fsc->fdblocks))
 		xchk_set_corrupt(sc);
+
+	/* Check the free extents counter for rt volumes. */
+	error = xchk_fscount_check_frextents(sc, fsc);
+	if (!xchk_process_error(sc, 0, XFS_SB_BLOCK(mp), &error))
+		return error;
 
 	return 0;
 }
