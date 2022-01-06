@@ -69,7 +69,7 @@ extern const struct xfs_defer_op_type xfs_agfl_free_defer_type;
  * Deferred operation item relogging limits.
  */
 #define XFS_DEFER_OPS_NR_INODES	2	/* join up to two inodes */
-#define XFS_DEFER_OPS_NR_BUFS	2	/* join up to two buffers */
+#define XFS_DEFER_OPS_NR_BUFS	3	/* join up to three buffers */
 
 /* Resources that must be held across a transaction roll. */
 struct xfs_defer_resources {
