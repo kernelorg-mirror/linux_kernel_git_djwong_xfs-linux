@@ -49,6 +49,10 @@ xrep_superblock(
 	if (error)
 		return error;
 
+	/* Last chance to abort before we start committing fixes. */
+	if (xchk_should_terminate(sc, &error))
+		return error;
+
 	/* Copy AG 0's superblock to this one. */
 	xfs_buf_zero(bp, 0, BBTOB(bp->b_length));
 	xfs_sb_to_disk(bp->b_addr, &mp->m_sb);
@@ -427,6 +431,10 @@ xrep_agf(
 	if (error)
 		return error;
 
+	/* Last chance to abort before we start committing fixes. */
+	if (xchk_should_terminate(sc, &error))
+		return error;
+
 	/* Start rewriting the header and implant the btrees we found. */
 	xrep_agf_init_header(sc, agf_bp, &old_agf);
 	xrep_agf_set_roots(sc, agf, fab);
@@ -758,6 +766,10 @@ xrep_agfl(
 	if (error)
 		goto err;
 
+	/* Last chance to abort before we start committing fixes. */
+	if (xchk_should_terminate(sc, &error))
+		goto err;
+
 	/*
 	 * Update AGF and AGFL.  We reset the global free block counter when
 	 * we adjust the AGF flcount (which can fail) so avoid updating any
@@ -1005,6 +1017,10 @@ xrep_agi(
 	/* Find the AGI btree roots. */
 	error = xrep_agi_find_btrees(sc, fab);
 	if (error)
+		return error;
+
+	/* Last chance to abort before we start committing fixes. */
+	if (xchk_should_terminate(sc, &error))
 		return error;
 
 	/* Start rewriting the header and implant the btrees we found. */
