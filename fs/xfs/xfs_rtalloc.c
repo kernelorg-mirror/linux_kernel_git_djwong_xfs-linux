@@ -1289,6 +1289,33 @@ xfs_rtmount_init(
 }
 
 /*
+ * Realtime metadata files are not quite regular files because userspace can't
+ * access the realtime bitmap directly, and because we take the ILOCK of the rt
+ * bitmap file while holding the ILOCK of a realtime file.  The double nature
+ * of inodes confuses lockdep, so create different lockdep classes here to help
+ * it keep things straight.
+ */
+static struct lock_class_key xfs_rbmip_key;
+static struct lock_class_key xfs_rsumip_key;
+
+static inline int
+xfs_rt_iget(
+	struct xfs_mount	*mp,
+	xfs_ino_t		ino,
+	struct lock_class_key	*lockdep_key,
+	struct xfs_inode	**ipp)
+{
+	int			error;
+
+	error = xfs_imeta_iget(mp, ino, XFS_DIR3_FT_REG_FILE, ipp);
+	if (error)
+		return error;
+
+	lockdep_set_class(&(*ipp)->i_lock.mr_lock, lockdep_key);
+	return 0;
+}
+
+/*
  * Get the bitmap and summary inodes and the summary cache into the mount
  * structure at mount time.
  */
@@ -1300,7 +1327,7 @@ xfs_rtmount_inodes(
 	xfs_sb_t	*sbp;
 
 	sbp = &mp->m_sb;
-	error = xfs_imeta_iget(mp, mp->m_sb.sb_rbmino, XFS_DIR3_FT_REG_FILE,
+	error = xfs_rt_iget(mp, mp->m_sb.sb_rbmino, &xfs_rbmip_key,
 			&mp->m_rbmip);
 	if (xfs_metadata_is_sick(error))
 		xfs_rt_mark_sick(mp, XFS_SICK_RT_BITMAP);
@@ -1308,7 +1335,7 @@ xfs_rtmount_inodes(
 		return error;
 	ASSERT(mp->m_rbmip != NULL);
 
-	error = xfs_imeta_iget(mp, mp->m_sb.sb_rsumino, XFS_DIR3_FT_REG_FILE,
+	error = xfs_rt_iget(mp, mp->m_sb.sb_rsumino, &xfs_rsumip_key,
 			&mp->m_rsumip);
 	if (xfs_metadata_is_sick(error))
 		xfs_rt_mark_sick(mp, XFS_SICK_RT_SUMMARY);
