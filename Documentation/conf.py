@@ -429,6 +429,8 @@ latex_elements['preamble'] += '''
 #  author, documentclass [howto, manual, or own class]).
 # Sorted in alphabetical order
 latex_documents = [
+    ('filesystems/ext4/index', 'ext4.tex', 'ext4 Filesystem',
+     'ext4 Filesystem Developers', 'manual'),
 ]
 
 # Add all other index files from Documentation/ subdirectories
