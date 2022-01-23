@@ -929,6 +929,7 @@ xfs_file_fallocate(
 	uint			iolock = XFS_IOLOCK_EXCL | XFS_MMAPLOCK_EXCL;
 	loff_t			new_size = 0;
 	bool			do_file_insert = false;
+	bool			flush_log;
 
 	if (!S_ISREG(inode->i_mode))
 		return -EINVAL;
@@ -1078,15 +1079,18 @@ xfs_file_fallocate(
 		goto out_unlock;
 
 	/*
-	 * If we need to change the PREALLOC flag or flush the log, do so.
-	 * We already updated the timestamps and cleared the suid flags, so we
-	 * don't need to do that again.  This must be committed before the size
-	 * change so that we don't trim post-EOF preallocations.
+	 * If we need to change the PREALLOC flag, do so.  We already updated
+	 * the timestamps and cleared the suid flags, so we don't need to do
+	 * that again.  This must be committed before the size change so that
+	 * we don't trim post-EOF preallocations.  If this is the last
+	 * transaction we're going to make, make the update synchronous too.
 	 */
-	if (xfs_file_sync_writes(file))
-		flags |= XFS_PREALLOC_SYNC;
+	flush_log = xfs_file_sync_writes(file);
 	if (flags) {
 		flags |= XFS_PREALLOC_INVISIBLE;
+
+		if (flush_log && !(do_file_insert || new_size))
+			flags |= XFS_PREALLOC_SYNC;
 
 		error = xfs_update_prealloc_flags(ip, flags);
 		if (error)
@@ -1111,8 +1115,22 @@ xfs_file_fallocate(
 	 * leave shifted extents past EOF and hence losing access to
 	 * the data that is contained within them.
 	 */
-	if (do_file_insert)
+	if (do_file_insert) {
 		error = xfs_insert_file_space(ip, offset, len);
+		if (error)
+			goto out_unlock;
+	}
+
+	/*
+	 * If the caller wants us to flush the log and either we've made
+	 * changes since updating the PREALLOC flag or we didn't need to
+	 * update the PREALLOC flag, then flush the log now.
+	 */
+	if (flush_log && (do_file_insert || new_size || flags == 0)) {
+		error = xfs_log_force_inode(ip);
+		if (error)
+			goto out_unlock;
+	}
 
 out_unlock:
 	xfs_iunlock(ip, iolock);
