@@ -11,8 +11,10 @@
 #include "xfs_mount.h"
 #include "xfs_btree.h"
 #include "xfs_log_format.h"
+#include "xfs_trans.h"
 #include "xfs_inode.h"
 #include "xfs_ialloc.h"
+#include "xfs_icache.h"
 #include "xfs_da_format.h"
 #include "xfs_reflink.h"
 #include "xfs_rmap.h"
@@ -20,6 +22,7 @@
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/btree.h"
+#include "scrub/trace.h"
 
 /*
  * Grab total control of the inode metadata.  It doesn't matter here if
@@ -30,35 +33,143 @@ int
 xchk_setup_inode(
 	struct xfs_scrub	*sc)
 {
+	struct xfs_imap		imap;
+	struct xfs_inode	*ip;
+	struct xfs_mount	*mp = sc->mp;
+	struct xfs_inode	*ip_in = XFS_I(file_inode(sc->file));
+	struct xfs_buf		*agi_bp = NULL;
+	xfs_agnumber_t		agno = XFS_INO_TO_AGNO(mp, sc->sm->sm_ino);
 	int			error;
 
-	/*
-	 * Try to get the inode.  If the verifiers fail, we try again
-	 * in raw mode.
-	 */
-	error = xchk_get_inode(sc);
+	/* We want to scan the opened inode, so lock it and exit. */
+	if (sc->sm->sm_ino == 0 || sc->sm->sm_ino == ip_in->i_ino) {
+		sc->ip = ip_in;
+		goto got_inode;
+	}
+
+	/* Reject internal metadata files. */
+	if (xfs_internal_inum(mp, sc->sm->sm_ino))
+		return -ENOENT;
+
+retry:
+	error = xchk_iget(sc, sc->sm->sm_ino, &ip);
 	switch (error) {
+	case -ENOENT:
+		/*
+		 * The incore inode says the ondisk inode is free or unlinked,
+		 * so there's nothing worth checking.
+		 */
+		return error;
 	case 0:
-		break;
+		/*
+		 * We got a cached inode.  Make sure that the generation number
+		 * matches.
+		 */
+		if (!xchk_iget_check_handle(sc, ip)) {
+			xchk_irele(sc, ip);
+			return -ENOENT;
+		}
+
+		/*
+		 * Release the transaction and the AGI buffer, since the cached
+		 * inode is what we are really after, and we can't take the
+		 * IOLOCK or MMAPLOCK with a transaction in hand.
+		 */
+		if (agi_bp) {
+			xfs_trans_cancel(sc->tp);
+			sc->tp = NULL;
+			agi_bp = NULL;
+		}
+
+		sc->ip = ip;
+		goto got_inode;
 	case -EFSCORRUPTED:
 	case -EFSBADCRC:
-		return xchk_trans_alloc(sc, 0);
+		/*
+		 * The inode exists on disk, but loading some other part of it
+		 * (such as the inode forks) failed with a corruption error.
+		 * Since we cannot obtain a cached inode, treat this the same
+		 * as a mapping failure.  See below.
+		 */
+		break;
+	case -EINVAL:
+		/*
+		 * There was an error when we tried to map the inode number to
+		 * the actual inode.  See below.
+		 */
+		break;
 	default:
+		/* Treat everything else as an operational error. */
+		trace_xchk_op_error(sc, agno,
+				XFS_INO_TO_AGBNO(mp, sc->sm->sm_ino),
+				error, __return_address);
 		return error;
 	}
 
-	/* Got the inode, lock it and we're ready to go. */
+	/*
+	 * EINVAL with IGET_UNTRUSTED could mean one of several things:
+	 * userspace gave us an inode number that doesn't correspond to fs
+	 * space; the inode btree says the inode is free; or the inode buffer
+	 * failed the read verifiers.
+	 *
+	 * EFSCORRUPTED/EFSBADCRC means that the inode was mappable, but some
+	 * other metadata corruption (e.g. inode forks) prevented instantiation
+	 * of the incore inode.
+	 *
+	 * Either way, we don't have an incore inode, so allocate a transaction
+	 * and grab our own reference to the AGI buffer to prevent other
+	 * threads from allocating or freeing the inode.  Retry the iget to
+	 * cover the case where we're racing with another thread creating the
+	 * inode.
+	 *
+	 * The AGI buffer has to stay attached to the scrub transaction until
+	 * we fix the ondisk inode or give up.
+	 */
+	if (!agi_bp) {
+		error = xchk_trans_alloc(sc, 0);
+		if (error)
+			return error;
+
+		error = xfs_ialloc_read_agi(mp, sc->tp, agno, &agi_bp);
+		if (error)
+			return error;
+
+		goto retry;
+	}
+
+	/*
+	 * Try just the inode mapping lookup -- if it succeeds, then the inode
+	 * buffer verifier failed and something needs fixing.  Otherwise, there
+	 * is no mapping from the inode number to an allocated ondisk inode, so
+	 * tell userspace that it no longer exists.
+	 */
+	error = xfs_imap(mp, sc->tp, sc->sm->sm_ino, &imap,
+			XFS_IGET_UNTRUSTED);
+	if (error)
+		return -ENOENT;
+
+	/*
+	 * We have allocated a scrub transaction and joined the AGI buffer to
+	 * it.  Mapping the inode succeeded, which means that there is an
+	 * ondisk inode that is corrupt enough that iget fails.
+	 */
+	return 0;
+
+got_inode:
+	/*
+	 * We have an incore inode, which means that it cannot disappear on us.
+	 * Join the inode to the scrub context, lock the inode, and allocate
+	 * a transaction, in the customary order.
+	 */
 	sc->ilock_flags = XFS_IOLOCK_EXCL | XFS_MMAPLOCK_EXCL;
 	xfs_ilock(sc->ip, sc->ilock_flags);
 	error = xchk_trans_alloc(sc, 0);
 	if (error)
-		goto out;
+		return error;
+
 	sc->ilock_flags |= XFS_ILOCK_EXCL;
 	xfs_ilock(sc->ip, XFS_ILOCK_EXCL);
-
-out:
-	/* scrub teardown will unlock and release the inode for us */
-	return error;
+	return 0;
 }
 
 /* Inode core */

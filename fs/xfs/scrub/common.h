@@ -137,6 +137,7 @@ int xchk_setup_inode_contents(struct xfs_scrub *sc, unsigned int resblks);
 void xchk_buffer_recheck(struct xfs_scrub *sc, struct xfs_buf *bp);
 
 int xchk_iget(struct xfs_scrub *sc, xfs_ino_t inum, struct xfs_inode **ipp);
+bool xchk_iget_check_handle(struct xfs_scrub *sc, struct xfs_inode *ip);
 void xchk_irele(struct xfs_scrub *sc, struct xfs_inode *ip);
 
 /*
