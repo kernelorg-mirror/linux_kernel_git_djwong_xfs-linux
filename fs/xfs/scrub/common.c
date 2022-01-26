@@ -716,6 +716,19 @@ xchk_iget(
 	return xfs_iget(sc->mp, sc->tp, inum, XFS_IGET_UNTRUSTED, 0, ipp);
 }
 
+/* Decide if this inode matches the handle that we were told to scrub. */
+bool
+xchk_iget_check_handle(
+	struct xfs_scrub	*sc,
+	struct xfs_inode	*ip)
+{
+	/* Generation must match to scrub by handle. */
+	if (VFS_I(ip)->i_generation == sc->sm->sm_gen)
+		return true;
+
+	return false;
+}
+
 /*
  * Given an inode and the scrub control structure, grab either the
  * inode referenced in the control structure or the inode passed in.
@@ -774,7 +787,8 @@ xchk_get_inode(
 				error, __return_address);
 		return error;
 	}
-	if (VFS_I(ip)->i_generation != sc->sm->sm_gen) {
+
+	if (!xchk_iget_check_handle(sc, ip)) {
 		xchk_irele(sc, ip);
 		return -ENOENT;
 	}
