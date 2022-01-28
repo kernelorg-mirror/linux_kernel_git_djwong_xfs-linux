@@ -1058,12 +1058,26 @@ xfs_file_fallocate(
 		}
 	}
 
-	if (file->f_flags & O_DSYNC)
-		flags |= XFS_PREALLOC_SYNC;
-
-	error = xfs_update_prealloc_flags(ip, flags);
+	/* Update [cm]time and drop file privileges like a regular write. */
+	error = file_modified(file);
 	if (error)
 		goto out_unlock;
+
+	/*
+	 * If we need to change the PREALLOC flag or flush the log, do so.
+	 * We already updated the timestamps and cleared the suid flags, so we
+	 * don't need to do that again.  This must be committed before the size
+	 * change so that we don't trim post-EOF preallocations.
+	 */
+	if (file->f_flags & O_DSYNC)
+		flags |= XFS_PREALLOC_SYNC;
+	if (flags) {
+		flags |= XFS_PREALLOC_INVISIBLE;
+
+		error = xfs_update_prealloc_flags(ip, flags);
+		if (error)
+			goto out_unlock;
+	}
 
 	/* Change file size if needed */
 	if (new_size) {
