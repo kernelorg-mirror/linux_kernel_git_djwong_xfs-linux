@@ -99,6 +99,16 @@ struct xrep_refc_rmap {
 	xfs_extlen_t		blockcount;
 } __packed;
 
+/*
+ * We store the 32-bit packed version of the incore refcount record in the
+ * xfarray to reduce memory consumption by 50%.
+ */
+struct xrep_refcount_irec {
+	xfs_agblock_t		rc_startblock;
+	xfs_extlen_t		rc_blockcount;
+	xfs_nlink_t		rc_refcount;
+} __packed;
+
 struct xrep_refc {
 	/* refcount extents */
 	struct xfarray		*refcount_records;
@@ -123,7 +133,7 @@ struct xrep_refc {
 STATIC int
 xrep_refc_check_ext(
 	struct xfs_scrub		*sc,
-	const struct xfs_refcount_irec	*rec)
+	const struct xrep_refcount_irec	*rec)
 {
 	xfs_agblock_t			agbno = rec->rc_startblock;
 	enum xfs_btree_keyfill		keyfill;
@@ -164,7 +174,7 @@ xrep_refc_stash(
 	xfs_extlen_t			len,
 	xfs_nlink_t			refcount)
 {
-	struct xfs_refcount_irec	irec = {
+	struct xrep_refcount_irec	irec = {
 		.rc_startblock		= agbno,
 		.rc_blockcount		= len,
 		.rc_refcount		= refcount,
@@ -179,7 +189,8 @@ xrep_refc_stash(
 	if (error)
 		return error;
 
-	trace_xrep_refc_found(sc->mp, sc->sa.pag->pag_agno, &irec);
+	trace_xrep_refc_found(sc->mp, sc->sa.pag->pag_agno, agbno, len,
+			refcount);
 
 	return xfarray_append(rr->refcount_records, &irec);
 }
@@ -292,8 +303,8 @@ xrep_refc_extent_cmp(
 	const void			*a,
 	const void			*b)
 {
-	const struct xfs_refcount_irec	*ap = a;
-	const struct xfs_refcount_irec	*bp = b;
+	const struct xrep_refcount_irec	*ap = a;
+	const struct xrep_refcount_irec	*bp = b;
 
 	if (ap->rc_startblock > bp->rc_startblock)
 		return 1;
@@ -510,6 +521,7 @@ xrep_refc_get_records(
 	unsigned int			nr_wanted,
 	void				*priv)
 {
+	struct xrep_refcount_irec	xrec;
 	struct xfs_refcount_irec	*irec = &cur->bc_rec.rc;
 	struct xrep_refc		*rr = priv;
 	union xfs_btree_rec		*block_rec;
@@ -518,9 +530,13 @@ xrep_refc_get_records(
 
 	for (loaded = 0; loaded < nr_wanted; loaded++, idx++) {
 		error = xfarray_load(rr->refcount_records, rr->array_cur++,
-				irec);
+				&xrec);
 		if (error)
 			return error;
+
+		irec->rc_startblock = xrec.rc_startblock;
+		irec->rc_blockcount = xrec.rc_blockcount;
+		irec->rc_refcount = xrec.rc_refcount;
 
 		block_rec = xfs_btree_rec_addr(cur, idx, block);
 		cur->bc_ops->init_rec_from_cur(cur, block_rec);
@@ -736,7 +752,7 @@ xrep_refcountbt(
 	/* Set up enough storage to handle one refcount record per block. */
 	error = xfarray_create(mp, "refcount records",
 			mp->m_sb.sb_agblocks,
-			sizeof(struct xfs_refcount_irec),
+			sizeof(struct xrep_refcount_irec),
 			&rr->refcount_records);
 	if (error)
 		goto out_rr;
