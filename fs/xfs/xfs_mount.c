@@ -1386,17 +1386,26 @@ xfs_mod_delalloc(
 }
 
 #ifdef CONFIG_XFS_DRAIN_INTENTS
+/*
+ * Use a static key here to reduce the overhead of xfs_drain_drop.  If the
+ * compiler supports jump labels, the static branch will be replaced by a nop
+ * sled when there are no xfs_drain_wait callers.  Online fsck is currently
+ * the only caller, so this is a reasonable tradeoff.
+ */
+DEFINE_STATIC_KEY_FALSE(xfs_drain_waiter_hook);
+
 /* Increase the pending intent count. */
 static inline void xfs_drain_bump(struct xfs_drain *dr)
 {
-	atomic_inc(&dr->dr_count);
+	percpu_counter_add_batch(&dr->dr_count, 1, XFS_DRAIN_BATCH);
 }
 
 /* Decrease the pending intent count, and wake any waiters, if appropriate. */
 static inline void xfs_drain_drop(struct xfs_drain *dr)
 {
-	if (atomic_dec_and_test(&dr->dr_count) &&
-	    wq_has_sleeper(&dr->dr_waiters))
+	percpu_counter_add_batch(&dr->dr_count, -1, XFS_DRAIN_BATCH);
+
+	if (static_branch_unlikely(&xfs_drain_waiter_hook))
 		wake_up(&dr->dr_waiters);
 }
 
@@ -1408,7 +1417,15 @@ static inline void xfs_drain_drop(struct xfs_drain *dr)
  */
 static inline int xfs_drain_wait(struct xfs_drain *dr)
 {
-	return wait_event_killable(dr->dr_waiters, !xfs_drain_busy(dr));
+	int	error;
+
+	if (!xfs_drain_busy(dr))
+		return 0;
+
+	static_branch_inc(&xfs_drain_waiter_hook);
+	error = wait_event_killable(dr->dr_waiters, !xfs_drain_busy(dr));
+	static_branch_dec(&xfs_drain_waiter_hook);
+	return error;
 }
 
 /* Add an item to the pending count. */
