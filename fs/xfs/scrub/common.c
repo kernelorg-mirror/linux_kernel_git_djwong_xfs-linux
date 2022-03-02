@@ -27,6 +27,7 @@
 #include "xfs_attr.h"
 #include "xfs_reflink.h"
 #include "xfs_ag.h"
+#include "xfs_quota.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -731,6 +732,22 @@ xchk_iget_check_handle(
 	return false;
 }
 
+#ifdef CONFIG_XFS_QUOTA
+/*
+ * Try to attach dquots to this inode if we think we might want to repair it.
+ * Quota itself could need repairs, so we don't require success here.
+ */
+void
+xchk_try_dqattach(
+	struct xfs_scrub	*sc)
+{
+	ASSERT(sc->ip != NULL);
+
+	if (xchk_could_repair(sc))
+		xfs_qm_dqattach(sc->ip);
+}
+#endif
+
 /*
  * We want to scan the inode that was passed in.  Get our own reference to the
  * inode to make disposal simpler.  The inode had better not be in I_FREEING
@@ -745,7 +762,9 @@ xchk_install_inode(
 		xchk_ino_set_corrupt(sc, ip->i_ino);
 		return -EFSCORRUPTED;
 	}
+
 	sc->ip = ip;
+	xchk_try_dqattach(sc);
 	return 0;
 }
 
@@ -812,6 +831,7 @@ xchk_get_inode(
 	}
 
 	sc->ip = ip;
+	xchk_try_dqattach(sc);
 	return 0;
 }
 

@@ -19,6 +19,7 @@
 #include "xfs_reflink.h"
 #include "xfs_rmap.h"
 #include "xfs_bmap_util.h"
+#include "xfs_quota.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/btree.h"
@@ -85,6 +86,7 @@ retry:
 		}
 
 		sc->ip = ip;
+		xchk_try_dqattach(sc);
 		goto got_inode;
 	case -EFSCORRUPTED:
 	case -EFSBADCRC:
