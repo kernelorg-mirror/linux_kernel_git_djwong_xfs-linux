@@ -511,4 +511,36 @@ void xfs_iunlock2_io_mmap(struct xfs_inode *ip1, struct xfs_inode *ip2);
 void xfs_inode_count_blocks(struct xfs_trans *tp, struct xfs_inode *ip,
 		xfs_filblks_t *dblocks, xfs_filblks_t *rblocks);
 
+/*
+ * Parameters for tracking bumplink and droplink operations.  The hook
+ * function arg parameter is one of these.
+ */
+enum xfs_nlink_delta_type {
+	XFS_DIRENT_NLINK_DELTA,		/* parent pointing to child */
+	XFS_BACKREF_NLINK_DELTA,		/* dotdot entries */
+	XFS_SELF_NLINK_DELTA,		/* dot entries */
+};
+
+struct xfs_nlink_delta_params {
+	struct xfs_inode	*dp;
+	struct xfs_inode	*ip;
+	const struct xfs_name	*name;
+	int			delta;
+};
+
+#ifdef CONFIG_XFS_LIVE_HOOKS
+void xfs_nlink_dirent_delta(struct xfs_inode *dp, struct xfs_inode *ip,
+		int delta, struct xfs_name *name);
+
+struct xfs_nlink_hook {
+	struct xfs_hook		delta_hook;
+};
+
+int xfs_nlink_hook_add(struct xfs_mount *mp, struct xfs_nlink_hook *hook);
+void xfs_nlink_hook_del(struct xfs_mount *mp, struct xfs_nlink_hook *hook);
+
+#else
+# define xfs_nlink_dirent_delta(dp, ip, delta, name)	((void)0)
+#endif /* CONFIG_XFS_LIVE_HOOKS */
+
 #endif	/* __XFS_INODE_H__ */
