@@ -206,10 +206,11 @@ STATIC struct dentry *
 xfs_fs_get_parent(
 	struct dentry		*child)
 {
+	struct xfs_name		dotdot = xfs_name_dotdot;
 	int			error;
 	struct xfs_inode	*cip;
 
-	error = xfs_lookup(XFS_I(d_inode(child)), &xfs_name_dotdot, &cip, NULL);
+	error = xfs_lookup(XFS_I(d_inode(child)), &dotdot, &cip, NULL);
 	if (unlikely(error))
 		return ERR_PTR(error);
 

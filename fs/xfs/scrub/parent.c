@@ -131,6 +131,7 @@ xchk_parent_validate(
 	xfs_ino_t		dnum,
 	bool			*try_again)
 {
+	struct xfs_name		dotdot = xfs_name_dotdot;
 	struct xfs_mount	*mp = sc->mp;
 	struct xfs_inode	*dp = NULL;
 	xfs_nlink_t		expected_nlink;
@@ -230,7 +231,7 @@ xchk_parent_validate(
 	expected_nlink = VFS_I(sc->ip)->i_nlink == 0 ? 0 : 1;
 
 	/* Look up '..' to see if the inode changed. */
-	error = xfs_dir_lookup(sc->tp, sc->ip, &xfs_name_dotdot, &dnum, NULL);
+	error = xfs_dir_lookup(sc->tp, sc->ip, &dotdot, &dnum, NULL);
 	if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, 0, &error))
 		goto out_rele;
 
@@ -263,6 +264,7 @@ int
 xchk_parent(
 	struct xfs_scrub	*sc)
 {
+	struct xfs_name		dotdot = xfs_name_dotdot;
 	struct xfs_mount	*mp = sc->mp;
 	xfs_ino_t		dnum;
 	bool			try_again;
@@ -293,7 +295,7 @@ xchk_parent(
 	xfs_iunlock(sc->ip, XFS_ILOCK_EXCL | XFS_MMAPLOCK_EXCL);
 
 	/* Look up '..' */
-	error = xfs_dir_lookup(sc->tp, sc->ip, &xfs_name_dotdot, &dnum, NULL);
+	error = xfs_dir_lookup(sc->tp, sc->ip, &dotdot, &dnum, NULL);
 	if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, 0, &error))
 		goto out;
 	if (!xfs_verify_dir_ino(mp, dnum)) {
