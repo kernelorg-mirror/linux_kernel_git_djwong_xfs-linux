@@ -791,7 +791,6 @@ xfs_fs_statfs(
 	uint64_t		fakeinos, id;
 	uint64_t		icount;
 	uint64_t		ifree;
-	uint64_t		fdblocks;
 	xfs_extlen_t		lsize;
 	int64_t			ffree;
 
@@ -806,7 +805,6 @@ xfs_fs_statfs(
 
 	icount = percpu_counter_sum(&mp->m_icount);
 	ifree = percpu_counter_sum(&mp->m_ifree);
-	fdblocks = percpu_counter_sum(&mp->m_fdblocks);
 
 	spin_lock(&mp->m_sb_lock);
 	statp->f_bsize = sbp->sb_blocksize;
@@ -815,7 +813,7 @@ xfs_fs_statfs(
 	spin_unlock(&mp->m_sb_lock);
 
 	/* make sure statp->f_bfree does not underflow */
-	statp->f_bfree = max_t(int64_t, fdblocks - mp->m_alloc_set_aside, 0);
+	statp->f_bfree = max_t(int64_t, xfs_fdblocks_available(mp), 0);
 	statp->f_bavail = statp->f_bfree;
 
 	fakeinos = XFS_FSB_TO_INO(mp, statp->f_bfree);

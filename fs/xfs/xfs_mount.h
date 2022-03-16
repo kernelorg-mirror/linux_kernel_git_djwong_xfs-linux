@@ -508,6 +508,19 @@ xfs_fdblocks_available(
 	return free;
 }
 
+/* Same as above, but don't take the slow path. */
+static inline int64_t
+xfs_fdblocks_available_fast(
+	struct xfs_mount	*mp)
+{
+	int64_t			free;
+
+	free = percpu_counter_read_positive(&mp->m_fdblocks);
+	free -= mp->m_alloc_set_aside;
+	free -= atomic64_read(&mp->m_allocbt_blks);
+	return free;
+}
+
 extern int	xfs_mod_fdblocks(struct xfs_mount *mp, int64_t delta,
 				 bool reserved);
 extern int	xfs_mod_frextents(struct xfs_mount *mp, int64_t delta);
