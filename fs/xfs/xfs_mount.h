@@ -479,6 +479,35 @@ extern void	xfs_unmountfs(xfs_mount_t *);
  */
 #define XFS_FDBLOCKS_BATCH	1024
 
+/*
+ * Estimate the amount of space that xfs_mod_fdblocks might give us without
+ * drawing from the reservation pool.  In other words, estimate the free space
+ * that is available to userspace.
+ *
+ * This quantity is the amount of free space tracked in the on-disk metadata
+ * minus:
+ *
+ * - Delayed allocation reservations
+ * - Per-AG space reservations to guarantee metadata expansion
+ * - Userspace-controlled free space reserve pool
+ *
+ * - Space reserved to ensure that we can always split a bmap btree
+ * - Free space btree blocks that are not available for allocation due to
+ *   per-AG metadata reservations
+ *
+ * The first three are captured in the incore fdblocks counter.
+ */
+static inline int64_t
+xfs_fdblocks_available(
+	struct xfs_mount	*mp)
+{
+	int64_t			free = percpu_counter_sum(&mp->m_fdblocks);
+
+	free -= mp->m_alloc_set_aside;
+	free -= atomic64_read(&mp->m_allocbt_blks);
+	return free;
+}
+
 extern int	xfs_mod_fdblocks(struct xfs_mount *mp, int64_t delta,
 				 bool reserved);
 extern int	xfs_mod_frextents(struct xfs_mount *mp, int64_t delta);

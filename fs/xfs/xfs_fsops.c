@@ -433,8 +433,11 @@ xfs_reserve_blocks(
 	 */
 	error = -ENOSPC;
 	do {
-		free = percpu_counter_sum(&mp->m_fdblocks) -
-						mp->m_alloc_set_aside;
+		/*
+		 * The reservation pool cannot take space that xfs_mod_fdblocks
+		 * will not give us.
+		 */
+		free = xfs_fdblocks_available(mp);
 		if (free <= 0)
 			break;
 
