@@ -656,7 +656,7 @@ xfs_mountfs(
 	 * Compute the amount of space to set aside to handle btree splits now
 	 * that we have calculated the btree maxlevels.
 	 */
-	mp->m_alloc_set_aside = xfs_alloc_set_aside(mp);
+	mp->m_bmbt_split_setaside = xfs_bmbt_split_setaside(mp);
 	mp->m_ag_max_usable = xfs_alloc_ag_max_usable(mp);
 
 	/*
@@ -1153,7 +1153,7 @@ xfs_mod_fdblocks(
 	 * problems (i.e. transaction abort, pagecache discards, etc.) than
 	 * slightly premature -ENOSPC.
 	 */
-	set_aside = mp->m_alloc_set_aside + atomic64_read(&mp->m_allocbt_blks);
+	set_aside = mp->m_bmbt_split_setaside + atomic64_read(&mp->m_allocbt_blks);
 	percpu_counter_add_batch(&mp->m_fdblocks, delta, batch);
 	if (__percpu_counter_compare(&mp->m_fdblocks, set_aside,
 				     XFS_FDBLOCKS_BATCH) >= 0) {
