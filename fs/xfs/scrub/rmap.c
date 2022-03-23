@@ -19,6 +19,7 @@
 #include "xfs_alloc.h"
 #include "xfs_alloc_btree.h"
 #include "xfs_ialloc_btree.h"
+#include "xfs_refcount_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/btree.h"
@@ -55,6 +56,7 @@ struct xchk_rmap {
 	struct xbitmap		log_owned;
 	struct xbitmap		ag_owned;
 	struct xbitmap		inobt_owned;
+	struct xbitmap		refcbt_owned;
 
 	/* Did we complete the AG space metadata bitmaps? */
 	bool			bitmaps_complete;
@@ -248,6 +250,9 @@ xchk_rmapbt_mark_bitmap(
 		break;
 	case XFS_RMAP_OWN_INOBT:
 		bmp = &cr->inobt_owned;
+		break;
+	case XFS_RMAP_OWN_REFC:
+		bmp = &cr->refcbt_owned;
 		break;
 	}
 
@@ -494,6 +499,20 @@ xchk_rmapbt_walk_ag_metadata(
 			goto out;
 	}
 
+	/* OWN_REFC: refcountbt */
+	if (xfs_has_reflink(sc->mp)) {
+		cur = sc->sa.refc_cur;
+		if (!cur)
+			cur = xfs_refcountbt_init_cursor(sc->mp, sc->tp,
+					sc->sa.agf_bp, sc->sa.pag);
+		error = xfs_btree_visit_blocks(cur, xchk_rmapbt_visit_btblock,
+				XFS_BTREE_VISIT_ALL, &cr->refcbt_owned);
+		if (cur != sc->sa.refc_cur)
+			xfs_btree_del_cursor(cur, error);
+		if (error)
+			goto out;
+	}
+
 out:
 	/*
 	 * If there's an error, set XFAIL and disable the bitmap
@@ -541,6 +560,9 @@ xchk_rmapbt_check_bitmaps(
 
 	if (xbitmap_hweight(&cr->inobt_owned) != 0)
 		xchk_btree_xref_set_corrupt(sc, cur, level);
+
+	if (xbitmap_hweight(&cr->refcbt_owned) != 0)
+		xchk_btree_xref_set_corrupt(sc, cur, level);
 }
 
 /* Scrub the rmap btree for some AG. */
@@ -559,6 +581,7 @@ xchk_rmapbt(
 	xbitmap_init(&cr->log_owned);
 	xbitmap_init(&cr->ag_owned);
 	xbitmap_init(&cr->inobt_owned);
+	xbitmap_init(&cr->refcbt_owned);
 
 	error = xchk_rmapbt_walk_ag_metadata(sc, cr);
 	if (error)
@@ -572,6 +595,7 @@ xchk_rmapbt(
 	xchk_rmapbt_check_bitmaps(sc, cr);
 
 out:
+	xbitmap_destroy(&cr->refcbt_owned);
 	xbitmap_destroy(&cr->inobt_owned);
 	xbitmap_destroy(&cr->ag_owned);
 	xbitmap_destroy(&cr->log_owned);
