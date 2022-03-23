@@ -7,13 +7,17 @@
 #include "xfs_fs.h"
 #include "xfs_shared.h"
 #include "xfs_format.h"
+#include "xfs_log_format.h"
 #include "xfs_trans_resv.h"
 #include "xfs_mount.h"
+#include "xfs_trans.h"
 #include "xfs_btree.h"
 #include "xfs_rmap.h"
 #include "xfs_refcount.h"
 #include "xfs_ag.h"
 #include "xfs_bit.h"
+#include "xfs_alloc.h"
+#include "xfs_alloc_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/btree.h"
@@ -48,6 +52,7 @@ struct xchk_rmap {
 	/* Bitmaps containing all blocks for each type of AG metadata. */
 	struct xbitmap		fs_owned;
 	struct xbitmap		log_owned;
+	struct xbitmap		ag_owned;
 
 	/* Did we complete the AG space metadata bitmaps? */
 	bool			bitmaps_complete;
@@ -236,6 +241,9 @@ xchk_rmapbt_mark_bitmap(
 	case XFS_RMAP_OWN_LOG:
 		bmp = &cr->log_owned;
 		break;
+	case XFS_RMAP_OWN_AG:
+		bmp = &cr->ag_owned;
+		break;
 	}
 
 	if (!bmp)
@@ -346,9 +354,47 @@ out:
 	return error;
 }
 
+/* Add a btree block to the rmap list. */
+STATIC int
+xchk_rmapbt_visit_btblock(
+	struct xfs_btree_cur	*cur,
+	int			level,
+	void			*priv)
+{
+	struct xbitmap		*bitmap = priv;
+	struct xfs_buf		*bp;
+	xfs_fsblock_t		fsbno;
+	xfs_agblock_t		agbno;
+
+	xfs_btree_get_block(cur, level, &bp);
+	if (!bp)
+		return 0;
+
+	fsbno = XFS_DADDR_TO_FSB(cur->bc_mp, xfs_buf_daddr(bp));
+	agbno = XFS_FSB_TO_AGBNO(cur->bc_mp, fsbno);
+	return xbitmap_set(bitmap, agbno, 1);
+}
+
+/* Add an AGFL block to the rmap list. */
+STATIC int
+xchk_rmapbt_walk_agfl(
+	struct xfs_mount	*mp,
+	xfs_agblock_t		bno,
+	void			*priv)
+{
+	struct xbitmap		*bitmap = priv;
+
+	return xbitmap_set(bitmap, bno, 1);
+}
+
 /*
  * Set up bitmaps mapping all the AG metadata to compare with the rmapbt
  * records.
+ *
+ * Grab our own btree cursors here if the scrub setup function didn't give us a
+ * btree cursor due to reports of poor health.  We need to find out if the
+ * rmapbt disagrees with primary metadata btrees to tag the rmapbt as being
+ * XCORRUPT.
  */
 STATIC int
 xchk_rmapbt_walk_ag_metadata(
@@ -356,6 +402,9 @@ xchk_rmapbt_walk_ag_metadata(
 	struct xchk_rmap	*cr)
 {
 	struct xfs_mount	*mp = sc->mp;
+	struct xfs_buf		*agfl_bp;
+	struct xfs_agf		*agf = sc->sa.agf_bp->b_addr;
+	struct xfs_btree_cur	*cur;
 	int			error;
 
 	/* OWN_FS: AG headers */
@@ -373,6 +422,44 @@ xchk_rmapbt_walk_ag_metadata(
 		if (error)
 			goto out;
 	}
+
+	/* OWN_AG: bnobt, cntbt, rmapbt, and AGFL */
+	cur = sc->sa.bno_cur;
+	if (!cur)
+		cur = xfs_allocbt_init_cursor(sc->mp, sc->tp, sc->sa.agf_bp,
+				sc->sa.pag, XFS_BTNUM_BNO);
+	error = xfs_btree_visit_blocks(cur, xchk_rmapbt_visit_btblock,
+			XFS_BTREE_VISIT_ALL, &cr->ag_owned);
+	if (cur != sc->sa.bno_cur)
+		xfs_btree_del_cursor(cur, error);
+	if (error)
+		goto out;
+
+	cur = sc->sa.cnt_cur;
+	if (!cur)
+		cur = xfs_allocbt_init_cursor(sc->mp, sc->tp, sc->sa.agf_bp,
+				sc->sa.pag, XFS_BTNUM_CNT);
+	error = xfs_btree_visit_blocks(cur, xchk_rmapbt_visit_btblock,
+			XFS_BTREE_VISIT_ALL, &cr->ag_owned);
+	if (cur != sc->sa.cnt_cur)
+		xfs_btree_del_cursor(cur, error);
+	if (error)
+		goto out;
+
+	error = xfs_btree_visit_blocks(sc->sa.rmap_cur,
+			xchk_rmapbt_visit_btblock, XFS_BTREE_VISIT_ALL,
+			&cr->ag_owned);
+	if (error)
+		goto out;
+
+	error = xfs_alloc_read_agfl(sc->mp, sc->tp, sc->sa.pag->pag_agno,
+			&agfl_bp);
+	if (error)
+		goto out;
+
+	error = xfs_agfl_walk(sc->mp, agf, agfl_bp, xchk_rmapbt_walk_agfl,
+			&cr->ag_owned);
+	xfs_trans_brelse(sc->tp, agfl_bp);
 
 out:
 	/*
@@ -415,6 +502,9 @@ xchk_rmapbt_check_bitmaps(
 
 	if (xbitmap_hweight(&cr->log_owned) != 0)
 		xchk_btree_xref_set_corrupt(sc, cur, level);
+
+	if (xbitmap_hweight(&cr->ag_owned) != 0)
+		xchk_btree_xref_set_corrupt(sc, cur, level);
 }
 
 /* Scrub the rmap btree for some AG. */
@@ -431,6 +521,7 @@ xchk_rmapbt(
 
 	xbitmap_init(&cr->fs_owned);
 	xbitmap_init(&cr->log_owned);
+	xbitmap_init(&cr->ag_owned);
 
 	error = xchk_rmapbt_walk_ag_metadata(sc, cr);
 	if (error)
@@ -444,6 +535,7 @@ xchk_rmapbt(
 	xchk_rmapbt_check_bitmaps(sc, cr);
 
 out:
+	xbitmap_destroy(&cr->ag_owned);
 	xbitmap_destroy(&cr->log_owned);
 	xbitmap_destroy(&cr->fs_owned);
 	kfree(cr);
