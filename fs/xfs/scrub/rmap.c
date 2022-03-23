@@ -18,6 +18,7 @@
 #include "xfs_bit.h"
 #include "xfs_alloc.h"
 #include "xfs_alloc_btree.h"
+#include "xfs_ialloc_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/btree.h"
@@ -53,6 +54,7 @@ struct xchk_rmap {
 	struct xbitmap		fs_owned;
 	struct xbitmap		log_owned;
 	struct xbitmap		ag_owned;
+	struct xbitmap		inobt_owned;
 
 	/* Did we complete the AG space metadata bitmaps? */
 	bool			bitmaps_complete;
@@ -243,6 +245,9 @@ xchk_rmapbt_mark_bitmap(
 		break;
 	case XFS_RMAP_OWN_AG:
 		bmp = &cr->ag_owned;
+		break;
+	case XFS_RMAP_OWN_INOBT:
+		bmp = &cr->inobt_owned;
 		break;
 	}
 
@@ -460,6 +465,34 @@ xchk_rmapbt_walk_ag_metadata(
 	error = xfs_agfl_walk(sc->mp, agf, agfl_bp, xchk_rmapbt_walk_agfl,
 			&cr->ag_owned);
 	xfs_trans_brelse(sc->tp, agfl_bp);
+	if (error)
+		goto out;
+
+	/* OWN_INOBT: inobt, finobt */
+	cur = sc->sa.ino_cur;
+	if (!cur)
+		cur = xfs_inobt_init_cursor(sc->mp, sc->tp, sc->sa.agi_bp,
+				sc->sa.pag, XFS_BTNUM_INO);
+	error = xfs_btree_visit_blocks(cur, xchk_rmapbt_visit_btblock,
+			XFS_BTREE_VISIT_ALL, &cr->inobt_owned);
+	if (cur != sc->sa.ino_cur)
+		xfs_btree_del_cursor(cur, error);
+	if (error)
+		goto out;
+
+	if (xfs_has_finobt(sc->mp)) {
+		cur = sc->sa.fino_cur;
+		if (!cur)
+			cur = xfs_inobt_init_cursor(sc->mp, sc->tp,
+					sc->sa.agi_bp, sc->sa.pag,
+					XFS_BTNUM_FINO);
+		error = xfs_btree_visit_blocks(cur, xchk_rmapbt_visit_btblock,
+				XFS_BTREE_VISIT_ALL, &cr->inobt_owned);
+		if (cur != sc->sa.fino_cur)
+			xfs_btree_del_cursor(cur, error);
+		if (error)
+			goto out;
+	}
 
 out:
 	/*
@@ -505,6 +538,9 @@ xchk_rmapbt_check_bitmaps(
 
 	if (xbitmap_hweight(&cr->ag_owned) != 0)
 		xchk_btree_xref_set_corrupt(sc, cur, level);
+
+	if (xbitmap_hweight(&cr->inobt_owned) != 0)
+		xchk_btree_xref_set_corrupt(sc, cur, level);
 }
 
 /* Scrub the rmap btree for some AG. */
@@ -522,6 +558,7 @@ xchk_rmapbt(
 	xbitmap_init(&cr->fs_owned);
 	xbitmap_init(&cr->log_owned);
 	xbitmap_init(&cr->ag_owned);
+	xbitmap_init(&cr->inobt_owned);
 
 	error = xchk_rmapbt_walk_ag_metadata(sc, cr);
 	if (error)
@@ -535,6 +572,7 @@ xchk_rmapbt(
 	xchk_rmapbt_check_bitmaps(sc, cr);
 
 out:
+	xbitmap_destroy(&cr->inobt_owned);
 	xbitmap_destroy(&cr->ag_owned);
 	xbitmap_destroy(&cr->log_owned);
 	xbitmap_destroy(&cr->fs_owned);
