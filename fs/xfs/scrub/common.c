@@ -631,6 +631,14 @@ xchk_ag_init(
 
 /* Per-scrubber setup functions */
 
+void
+xchk_trans_cancel(
+	struct xfs_scrub	*sc)
+{
+	xfs_trans_cancel(sc->tp);
+	sc->tp = NULL;
+}
+
 /*
  * Grab an empty transaction so that we can re-grab locked buffers if
  * one of our btrees turns out to be cyclic.
@@ -716,6 +724,21 @@ xchk_iget(
 	return xfs_iget(sc->mp, sc->tp, inum, XFS_IGET_UNTRUSTED, 0, ipp);
 }
 
+/* Install an inode that we opened by handle for scrubbing. */
+static int
+xchk_install_handle_inode(
+	struct xfs_scrub	*sc,
+	struct xfs_inode	*ip)
+{
+	if (VFS_I(ip)->i_generation != sc->sm->sm_gen) {
+		xchk_irele(sc, ip);
+		return -ENOENT;
+	}
+
+	sc->ip = ip;
+	return 0;
+}
+
 /*
  * Given an inode and the scrub control structure, grab either the
  * inode referenced in the control structure or the inode passed in.
@@ -727,9 +750,13 @@ xchk_get_inode(
 {
 	struct xfs_imap		imap;
 	struct xfs_mount	*mp = sc->mp;
+	struct xfs_buf		*agi_bp;
 	struct xfs_inode	*ip_in = XFS_I(file_inode(sc->file));
 	struct xfs_inode	*ip = NULL;
+	xfs_agnumber_t		agno = XFS_INO_TO_AGNO(mp, sc->sm->sm_ino);
 	int			error;
+
+	ASSERT(sc->tp == NULL);
 
 	/* We want to scan the inode we already had opened. */
 	if (sc->sm->sm_ino == 0 || sc->sm->sm_ino == ip_in->i_ino) {
@@ -737,50 +764,77 @@ xchk_get_inode(
 		return 0;
 	}
 
-	/* Look up the inode, see if the generation number matches. */
+	/* Reject internal metadata files. */
 	if (xfs_internal_inum(mp, sc->sm->sm_ino))
 		return -ENOENT;
-	error = xchk_iget(sc, sc->sm->sm_ino, &ip);
-	switch (error) {
-	case -ENOENT:
-		/* Inode doesn't exist, just bail out. */
-		return error;
-	case 0:
-		/* Got an inode, continue. */
-		break;
-	case -EINVAL:
-		/*
-		 * -EINVAL with IGET_UNTRUSTED could mean one of several
-		 * things: userspace gave us an inode number that doesn't
-		 * correspond to fs space, or doesn't have an inobt entry;
-		 * or it could simply mean that the inode buffer failed the
-		 * read verifiers.
-		 *
-		 * Try just the inode mapping lookup -- if it succeeds, then
-		 * the inode buffer verifier failed and something needs fixing.
-		 * Otherwise, we really couldn't find it so tell userspace
-		 * that it no longer exists.
-		 */
-		error = xfs_imap(sc->mp, sc->tp, sc->sm->sm_ino, &imap,
-				XFS_IGET_UNTRUSTED);
-		if (error)
-			return -ENOENT;
-		error = -EFSCORRUPTED;
-		fallthrough;
-	default:
-		trace_xchk_op_error(sc,
-				XFS_INO_TO_AGNO(mp, sc->sm->sm_ino),
-				XFS_INO_TO_AGBNO(mp, sc->sm->sm_ino),
-				error, __return_address);
-		return error;
-	}
-	if (VFS_I(ip)->i_generation != sc->sm->sm_gen) {
-		xchk_irele(sc, ip);
-		return -ENOENT;
-	}
 
-	sc->ip = ip;
-	return 0;
+	error = xchk_iget(sc, sc->sm->sm_ino, &ip);
+	if (!error)
+		return xchk_install_handle_inode(sc, ip);
+	if (error != -EINVAL)
+		goto out_error;
+
+	/*
+	 * EINVAL with IGET_UNTRUSTED probably means one of several things:
+	 * userspace gave us an inode number that doesn't correspond to fs
+	 * space; the inode btree lacks a record for this inode; or there is a
+	 * record, and it says this inode is free.
+	 *
+	 * We want to look up this inode in the inobt to distinguish two
+	 * scenarios: (1) the inobt says the inode is free, in which case
+	 * there's nothing to do; and (2) the inobt says the inode is
+	 * allocated, but loading it failed due to corruption.
+	 *
+	 * Allocate a transaction and grab the AGI to prevent inobt activity
+	 * in this AG.  Retry the iget in case someone allocated a new inode
+	 * after the first iget failed.
+	 */
+	error = xchk_trans_alloc(sc, 0);
+	if (error)
+		goto out_error;
+
+	error = xfs_ialloc_read_agi(mp, sc->tp, agno, &agi_bp);
+	if (error)
+		goto out_cancel;
+
+	error = xchk_iget(sc, sc->sm->sm_ino, &ip);
+	if (!error) {
+		xchk_trans_cancel(sc);
+		return xchk_install_handle_inode(sc, ip);
+	}
+	if (error != -EINVAL)
+		goto out_cancel;
+
+	/*
+	 * Untrusted iget failed a second time.  Let's try an inobt lookup.
+	 * If the inobt doesn't think this is an allocated inode then we'll
+	 * return ENOENT to signal that the check can be skipped.
+	 *
+	 * If the lookup signals corruption, we'll mark this inode corrupt and
+	 * exit to userspace.  There's little chance of fixing anything until
+	 * the inobt is straightened out, but there's nothing we can do here.
+	 *
+	 * If the lookup succeeds, something else must be very wrong in the fs
+	 * such that setting up the incore inode failed in some strange way.
+	 * Treat those as corruptions.
+	 */
+	error = xfs_imap(sc->mp, sc->tp, sc->sm->sm_ino, &imap,
+			XFS_IGET_UNTRUSTED);
+	if (error)
+		goto out_cancel;
+
+	error = -EFSCORRUPTED;
+
+out_cancel:
+	xchk_trans_cancel(sc);
+out_error:
+	/* ENOENT means "nothing here to scrub" and is not an operation error */
+	if (error == -ENOENT)
+		return error;
+
+	trace_xchk_op_error(sc, agno, XFS_INO_TO_AGBNO(mp, sc->sm->sm_ino),
+			error, __return_address);
+	return error;
 }
 
 /* Release an inode, possibly dropping it in the process. */

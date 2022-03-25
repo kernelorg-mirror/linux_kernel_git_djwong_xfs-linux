@@ -32,6 +32,8 @@ xchk_should_terminate(
 }
 
 int xchk_trans_alloc(struct xfs_scrub *sc, uint resblks);
+void xchk_trans_cancel(struct xfs_scrub *sc);
+
 bool xchk_process_error(struct xfs_scrub *sc, xfs_agnumber_t agno,
 		xfs_agblock_t bno, int *error);
 bool xchk_fblock_process_error(struct xfs_scrub *sc, int whichfork,
