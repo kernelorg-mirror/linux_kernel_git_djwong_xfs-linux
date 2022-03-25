@@ -23,6 +23,7 @@ static inline int xrep_notsupported(struct xfs_scrub *sc)
 /* Repair helpers */
 
 int xrep_attempt(struct xfs_scrub *sc);
+bool xrep_will_attempt(struct xfs_scrub *sc);
 void xrep_failure(struct xfs_mount *mp);
 int xrep_roll_ag_trans(struct xfs_scrub *sc);
 int xrep_roll_trans(struct xfs_scrub *sc);
@@ -161,6 +162,8 @@ void xrep_bload_estimate_slack(struct xfs_scrub *sc,
 int xrep_newbt_relog_autoreap(struct xrep_newbt *xnr);
 
 #else
+
+#define xrep_will_attempt(sc)	(false)
 
 static inline int
 xrep_attempt(
