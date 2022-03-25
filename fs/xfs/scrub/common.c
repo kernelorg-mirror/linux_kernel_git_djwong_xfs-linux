@@ -814,16 +814,18 @@ xchk_get_inode(
 	 * exit to userspace.  There's little chance of fixing anything until
 	 * the inobt is straightened out, but there's nothing we can do here.
 	 *
+	 * If the lookup encounters a runtime error, exit to userspace.
+	 *
 	 * If the lookup succeeds, something else must be very wrong in the fs
 	 * such that setting up the incore inode failed in some strange way.
 	 * Treat those as corruptions.
 	 */
 	error = xfs_imap(sc->mp, sc->tp, sc->sm->sm_ino, &imap,
 			XFS_IGET_UNTRUSTED);
-	if (error)
-		goto out_cancel;
-
-	error = -EFSCORRUPTED;
+	if (error == -EINVAL)
+		error = -ENOENT;
+	if (!error)
+		error = -EFSCORRUPTED;
 
 out_cancel:
 	xchk_trans_cancel(sc);
