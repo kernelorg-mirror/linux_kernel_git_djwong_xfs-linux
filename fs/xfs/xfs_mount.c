@@ -1183,17 +1183,37 @@ xfs_mod_frextents(
 	struct xfs_mount	*mp,
 	int64_t			delta)
 {
-	int64_t			lcounter;
-	int			ret = 0;
+	int			batch;
 
-	spin_lock(&mp->m_sb_lock);
-	lcounter = mp->m_sb.sb_frextents + delta;
-	if (lcounter < 0)
-		ret = -ENOSPC;
+	if (delta > 0) {
+		percpu_counter_add(&mp->m_frextents, delta);
+		return 0;
+	}
+
+	/*
+	 * Taking blocks away, need to be more accurate the closer we
+	 * are to zero.
+	 *
+	 * If the counter has a value of less than 2 * max batch size,
+	 * then make everything serialise as we are real close to
+	 * ENOSPC.
+	 */
+	if (__percpu_counter_compare(&mp->m_frextents, 2 * XFS_FDBLOCKS_BATCH,
+				     XFS_FDBLOCKS_BATCH) < 0)
+		batch = 1;
 	else
-		mp->m_sb.sb_frextents = lcounter;
-	spin_unlock(&mp->m_sb_lock);
-	return ret;
+		batch = XFS_FDBLOCKS_BATCH;
+
+	percpu_counter_add_batch(&mp->m_frextents, delta, batch);
+	if (__percpu_counter_compare(&mp->m_frextents, 0,
+				     XFS_FDBLOCKS_BATCH) >= 0) {
+		/* we had space! */
+		return 0;
+	}
+
+	/* oops, negative free space, put that back! */
+	percpu_counter_add(&mp->m_frextents, -delta);
+	return -ENOSPC;
 }
 
 /*
