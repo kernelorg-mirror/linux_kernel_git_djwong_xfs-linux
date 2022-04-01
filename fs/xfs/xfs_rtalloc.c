@@ -19,6 +19,7 @@
 #include "xfs_icache.h"
 #include "xfs_rtalloc.h"
 #include "xfs_sb.h"
+#include "xfs_log_priv.h"
 
 /*
  * Read and return the summary information for a given extent size,
@@ -1284,6 +1285,43 @@ xfs_rtmount_init(
 	return 0;
 }
 
+static inline int
+xfs_rtalloc_count_frextent(
+	struct xfs_trans		*tp,
+	const struct xfs_rtalloc_rec	*rec,
+	void				*priv)
+{
+	uint64_t			*valp = priv;
+
+	*valp += rec->ar_extcount;
+	return 0;
+}
+
+/* Reinitialize the number of free realtime extents from the realtime bitmap. */
+STATIC int
+xfs_rtalloc_reinit_frextents(
+	struct xfs_mount	*mp)
+{
+	struct xfs_trans	*tp;
+	uint64_t		val = 0;
+	int			error;
+
+	error = xfs_trans_alloc_empty(mp, &tp);
+	if (error)
+		return error;
+
+	xfs_ilock(mp->m_rbmip, XFS_ILOCK_EXCL);
+	error = xfs_rtalloc_query_all(tp, xfs_rtalloc_count_frextent, &val);
+	xfs_iunlock(mp->m_rbmip, XFS_ILOCK_EXCL);
+	xfs_trans_cancel(tp);
+	if (error)
+		return error;
+
+	spin_lock(&mp->m_sb_lock);
+	mp->m_sb.sb_frextents = val;
+	spin_unlock(&mp->m_sb_lock);
+	return 0;
+}
 /*
  * Get the bitmap and summary inodes and the summary cache into the mount
  * structure at mount time.
@@ -1302,13 +1340,35 @@ xfs_rtmount_inodes(
 	ASSERT(mp->m_rbmip != NULL);
 
 	error = xfs_iget(mp, NULL, sbp->sb_rsumino, 0, 0, &mp->m_rsumip);
-	if (error) {
-		xfs_irele(mp->m_rbmip);
-		return error;
-	}
+	if (error)
+		goto out_rbm;
 	ASSERT(mp->m_rsumip != NULL);
+
+	/*
+	 * Older kernels misused sb_frextents to reflect both incore
+	 * reservations made by running transactions and the actual count of
+	 * free rt extents in the ondisk metadata.  Transactions committed
+	 * during runtime can therefore contain a superblock update that
+	 * undercounts the number of free rt extents tracked in the rt bitmap.
+	 * A clean unmount record will have the correct frextents value since
+	 * there can be no other transactions running at that point.
+	 *
+	 * If we're mounting the rt volume after recovering the log, recompute
+	 * frextents from the rtbitmap file to fix the inconsistency.
+	 */
+	if (xfs_has_realtime(mp) && xlog_recovery_needed(mp->m_log)) {
+		error = xfs_rtalloc_reinit_frextents(mp);
+		if (error)
+			goto out_rsum;
+	}
+
 	xfs_alloc_rsum_cache(mp, sbp->sb_rbmblocks);
 	return 0;
+out_rsum:
+	xfs_irele(mp->m_rsumip);
+out_rbm:
+	xfs_irele(mp->m_rbmip);
+	return error;
 }
 
 void
