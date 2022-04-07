@@ -933,3 +933,15 @@ xfs_trans_resv_calc(
 	/* Put everything back the way it was.  This goes at the end. */
 	mp->m_rmap_maxlevels = rmap_maxlevels;
 }
+
+/*
+ * Compute an alternate set of log reservation sizes for use exclusively with
+ * minimum log size calculations.
+ */
+void
+xfs_trans_resv_calc_logsize(
+	struct xfs_mount	*mp,
+	struct xfs_trans_resv	*resp)
+{
+	xfs_trans_resv_calc(mp, resp);
+}
