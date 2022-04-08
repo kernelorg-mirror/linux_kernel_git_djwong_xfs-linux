@@ -522,9 +522,12 @@ STATIC bool
 xfs_bmbt_has_key_gap(
 	struct xfs_btree_cur		*cur,
 	const union xfs_btree_key	*key1,
-	const union xfs_btree_key	*key2)
+	const union xfs_btree_key	*key2,
+	const union xfs_btree_key	*mask)
 {
 	xfs_fileoff_t			next;
+
+	ASSERT(!mask || mask->bmbt.br_startoff);
 
 	next = be64_to_cpu(key1->bmbt.br_startoff) + 1;
 	return next != be64_to_cpu(key2->bmbt.br_startoff);
