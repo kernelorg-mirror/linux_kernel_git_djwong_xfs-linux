@@ -501,6 +501,8 @@ enum xfs_delattr_state {
 	{ XFS_DAS_NODE_REMOVE_ATTR,	"XFS_DAS_NODE_REMOVE_ATTR" }, \
 	{ XFS_DAS_DONE,			"XFS_DAS_DONE" }
 
+struct xfs_attri_log_nameval;
+
 /*
  * Defines for xfs_attr_item.xattri_flags
  */
@@ -511,6 +513,12 @@ enum xfs_delattr_state {
  */
 struct xfs_attr_item {
 	struct xfs_da_args		*xattri_da_args;
+
+	/*
+	 * Shared buffer containing the attr name and value so that the logging
+	 * code can share large memory buffers between log items.
+	 */
+	struct xfs_attri_log_nameval	*xattri_nameval;
 
 	/*
 	 * Used by xfs_attr_set to hold a leaf buffer across a transaction roll
