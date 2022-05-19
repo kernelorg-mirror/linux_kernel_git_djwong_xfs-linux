@@ -442,11 +442,8 @@ xfs_attr_create_intent(
 		attr->xattri_nameval = xfs_attri_log_nameval_alloc(args->name,
 				args->namelen, args->value, args->valuelen);
 	}
-	if (!attr->xattri_nameval) {
-		/* Callers cannot handle errors, so we can only shut down. */
-		xlog_force_shutdown(mp->m_log, SHUTDOWN_LOG_IO_ERROR);
-		return NULL;
-	}
+	if (!attr->xattri_nameval)
+		return ERR_PTR(-ENOMEM);
 
 	attrip = xfs_attri_init(mp, attr->xattri_nameval);
 	xfs_trans_add_item(tp, &attrip->attri_item);
