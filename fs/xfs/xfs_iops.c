@@ -24,6 +24,7 @@
 #include "xfs_iomap.h"
 #include "xfs_error.h"
 #include "xfs_ioctl.h"
+#include "xfs_log.h"
 
 #include <linux/posix_acl.h>
 #include <linux/security.h>
@@ -50,6 +51,8 @@ xfs_initxattrs(
 {
 	const struct xattr	*xattr;
 	struct xfs_inode	*ip = XFS_I(inode);
+	struct xfs_mount	*mp = ip->i_mount;
+	bool			*need_rele = fs_info;
 	int			error = 0;
 
 	for (xattr = xattr_array; xattr->name != NULL; xattr++) {
@@ -61,6 +64,13 @@ xfs_initxattrs(
 			.value		= xattr->value,
 			.valuelen	= xattr->value_len,
 		};
+
+		if (!(*need_rele) && xfs_has_larp(mp)) {
+			error = xfs_xattr_use_log_assist(mp, need_rele);
+			if (error)
+				return error;
+		}
+
 		error = xfs_attr_set(&args);
 		if (error < 0)
 			break;
@@ -77,12 +87,17 @@ xfs_initxattrs(
 
 STATIC int
 xfs_init_security(
-	struct inode	*inode,
-	struct inode	*dir,
-	const struct qstr *qstr)
+	struct inode		*inode,
+	struct inode		*dir,
+	const struct qstr	*qstr)
 {
-	return security_inode_init_security(inode, dir, qstr,
-					     &xfs_initxattrs, NULL);
+	bool			need_rele = false;
+	int			error;
+
+	error = security_inode_init_security(inode, dir, qstr, &xfs_initxattrs,
+			&need_rele);
+	xfs_xattr_rele_log_assist(XFS_I(inode)->i_mount, need_rele);
+	return error;
 }
 
 static void

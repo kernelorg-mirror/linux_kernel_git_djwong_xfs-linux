@@ -15,6 +15,7 @@
 #include "xfs_da_btree.h"
 #include "xfs_attr.h"
 #include "xfs_acl.h"
+#include "xfs_log.h"
 
 #include <linux/posix_acl_xattr.h>
 
@@ -39,6 +40,61 @@ xfs_xattr_get(const struct xattr_handler *handler, struct dentry *unused,
 	return args.valuelen;
 }
 
+/*
+ * Get permission to use log-assisted extended attribute updates.
+ *
+ * Callers must not be running any transactions or hold any inode locks, and
+ * they must release the permission by calling xlog_drop_incompat_feat
+ * when they're done.  The @need_rele parameter will be set to true if the
+ * caller should drop permission after the call.
+ */
+int
+xfs_xattr_use_log_assist(
+	struct xfs_mount	*mp,
+	bool			*need_rele)
+{
+	int			error = 0;
+
+	/*
+	 * Protect ourselves from an idle log clearing the logged xattrs log
+	 * incompat feature bit.
+	 */
+	xlog_use_incompat_feat(mp->m_log);
+	*need_rele = true;
+
+	/*
+	 * If log-assisted xattrs are already enabled, the caller can use the
+	 * log assisted swap functions with the log-incompat reference we got.
+	 */
+	if (xfs_sb_version_haslogxattrs(&mp->m_sb))
+		return 0;
+
+	/* Enable log-assisted xattrs. */
+	error = xfs_add_incompat_log_feature(mp,
+			XFS_SB_FEAT_INCOMPAT_LOG_XATTRS);
+	if (error)
+		goto drop_incompat;
+
+	xfs_warn_daily(mp,
+ "EXPERIMENTAL logged extended attributes feature added. Use at your own risk!");
+
+	return 0;
+drop_incompat:
+	xlog_drop_incompat_feat(mp->m_log);
+	*need_rele = false;
+	return error;
+}
+
+/* Release permission to use log-assisted xattr updates. */
+void
+xfs_xattr_rele_log_assist(
+	struct xfs_mount	*mp,
+	bool			need_rele)
+{
+	if (need_rele)
+		xlog_drop_incompat_feat(mp->m_log);
+}
+
 static int
 xfs_xattr_set(const struct xattr_handler *handler,
 	      struct user_namespace *mnt_userns, struct dentry *unused,
@@ -54,11 +110,20 @@ xfs_xattr_set(const struct xattr_handler *handler,
 		.value		= (void *)value,
 		.valuelen	= size,
 	};
+	struct xfs_mount	*mp = XFS_I(inode)->i_mount;
+	bool			need_rele = false;
 	int			error;
+
+	if (xfs_has_larp(mp)) {
+		error = xfs_xattr_use_log_assist(mp, &need_rele);
+		if (error)
+			return error;
+	}
 
 	error = xfs_attr_set(&args);
 	if (!error && (handler->flags & XFS_ATTR_ROOT))
 		xfs_forget_acl(inode, name);
+	xfs_xattr_rele_log_assist(mp, need_rele);
 	return error;
 }
 

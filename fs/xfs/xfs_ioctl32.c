@@ -372,6 +372,7 @@ xfs_compat_attrmulti_by_handle(
 	compat_xfs_fsop_attrmulti_handlereq_t	am_hreq;
 	struct dentry				*dentry;
 	unsigned int				i, size;
+	bool					need_rele = false;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
@@ -404,8 +405,9 @@ xfs_compat_attrmulti_by_handle(
 				d_inode(dentry), ops[i].am_opcode,
 				compat_ptr(ops[i].am_attrname),
 				compat_ptr(ops[i].am_attrvalue),
-				&ops[i].am_length, ops[i].am_flags);
+				&ops[i].am_length, ops[i].am_flags, &need_rele);
 	}
+	xfs_xattr_rele_log_assist(XFS_I(d_inode(dentry))->i_mount, need_rele);
 
 	if (copy_to_user(compat_ptr(am_hreq.ops), ops, size))
 		error = -EFAULT;

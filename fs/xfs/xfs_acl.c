@@ -17,6 +17,7 @@
 #include "xfs_error.h"
 #include "xfs_acl.h"
 #include "xfs_trans.h"
+#include "xfs_log.h"
 
 #include <linux/posix_acl_xattr.h>
 
@@ -174,10 +175,12 @@ int
 __xfs_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 {
 	struct xfs_inode	*ip = XFS_I(inode);
+	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_da_args	args = {
 		.dp		= ip,
 		.attr_filter	= XFS_ATTR_ROOT,
 	};
+	bool			need_rele = false;
 	int			error;
 
 	switch (type) {
@@ -202,8 +205,15 @@ __xfs_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 		xfs_acl_to_disk(args.value, acl);
 	}
 
+	if (xfs_has_larp(mp)) {
+		error = xfs_xattr_use_log_assist(mp, &need_rele);
+		if (error)
+			return error;
+	}
+
 	error = xfs_attr_set(&args);
 	kmem_free(args.value);
+	xfs_xattr_rele_log_assist(mp, need_rele);
 
 	/*
 	 * If the attribute didn't exist to start with that's fine.

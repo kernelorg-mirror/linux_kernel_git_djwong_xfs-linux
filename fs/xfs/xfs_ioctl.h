@@ -31,7 +31,7 @@ xfs_readlink_by_handle(
 
 int xfs_ioc_attrmulti_one(struct file *parfilp, struct inode *inode,
 		uint32_t opcode, void __user *uname, void __user *value,
-		uint32_t *len, uint32_t flags);
+		uint32_t *len, uint32_t flags, bool *need_rele);
 int xfs_ioc_attr_list(struct xfs_inode *dp, void __user *ubuf,
 		      size_t bufsize, int flags,
 		      struct xfs_attrlist_cursor __user *ucursor);

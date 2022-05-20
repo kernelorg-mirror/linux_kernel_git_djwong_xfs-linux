@@ -37,6 +37,7 @@
 #include "xfs_health.h"
 #include "xfs_reflink.h"
 #include "xfs_ioctl.h"
+#include "xfs_log.h"
 
 #include <linux/mount.h>
 #include <linux/namei.h>
@@ -501,7 +502,8 @@ xfs_attrmulti_attr_set(
 	unsigned char		*name,
 	const unsigned char	__user *ubuf,
 	uint32_t		len,
-	uint32_t		flags)
+	uint32_t		flags,
+	bool			*need_rele)
 {
 	struct xfs_da_args	args = {
 		.dp		= XFS_I(inode),
@@ -510,6 +512,7 @@ xfs_attrmulti_attr_set(
 		.name		= name,
 		.namelen	= strlen(name),
 	};
+	struct xfs_mount	*mp = XFS_I(inode)->i_mount;
 	int			error;
 
 	if (IS_IMMUTABLE(inode) || IS_APPEND(inode))
@@ -522,6 +525,12 @@ xfs_attrmulti_attr_set(
 		if (IS_ERR(args.value))
 			return PTR_ERR(args.value);
 		args.valuelen = len;
+	}
+
+	if (!(*need_rele) && xfs_has_larp(mp)) {
+		error = xfs_xattr_use_log_assist(mp, need_rele);
+		if (error)
+			return error;
 	}
 
 	error = xfs_attr_set(&args);
@@ -539,7 +548,8 @@ xfs_ioc_attrmulti_one(
 	void __user		*uname,
 	void __user		*value,
 	uint32_t		*len,
-	uint32_t		flags)
+	uint32_t		flags,
+	bool			*need_rele)
 {
 	unsigned char		*name;
 	int			error;
@@ -563,7 +573,8 @@ xfs_ioc_attrmulti_one(
 		error = mnt_want_write_file(parfilp);
 		if (error)
 			break;
-		error = xfs_attrmulti_attr_set(inode, name, value, *len, flags);
+		error = xfs_attrmulti_attr_set(inode, name, value, *len, flags,
+				need_rele);
 		mnt_drop_write_file(parfilp);
 		break;
 	default:
@@ -584,6 +595,7 @@ xfs_attrmulti_by_handle(
 	xfs_attr_multiop_t	*ops;
 	xfs_fsop_attrmulti_handlereq_t am_hreq;
 	struct dentry		*dentry;
+	bool			need_rele = false;
 	unsigned int		i, size;
 
 	if (!capable(CAP_SYS_ADMIN))
@@ -615,8 +627,10 @@ xfs_attrmulti_by_handle(
 		ops[i].am_error = xfs_ioc_attrmulti_one(parfilp,
 				d_inode(dentry), ops[i].am_opcode,
 				ops[i].am_attrname, ops[i].am_attrvalue,
-				&ops[i].am_length, ops[i].am_flags);
+				&ops[i].am_length, ops[i].am_flags,
+				&need_rele);
 	}
+	xfs_xattr_rele_log_assist(XFS_I(d_inode(dentry))->i_mount, need_rele);
 
 	if (copy_to_user(am_hreq.ops, ops, size))
 		error = -EFAULT;
