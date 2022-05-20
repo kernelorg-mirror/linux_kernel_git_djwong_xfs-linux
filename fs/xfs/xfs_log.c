@@ -3910,8 +3910,8 @@ xfs_attr_use_log_assist(
 	if (error)
 		goto drop_incompat;
 
-	xfs_warn_once(mp,
-"EXPERIMENTAL logged extended attributes feature added. Use at your own risk!");
+	xfs_warn_daily(mp,
+ "EXPERIMENTAL logged extended attributes feature added. Use at your own risk!");
 
 	return 0;
 drop_incompat:
