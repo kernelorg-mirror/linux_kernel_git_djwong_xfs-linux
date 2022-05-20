@@ -3879,15 +3879,17 @@ xlog_drop_incompat_feat(
 }
 
 /*
- * Get permission to use log-assisted atomic exchange of file extents.
+ * Get permission to use log-assisted extended attribute updates.
  *
  * Callers must not be running any transactions or hold any inode locks, and
  * they must release the permission by calling xlog_drop_incompat_feat
- * when they're done.
+ * when they're done.  The @need_rele parameter will be set to true if the
+ * caller should drop permission after the call.
  */
 int
 xfs_attr_use_log_assist(
-	struct xfs_mount	*mp)
+	struct xfs_mount	*mp,
+	bool			*need_rele)
 {
 	int			error = 0;
 
@@ -3896,6 +3898,7 @@ xfs_attr_use_log_assist(
 	 * incompat feature bit.
 	 */
 	xlog_use_incompat_feat(mp->m_log);
+	*need_rele = true;
 
 	/*
 	 * If log-assisted xattrs are already enabled, the caller can use the
@@ -3916,5 +3919,6 @@ xfs_attr_use_log_assist(
 	return 0;
 drop_incompat:
 	xlog_drop_incompat_feat(mp->m_log);
+	*need_rele = false;
 	return error;
 }
