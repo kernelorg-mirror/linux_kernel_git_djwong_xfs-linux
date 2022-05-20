@@ -55,6 +55,15 @@ do {									\
 		func(dev, fmt, ##__VA_ARGS__);				\
 } while (0)
 
+#define xfs_printk_daily(func, dev, fmt, ...)				\
+do {									\
+	static DEFINE_RATELIMIT_STATE(_rs, 86400 * HZ, 1);		\
+									\
+	ratelimit_set_flags(&_rs, RATELIMIT_MSG_ON_RELEASE);		\
+	if (__ratelimit(&_rs))						\
+		func(dev, fmt, ##__VA_ARGS__);				\
+} while (0)
+
 #define xfs_printk_once(func, dev, fmt, ...)			\
 	DO_ONCE_LITE(func, dev, fmt, ##__VA_ARGS__)
 
@@ -74,6 +83,9 @@ do {									\
 	xfs_printk_ratelimited(xfs_info, dev, fmt, ##__VA_ARGS__)
 #define xfs_debug_ratelimited(dev, fmt, ...)				\
 	xfs_printk_ratelimited(xfs_debug, dev, fmt, ##__VA_ARGS__)
+
+#define xfs_warn_daily(dev, fmt, ...)				\
+	xfs_printk_daily(xfs_warn, dev, fmt, ##__VA_ARGS__)
 
 #define xfs_warn_once(dev, fmt, ...)				\
 	xfs_printk_once(xfs_warn, dev, fmt, ##__VA_ARGS__)
