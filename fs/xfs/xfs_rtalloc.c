@@ -26,6 +26,7 @@
 #include "xfs_imeta.h"
 #include "xfs_quota.h"
 #include "xfs_error.h"
+#include "xfs_rtrmap_btree.h"
 
 /*
  * Read and return the summary information for a given extent size,
@@ -1340,6 +1341,7 @@ void
 xfs_rt_resv_free(
 	struct xfs_mount	*mp)
 {
+	xfs_imeta_resv_free_inode(mp->m_rrmapip);
 }
 
 /* Reserve space for rt metadata inodes' space expansion. */
@@ -1347,7 +1349,10 @@ int
 xfs_rt_resv_init(
 	struct xfs_mount	*mp)
 {
-	return 0;
+	xfs_filblks_t		ask;
+
+	ask = xfs_rtrmapbt_calc_reserves(mp);
+	return xfs_imeta_resv_init_inode(mp->m_rrmapip, ask);
 }
 
 /*
