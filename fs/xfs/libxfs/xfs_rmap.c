@@ -829,6 +829,11 @@ xfs_rmap_update_hook(
 
 		if (pag)
 			xfs_hooks_call(&pag->pag_rmap_update_hooks, op, &p);
+#ifdef CONFIG_XFS_RT
+		else
+			xfs_hooks_call(&tp->t_mountp->m_rtrmap_update_hooks,
+					op, &p);
+#endif
 	}
 }
 
@@ -856,6 +861,33 @@ xfs_rmap_hook_del(
 	xfs_hooks_del(&pag->pag_rmap_update_hooks, &hook->update_hook);
 	xfs_hooks_switch_off(&xfs_rmap_hooks_switch);
 }
+
+# ifdef CONFIG_XFS_RT
+/* Call the specified function during a rt reverse mapping update. */
+int
+xfs_rtrmap_hook_add(
+	struct xfs_mount	*mp,
+	struct xfs_rmap_hook	*hook)
+{
+	int			error;
+
+	xfs_hooks_switch_on(&xfs_rmap_hooks_switch);
+	error = xfs_hooks_add(&mp->m_rtrmap_update_hooks, &hook->update_hook);
+	if (error)
+		xfs_hooks_switch_off(&xfs_rmap_hooks_switch);
+	return error;
+}
+
+/* Stop calling the specified function during a rt reverse mapping update. */
+void
+xfs_rtrmap_hook_del(
+	struct xfs_mount	*mp,
+	struct xfs_rmap_hook	*hook)
+{
+	xfs_hooks_del(&mp->m_rtrmap_update_hooks, &hook->update_hook);
+	xfs_hooks_switch_off(&xfs_rmap_hooks_switch);
+}
+# endif /* CONFIG_XFS_RT */
 #else
 # define xfs_rmap_update_hook(t, p, o, s, b, u, oi)	do { } while(0)
 #endif /* CONFIG_XFS_LIVE_HOOKS */

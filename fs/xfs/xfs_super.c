@@ -1953,6 +1953,9 @@ static int xfs_init_fs_context(
 	mp->m_allocsize_log = 16; /* 64k */
 
 	xfs_hooks_init(&mp->m_nlink_delta_hooks);
+#ifdef CONFIG_XFS_RT
+	xfs_hooks_init(&mp->m_rtrmap_update_hooks);
+#endif
 
 	/*
 	 * Copy binary VFS mount flags we are interested in.
