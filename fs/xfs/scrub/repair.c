@@ -522,16 +522,16 @@ xrep_newbt_schedule_autoreap(
 
 	INIT_LIST_HEAD(&efi_item.xefi_list);
 	list_add(&efi_item.xefi_list, &items);
-	xfs_fs_bump_intents(xnr->sc->mp, resv->fsbno);
+	xfs_fs_bump_intents(xnr->sc->mp, false, resv->fsbno);
 	lip = xfs_extent_free_defer_type.create_intent(xnr->sc->tp,
 			&items, 1, false);
 	if (!lip) {
 		ASSERT(0);
-		xfs_fs_drop_intents(xnr->sc->mp, resv->fsbno);
+		xfs_fs_drop_intents(xnr->sc->mp, false, resv->fsbno);
 		return -EFSCORRUPTED;
 	}
 	if (IS_ERR(lip)) {
-		xfs_fs_drop_intents(xnr->sc->mp, resv->fsbno);
+		xfs_fs_drop_intents(xnr->sc->mp, false, resv->fsbno);
 		return PTR_ERR(lip);
 	}
 
@@ -745,7 +745,7 @@ xrep_newbt_free_resv(
 	 */
 	list_for_each_entry_safe(resv, n, &xnr->resv_list, list) {
 		xrep_newbt_cancel_autoreap(resv);
-		xfs_fs_drop_intents(sc->mp, resv->fsbno);
+		xfs_fs_drop_intents(sc->mp, false, resv->fsbno);
 		list_del(&resv->list);
 		kfree(resv);
 	}
@@ -780,7 +780,7 @@ xrep_newbt_cancel_resv(
 			&xnr->oinfo, true);
 
 	/* Drop the intent drain after we commit the new item. */
-	xfs_fs_drop_intents(sc->mp, resv->fsbno);
+	xfs_fs_drop_intents(sc->mp, false, resv->fsbno);
 }
 
 /*
@@ -877,7 +877,7 @@ xrep_newbt_destroy_resv(
 	 * original fsbno from the reservation because destroying the
 	 * reservation consumes resv->fsbno.
 	 */
-	xfs_fs_drop_intents(sc->mp, fsbno);
+	xfs_fs_drop_intents(sc->mp, false, fsbno);
 }
 
 /* Free all the accounting info and disk space we reserved for a new btree. */
