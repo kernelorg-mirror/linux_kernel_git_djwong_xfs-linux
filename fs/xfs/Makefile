@@ -179,6 +179,7 @@ ifeq ($(CONFIG_XFS_ONLINE_REPAIR),y)
 xfs-y				+= $(addprefix scrub/, \
 				   agheader_repair.o \
 				   alloc_repair.o \
+				   attr_repair.o \
 				   bmap_repair.o \
 				   fscounters_repair.o \
 				   ialloc_repair.o \
