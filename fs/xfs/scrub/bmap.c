@@ -91,7 +91,8 @@ out:
 struct xchk_bmap_info {
 	struct xfs_scrub	*sc;
 	struct xfs_iext_cursor	icur;
-	xfs_fileoff_t		lastoff;
+	struct xfs_bmbt_irec	prev_rec;
+
 	bool			is_rt;
 	bool			is_shared;
 	bool			was_loaded;
@@ -380,7 +381,8 @@ xchk_bmap_iextent(
 	 * Check for out-of-order extents.  This record could have come
 	 * from the incore list, for which there is no ordering check.
 	 */
-	if (irec->br_startoff < info->lastoff)
+	if (irec->br_startoff < info->prev_rec.br_startoff +
+				info->prev_rec.br_blockcount)
 		xchk_fblock_set_corrupt(info->sc, info->whichfork,
 				irec->br_startoff);
 
@@ -681,7 +683,8 @@ xchk_bmap_iextent_delalloc(
 	 * Check for out-of-order extents.  This record could have come
 	 * from the incore list, for which there is no ordering check.
 	 */
-	if (irec->br_startoff < info->lastoff)
+	if (irec->br_startoff < info->prev_rec.br_startoff +
+				info->prev_rec.br_blockcount)
 		xchk_fblock_set_corrupt(info->sc, info->whichfork,
 				irec->br_startoff);
 
@@ -773,7 +776,6 @@ xchk_bmap(
 		goto out;
 
 	/* Scrub extent records. */
-	info.lastoff = 0;
 	ifp = XFS_IFORK_PTR(ip, whichfork);
 	for_each_xfs_iext(ifp, &info.icur, &irec) {
 		if (xchk_should_terminate(sc, &error) ||
@@ -790,7 +792,7 @@ xchk_bmap(
 			xchk_bmap_iextent_delalloc(ip, &info, &irec);
 		else
 			xchk_bmap_iextent(ip, &info, &irec);
-		info.lastoff = irec.br_startoff + irec.br_blockcount;
+		memcpy(&info.prev_rec, &irec, sizeof(struct xfs_bmbt_irec));
 	}
 
 	error = xchk_bmap_check_rmaps(sc, whichfork);
