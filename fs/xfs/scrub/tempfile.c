@@ -783,6 +783,15 @@ bool
 xrep_is_tempfile(
 	struct xfs_inode	*ip)
 {
+	struct xfs_mount	*mp = ip->i_mount;
+
+	/*
+	 * Files in the metadata directory tree also have S_PRIVATE set and
+	 * IOP_XATTR unset, so we must distinguish them separately.
+	 */
+	if (xfs_has_metadir(mp) && (ip->i_diflags2 & XFS_DIFLAG2_METADATA))
+		return false;
+
 	if (IS_PRIVATE(VFS_I(ip)) && !(VFS_I(ip)->i_opflags & IOP_XATTR))
 		return true;
 
