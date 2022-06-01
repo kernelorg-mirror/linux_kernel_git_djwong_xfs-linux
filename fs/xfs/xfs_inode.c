@@ -787,6 +787,24 @@ xfs_nlink_hook_del(
 #endif /* CONFIG_XFS_LIVE_HOOKS */
 
 int
+xfs_icreate_dqalloc(
+	const struct xfs_icreate_args	*args,
+	struct xfs_dquot		**udqpp,
+	struct xfs_dquot		**gdqpp,
+	struct xfs_dquot		**pdqpp)
+{
+	unsigned int			flags = XFS_QMOPT_QUOTALL;
+
+	*udqpp = *gdqpp = *pdqpp = NULL;
+
+	if (!(args->flags & XFS_ICREATE_ARGS_FORCE_GID))
+		flags |= XFS_QMOPT_INHERIT;
+
+	return xfs_qm_vop_dqalloc(args->pip, args->uid, args->gid, args->prid,
+			flags, udqpp, gdqpp, pdqpp);
+}
+
+int
 xfs_create(
 	struct xfs_inode	*dp,
 	struct xfs_name		*name,
@@ -796,9 +814,9 @@ xfs_create(
 	struct xfs_mount	*mp = dp->i_mount;
 	struct xfs_inode	*ip = NULL;
 	struct xfs_trans	*tp = NULL;
-	struct xfs_dquot	*udqp = NULL;
-	struct xfs_dquot	*gdqp = NULL;
-	struct xfs_dquot	*pdqp = NULL;
+	struct xfs_dquot	*udqp;
+	struct xfs_dquot	*gdqp;
+	struct xfs_dquot	*pdqp;
 	struct xfs_trans_res	*tres;
 	xfs_ino_t		ino;
 	bool			unlock_dp_on_error = false;
@@ -815,9 +833,7 @@ xfs_create(
 	/*
 	 * Make sure that we have allocated dquot(s) on disk.
 	 */
-	error = xfs_qm_vop_dqalloc(dp, args->uid, args->gid, args->prid,
-			XFS_QMOPT_QUOTALL | XFS_QMOPT_INHERIT,
-			&udqp, &gdqp, &pdqp);
+	error = xfs_icreate_dqalloc(args, &udqp, &gdqp, &pdqp);
 	if (error)
 		return error;
 
@@ -954,9 +970,9 @@ xfs_create_tmpfile(
 	struct xfs_mount	*mp = dp->i_mount;
 	struct xfs_inode	*ip = NULL;
 	struct xfs_trans	*tp = NULL;
-	struct xfs_dquot	*udqp = NULL;
-	struct xfs_dquot	*gdqp = NULL;
-	struct xfs_dquot	*pdqp = NULL;
+	struct xfs_dquot	*udqp;
+	struct xfs_dquot	*gdqp;
+	struct xfs_dquot	*pdqp;
 	struct xfs_trans_res	*tres;
 	xfs_ino_t		ino;
 	uint			resblks;
@@ -971,9 +987,7 @@ xfs_create_tmpfile(
 	/*
 	 * Make sure that we have allocated dquot(s) on disk.
 	 */
-	error = xfs_qm_vop_dqalloc(dp, args->uid, args->gid, args->prid,
-			XFS_QMOPT_QUOTALL | XFS_QMOPT_INHERIT,
-			&udqp, &gdqp, &pdqp);
+	error = xfs_icreate_dqalloc(args, &udqp, &gdqp, &pdqp);
 	if (error)
 		return error;
 
