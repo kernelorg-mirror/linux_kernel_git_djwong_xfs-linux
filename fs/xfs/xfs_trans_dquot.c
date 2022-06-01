@@ -121,6 +121,85 @@ xfs_trans_dup_dqinfo(
 	}
 }
 
+#ifdef CONFIG_XFS_LIVE_HOOKS
+static XFS_HOOKS_SWITCH_DEFINE(xfs_dqtrx_hooks_switch);
+
+/* Schedule a transactional dquot update on behalf of an inode. */
+void
+xfs_trans_mod_ino_dquot(
+	struct xfs_trans		*tp,
+	struct xfs_inode		*ip,
+	struct xfs_dquot		*dqp,
+	unsigned int			field,
+	int64_t				delta)
+{
+	xfs_trans_mod_dquot(tp, dqp, field, delta);
+
+	if (xfs_hooks_switched_on(&xfs_dqtrx_hooks_switch)) {
+		struct xfs_mod_ino_dqtrx_params	p = {
+			.tp		= tp,
+			.ip		= ip,
+			.dqp		= dqp,
+			.delta		= delta
+		};
+		struct xfs_quotainfo	*qi = tp->t_mountp->m_quotainfo;
+
+		xfs_hooks_call(&qi->qi_mod_ino_dqtrx_hooks, field, &p);
+	}
+}
+
+/* Call the specified functions during a dquot counter update. */
+int
+xfs_dqtrx_hook_add(
+	struct xfs_quotainfo	*qi,
+	struct xfs_dqtrx_hook	*hook)
+{
+	int			error;
+
+	xfs_hooks_switch_on(&xfs_dqtrx_hooks_switch);
+
+	/*
+	 * Transactional dquot updates first call the mod hook when changes
+	 * are attached to the transaction and then call the apply hook when
+	 * those changes are committed (or canceled).
+	 *
+	 * The apply hook must be installed before the mod hook so that we
+	 * never fail to catch the end of a quota update sequence.
+	 */
+	error = xfs_hooks_add(&qi->qi_apply_dqtrx_hooks, &hook->apply_hook);
+	if (error)
+		goto out_switch;
+
+	error = xfs_hooks_add(&qi->qi_mod_ino_dqtrx_hooks, &hook->mod_hook);
+	if (error)
+		goto out_apply;
+
+	return 0;
+
+out_apply:
+	xfs_hooks_del(&qi->qi_apply_dqtrx_hooks, &hook->apply_hook);
+out_switch:
+	xfs_hooks_switch_off(&xfs_dqtrx_hooks_switch);
+	return error;
+}
+
+/* Stop calling the specified function during a dquot counter update. */
+void
+xfs_dqtrx_hook_del(
+	struct xfs_quotainfo	*qi,
+	struct xfs_dqtrx_hook	*hook)
+{
+	/*
+	 * The mod hook must be removed before apply hook to avoid giving the
+	 * hook consumer with an incomplete update.  No hooks should be running
+	 * after these functions return.
+	 */
+	xfs_hooks_del(&qi->qi_mod_ino_dqtrx_hooks, &hook->mod_hook);
+	xfs_hooks_del(&qi->qi_apply_dqtrx_hooks, &hook->apply_hook);
+	xfs_hooks_switch_off(&xfs_dqtrx_hooks_switch);
+}
+#endif /* CONFIG_XFS_LIVE_HOOKS */
+
 /*
  * Wrap around mod_dquot to account for both user and group quotas.
  */
@@ -138,11 +217,11 @@ xfs_trans_mod_dquot_byino(
 		return;
 
 	if (XFS_IS_UQUOTA_ON(mp) && ip->i_udquot)
-		(void) xfs_trans_mod_dquot(tp, ip->i_udquot, field, delta);
+		xfs_trans_mod_ino_dquot(tp, ip, ip->i_udquot, field, delta);
 	if (XFS_IS_GQUOTA_ON(mp) && ip->i_gdquot)
-		(void) xfs_trans_mod_dquot(tp, ip->i_gdquot, field, delta);
+		xfs_trans_mod_ino_dquot(tp, ip, ip->i_gdquot, field, delta);
 	if (XFS_IS_PQUOTA_ON(mp) && ip->i_pdquot)
-		(void) xfs_trans_mod_dquot(tp, ip->i_pdquot, field, delta);
+		xfs_trans_mod_ino_dquot(tp, ip, ip->i_pdquot, field, delta);
 }
 
 STATIC struct xfs_dqtrx *
@@ -322,6 +401,28 @@ xfs_apply_quota_reservation_deltas(
 	}
 }
 
+#ifdef CONFIG_XFS_LIVE_HOOKS
+/* Call downstream hooks now that it's time to apply dquot deltas. */
+static inline void
+xfs_trans_apply_dquot_deltas_hook(
+	struct xfs_trans		*tp,
+	struct xfs_dquot		*dqp)
+{
+	if (xfs_hooks_switched_on(&xfs_dqtrx_hooks_switch)) {
+		struct xfs_apply_dqtrx_params	p = {
+			.tp		= tp,
+			.dqp		= dqp,
+		};
+		struct xfs_quotainfo	*qi = tp->t_mountp->m_quotainfo;
+
+		xfs_hooks_call(&qi->qi_apply_dqtrx_hooks,
+				XFS_APPLY_DQTRX_COMMIT, &p);
+	}
+}
+#else
+# define xfs_trans_apply_dquot_deltas_hook(tp, dqp)	((void)0)
+#endif /* CONFIG_XFS_LIVE_HOOKS */
+
 /*
  * Called by xfs_trans_commit() and similar in spirit to
  * xfs_trans_apply_sb_deltas().
@@ -366,6 +467,8 @@ xfs_trans_apply_dquot_deltas(
 				break;
 
 			ASSERT(XFS_DQ_IS_LOCKED(dqp));
+
+			xfs_trans_apply_dquot_deltas_hook(tp, dqp);
 
 			/*
 			 * adjust the actual number of blocks used
@@ -466,6 +569,28 @@ xfs_trans_apply_dquot_deltas(
 	}
 }
 
+#ifdef CONFIG_XFS_LIVE_HOOKS
+/* Call downstream hooks now that it's time to cancel dquot deltas. */
+static inline void
+xfs_trans_unreserve_and_mod_dquots_hook(
+	struct xfs_trans		*tp,
+	struct xfs_dquot		*dqp)
+{
+	if (xfs_hooks_switched_on(&xfs_dqtrx_hooks_switch)) {
+		struct xfs_apply_dqtrx_params	p = {
+			.tp		= tp,
+			.dqp		= dqp,
+		};
+		struct xfs_quotainfo	*qi = tp->t_mountp->m_quotainfo;
+
+		xfs_hooks_call(&qi->qi_apply_dqtrx_hooks,
+				XFS_APPLY_DQTRX_UNRESERVE, &p);
+	}
+}
+#else
+# define xfs_trans_unreserve_and_mod_dquots_hook(tp, dqp)	((void)0)
+#endif /* CONFIG_XFS_LIVE_HOOKS */
+
 /*
  * Release the reservations, and adjust the dquots accordingly.
  * This is called only when the transaction is being aborted. If by
@@ -496,6 +621,9 @@ xfs_trans_unreserve_and_mod_dquots(
 			 */
 			if ((dqp = qtrx->qt_dquot) == NULL)
 				break;
+
+			xfs_trans_unreserve_and_mod_dquots_hook(tp, dqp);
+
 			/*
 			 * Unreserve the original reservation. We don't care
 			 * about the number of blocks used field, or deltas.
