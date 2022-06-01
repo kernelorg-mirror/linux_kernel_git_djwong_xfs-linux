@@ -42,6 +42,7 @@
 #include "xfs_health.h"
 #include "xfs_rtrmap_btree.h"
 #include "xfs_rtalloc.h"
+#include "xfs_imeta.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -2733,4 +2734,104 @@ xrep_is_rtmeta_ino(
 		return true;
 
 	return false;
+}
+
+/* Check the sanity of a rmap record for a metadata btree inode. */
+int
+xrep_check_ino_btree_mapping(
+	struct xfs_scrub		*sc,
+	const struct xfs_rmap_irec	*rec)
+{
+	enum xfs_btree_keyfill		keyfill;
+	int				error;
+
+	/*
+	 * Metadata btree inodes never have extended attributes, and all blocks
+	 * should have the bmbt block flag set.
+	 */
+	if ((rec->rm_flags & XFS_RMAP_ATTR_FORK) ||
+	    !(rec->rm_flags & XFS_RMAP_BMBT_BLOCK))
+		return -EFSCORRUPTED;
+
+	/* Make sure the block is within the AG. */
+	if (!xfs_verify_agbext(sc->mp, sc->sa.pag->pag_agno, rec->rm_startblock,
+				rec->rm_blockcount))
+		return -EFSCORRUPTED;
+
+	/* Make sure this isn't free space. */
+	error = xfs_alloc_scan_keyfill(sc->sa.bno_cur, rec->rm_startblock,
+			rec->rm_blockcount, &keyfill);
+	if (error)
+		return error;
+	if (keyfill != XFS_BTREE_KEYFILL_EMPTY)
+		return -EFSCORRUPTED;
+
+	return 0;
+}
+
+/*
+ * Reset the block count of the inode being repaired, and adjust the dquot
+ * block usage to match.  The inode must not have an xattr fork.
+ */
+void
+xrep_inode_set_nblocks(
+	struct xfs_scrub	*sc,
+	int64_t			new_blocks)
+{
+	int64_t			delta;
+
+	delta = new_blocks - sc->ip->i_nblocks;
+	sc->ip->i_nblocks = new_blocks;
+
+	xfs_trans_log_inode(sc->tp, sc->ip, XFS_ILOG_CORE);
+	if (delta != 0)
+		xfs_trans_mod_dquot_byino(sc->tp, sc->ip, XFS_TRANS_DQ_BCOUNT,
+				delta);
+}
+
+/* Reset the block reservation for a metadata inode. */
+int
+xrep_reset_imeta_reservation(
+	struct xfs_scrub	*sc)
+{
+	struct xfs_inode	*ip = sc->ip;
+	int64_t			delta;
+	int			error;
+
+	delta = ip->i_nblocks + ip->i_delayed_blks - ip->i_meta_resv_asked;
+	if (delta == 0)
+		return 0;
+
+	if (delta > 0) {
+		int64_t		give_back;
+
+		/* Too many blocks, free from the incore reservation. */
+		give_back = min_t(uint64_t, delta, ip->i_delayed_blks);
+		if (give_back > 0) {
+			xfs_mod_delalloc(ip->i_mount, -give_back);
+			xfs_mod_fdblocks(ip->i_mount, give_back, true);
+			ip->i_delayed_blks -= give_back;
+		}
+
+		return 0;
+	}
+
+	/* Not enough reservation, try to add more.  @delta is negative here. */
+	error = xfs_mod_fdblocks(sc->mp, delta, true);
+	while (error == -ENOSPC) {
+		delta++;
+		if (delta == 0) {
+			xfs_warn(sc->mp,
+"Insufficient free space to reset space reservation for inode 0x%llx after repair.",
+					ip->i_ino);
+			return 0;
+		}
+		error = xfs_mod_fdblocks(sc->mp, delta, true);
+	}
+	if (error)
+		return error;
+
+	xfs_mod_delalloc(sc->mp, -delta);
+	ip->i_delayed_blks += -delta;
+	return 0;
 }
