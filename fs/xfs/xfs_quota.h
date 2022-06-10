@@ -74,6 +74,20 @@ struct xfs_dqtrx {
 	int64_t		qt_icount_delta;  /* dquot inode count changes */
 };
 
+enum xfs_apply_dqtrx_type {
+	XFS_APPLY_DQTRX_COMMIT = 0,
+	XFS_APPLY_DQTRX_UNRESERVE,
+};
+
+/*
+ * Parameters for applying dqtrx changes to a dquot.  The hook function arg
+ * parameter is enum xfs_apply_dqtrx_type.
+ */
+struct xfs_apply_dqtrx_params {
+	struct xfs_trans	*tp;
+	struct xfs_dquot	*dqp;
+};
+
 #ifdef CONFIG_XFS_QUOTA
 extern void xfs_trans_dup_dqinfo(struct xfs_trans *, struct xfs_trans *);
 extern void xfs_trans_free_dqinfo(struct xfs_trans *);
@@ -179,5 +193,24 @@ xfs_quota_unreserve_blkres(struct xfs_inode *ip, int64_t blocks)
 }
 
 extern int xfs_mount_reset_sbqflags(struct xfs_mount *);
+
+#ifdef CONFIG_XFS_LIVE_HOOKS
+void xfs_trans_mod_ino_dquot(struct xfs_trans *tp, struct xfs_inode *ip,
+		struct xfs_dquot *dqp, unsigned int field, int64_t delta);
+
+struct xfs_quotainfo;
+
+struct xfs_dqtrx_hook {
+	struct xfs_hook		mod_hook;
+	struct xfs_hook		apply_hook;
+};
+
+int xfs_dqtrx_hook_add(struct xfs_quotainfo *qi, struct xfs_dqtrx_hook *hook);
+void xfs_dqtrx_hook_del(struct xfs_quotainfo *qi, struct xfs_dqtrx_hook *hook);
+
+#else
+#define xfs_trans_mod_ino_dquot(tp, ip, dqp, field, delta) \
+		xfs_trans_mod_dquot((tp), (dqp), (field), (delta))
+#endif /* CONFIG_XFS_LIVE_HOOKS */
 
 #endif	/* __XFS_QUOTA_H__ */
