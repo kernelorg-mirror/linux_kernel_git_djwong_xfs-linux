@@ -138,11 +138,23 @@ xrep_roll_ag_trans(
 	if (error)
 		return error;
 
-	/* Join AG headers to the new transaction. */
-	if (sc->sa.agi_bp)
+	/*
+	 * Join AG headers to the new transaction.  The buffer log item can
+	 * detach from the buffer across the transaction roll if the bli is
+	 * clean, so ensure the buffer type is still set on the AG header
+	 * buffers' blis before we return.
+	 *
+	 * Normal code would never hold a clean buffer across a roll, but scrub
+	 * needs both buffers to maintain a total lock on the AG.
+	 */
+	if (sc->sa.agi_bp) {
 		xfs_trans_bjoin(sc->tp, sc->sa.agi_bp);
-	if (sc->sa.agf_bp)
+		xfs_trans_buf_set_type(sc->tp, sc->sa.agi_bp, XFS_BLFT_AGI_BUF);
+	}
+	if (sc->sa.agf_bp) {
 		xfs_trans_bjoin(sc->tp, sc->sa.agf_bp);
+		xfs_trans_buf_set_type(sc->tp, sc->sa.agf_bp, XFS_BLFT_AGF_BUF);
+	}
 
 	return 0;
 }
