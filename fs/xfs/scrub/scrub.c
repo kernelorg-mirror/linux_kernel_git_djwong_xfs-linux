@@ -187,7 +187,10 @@ xchk_teardown(
 		sc->xfile = NULL;
 	}
 	if (sc->buf) {
+		if (sc->buf_cleanup)
+			sc->buf_cleanup(sc->buf);
 		kvfree(sc->buf);
+		sc->buf_cleanup = NULL;
 		sc->buf = NULL;
 	}
 
@@ -355,6 +358,12 @@ static const struct xchk_meta_ops meta_scrub_ops[] = {
 		.type	= ST_FS,
 		.setup	= xchk_setup_fscounters,
 		.scrub	= xchk_fscounters,
+		.repair	= xrep_notsupported,
+	},
+	[XFS_SCRUB_TYPE_QUOTACHECK] = {	/* quota counters */
+		.type	= ST_FS,
+		.setup	= xchk_setup_quotacheck,
+		.scrub	= xchk_quotacheck,
 		.repair	= xrep_notsupported,
 	},
 };
