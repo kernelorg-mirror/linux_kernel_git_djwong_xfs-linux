@@ -37,6 +37,16 @@ xchk_xattr_valuebuf(
 	return ab->buf;
 }
 
+/* A place to store attribute names. */
+static inline unsigned char *
+xchk_xattr_namebuf(
+	struct xfs_scrub	*sc)
+{
+	struct xchk_xattr_buf	*ab = sc->buf;
+
+	return (unsigned char *)ab->buf + ab->sz - XATTR_NAME_MAX - 1;
+}
+
 /* A bitmap of space usage computed by walking an attr leaf block. */
 static inline unsigned long *
 xchk_xattr_usedmap(
@@ -64,5 +74,8 @@ xchk_xattr_dstmap(
 	return xchk_xattr_freemap(sc) +
 			BITS_TO_LONGS(sc->mp->m_attr_geo->blksize);
 }
+
+bool xchk_xattr_set_map(struct xfs_scrub *sc, unsigned long *map,
+		unsigned int start, unsigned int len);
 
 #endif	/* __XFS_SCRUB_ATTR_H__ */
