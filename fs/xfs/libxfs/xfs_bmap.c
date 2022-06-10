@@ -5116,15 +5116,14 @@ xfs_bmap_del_extent_real(
 
 	flags = XFS_ILOG_CORE;
 	if (xfs_ifork_is_realtime(ip, whichfork)) {
-		xfs_filblks_t	len;
-		xfs_extlen_t	mod;
-
-		len = div_u64_rem(del->br_blockcount, mp->m_sb.sb_rextsize,
-				  &mod);
-		ASSERT(mod == 0);
-
 		if (!(bflags & XFS_BMAPI_REMAP)) {
 			xfs_fsblock_t	bno;
+			xfs_filblks_t	len;
+			xfs_extlen_t	mod;
+
+			len = div_u64_rem(del->br_blockcount,
+					mp->m_sb.sb_rextsize, &mod);
+			ASSERT(mod == 0);
 
 			bno = div_u64_rem(del->br_startblock,
 					mp->m_sb.sb_rextsize, &mod);
@@ -5133,10 +5132,12 @@ xfs_bmap_del_extent_real(
 			error = xfs_rtfree_extent(tp, bno, (xfs_extlen_t)len);
 			if (error)
 				goto done;
+			nblks = len * mp->m_sb.sb_rextsize;
+		} else {
+			nblks = del->br_blockcount;
 		}
 
 		do_fx = 0;
-		nblks = len * mp->m_sb.sb_rextsize;
 		qfield = XFS_TRANS_DQ_RTBCOUNT;
 	} else {
 		do_fx = 1;
@@ -5443,7 +5444,7 @@ __xfs_bunmapi(
 		if (del.br_startoff + del.br_blockcount > end + 1)
 			del.br_blockcount = end + 1 - del.br_startoff;
 
-		if (!isrt)
+		if (!isrt || (flags & XFS_BMAPI_REMAP))
 			goto delete;
 
 		sum = del.br_startblock + del.br_blockcount;
@@ -5461,7 +5462,7 @@ __xfs_bunmapi(
 				 * This piece is unwritten, or we're not
 				 * using unwritten extents.  Skip over it.
 				 */
-				ASSERT(end >= mod);
+				ASSERT((flags & XFS_BMAPI_REMAP) || end >= mod);
 				end -= mod > del.br_blockcount ?
 					del.br_blockcount : mod;
 				if (end < got.br_startoff &&
