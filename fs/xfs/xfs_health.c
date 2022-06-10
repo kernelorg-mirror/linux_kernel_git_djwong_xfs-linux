@@ -366,6 +366,7 @@ static const struct ioctl_sick_map fs_map[] = {
 static const struct ioctl_sick_map rt_map[] = {
 	{ XFS_SICK_RT_BITMAP,	XFS_FSOP_GEOM_SICK_RT_BITMAP },
 	{ XFS_SICK_RT_SUMMARY,	XFS_FSOP_GEOM_SICK_RT_SUMMARY },
+	{ XFS_SICK_RT_RMAPBT,	XFS_FSOP_GEOM_SICK_RT_RMAPBT },
 	{ 0, 0 },
 };
 
@@ -514,6 +515,9 @@ xfs_btree_mark_sick(
 	switch (cur->bc_btnum) {
 	case XFS_BTNUM_BMAP:
 		xfs_bmap_mark_sick(cur->bc_ino.ip, cur->bc_ino.whichfork);
+		return;
+	case XFS_BTNUM_RTRMAP:
+		xfs_rt_mark_sick(cur->bc_mp, XFS_SICK_RT_RMAPBT);
 		return;
 	case XFS_BTNUM_BNO:
 		mask = XFS_SICK_AG_BNOBT;
