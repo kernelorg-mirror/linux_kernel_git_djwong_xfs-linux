@@ -670,7 +670,7 @@ xchk_ag_init(
 
 #ifdef CONFIG_XFS_RT
 /* Lock all the realtime metadata inode ILOCKs and wait for intents. */
-static int
+int
 xchk_rt_lock(
 	struct xfs_scrub	*sc,
 	struct xchk_rt		*sr)
@@ -717,7 +717,7 @@ xchk_rt_lock(
 }
 #else
 /* Lock all the realtime metadata inode ILOCKs. */
-static int
+int
 xchk_rt_lock(
 	struct xfs_scrub	*sc,
 	struct xchk_rt		*sr)
