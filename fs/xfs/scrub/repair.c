@@ -1287,11 +1287,23 @@ xrep_agextent_reap(
 		return 0;
 	}
 
-	if (rs->resv == XFS_AG_RESV_AGFL) {
+	switch (rs->resv) {
+	case XFS_AG_RESV_AGFL:
 		ASSERT(*aglenp == 1);
 		error = xrep_put_freelist(sc, agbno);
 		rs->force_roll = true;
-	} else {
+		break;
+	case XFS_AG_RESV_IGNORE:
+		/*
+		 * bnobt/cntbt blocks are counted as free space, so we pass
+		 * XFS_AG_RESV_IGNORE when reaping the old free space btree
+		 * blocks to avoid changing fdblocks.
+		 */
+		error = __xfs_free_extent(sc->tp, fsbno, *aglenp, rs->oinfo,
+				rs->resv, true);
+		rs->force_roll = true;
+		break;
+	default:
 		/*
 		 * Use deferred frees to get rid of the old btree blocks to try
 		 * to minimize the window in which we could crash and lose the
@@ -1299,6 +1311,7 @@ xrep_agextent_reap(
 		 */
 		__xfs_free_extent_later(sc->tp, fsbno, *aglenp, rs->oinfo, true);
 		rs->deferred++;
+		break;
 	}
 
 	return error;
@@ -1773,4 +1786,44 @@ xrep_ino_dqattach(
 	}
 
 	return error;
+}
+
+/* Initialize all the btree cursors for an AG repair. */
+void
+xrep_ag_btcur_init(
+	struct xfs_scrub	*sc,
+	struct xchk_ag		*sa)
+{
+	struct xfs_mount	*mp = sc->mp;
+
+	/* Set up a bnobt cursor for cross-referencing. */
+	if (sc->sm->sm_type != XFS_SCRUB_TYPE_BNOBT &&
+	    sc->sm->sm_type != XFS_SCRUB_TYPE_CNTBT) {
+		sa->bno_cur = xfs_allocbt_init_cursor(mp, sc->tp, sa->agf_bp,
+				sc->sa.pag, XFS_BTNUM_BNO);
+		sa->cnt_cur = xfs_allocbt_init_cursor(mp, sc->tp, sa->agf_bp,
+				sc->sa.pag, XFS_BTNUM_CNT);
+	}
+
+	/* Set up a inobt cursor for cross-referencing. */
+	if (sc->sm->sm_type != XFS_SCRUB_TYPE_INOBT &&
+	    sc->sm->sm_type != XFS_SCRUB_TYPE_FINOBT) {
+		sa->ino_cur = xfs_inobt_init_cursor(mp, sc->tp, sa->agi_bp,
+				sc->sa.pag, XFS_BTNUM_INO);
+		if (xfs_has_finobt(mp))
+			sa->fino_cur = xfs_inobt_init_cursor(mp, sc->tp,
+					sa->agi_bp, sc->sa.pag, XFS_BTNUM_FINO);
+	}
+
+	/* Set up a rmapbt cursor for cross-referencing. */
+	if (sc->sm->sm_type != XFS_SCRUB_TYPE_RMAPBT &&
+	    xfs_has_rmapbt(mp))
+		sa->rmap_cur = xfs_rmapbt_init_cursor(mp, sc->tp, sa->agf_bp,
+				sc->sa.pag);
+
+	/* Set up a refcountbt cursor for cross-referencing. */
+	if (sc->sm->sm_type != XFS_SCRUB_TYPE_REFCNTBT &&
+	    xfs_has_reflink(mp))
+		sa->refc_cur = xfs_refcountbt_init_cursor(mp, sc->tp,
+				sa->agf_bp, sc->sa.pag);
 }
