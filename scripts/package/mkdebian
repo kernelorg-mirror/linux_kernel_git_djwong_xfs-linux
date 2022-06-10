@@ -221,6 +221,20 @@ Description: Linux kernel debugging symbols for $version
 EOF
 fi
 
+# tools package
+cat <<EOF >> debian/control
+
+Package: linux-tools-mtr$LOCALVERSION
+Section: devel
+Architecture: $debarch
+Depends: libc6, libdw1, libelf1, liblzma5, libnuma1, libpci3, libslang2, libudev1, libunwind8, zlib1g, linux-tools-common
+Provides: linux-tools-djwong-kernel
+Description: Linux kernel version specific tools for $version
+ This package provides the architecture dependent parts for kernel
+ version locked tools (such as perf and x86_energy_perf_policy) for
+ version $version.
+EOF
+
 cat <<EOF > debian/rules
 #!$(command -v $MAKE) -f
 
@@ -230,6 +244,12 @@ build-indep:
 build-arch:
 	\$(MAKE) KERNELRELEASE=${version} ARCH=${ARCH} \
 	KBUILD_BUILD_VERSION=${revision} -f \$(srctree)/Makefile
+	\$(MAKE) KERNELRELEASE=${version} ARCH=${ARCH} \
+	KBUILD_BUILD_VERSION=${revision} -f \$(srctree)/Makefile tools/perf
+	-\$(MAKE) KERNELRELEASE=${version} ARCH=${ARCH} \
+	KBUILD_BUILD_VERSION=${revision} -f \$(srctree)/Makefile tools/turbostat
+	-\$(MAKE) KERNELRELEASE=${version} ARCH=${ARCH} \
+	KBUILD_BUILD_VERSION=${revision} -f \$(srctree)/Makefile tools/x86_energy_perf_policy
 
 build: build-arch
 
@@ -240,7 +260,7 @@ binary-arch: build-arch
 
 clean:
 	rm -rf debian/*tmp debian/files
-	\$(MAKE) clean
+	\$(MAKE) clean tools/clean
 
 binary: binary-arch
 EOF
