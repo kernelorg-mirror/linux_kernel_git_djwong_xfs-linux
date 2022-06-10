@@ -196,4 +196,17 @@ struct xfs_imeta_update;
 int xfs_rtrmapbt_create(struct xfs_trans **tpp, struct xfs_imeta_update *ic,
 		struct xfs_inode **ipp);
 
+#ifdef CONFIG_XFS_IN_MEMORY_BTREE
+struct xfbtree;
+struct xfs_btree_cur *xfs_rtrmapbt_mem_cursor(struct xfs_mount *mp,
+		struct xfs_trans *tp, struct xfs_buf *mhead_bp,
+		struct xfbtree *xfbtree);
+int xfs_rtrmapbt_mem_create(struct xfs_mount *mp, struct xfs_buftarg *target,
+		struct xfbtree **xfbtreep);
+bool xfs_rtrmapbt_mem_verify_rec(struct xfs_btree_cur *cur,
+		const struct xfs_rmap_irec *irec);
+#else
+# define xfs_rtrmapbt_mem_verify_rec(cur, irec)		(false)
+#endif /* CONFIG_XFS_IN_MEMORY_BTREE */
+
 #endif	/* __XFS_RTRMAP_BTREE_H__ */
