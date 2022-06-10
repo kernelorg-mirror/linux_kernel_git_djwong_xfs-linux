@@ -1786,7 +1786,7 @@ xfs_refcount_scan_keyfill(
 	memset(&high, 0xFF, sizeof(high));
 	high.rc.rc_startblock = bno + len - 1;
 
-	return xfs_btree_scan_keyfill(cur, &low, &high, outcome);
+	return xfs_btree_scan_keyfill(cur, &low, &high, NULL, outcome);
 }
 
 int __init
