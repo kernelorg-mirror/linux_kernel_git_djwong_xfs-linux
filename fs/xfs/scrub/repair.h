@@ -185,6 +185,10 @@ void xrep_bload_estimate_slack(struct xfs_scrub *sc,
 		struct xfs_btree_bload *bload);
 int xrep_newbt_relog_autoreap(struct xrep_newbt *xnr);
 
+int xrep_trans_alloc_hook_dummy(struct xfs_mount *mp, void **cookiep,
+		struct xfs_trans **tpp);
+void xrep_trans_cancel_hook_dummy(void **cookiep, struct xfs_trans *tp);
+
 #else
 
 #define xrep_will_attempt(sc)	(false)
