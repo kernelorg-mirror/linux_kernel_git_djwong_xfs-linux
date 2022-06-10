@@ -30,6 +30,7 @@
 #include "xfs_reflink.h"
 #include "xfs_swapext.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_rtrefcount_btree.h"
 
 /* Kernel only BMAP related definitions and functions */
 
@@ -333,6 +334,9 @@ xfs_bmap_count_blocks(
 	switch (ifp->if_format) {
 	case XFS_DINODE_FMT_RMAP:
 		cur = xfs_rtrmapbt_init_cursor(mp, tp, ip);
+		return xfs_bmap_count_btblocks(cur, count);
+	case XFS_DINODE_FMT_REFCOUNT:
+		cur = xfs_rtrefcountbt_init_cursor(mp, tp, ip);
 		return xfs_bmap_count_btblocks(cur, count);
 	case XFS_DINODE_FMT_BTREE:
 		error = xfs_iread_extents(tp, ip, whichfork);
