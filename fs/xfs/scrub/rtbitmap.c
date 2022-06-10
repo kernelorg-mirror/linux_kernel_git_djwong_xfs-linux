@@ -24,6 +24,8 @@ xchk_setup_rtbitmap(
 {
 	int			error;
 
+	xchk_fshooks_enable(sc, XCHK_FSHOOKS_DRAIN);
+
 	error = xchk_trans_alloc(sc, 0);
 	if (error)
 		return error;
