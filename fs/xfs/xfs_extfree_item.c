@@ -481,7 +481,7 @@ xfs_extent_free_drop_intents(
 	struct xfs_mount			*mp,
 	const struct xfs_extent_free_item	*xefi)
 {
-	xfs_fs_drop_intents(mp, xefi->xefi_startblock);
+	xfs_fs_drop_intents(mp, false, xefi->xefi_startblock);
 }
 
 /* Process a free extent. */
@@ -545,7 +545,7 @@ xfs_extent_free_add_item(
 	xefi = container_of(item, struct xfs_extent_free_item, xefi_list);
 
 	/* Grab an intent counter reference for this intent item. */
-	xfs_fs_bump_intents(mp, xefi->xefi_startblock);
+	xfs_fs_bump_intents(mp, false, xefi->xefi_startblock);
 }
 
 const struct xfs_defer_op_type xfs_extent_free_defer_type = {
