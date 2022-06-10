@@ -422,6 +422,18 @@ xfs_cntbt_recs_inorder(
 		 be32_to_cpu(r2->alloc.ar_startblock));
 }
 
+STATIC bool
+xfs_allocbt_has_key_gap(
+	struct xfs_btree_cur		*cur,
+	const union xfs_btree_key	*key1,
+	const union xfs_btree_key	*key2)
+{
+	xfs_agblock_t			next;
+
+	next = be32_to_cpu(key1->alloc.ar_startblock) + 1;
+	return next != be32_to_cpu(key2->alloc.ar_startblock);
+}
+
 static const struct xfs_btree_ops xfs_bnobt_ops = {
 	.rec_len		= sizeof(xfs_alloc_rec_t),
 	.key_len		= sizeof(xfs_alloc_key_t),
@@ -442,6 +454,7 @@ static const struct xfs_btree_ops xfs_bnobt_ops = {
 	.diff_two_keys		= xfs_bnobt_diff_two_keys,
 	.keys_inorder		= xfs_bnobt_keys_inorder,
 	.recs_inorder		= xfs_bnobt_recs_inorder,
+	.has_key_gap		= xfs_allocbt_has_key_gap,
 };
 
 static const struct xfs_btree_ops xfs_cntbt_ops = {

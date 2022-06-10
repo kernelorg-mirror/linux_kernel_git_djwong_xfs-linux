@@ -433,6 +433,18 @@ xfs_rmapbt_recs_inorder(
 	return 0;
 }
 
+STATIC bool
+xfs_rmapbt_has_key_gap(
+	struct xfs_btree_cur		*cur,
+	const union xfs_btree_key	*key1,
+	const union xfs_btree_key	*key2)
+{
+	xfs_agblock_t			next;
+
+	next = be32_to_cpu(key1->rmap.rm_startblock) + 1;
+	return next != be32_to_cpu(key2->rmap.rm_startblock);
+}
+
 static const struct xfs_btree_ops xfs_rmapbt_ops = {
 	.rec_len		= sizeof(struct xfs_rmap_rec),
 	.key_len		= 2 * sizeof(struct xfs_rmap_key),
@@ -452,6 +464,7 @@ static const struct xfs_btree_ops xfs_rmapbt_ops = {
 	.diff_two_keys		= xfs_rmapbt_diff_two_keys,
 	.keys_inorder		= xfs_rmapbt_keys_inorder,
 	.recs_inorder		= xfs_rmapbt_recs_inorder,
+	.has_key_gap		= xfs_rmapbt_has_key_gap,
 };
 
 static struct xfs_btree_cur *
