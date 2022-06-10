@@ -18,12 +18,14 @@
 #include "xfs_btree.h"
 #include "xfs_btree_staging.h"
 #include "xfs_rmap.h"
+#include "xfs_xchgrange.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
 #include "scrub/repair.h"
 #include "scrub/health.h"
 #include "scrub/xfile.h"
+#include "scrub/tempfile.h"
 
 /*
  * Online Scrub and Repair
@@ -188,6 +190,10 @@ xchk_teardown(
 		xchk_irele(sc, sc->ip);
 		sc->ip = NULL;
 	}
+	if (sc->flags & XREP_ATOMIC_EXCHANGE) {
+		xfs_xchg_range_rele_log_assist(sc->mp, true);
+		sc->flags &= ~XREP_ATOMIC_EXCHANGE;
+	}
 	if (sc->flags & XCHK_HAVE_FREEZE_PROT) {
 		sc->flags &= ~XCHK_HAVE_FREEZE_PROT;
 		mnt_drop_write_file(sc->file);
@@ -208,6 +214,7 @@ xchk_teardown(
 		sc->buf = NULL;
 	}
 
+	xrep_tempfile_rele(sc);
 	xchk_fshooks_disable(sc);
 	return error;
 }

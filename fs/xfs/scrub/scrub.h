@@ -105,6 +105,10 @@ struct xfs_scrub {
 	/* Lock flags for @ip. */
 	uint				ilock_flags;
 
+	/* A temporary file on this filesystem, for staging new metadata. */
+	struct xfs_inode		*tempip;
+	uint				temp_ilock_flags;
+
 	/* See the XCHK/XREP state flags below. */
 	unsigned int			flags;
 
@@ -126,6 +130,7 @@ struct xfs_scrub {
 #define XCHK_FSHOOKS_QUOTA	(1 << 3)  /* quota live update enabled */
 #define XCHK_FSHOOKS_NLINKS	(1 << 4)  /* link count live update enabled */
 #define XCHK_FSHOOKS_RMAP	(1 << 5)  /* rmapbt live update enabled */
+#define XREP_ATOMIC_EXCHANGE	(1 << 29) /* uses atomic file content exchange */
 #define XREP_RESET_PERAG_RESV	(1 << 30) /* must reset AG space reservation */
 #define XREP_ALREADY_FIXED	(1 << 31) /* checking our repair work */
 
