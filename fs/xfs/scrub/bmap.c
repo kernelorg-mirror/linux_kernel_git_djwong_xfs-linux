@@ -324,6 +324,7 @@ xchk_bmap_rt_iextent_xref(
 			irec->br_blockcount);
 
 out_free:
+	xchk_rt_btcur_free(&info->sc->sr);
 	xchk_rt_unlock(info->sc, &info->sc->sr);
 }
 
@@ -803,6 +804,7 @@ xchk_bmap(
 	case XFS_DINODE_FMT_UUID:
 	case XFS_DINODE_FMT_DEV:
 	case XFS_DINODE_FMT_LOCAL:
+	case XFS_DINODE_FMT_RMAP:
 		/* No mappings to check. */
 		goto out;
 	case XFS_DINODE_FMT_EXTENTS:

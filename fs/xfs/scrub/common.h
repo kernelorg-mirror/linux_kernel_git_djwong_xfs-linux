@@ -93,6 +93,7 @@ int xchk_setup_parent(struct xfs_scrub *sc);
 #ifdef CONFIG_XFS_RT
 int xchk_setup_rtbitmap(struct xfs_scrub *sc);
 int xchk_setup_rtsummary(struct xfs_scrub *sc);
+int xchk_setup_rtrmapbt(struct xfs_scrub *sc);
 #else
 static inline int
 xchk_setup_rtbitmap(struct xfs_scrub *sc)
@@ -101,6 +102,11 @@ xchk_setup_rtbitmap(struct xfs_scrub *sc)
 }
 static inline int
 xchk_setup_rtsummary(struct xfs_scrub *sc)
+{
+	return -ENOENT;
+}
+static inline int
+xchk_setup_rtrmapbt(struct xfs_scrub *sc)
 {
 	return -ENOENT;
 }
@@ -153,6 +159,7 @@ xchk_ag_init_existing(
 }
 
 int xchk_rt_init(struct xfs_scrub *sc, struct xchk_rt *sr);
+void xchk_rt_btcur_free(struct xchk_rt *sr);
 void xchk_rt_unlock(struct xfs_scrub *sc, struct xchk_rt *sr);
 int xchk_ag_read_headers(struct xfs_scrub *sc, xfs_agnumber_t agno,
 		struct xchk_ag *sa);
