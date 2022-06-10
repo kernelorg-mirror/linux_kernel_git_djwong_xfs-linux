@@ -29,6 +29,7 @@
 #include "xfs_attr.h"
 #include "xfs_reflink.h"
 #include "xfs_ag.h"
+#include "xfs_quota.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -784,6 +785,22 @@ again:
 	return error;
 }
 
+#ifdef CONFIG_XFS_QUOTA
+/*
+ * Try to attach dquots to this inode if we think we might want to repair it.
+ * Quota itself could need repairs, so we don't require success here.
+ */
+void
+xchk_try_dqattach(
+	struct xfs_scrub	*sc)
+{
+	ASSERT(sc->ip != NULL);
+
+	if (xchk_could_repair(sc))
+		xfs_qm_dqattach(sc->ip);
+}
+#endif
+
 /* Install an inode that we opened by handle for scrubbing. */
 int
 xchk_install_handle_inode(
@@ -796,6 +813,7 @@ xchk_install_handle_inode(
 	}
 
 	sc->ip = ip;
+	xchk_try_dqattach(sc);
 	return 0;
 }
 
@@ -815,6 +833,7 @@ xchk_install_live_inode(
 	}
 
 	sc->ip = ip;
+	xchk_try_dqattach(sc);
 	return 0;
 }
 
