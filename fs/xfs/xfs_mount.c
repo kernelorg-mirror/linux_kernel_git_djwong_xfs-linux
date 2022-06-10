@@ -1384,3 +1384,71 @@ xfs_mod_delalloc(
 	percpu_counter_add_batch(&mp->m_delalloc_blks, delta,
 			XFS_DELALLOC_BATCH);
 }
+
+#ifdef CONFIG_XFS_DRAIN_INTENTS
+/* Increase the pending intent count. */
+static inline void xfs_drain_bump(struct xfs_drain *dr)
+{
+	atomic_inc(&dr->dr_count);
+}
+
+/* Decrease the pending intent count, and wake any waiters, if appropriate. */
+static inline void xfs_drain_drop(struct xfs_drain *dr)
+{
+	if (atomic_dec_and_test(&dr->dr_count) &&
+	    wq_has_sleeper(&dr->dr_waiters))
+		wake_up(&dr->dr_waiters);
+}
+
+/*
+ * Wait for the pending intent count for a drain to hit zero.
+ *
+ * Callers must not hold any locks that would prevent intents from being
+ * finished.
+ */
+static inline int xfs_drain_wait(struct xfs_drain *dr)
+{
+	return wait_event_killable(dr->dr_waiters, !xfs_drain_busy(dr));
+}
+
+/* Add an item to the pending count. */
+void
+xfs_fs_bump_intents(
+	struct xfs_mount	*mp,
+	xfs_fsblock_t		fsb)
+{
+	struct xfs_perag	*pag;
+
+	pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, fsb));
+	trace_xfs_perag_bump_intents(pag, __return_address);
+	xfs_drain_bump(&pag->pag_intents);
+	xfs_perag_put(pag);
+}
+
+/* Remove an item from the pending count. */
+void
+xfs_fs_drop_intents(
+	struct xfs_mount	*mp,
+	xfs_fsblock_t		fsb)
+{
+	struct xfs_perag	*pag;
+
+	pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, fsb));
+	trace_xfs_perag_drop_intents(pag, __return_address);
+	xfs_drain_drop(&pag->pag_intents);
+	xfs_perag_put(pag);
+}
+
+/*
+ * Wait for the pending intent count for AG metadata to hit zero.
+ * Callers must not hold any AG header buffers.
+ */
+int
+xfs_perag_drain_intents(
+	struct xfs_perag	*pag)
+{
+	trace_xfs_perag_wait_intents(pag, __return_address);
+
+	return xfs_drain_wait(&pag->pag_intents);
+}
+#endif /* CONFIG_XFS_DRAIN_INTENTS */
