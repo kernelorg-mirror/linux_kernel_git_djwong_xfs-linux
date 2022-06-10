@@ -167,6 +167,15 @@ if is_enabled CONFIG_MODULES; then
 		rmdir "$tmpdir/lib/modules/$version"
 	fi
 	if [ -n "$BUILD_DEBUG" ] ; then
+		# Fugly hack to decompress xz-compressed modules before we
+		# separate the debug information...
+		if is_enabled CONFIG_MODULE_COMPRESS_XZ; then
+			for module in $(find $tmpdir/lib/modules/ -name *.ko.xz -printf '%P\n'); do
+				module=lib/modules/$module
+				xz -d -f "${tmpdir}/${module}"
+			done
+		fi
+
 		# If we've invoked make with -j, then parallelize; otherwise
 		# just use a single process.
 		procs=1
@@ -186,6 +195,15 @@ if is_enabled CONFIG_MODULES; then
 		# resign stripped modules
 		if is_enabled CONFIG_MODULE_SIG_ALL; then
 			INSTALL_MOD_PATH="$tmpdir" $MAKE -f $srctree/Makefile modules_sign
+		fi
+
+		# ...and another fugly hack to recompress the modules now that
+		# we've extracted the debug info and re-signed them.
+		if is_enabled CONFIG_MODULE_COMPRESS_XZ; then
+			for module in $(find $tmpdir/lib/modules/ -name *.ko -printf '%P\n'); do
+				module=lib/modules/$module
+				xz --lzma2=dict=2MiB -f "${tmpdir}/${module}"
+			done
 		fi
 	fi
 
