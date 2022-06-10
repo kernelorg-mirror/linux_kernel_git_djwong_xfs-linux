@@ -379,11 +379,14 @@ xfs_refcount_update_finish_item(
 	struct xfs_btree_cur		**state)
 {
 	struct xfs_refcount_intent	*refc;
+	struct xfs_mount		*mp = tp->t_mountp;
+	xfs_fsblock_t			orig_startblock;
 	xfs_fsblock_t			new_fsb;
 	xfs_extlen_t			new_aglen;
 	int				error;
 
 	refc = container_of(item, struct xfs_refcount_intent, ri_list);
+	orig_startblock = refc->ri_startblock;
 	error = xfs_trans_log_finish_refcount_update(tp, CUD_ITEM(done),
 			refc->ri_type, refc->ri_startblock, refc->ri_blockcount,
 			&new_fsb, &new_aglen, state);
@@ -396,6 +399,13 @@ xfs_refcount_update_finish_item(
 		refc->ri_blockcount = new_aglen;
 		return -EAGAIN;
 	}
+
+	/*
+	 * Drop our intent counter reference now that we've finished all the
+	 * work or failed.  Be careful to use the original startblock because
+	 * the finishing functions can update the intent state.
+	 */
+	xfs_fs_drop_intents(mp, orig_startblock);
 	kmem_cache_free(xfs_refcount_intent_cache, refc);
 	return error;
 }
@@ -411,12 +421,26 @@ xfs_refcount_update_abort_intent(
 /* Cancel a deferred refcount update. */
 STATIC void
 xfs_refcount_update_cancel_item(
+	struct xfs_mount		*mp,
 	struct list_head		*item)
 {
 	struct xfs_refcount_intent	*refc;
 
 	refc = container_of(item, struct xfs_refcount_intent, ri_list);
+	xfs_fs_drop_intents(mp, refc->ri_startblock);
 	kmem_cache_free(xfs_refcount_intent_cache, refc);
+}
+
+/* Add a deferred refcount update. */
+STATIC void
+xfs_refcount_update_add_item(
+	struct xfs_mount		*mp,
+	const struct list_head		*item)
+{
+	const struct xfs_refcount_intent *ri;
+
+	ri = container_of(item, struct xfs_refcount_intent, ri_list);
+	xfs_fs_bump_intents(mp, ri->ri_startblock);
 }
 
 const struct xfs_defer_op_type xfs_refcount_update_defer_type = {
@@ -427,6 +451,7 @@ const struct xfs_defer_op_type xfs_refcount_update_defer_type = {
 	.finish_item	= xfs_refcount_update_finish_item,
 	.finish_cleanup = xfs_refcount_finish_one_cleanup,
 	.cancel_item	= xfs_refcount_update_cancel_item,
+	.add_item	= xfs_refcount_update_add_item,
 };
 
 /* Is this recovered CUI ok? */
