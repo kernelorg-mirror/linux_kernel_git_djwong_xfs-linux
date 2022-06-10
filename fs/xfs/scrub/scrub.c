@@ -170,6 +170,10 @@ xchk_teardown(
 		sc->flags &= ~XCHK_HAVE_FREEZE_PROT;
 		mnt_drop_write_file(sc->file);
 	}
+	if (sc->xfile_buftarg) {
+		xfs_free_buftarg(sc->xfile_buftarg);
+		sc->xfile_buftarg = NULL;
+	}
 	if (sc->xfile) {
 		xfile_destroy(sc->xfile);
 		sc->xfile = NULL;
