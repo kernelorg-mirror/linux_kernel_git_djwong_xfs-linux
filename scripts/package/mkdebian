@@ -98,7 +98,7 @@ sourcename=$KDEB_SOURCENAME
 if [ "$ARCH" = "um" ] ; then
 	packagename=user-mode-linux
 else
-	packagename=linux-image
+	packagename=linux-image-mtr$LOCALVERSION
 fi
 
 debarch=
@@ -143,8 +143,10 @@ extra_build_depends="$extra_build_depends, $(if_enabled_echo CONFIG_SYSTEM_TRUST
 cat <<EOF > debian/changelog
 $sourcename ($packageversion) $distribution; urgency=low
 
-  * Custom built Linux kernel.
-
+  * Custom built Linux kernel with these patches:
+EOF
+(cd source/ ; stg ser | sed -e '/^-/d' -e 's/^. /  * /g') >> debian/changelog
+cat <<EOF >> debian/changelog
  -- $maintainer  $(date -R)
 EOF
 
@@ -178,13 +180,14 @@ Rules-Requires-Root: no
 Build-Depends: bc, rsync, kmod, cpio, bison, flex | flex:native $extra_build_depends
 Homepage: https://www.kernel.org/
 
-Package: $packagename-$version
+Package: $packagename
 Architecture: $debarch
+Depends: djwong-kernel-support
 Description: Linux kernel, version $version
  This package contains the Linux kernel, modules and corresponding other
  files, version: $version.
 
-Package: linux-libc-dev
+Package: linux-libc-dev-mtr$LOCALVERSION
 Section: devel
 Provides: linux-kernel-headers
 Architecture: $debarch
@@ -197,7 +200,7 @@ EOF
 if is_enabled CONFIG_MODULES; then
 cat <<EOF >> debian/control
 
-Package: linux-headers-$version
+Package: linux-headers-mtr$LOCALVERSION
 Architecture: $debarch
 Description: Linux kernel headers for $version on $debarch
  This package provides kernel header files for $version on $debarch
@@ -209,7 +212,7 @@ fi
 if is_enabled CONFIG_DEBUG_INFO; then
 cat <<EOF >> debian/control
 
-Package: linux-image-$version-dbg
+Package: $packagename-dbg
 Section: debug
 Architecture: $debarch
 Description: Linux kernel debugging symbols for $version
