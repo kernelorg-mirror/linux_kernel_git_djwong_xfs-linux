@@ -469,6 +469,9 @@ xfs_cui_validate_phys(
 		return false;
 	}
 
+	if (refc->pe_flags & XFS_REFCOUNT_EXTENT_REALTIME)
+		return xfs_verify_rtext(mp, refc->pe_startblock, refc->pe_len);
+
 	return xfs_verify_fsbext(mp, refc->pe_startblock, refc->pe_len);
 }
 
