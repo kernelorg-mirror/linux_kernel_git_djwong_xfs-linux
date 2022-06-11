@@ -41,6 +41,7 @@
 #include "xfs_attr_item.h"
 #include "xfs_xattr.h"
 #include "xfs_iunlink_item.h"
+#include "xfs_parent.h"
 
 #include <linux/magic.h>
 #include <linux/fs_context.h>
@@ -2115,8 +2116,16 @@ xfs_init_caches(void)
 	if (!xfs_iunlink_cache)
 		goto out_destroy_attri_cache;
 
+	xfs_parent_intent_cache = kmem_cache_create("xfs_parent_intent",
+					     sizeof(struct xfs_parent_defer),
+					     0, 0, NULL);
+	if (!xfs_parent_intent_cache)
+		goto out_destroy_iul_cache;
+
 	return 0;
 
+ out_destroy_iul_cache:
+	kmem_cache_destroy(xfs_iunlink_cache);
  out_destroy_attri_cache:
 	kmem_cache_destroy(xfs_attri_cache);
  out_destroy_attrd_cache:
@@ -2171,6 +2180,7 @@ xfs_destroy_caches(void)
 	 * destroy caches.
 	 */
 	rcu_barrier();
+	kmem_cache_destroy(xfs_parent_intent_cache);
 	kmem_cache_destroy(xfs_iunlink_cache);
 	kmem_cache_destroy(xfs_attri_cache);
 	kmem_cache_destroy(xfs_attrd_cache);
