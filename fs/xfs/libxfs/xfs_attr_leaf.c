@@ -311,13 +311,49 @@ xfs_attr3_leaf_verify(
 		return fa;
 
 	/*
-	 * Empty leaf blocks should never occur;  they imply the existence of a
-	 * software bug that needs fixing. xfs_repair also flags them as a
-	 * corruption that needs fixing, so we should never let these go to
-	 * disk.
+	 * Empty leaf blocks can occur under the following circumstances:
+	 *
+	 * 1. setxattr adds a new extended attribute to a file;
+	 * 2. The file has zero existing attributes;
+	 * 3. The attribute is too large to fit in the attribute fork;
+	 * 4. The attribute is small enough to fit in a leaf block;
+	 * 5. A log flush occurs after committing the transaction that creates
+	 *    the (empty) leaf block; and
+	 * 6. The filesystem goes down after the log flush but before the new
+	 *    attribute can be committed to the leaf block.
+	 *
+	 * xfs_repair used to flag these empty leaf blocks as corruption, but
+	 * aside from wasting space, they are benign.  The rest of the xattr
+	 * code will happily add attributes to empty leaf blocks.  Hence this
+	 * comment serves as a tombstone to incorrect verifier code.
+	 *
+	 * Unfortunately, this check has been added and removed multiple times
+	 * throughout history.  It first appeared in[1] kernel 3.10 as part of
+	 * the early V5 format patches.  The check was later discovered to
+	 * break log recovery and hence disabled[2] during log recovery in
+	 * kernel 4.10.  Simultaneously, the check was added[3] to xfs_repair
+	 * 4.9.0 to try to weed out the empty leaf blocks.  This was still not
+	 * correct because log recovery would recover an empty attr leaf block
+	 * successfully only for regular xattr operations to trip over the
+	 * empty block during of the block during regular operation.
+	 * Therefore, the check was removed entirely[4] in kernel 5.7 but
+	 * removal of the xfs_repair check was forgotten.  The continued
+	 * complaints from xfs_repair lead to us mistakenly re-adding[5] the
+	 * verifier check for kernel 5.19, and has been removed once again.
+	 *
+	 * [1] 517c22207b04 ("xfs: add CRCs to attr leaf blocks")
+	 * [2] 2e1d23370e75 ("xfs: ignore leaf attr ichdr.count in verifier
+	 *                    during log replay")
+	 * [3] f7140161 ("xfs_repair: junk leaf attribute if count == 0")
+	 * [4] f28cef9e4dac ("xfs: don't fail verifier on empty attr3 leaf
+	 *                    block")
+	 * [5] 51e6104fdb95 ("xfs: detect empty attr leaf blocks in
+	 *                    xfs_attr3_leaf_verify")
+	 *
+	 * Normally this would go in the commit message, but as we've a history
+	 * of getting this wrong, this now goes in the code base as a gigantic
+	 * comment.
 	 */
-	if (ichdr.count == 0)
-		return __this_address;
 
 	/*
 	 * firstused is the block offset of the first name info structure.
