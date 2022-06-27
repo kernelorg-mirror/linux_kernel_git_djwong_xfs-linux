@@ -88,7 +88,9 @@ xfs_inode_alloc(
 	/* VFS doesn't initialise i_mode or i_state! */
 	VFS_I(ip)->i_mode = 0;
 	VFS_I(ip)->i_state = 0;
+#ifdef CONFIG_XFS_LARGE_FOLIOS
 	mapping_set_large_folios(VFS_I(ip)->i_mapping);
+#endif
 
 	XFS_STATS_INC(mp, vn_active);
 	ASSERT(atomic_read(&ip->i_pincount) == 0);
@@ -323,7 +325,9 @@ xfs_reinit_inode(
 	inode->i_rdev = dev;
 	inode->i_uid = uid;
 	inode->i_gid = gid;
+#ifdef CONFIG_XFS_LARGE_FOLIOS
 	mapping_set_large_folios(inode->i_mapping);
+#endif
 	return error;
 }
 
