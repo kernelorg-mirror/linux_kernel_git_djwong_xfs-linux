@@ -166,3 +166,14 @@ config XFS_ASSERT_FATAL
 	  result in warnings.
 
 	  This behavior can be modified at runtime via sysfs.
+
+config XFS_LARGE_FOLIOS
+	bool "XFS large folios support"
+	default n
+	depends on XFS_FS && XFS_DEBUG
+	help
+	  Say Y here to get an XFS build that enables multi-page folios in
+	  the page cache.  This option is hidden by default due to unresolved
+	  file data corruption problems.
+
+	  Say N unless you are an XFS or mm developer.
