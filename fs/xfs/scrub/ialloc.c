@@ -32,6 +32,7 @@ int
 xchk_setup_ag_iallocbt(
 	struct xfs_scrub	*sc)
 {
+	xchk_fshooks_enable(sc, XCHK_FSHOOKS_DRAIN);
 	return xchk_setup_ag_btree(sc, sc->flags & XCHK_TRY_HARDER);
 }
 

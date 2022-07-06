@@ -32,6 +32,8 @@ xchk_setup_inode(
 {
 	int			error;
 
+	xchk_fshooks_enable(sc, XCHK_FSHOOKS_DRAIN);
+
 	/*
 	 * Try to get the inode.  If the verifiers fail, we try again
 	 * in raw mode.
