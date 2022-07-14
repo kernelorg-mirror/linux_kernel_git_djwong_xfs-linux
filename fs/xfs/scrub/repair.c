@@ -69,9 +69,9 @@ xrep_attempt(
 		/*
 		 * We tried harder but still couldn't grab all the resources
 		 * we needed to fix it.  The corruption has not been fixed,
-		 * so report back to userspace.
+		 * so exit to userspace with the corruption flags still set.
 		 */
-		return -EFSCORRUPTED;
+		return 0;
 	default:
 		/*
 		 * EAGAIN tells the caller to re-scrub, so we cannot return
