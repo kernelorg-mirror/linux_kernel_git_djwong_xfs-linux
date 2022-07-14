@@ -38,5 +38,6 @@ int xbitmap_walk_bits(struct xbitmap *bitmap, xbitmap_walk_bits_fn fn,
 		void *priv);
 
 bool xbitmap_empty(struct xbitmap *bitmap);
+bool xbitmap_test(struct xbitmap *bitmap, uint64_t start, uint64_t *len);
 
 #endif	/* __XFS_SCRUB_BITMAP_H__ */
