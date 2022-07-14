@@ -73,6 +73,9 @@ struct xfs_drain {
 int xfs_ag_drain_intents(struct xfs_perag *pag);
 bool xfs_ag_intents_busy(struct xfs_perag *pag);
 
+void xfs_drain_wait_disable(void);
+void xfs_drain_wait_enable(void);
+
 void xfs_fs_bump_intents(struct xfs_mount *mp, xfs_fsblock_t fsb);
 void xfs_fs_drop_intents(struct xfs_mount *mp, xfs_fsblock_t fsb);
 
