@@ -490,17 +490,30 @@ xfs_rtgroup_update_secondary_sbs(
 void
 xfs_rtgroup_lock(
 	struct xfs_trans	*tp,
-	struct xfs_rtgroup	*rtg)
+	struct xfs_rtgroup	*rtg,
+	unsigned int		rtlock_flags)
 {
-	xfs_rtbitmap_lock(tp, rtg->rtg_mount);
+	if (rtlock_flags & XFS_RTLOCK_ALLOC)
+		xfs_rtbitmap_lock(tp, rtg->rtg_mount);
+
+	if ((rtlock_flags & XFS_RTLOCK_RMAP) && rtg->rtg_rmapip) {
+		xfs_ilock(rtg->rtg_rmapip, XFS_ILOCK_EXCL);
+		if (tp)
+			xfs_trans_ijoin(tp, rtg->rtg_rmapip, XFS_ILOCK_EXCL);
+	}
 }
 
 /* Unlock metadata inodes associated with this rt group. */
 void
 xfs_rtgroup_unlock(
-	struct xfs_rtgroup	*rtg)
+	struct xfs_rtgroup	*rtg,
+	unsigned int		rtlock_flags)
 {
-	xfs_rtbitmap_unlock(rtg->rtg_mount);
+	if ((rtlock_flags & XFS_RTLOCK_RMAP) && rtg->rtg_rmapip)
+		xfs_iunlock(rtg->rtg_rmapip, XFS_ILOCK_EXCL);
+
+	if (rtlock_flags & XFS_RTLOCK_ALLOC)
+		xfs_rtbitmap_unlock(rtg->rtg_mount);
 }
 
 /* Retrieve rt group geometry. */
@@ -509,13 +522,13 @@ xfs_rtgroup_get_geometry(
 	struct xfs_rtgroup	*rtg,
 	struct xfs_rtgroup_geometry *rgeo)
 {
-	xfs_rtgroup_lock(NULL, rtg);
+	xfs_rtgroup_lock(NULL, rtg, XFS_RTLOCK_ALLOC);
 
 	/* Fill out form. */
 	memset(rgeo, 0, sizeof(*rgeo));
 	rgeo->rg_number = rtg->rtg_rgno;
 	rgeo->rg_length = rtg->rtg_blockcount;
 	xfs_rtgroup_geom_health(rtg, rgeo);
-	xfs_rtgroup_unlock(rtg);
+	xfs_rtgroup_unlock(rtg, XFS_RTLOCK_ALLOC);
 	return 0;
 }

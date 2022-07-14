@@ -210,8 +210,13 @@ int xfs_rtgroup_update_secondary_sbs(struct xfs_mount *mp);
 int xfs_rtgroup_init_secondary_super(struct xfs_mount *mp, xfs_rgnumber_t rgno,
 		struct xfs_buf **bpp);
 
-void xfs_rtgroup_lock(struct xfs_trans *tp, struct xfs_rtgroup *rtg);
-void xfs_rtgroup_unlock(struct xfs_rtgroup *rtg);
+#define XFS_RTLOCK_ALLOC	(1 << 0) /* rt bitmap and summary */
+#define XFS_RTLOCK_RMAP		(1 << 1) /* rmap btree */
+#define XFS_RTLOCK_ALL		(XFS_RTLOCK_ALLOC | \
+				 XFS_RTLOCK_RMAP)
+void xfs_rtgroup_lock(struct xfs_trans *tp, struct xfs_rtgroup *rtg,
+		unsigned int rtlock_flags);
+void xfs_rtgroup_unlock(struct xfs_rtgroup *rtg, unsigned int rtlock_flags);
 
 int xfs_rtgroup_get_geometry(struct xfs_rtgroup *rtg,
 		struct xfs_rtgroup_geometry *rgeo);
@@ -221,8 +226,8 @@ int xfs_rtgroup_get_geometry(struct xfs_rtgroup *rtg,
 # define xfs_rtgroup_log_super(tp, sb_bp)	((void)0)
 # define xfs_rtgroup_update_secondary_sbs(mp)	(0)
 # define xfs_rtgroup_init_secondary_super(mp, rgno, bpp)	(-EOPNOTSUPP)
-# define xfs_rtgroup_lock(tp, rtg)		((void)0)
-# define xfs_rtgroup_unlock(rtg)		((void)0)
+# define xfs_rtgroup_lock(tp, rtg, f)		((void)0)
+# define xfs_rtgroup_unlock(rtg, f)		((void)0)
 # define xfs_rtgroup_get_geometry(rtg, rgeo)	(-EOPNOTSUPP)
 #endif /* CONFIG_XFS_RT */
 
