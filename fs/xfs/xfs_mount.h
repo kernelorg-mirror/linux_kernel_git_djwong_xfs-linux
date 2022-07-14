@@ -56,9 +56,13 @@ struct xfs_error_cfg {
 	long		retry_timeout;	/* in jiffies, -1 = infinite */
 };
 
-#ifdef CONFIG_XFS_LIVE_HOOKS
+#if defined(CONFIG_XFS_LIVE_HOOKS_SRCU)
 struct xfs_hooks {
 	struct srcu_notifier_head	head;
+};
+#elif defined(CONFIG_XFS_LIVE_HOOKS_BLOCKING)
+struct xfs_hooks {
+	struct blocking_notifier_head	head;
 };
 #else
 struct xfs_hooks { /* empty */ };
