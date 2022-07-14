@@ -1148,11 +1148,11 @@ xfs_rtbitmap_lock(
 	struct xfs_trans	*tp,
 	struct xfs_mount	*mp)
 {
-	xfs_ilock(mp->m_rbmip, XFS_ILOCK_EXCL | XFS_ILOCK_RTBITMAP);
+	xfs_ilock(mp->m_rbmip, XFS_ILOCK_EXCL);
 	if (tp)
 		xfs_trans_ijoin(tp, mp->m_rbmip, XFS_ILOCK_EXCL);
 
-	xfs_ilock(mp->m_rsumip, XFS_ILOCK_EXCL | XFS_ILOCK_RTSUM);
+	xfs_ilock(mp->m_rsumip, XFS_ILOCK_EXCL);
 	if (tp)
 		xfs_trans_ijoin(tp, mp->m_rsumip, XFS_ILOCK_EXCL);
 }
@@ -1162,6 +1162,6 @@ void
 xfs_rtbitmap_unlock(
 	struct xfs_mount	*mp)
 {
-	xfs_iunlock(mp->m_rsumip, XFS_ILOCK_EXCL | XFS_ILOCK_RTSUM);
-	xfs_iunlock(mp->m_rbmip, XFS_ILOCK_EXCL | XFS_ILOCK_RTBITMAP);
+	xfs_iunlock(mp->m_rsumip, XFS_ILOCK_EXCL);
+	xfs_iunlock(mp->m_rbmip, XFS_ILOCK_EXCL);
 }
