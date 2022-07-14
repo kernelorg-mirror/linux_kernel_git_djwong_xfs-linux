@@ -368,6 +368,7 @@ xfs_bmap_update_get_group(
 
 			rgno = xfs_rtb_to_rgno(mp, bi->bi_bmap.br_startblock);
 			bi->bi_rtg = xfs_rtgroup_get(mp, rgno);
+			xfs_rtgroup_bump_intents(bi->bi_rtg);
 		} else {
 			bi->bi_rtg = NULL;
 		}
@@ -393,8 +394,10 @@ xfs_bmap_update_put_group(
 	struct xfs_bmap_intent	*bi)
 {
 	if (xfs_ifork_is_realtime(bi->bi_owner, bi->bi_whichfork)) {
-		if (xfs_has_rtgroups(bi->bi_owner->i_mount))
+		if (xfs_has_rtgroups(bi->bi_owner->i_mount)) {
+			xfs_rtgroup_drop_intents(bi->bi_rtg);
 			xfs_rtgroup_put(bi->bi_rtg);
+		}
 		return;
 	}
 
