@@ -158,6 +158,9 @@ xchk_fshooks_disable(
 	if (sc->flags & XCHK_FSHOOKS_QUOTA)
 		xfs_dqtrx_hook_disable();
 
+	if (sc->flags & XCHK_FSHOOKS_NLINKS)
+		xfs_nlink_hook_disable();
+
 	sc->flags &= ~XCHK_FSHOOKS_ALL;
 }
 
