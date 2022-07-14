@@ -4259,7 +4259,7 @@ DECLARE_EVENT_CLASS(xfs_perag_intents_class,
 	TP_fast_assign(
 		__entry->dev = pag->pag_mount->m_super->s_dev;
 		__entry->agno = pag->pag_agno;
-		__entry->nr_intents = atomic_read(&pag->pag_intents.dr_count);
+		__entry->nr_intents = percpu_counter_sum(&pag->pag_intents.dr_count);
 		__entry->caller_ip = caller_ip;
 	),
 	TP_printk("dev %d:%d agno 0x%x intents %ld caller %pS",
