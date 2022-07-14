@@ -765,3 +765,44 @@ xfs_iflush_rtrefcount(
 			ifp->if_broot_bytes, dfp,
 			XFS_DFORK_SIZE(dip, ip->i_mount, XFS_DATA_FORK));
 }
+
+/*
+ * Create a realtime refcount btree inode.
+ *
+ * Regardless of the return value, the caller must clean up @ic.  If a new
+ * inode is returned through *ipp, the caller must finish setting up the incore
+ * inode and release it.
+ */
+int
+xfs_rtrefcountbt_create(
+	struct xfs_trans	**tpp,
+	struct xfs_imeta_path	*path,
+	struct xfs_imeta_update	*upd,
+	struct xfs_inode	**ipp)
+{
+	struct xfs_mount	*mp = (*tpp)->t_mountp;
+	struct xfs_ifork	*ifp;
+	struct xfs_inode	*ip;
+	int			error;
+
+	*ipp = NULL;
+
+	error = xfs_imeta_create(tpp, path, S_IFREG, 0, &ip, upd);
+	if (error)
+		return error;
+
+	ifp = &ip->i_df;
+	ifp->if_format = XFS_DINODE_FMT_REFCOUNT;
+	ASSERT(ifp->if_broot_bytes == 0);
+	ASSERT(ifp->if_bytes == 0);
+
+	/* Initialize the empty incore btree root. */
+	xfs_iroot_alloc(ip, XFS_DATA_FORK,
+			xfs_rtrefcount_broot_space_calc(mp, 0, 0));
+	xfs_btree_init_block(ip->i_mount, ifp->if_broot, &xfs_rtrefcountbt_ops,
+			0, 0, ip->i_ino);
+	xfs_trans_log_inode(*tpp, ip, XFS_ILOG_CORE | XFS_ILOG_DBROOT);
+
+	*ipp = ip;
+	return 0;
+}
