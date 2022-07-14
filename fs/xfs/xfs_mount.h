@@ -134,8 +134,8 @@ void xfs_drain_waiter_enable(void);
 
 int xfs_perag_drain_intents(struct xfs_perag *pag);
 
-void xfs_fs_bump_intents(struct xfs_mount *mp, xfs_fsblock_t fsb);
-void xfs_fs_drop_intents(struct xfs_mount *mp, xfs_fsblock_t fsb);
+void xfs_fs_bump_intents(struct xfs_mount *mp, bool isrt, xfs_fsblock_t fsb);
+void xfs_fs_drop_intents(struct xfs_mount *mp, bool isrt, xfs_fsblock_t fsb);
 
 /*
  * Use a large batch value for the drain counter so that writer threads
@@ -166,12 +166,12 @@ static inline void xfs_drain_free(struct xfs_drain *dr)
 struct xfs_drain { /* empty */ };
 
 static inline void
-xfs_fs_bump_intents(struct xfs_mount *mp, xfs_fsblock_t fsb)
+xfs_fs_bump_intents(struct xfs_mount *mp, bool isrt, xfs_fsblock_t fsb)
 {
 }
 
 static inline void
-xfs_fs_drop_intents(struct xfs_mount *mp, xfs_fsblock_t fsb)
+xfs_fs_drop_intents(struct xfs_mount *mp, bool isrt, xfs_fsblock_t fsb)
 {
 }
 # define xfs_drain_init(dr)	(0)
