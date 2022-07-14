@@ -390,6 +390,29 @@ xchk_bmap_dirattr_extent(
 		xchk_fblock_set_corrupt(info->sc, info->whichfork, off);
 }
 
+/* Are these two mappings mergeable? */
+static inline bool
+xchk_bmap_mergeable(
+	struct xchk_bmap_info		*info,
+	const struct xfs_bmbt_irec	*b2)
+{
+	const struct xfs_bmbt_irec	*b1 = &info->prev_rec;
+
+	/* Skip uninitialized prev_rec and COW fork extents */
+	if (b1->br_blockcount == 0)
+		return false;
+	if (info->whichfork == XFS_COW_FORK)
+		return false;
+
+	if (b1->br_startoff + b1->br_blockcount != b2->br_startoff)
+		return false;
+	if (b1->br_startblock + b1->br_blockcount != b2->br_startblock)
+		return false;
+	if (b1->br_blockcount + b2->br_blockcount > BMBT_BLOCKCOUNT_MASK)
+		return false;
+	return b1->br_state == b2->br_state;
+}
+
 /* Scrub a single extent record. */
 STATIC void
 xchk_bmap_iextent(
@@ -440,6 +463,10 @@ xchk_bmap_iextent(
 
 	if (info->sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
 		return;
+
+	/* Notify the user of mergeable records in the data/attr forks. */
+	if (xchk_bmap_mergeable(info, irec))
+		xchk_ino_set_preen(info->sc, info->sc->ip->i_ino);
 
 	if (info->is_rt)
 		xchk_bmap_rt_iextent_xref(ip, info, irec);
