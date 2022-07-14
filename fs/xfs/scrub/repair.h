@@ -113,7 +113,7 @@ int xrep_check_ino_btree_mapping(struct xfs_scrub *sc,
 
 #ifdef CONFIG_XFS_RT
 int xrep_require_rtext_inuse(struct xfs_scrub *sc, xfs_rtblock_t rtbno,
-		xfs_filblks_t len);
+		xfs_filblks_t len, bool must_align);
 #endif
 bool xrep_is_rtmeta_ino(struct xfs_scrub *sc, struct xfs_rtgroup *rtg,
 		xfs_ino_t ino);
@@ -183,11 +183,13 @@ int xrep_rtsummary(struct xfs_scrub *sc);
 int xrep_rgsuperblock(struct xfs_scrub *sc);
 int xrep_rgbitmap(struct xfs_scrub *sc);
 int xrep_rtrmapbt(struct xfs_scrub *sc);
+int xrep_rtrefcountbt(struct xfs_scrub *sc);
 #else
 # define xrep_rtsummary			xrep_notsupported
 # define xrep_rgsuperblock		xrep_notsupported
 # define xrep_rgbitmap			xrep_notsupported
 # define xrep_rtrmapbt			xrep_notsupported
+# define xrep_rtrefcountbt		xrep_notsupported
 #endif /* CONFIG_XFS_RT */
 
 struct xrep_newbt_resv {
@@ -368,6 +370,7 @@ static inline int xrep_setup_rgbitmap(struct xfs_scrub *sc, unsigned int *x)
 #define xrep_rgsuperblock		xrep_notsupported
 #define xrep_rgbitmap			xrep_notsupported
 #define xrep_rtrmapbt			xrep_notsupported
+#define xrep_rtrefcountbt		xrep_notsupported
 
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
