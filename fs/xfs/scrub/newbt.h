@@ -10,6 +10,9 @@ struct xrep_newbt_resv {
 	/* Link to list of extents that we've reserved. */
 	struct list_head	list;
 
+	struct xfs_perag	*pag;
+	struct xfs_log_item	*efi;
+
 	/* FSB of the block we reserved. */
 	xfs_fsblock_t		fsbno;
 
@@ -58,5 +61,6 @@ void xrep_newbt_cancel(struct xrep_newbt *xnr);
 int xrep_newbt_destroy(struct xrep_newbt *xnr);
 int xrep_newbt_claim_block(struct xfs_btree_cur *cur, struct xrep_newbt *xnr,
 		union xfs_btree_ptr *ptr);
+int xrep_newbt_relog_autoreap(struct xrep_newbt *xnr);
 
 #endif /* __XFS_SCRUB_NEWBT_H__ */
