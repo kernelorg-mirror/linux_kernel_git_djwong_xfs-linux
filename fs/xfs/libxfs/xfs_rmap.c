@@ -2534,13 +2534,7 @@ __xfs_rmap_finish_intent(
 int
 xfs_rmap_finish_one(
 	struct xfs_trans		*tp,
-	enum xfs_rmap_intent_type	type,
-	uint64_t			owner,
-	int				whichfork,
-	xfs_fileoff_t			startoff,
-	xfs_fsblock_t			startblock,
-	xfs_filblks_t			blockcount,
-	xfs_exntst_t			state,
+	struct xfs_rmap_intent		*ri,
 	struct xfs_btree_cur		**pcur)
 {
 	struct xfs_mount		*mp = tp->t_mountp;
@@ -2552,11 +2546,13 @@ xfs_rmap_finish_one(
 	xfs_agblock_t			bno;
 	bool				unwritten;
 
-	pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, startblock));
-	bno = XFS_FSB_TO_AGBNO(mp, startblock);
+	pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, ri->ri_bmap.br_startblock));
+	bno = XFS_FSB_TO_AGBNO(mp, ri->ri_bmap.br_startblock);
 
-	trace_xfs_rmap_deferred(mp, pag->pag_agno, type, bno, owner, whichfork,
-			startoff, blockcount, state);
+	trace_xfs_rmap_deferred(mp, pag->pag_agno, ri->ri_type, bno,
+			ri->ri_owner, ri->ri_whichfork,
+			ri->ri_bmap.br_startoff, ri->ri_bmap.br_blockcount,
+			ri->ri_bmap.br_state);
 
 	if (XFS_TEST_ERROR(false, mp, XFS_ERRTAG_RMAP_FINISH_ONE)) {
 		error = -EIO;
@@ -2593,17 +2589,18 @@ xfs_rmap_finish_one(
 	}
 	*pcur = rcur;
 
-	xfs_rmap_ino_owner(&oinfo, owner, whichfork, startoff);
-	unwritten = state == XFS_EXT_UNWRITTEN;
-	bno = XFS_FSB_TO_AGBNO(rcur->bc_mp, startblock);
+	xfs_rmap_ino_owner(&oinfo, ri->ri_owner, ri->ri_whichfork,
+			ri->ri_bmap.br_startoff);
+	unwritten = ri->ri_bmap.br_state == XFS_EXT_UNWRITTEN;
+	bno = XFS_FSB_TO_AGBNO(rcur->bc_mp, ri->ri_bmap.br_startblock);
 
-	error = __xfs_rmap_finish_intent(rcur, type, bno, blockcount, &oinfo,
-			unwritten);
+	error = __xfs_rmap_finish_intent(rcur, ri->ri_type, bno,
+			ri->ri_bmap.br_blockcount, &oinfo, unwritten);
 	if (error)
 		goto out_drop;
 
-	xfs_rmap_update_hook(tp, pag, type, bno, blockcount, unwritten,
-			&oinfo);
+	xfs_rmap_update_hook(tp, pag, ri->ri_type, bno,
+			ri->ri_bmap.br_blockcount, unwritten, &oinfo);
 out_drop:
 	xfs_perag_put(pag);
 	return error;
