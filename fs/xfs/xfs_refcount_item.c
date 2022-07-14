@@ -375,12 +375,14 @@ xfs_refcount_update_get_group(
 
 	agno = XFS_FSB_TO_AGNO(mp, ri->ri_startblock);
 	ri->ri_pag = xfs_perag_get(mp, agno);
+	xfs_ag_bump_intents(ri->ri_pag);
 }
 
 static inline void
 xfs_refcount_update_put_group(
 	struct xfs_refcount_intent	*ri)
 {
+	xfs_ag_drop_intents(ri->ri_pag);
 	xfs_perag_put(ri->ri_pag);
 }
 

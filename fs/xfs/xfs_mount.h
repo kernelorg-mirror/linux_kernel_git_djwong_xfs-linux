@@ -56,6 +56,52 @@ struct xfs_error_cfg {
 	long		retry_timeout;	/* in jiffies, -1 = infinite */
 };
 
+#ifdef CONFIG_XFS_DRAIN_INTENTS
+/*
+ * Passive drain mechanism.  This data structure tracks a count of some items
+ * and contains a waitqueue for callers who would like to wake up when the
+ * count hits zero.
+ */
+struct xfs_drain {
+	/* Number of items pending in some part of the filesystem. */
+	atomic_t		dr_count;
+
+	/* Queue to wait for dri_count to go to zero */
+	struct wait_queue_head	dr_waiters;
+};
+
+void xfs_ag_bump_intents(struct xfs_perag *pag);
+void xfs_ag_drop_intents(struct xfs_perag *pag);
+
+int xfs_ag_drain_intents(struct xfs_perag *pag);
+bool xfs_ag_intents_busy(struct xfs_perag *pag);
+
+/* Are there work items pending? */
+static inline bool xfs_drain_busy(struct xfs_drain *dr)
+{
+	return atomic_read(&dr->dr_count) > 0;
+}
+
+static inline void xfs_drain_init(struct xfs_drain *dr)
+{
+	atomic_set(&dr->dr_count, 0);
+	init_waitqueue_head(&dr->dr_waiters);
+}
+
+static inline void xfs_drain_free(struct xfs_drain *dr)
+{
+	ASSERT(!xfs_drain_busy(dr));
+}
+#else
+struct xfs_drain { /* empty */ };
+
+static inline void xfs_ag_bump_intents(struct xfs_perag *pag) { }
+static inline void xfs_ag_drop_intents(struct xfs_perag *pag) { }
+
+# define xfs_drain_init(dr)	((void)0)
+# define xfs_drain_free(dr)	((void)0)
+#endif /* CONFIG_XFS_DRAIN_INTENTS */
+
 /*
  * Per-cpu deferred inode inactivation GC lists.
  */
