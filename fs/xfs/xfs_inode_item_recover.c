@@ -23,6 +23,7 @@
 #include "xfs_icache.h"
 #include "xfs_bmap_btree.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_rtrefcount_btree.h"
 
 STATIC void
 xlog_recover_inode_ra_pass2(
@@ -283,6 +284,9 @@ xlog_recover_inode_dbroot(
 		break;
 	case XFS_DINODE_FMT_RMAP:
 		xfs_rtrmapbt_to_disk(mp, src, len, dfork, dsize);
+		break;
+	case XFS_DINODE_FMT_REFCOUNT:
+		xfs_rtrefcountbt_to_disk(mp, src, len, dfork, dsize);
 		break;
 	default:
 		ASSERT(0);
