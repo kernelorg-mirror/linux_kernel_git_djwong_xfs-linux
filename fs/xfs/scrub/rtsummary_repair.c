@@ -124,7 +124,8 @@ xrep_rtsummary(
 	 * so we can reuse it for the tempfile swapext information.
 	 */
 	ti = sc->buf;
-	error = xrep_tempswap_trans_reserve(sc, XFS_DATA_FORK, ti);
+	error = xrep_tempswap_trans_reserve(sc, XFS_DATA_FORK, 0, rsumblocks,
+			ti);
 	if (error)
 		return error;
 
