@@ -314,9 +314,12 @@ STATIC bool
 xfs_refcountbt_has_key_gap(
 	struct xfs_btree_cur		*cur,
 	const union xfs_btree_key	*key1,
-	const union xfs_btree_key	*key2)
+	const union xfs_btree_key	*key2,
+	const union xfs_btree_key	*mask)
 {
 	xfs_agblock_t			next;
+
+	ASSERT(!mask || mask->refc.rc_startblock);
 
 	next = be32_to_cpu(key1->refc.rc_startblock) + 1;
 	return next != be32_to_cpu(key2->refc.rc_startblock);
