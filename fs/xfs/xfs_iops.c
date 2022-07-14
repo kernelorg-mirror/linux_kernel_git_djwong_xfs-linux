@@ -26,6 +26,7 @@
 #include "xfs_ioctl.h"
 #include "xfs_xattr.h"
 #include "xfs_bmap.h"
+#include "xfs_reflink.h"
 
 #include <linux/posix_acl.h>
 #include <linux/security.h>
@@ -846,10 +847,24 @@ xfs_setattr_size(
 	 * truncate.
 	 */
 	if (newsize > oldsize) {
+		if (xfs_inode_needs_cow_around(ip)) {
+			error = xfs_file_cow_around(ip, oldsize,
+					newsize - oldsize);
+			if (error)
+				return error;
+		}
+
 		trace_xfs_zero_eof(ip, oldsize, newsize - oldsize);
 		error = xfs_zero_range(ip, oldsize, newsize - oldsize,
 				&did_zeroing);
 	} else {
+		if (xfs_inode_needs_cow_around(ip)) {
+			error = xfs_file_cow_around(ip, newsize,
+					oldsize - newsize);
+			if (error)
+				return error;
+		}
+
 		/*
 		 * iomap won't detect a dirty page over an unwritten block (or a
 		 * cow block over a hole) and subsequently skips zeroing the
