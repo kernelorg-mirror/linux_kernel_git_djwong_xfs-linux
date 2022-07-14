@@ -303,7 +303,7 @@ xfs_buf_free_direct_pages(
 	ASSERT(bp->b_target->bt_flags & XFS_BUFTARG_DIRECT_MAP);
 
 	if (xfs_buf_is_vmapped(bp))
-		vm_unmap_ram(bp->b_addr, bp->b_page_count);
+		vm_unmap_ram(bp->b_addr - bp->b_offset, bp->b_page_count);
 
 	for (m = 0, p = 0, map = bp->b_maps; m < bp->b_map_count; m++, map++) {
 		for (n = 0; n < map->bm_len; n += BTOBB(PAGE_SIZE)) {
@@ -336,7 +336,7 @@ xfs_buf_free_pages(
 	ASSERT(bp->b_flags & _XBF_PAGES);
 
 	if (xfs_buf_is_vmapped(bp))
-		vm_unmap_ram(bp->b_addr, bp->b_page_count);
+		vm_unmap_ram(bp->b_addr - bp->b_offset, bp->b_page_count);
 
 	for (i = 0; i < bp->b_page_count; i++) {
 		if (bp->b_pages[i])
@@ -465,6 +465,8 @@ xfs_buf_alloc_pages(
 		XFS_STATS_INC(bp->b_mount, xb_page_retries);
 		memalloc_retry_wait(gfp_mask);
 	}
+
+	bp->b_offset = 0;
 	return 0;
 }
 
@@ -513,15 +515,31 @@ xfs_buf_alloc_direct_pages(
 	struct xfs_buf_map	*map;
 	gfp_t			gfp_mask = __GFP_NOWARN;
 	const unsigned int	page_align_mask = PAGE_SIZE - 1;
+	unsigned int		first_page_offset;
 	unsigned int		m, p, n;
 	int			error;
 
 	ASSERT(bp->b_target->bt_flags & XFS_BUFTARG_IN_MEMORY);
 
-	/* For direct-map buffers, each map has to be page aligned. */
-	for (m = 0, map = bp->b_maps; m < bp->b_map_count; m++, map++)
-		if (BBTOB(map->bm_bn | map->bm_len) & page_align_mask)
+	/*
+	 * For direct-map buffer targets with multiple mappings, the first map
+	 * must end on a page boundary; the last map must start at a page
+	 * boundary; and the maps in between must start and end on a page
+	 * boundary.  For single-mapping buffers, we don't care.
+	 */
+	if (bp->b_map_count > 1) {
+		map = &bp->b_maps[bp->b_map_count - 1];
+		if (BBTOB(map->bm_bn) & page_align_mask)
 			return -ENOTBLK;
+
+		map = &bp->b_maps[0];
+		if (BBTOB(map->bm_bn + map->bm_len) & page_align_mask)
+			return -ENOTBLK;
+
+		for (m = 1, map++; m < bp->b_map_count - 1; m++, map++)
+			if (BBTOB(map->bm_bn | map->bm_len) & page_align_mask)
+				return -ENOTBLK;
+	}
 
 	if (flags & XBF_READ_AHEAD)
 		gfp_mask |= __GFP_NORETRY;
@@ -540,6 +558,7 @@ xfs_buf_alloc_direct_pages(
 	}
 
 	/* Map in the xfile pages. */
+	first_page_offset = offset_in_page(BBTOB(xfs_buf_daddr(bp)));
 	for (m = 0, p = 0, map = bp->b_maps; m < bp->b_map_count; m++, map++) {
 		for (n = 0; n < map->bm_len; n += BTOBB(PAGE_SIZE)) {
 			unsigned int	len;
@@ -556,6 +575,7 @@ xfs_buf_alloc_direct_pages(
 	}
 
 	bp->b_flags |= _XBF_DIRECT_MAP;
+	bp->b_offset = first_page_offset;
 	return 0;
 
 fail:
@@ -592,7 +612,7 @@ _xfs_buf_map_pages(
 
 	if (bp->b_page_count == 1) {
 		/* A single page buffer is always mappable */
-		bp->b_addr = page_address(bp->b_pages[0]);
+		bp->b_addr = page_address(bp->b_pages[0]) + bp->b_offset;
 	} else if (flags & XBF_UNMAPPED) {
 		bp->b_addr = NULL;
 	} else {
@@ -619,6 +639,8 @@ _xfs_buf_map_pages(
 
 		if (!bp->b_addr)
 			return -ENOMEM;
+
+		bp->b_addr += bp->b_offset;
 	}
 
 	return 0;
