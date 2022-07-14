@@ -793,6 +793,28 @@ DEFINE_INODE_EVENT(xfs_inode_reclaiming);
 DEFINE_INODE_EVENT(xfs_inode_set_need_inactive);
 DEFINE_INODE_EVENT(xfs_inode_inactivating);
 
+TRACE_EVENT(xfs_icache_inode_is_allocated,
+	TP_PROTO(struct xfs_inode *ip),
+	TP_ARGS(ip),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(unsigned long, iflags)
+		__field(umode_t, mode)
+	),
+	TP_fast_assign(
+		__entry->dev = VFS_I(ip)->i_sb->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->iflags = ip->i_flags;
+		__entry->mode = VFS_I(ip)->i_mode;
+	),
+	TP_printk("dev %d:%d ino 0x%llx iflags 0x%lx mode 0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->iflags,
+		  __entry->mode)
+);
+
 /*
  * ftrace's __print_symbolic requires that all enum values be wrapped in the
  * TRACE_DEFINE_ENUM macro so that the enum value can be encoded in the ftrace
