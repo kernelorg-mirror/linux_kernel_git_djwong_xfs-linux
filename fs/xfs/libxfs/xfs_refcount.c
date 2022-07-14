@@ -25,6 +25,7 @@
 #include "xfs_ag.h"
 #include "xfs_health.h"
 #include "xfs_rtgroup.h"
+#include "xfs_rtalloc.h"
 
 struct kmem_cache	*xfs_refcount_intent_cache;
 
@@ -1021,6 +1022,28 @@ xfs_refcount_still_have_space(
 		xrefc_btree_state(cur)->nr_ops * XFS_REFCOUNT_ITEM_OVERHEAD;
 }
 
+/* Schedule an extent free. */
+static void
+xrefc_free_extent(
+	struct xfs_btree_cur		*cur,
+	struct xfs_refcount_irec	*rec)
+{
+	xfs_fsblock_t			fsbno;
+	unsigned int			flags = 0;
+
+	if (cur->bc_btnum == XFS_BTNUM_RTREFC) {
+		flags |= XFS_FREE_EXTENT_REALTIME;
+		fsbno = xfs_rgbno_to_rtb(cur->bc_mp, cur->bc_ino.rtg->rtg_rgno,
+				rec->rc_startblock);
+	} else {
+		fsbno = XFS_AGB_TO_FSB(cur->bc_mp, cur->bc_ag.pag->pag_agno,
+				rec->rc_startblock);
+	}
+
+	xfs_free_extent_later(cur->bc_tp, fsbno, rec->rc_blockcount, NULL,
+			flags);
+}
+
 /*
  * Adjust the refcounts of middle extents.  At this point we should have
  * split extents that crossed the adjustment range; merged with adjacent
@@ -1037,7 +1060,6 @@ xfs_refcount_adjust_extents(
 	struct xfs_refcount_irec	ext, tmp;
 	int				error;
 	int				found_rec, found_tmp;
-	xfs_fsblock_t			fsbno;
 
 	/* Merging did all the work already. */
 	if (*aglen == 0)
@@ -1090,11 +1112,7 @@ xfs_refcount_adjust_extents(
 					goto out_error;
 				}
 			} else {
-				fsbno = XFS_AGB_TO_FSB(cur->bc_mp,
-						cur->bc_ag.pag->pag_agno,
-						tmp.rc_startblock);
-				xfs_free_extent_later(cur->bc_tp, fsbno,
-						tmp.rc_blockcount, NULL, 0);
+				xrefc_free_extent(cur, &tmp);
 			}
 
 			(*agbno) += tmp.rc_blockcount;
@@ -1134,11 +1152,7 @@ xfs_refcount_adjust_extents(
 			}
 			goto advloop;
 		} else {
-			fsbno = XFS_AGB_TO_FSB(cur->bc_mp,
-					cur->bc_ag.pag->pag_agno,
-					ext.rc_startblock);
-			xfs_free_extent_later(cur->bc_tp, fsbno,
-					ext.rc_blockcount, NULL, 0);
+			xrefc_free_extent(cur, &ext);
 		}
 
 skip:
@@ -1226,14 +1240,27 @@ xfs_refcount_finish_one_cleanup(
 	struct xfs_btree_cur	*rcur,
 	int			error)
 {
-	struct xfs_buf		*agbp;
+	struct xfs_buf		*agbp = NULL;
 
 	if (rcur == NULL)
 		return;
-	agbp = rcur->bc_ag.agbp;
+	if (rcur->bc_btnum == XFS_BTNUM_REFC)
+		agbp = rcur->bc_ag.agbp;
 	xfs_btree_del_cursor(rcur, error);
-	if (error)
+	if (agbp)
 		xfs_trans_brelse(tp, agbp);
+}
+
+/* Does this btree cursor match the given AG? */
+static inline bool
+xfs_refcount_is_wrong_cursor(
+	struct xfs_btree_cur	*cur,
+	struct xfs_perag	*pag,
+	struct xfs_rtgroup	*rtg)
+{
+	if (cur->bc_btnum == XFS_BTNUM_RTREFC)
+		return cur->bc_ino.rtg != rtg;
+	return cur->bc_ag.pag != pag;
 }
 
 /*
@@ -1259,11 +1286,21 @@ xfs_refcount_finish_one(
 	unsigned long			nr_ops = 0;
 	int				shape_changes = 0;
 	struct xfs_perag		*pag;
-
-	pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, ri->ri_startblock));
-	bno = XFS_FSB_TO_AGBNO(mp, ri->ri_startblock);
+	struct xfs_rtgroup		*rtg;
 
 	trace_xfs_refcount_deferred(mp, ri);
+
+	if (ri->ri_realtime) {
+		xfs_rgnumber_t		rgno;
+
+		pag = NULL;
+		bno = xfs_rtb_to_rgbno(mp, ri->ri_startblock, &rgno);
+		rtg = xfs_rtgroup_get(mp, rgno);
+	} else {
+		rtg = NULL;
+		pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, ri->ri_startblock));
+		bno = XFS_FSB_TO_AGBNO(mp, ri->ri_startblock);
+	}
 
 	if (XFS_TEST_ERROR(false, mp, XFS_ERRTAG_REFCOUNT_FINISH_ONE)) {
 		error = -EIO;
@@ -1275,7 +1312,7 @@ xfs_refcount_finish_one(
 	 * the startblock, get one now.
 	 */
 	rcur = *pcur;
-	if (rcur != NULL && rcur->bc_ag.pag != pag) {
+	if (rcur != NULL && xfs_refcount_is_wrong_cursor(rcur, pag, rtg)) {
 		nr_ops = xrefc_btree_state(rcur)->nr_ops;
 		shape_changes = xrefc_btree_state(rcur)->shape_changes;
 		xfs_refcount_finish_one_cleanup(tp, rcur, 0);
@@ -1283,12 +1320,18 @@ xfs_refcount_finish_one(
 		*pcur = NULL;
 	}
 	if (rcur == NULL) {
-		error = xfs_alloc_read_agf(pag, tp, XFS_ALLOC_FLAG_FREEING,
-				&agbp);
-		if (error)
-			goto out_drop;
+		if (ri->ri_realtime) {
+			/* coming in a later patch */
+			ASSERT(0);
+			return -EFSCORRUPTED;
+		} else {
+			error = xfs_alloc_read_agf(pag, tp,
+					XFS_ALLOC_FLAG_FREEING, &agbp);
+			if (error)
+				goto out_drop;
 
-		rcur = xfs_refcountbt_init_cursor(mp, tp, agbp, pag);
+			rcur = xfs_refcountbt_init_cursor(mp, tp, agbp, pag);
+		}
 		xrefc_btree_state(rcur)->nr_ops = nr_ops;
 		xrefc_btree_state(rcur)->shape_changes = shape_changes;
 	}
@@ -1299,16 +1342,24 @@ xfs_refcount_finish_one(
 		error = xfs_refcount_adjust(rcur, bno, ri->ri_blockcount,
 				&new_agbno, &new_len,
 				XFS_REFCOUNT_ADJUST_INCREASE);
-		ri->ri_startblock = XFS_AGB_TO_FSB(mp, pag->pag_agno,
-				new_agbno);
+		if (ri->ri_realtime)
+			ri->ri_startblock = xfs_rgbno_to_rtb(mp, rtg->rtg_rgno,
+							new_agbno);
+		else
+			ri->ri_startblock = XFS_AGB_TO_FSB(mp, pag->pag_agno,
+							new_agbno);
 		ri->ri_blockcount = new_len;
 		break;
 	case XFS_REFCOUNT_DECREASE:
 		error = xfs_refcount_adjust(rcur, bno, ri->ri_blockcount,
 				&new_agbno, &new_len,
 				XFS_REFCOUNT_ADJUST_DECREASE);
-		ri->ri_startblock = XFS_AGB_TO_FSB(mp, pag->pag_agno,
-				new_agbno);
+		if (ri->ri_realtime)
+			ri->ri_startblock = xfs_rgbno_to_rtb(mp, rtg->rtg_rgno,
+							new_agbno);
+		else
+			ri->ri_startblock = XFS_AGB_TO_FSB(mp, pag->pag_agno,
+							new_agbno);
 		ri->ri_blockcount = new_len;
 		break;
 	case XFS_REFCOUNT_ALLOC_COW:
@@ -1328,7 +1379,10 @@ xfs_refcount_finish_one(
 	if (!error && ri->ri_blockcount > 0)
 		trace_xfs_refcount_finish_one_leftover(mp, ri);
 out_drop:
-	xfs_perag_put(pag);
+	if (pag)
+		xfs_perag_put(pag);
+	if (rtg)
+		xfs_rtgroup_put(rtg);
 	return error;
 }
 
@@ -1339,6 +1393,7 @@ static void
 __xfs_refcount_add(
 	struct xfs_trans		*tp,
 	enum xfs_refcount_intent_type	type,
+	bool				isrt,
 	xfs_fsblock_t			startblock,
 	xfs_extlen_t			blockcount)
 {
@@ -1350,6 +1405,7 @@ __xfs_refcount_add(
 	ri->ri_type = type;
 	ri->ri_startblock = startblock;
 	ri->ri_blockcount = blockcount;
+	ri->ri_realtime = isrt;
 
 	trace_xfs_refcount_defer(tp->t_mountp, ri);
 	xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_REFCOUNT, &ri->ri_list);
@@ -1361,12 +1417,13 @@ __xfs_refcount_add(
 void
 xfs_refcount_increase_extent(
 	struct xfs_trans		*tp,
+	bool				isrt,
 	struct xfs_bmbt_irec		*PREV)
 {
 	if (!xfs_has_reflink(tp->t_mountp))
 		return;
 
-	__xfs_refcount_add(tp, XFS_REFCOUNT_INCREASE, PREV->br_startblock,
+	__xfs_refcount_add(tp, XFS_REFCOUNT_INCREASE, isrt, PREV->br_startblock,
 			PREV->br_blockcount);
 }
 
@@ -1376,12 +1433,13 @@ xfs_refcount_increase_extent(
 void
 xfs_refcount_decrease_extent(
 	struct xfs_trans		*tp,
+	bool				isrt,
 	struct xfs_bmbt_irec		*PREV)
 {
 	if (!xfs_has_reflink(tp->t_mountp))
 		return;
 
-	__xfs_refcount_add(tp, XFS_REFCOUNT_DECREASE, PREV->br_startblock,
+	__xfs_refcount_add(tp, XFS_REFCOUNT_DECREASE, isrt, PREV->br_startblock,
 			PREV->br_blockcount);
 }
 
@@ -1735,6 +1793,7 @@ __xfs_refcount_cow_free(
 void
 xfs_refcount_alloc_cow_extent(
 	struct xfs_trans		*tp,
+	bool				isrt,
 	xfs_fsblock_t			fsb,
 	xfs_extlen_t			len)
 {
@@ -1743,16 +1802,17 @@ xfs_refcount_alloc_cow_extent(
 	if (!xfs_has_reflink(mp))
 		return;
 
-	__xfs_refcount_add(tp, XFS_REFCOUNT_ALLOC_COW, fsb, len);
+	__xfs_refcount_add(tp, XFS_REFCOUNT_ALLOC_COW, isrt, fsb, len);
 
 	/* Add rmap entry */
-	xfs_rmap_alloc_extent(tp, false, fsb, len, XFS_RMAP_OWN_COW);
+	xfs_rmap_alloc_extent(tp, isrt, fsb, len, XFS_RMAP_OWN_COW);
 }
 
 /* Forget a CoW staging event in the refcount btree. */
 void
 xfs_refcount_free_cow_extent(
 	struct xfs_trans		*tp,
+	bool				isrt,
 	xfs_fsblock_t			fsb,
 	xfs_extlen_t			len)
 {
@@ -1762,8 +1822,8 @@ xfs_refcount_free_cow_extent(
 		return;
 
 	/* Remove rmap entry */
-	xfs_rmap_free_extent(tp, false, fsb, len, XFS_RMAP_OWN_COW);
-	__xfs_refcount_add(tp, XFS_REFCOUNT_FREE_COW, fsb, len);
+	xfs_rmap_free_extent(tp, isrt, fsb, len, XFS_RMAP_OWN_COW);
+	__xfs_refcount_add(tp, XFS_REFCOUNT_FREE_COW, isrt, fsb, len);
 }
 
 struct xfs_refcount_recovery {
@@ -1870,7 +1930,7 @@ xfs_refcount_recover_cow_leftovers(
 		/* Free the orphan record */
 		fsb = XFS_AGB_TO_FSB(mp, pag->pag_agno,
 				rr->rr_rrec.rc_startblock);
-		xfs_refcount_free_cow_extent(tp, fsb,
+		xfs_refcount_free_cow_extent(tp, false, fsb,
 				rr->rr_rrec.rc_blockcount);
 
 		/* Free the block. */
