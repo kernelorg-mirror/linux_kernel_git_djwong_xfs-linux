@@ -164,9 +164,9 @@ xfs_file_fsync(
 	 * inode size in case of an extending write.
 	 */
 	if (XFS_IS_REALTIME_INODE(ip))
-		error = blkdev_issue_flush(mp->m_rtdev_targp->bt_bdev);
+		error = xfs_buftarg_flush(mp->m_rtdev_targp);
 	else if (mp->m_logdev_targp != mp->m_ddev_targp)
-		error = blkdev_issue_flush(mp->m_ddev_targp->bt_bdev);
+		error = xfs_buftarg_flush(mp->m_ddev_targp);
 
 	/*
 	 * Any inode that has dirty modifications in the log is pinned.  The
@@ -189,7 +189,7 @@ xfs_file_fsync(
 	 */
 	if (!log_flushed && !XFS_IS_REALTIME_INODE(ip) &&
 	    mp->m_logdev_targp == mp->m_ddev_targp) {
-		err2 = blkdev_issue_flush(mp->m_ddev_targp->bt_bdev);
+		err2 = xfs_buftarg_flush(mp->m_ddev_targp);
 		if (err2 && !error)
 			error = err2;
 	}
