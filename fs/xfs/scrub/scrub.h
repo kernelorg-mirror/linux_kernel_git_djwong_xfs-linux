@@ -118,12 +118,11 @@ struct xfs_scrub {
 
 /* XCHK state flags grow up from zero, XREP state flags grown down from 2^31 */
 #define XCHK_TRY_HARDER		(1 << 0)  /* can't get resources, try again */
-#define XCHK_REAPING_DISABLED	(1 << 1)  /* background block reaping paused */
+#define XCHK_HAVE_FREEZE_PROT	(1 << 1)  /* do we have freeze protection? */
 #define XCHK_FSHOOKS_DRAIN	(1 << 2)  /* defer ops draining enabled */
 #define XCHK_NEED_DRAIN		(1 << 3)  /* scrub needs to use intent drain */
 #define XCHK_FSHOOKS_QUOTA	(1 << 4)  /* quota live update enabled */
 #define XCHK_FSHOOKS_NLINKS	(1 << 5)  /* link count live update enabled */
-#define XCHK_HAVE_FREEZE_PROT	(1 << 6)  /* do we have freeze protection? */
 #define XREP_RESET_PERAG_RESV	(1 << 30) /* must reset AG space reservation */
 #define XREP_ALREADY_FIXED	(1 << 31) /* checking our repair work */
 
