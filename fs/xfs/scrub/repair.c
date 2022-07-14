@@ -2760,3 +2760,31 @@ xrep_buf_verify_struct(
 
 	return fa == NULL;
 }
+
+/*
+ * Look up the '..' entry for @sc->ip.  Returns NULLFSINO if sc->ip is not
+ * a directory, the directory is corrupt, or the inode number can't possibly
+ * be valid.
+ */
+xfs_ino_t
+xrep_dotdot_lookup(
+	struct xfs_scrub	*sc)
+{
+	struct xfs_name		dotdot = xfs_name_dotdot;
+	xfs_ino_t		ino;
+	int			error;
+
+	/* sc->ip had better be a directory, so bail out if it isn't */
+	if (!S_ISDIR(VFS_I(sc->ip)->i_mode)) {
+		ASSERT(0);
+		return NULLFSINO;
+	}
+
+	error = xfs_dir_lookup(sc->tp, sc->ip, &dotdot, &ino, NULL);
+	if (error)
+		return NULLFSINO;
+	if (!xfs_verify_dir_ino(sc->mp, ino))
+		return NULLFSINO;
+
+	return ino;
+}
