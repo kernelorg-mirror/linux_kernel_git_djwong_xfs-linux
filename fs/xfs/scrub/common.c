@@ -1270,5 +1270,8 @@ xchk_fshooks_enable(
 	if (scrub_fshooks & XCHK_FSHOOKS_DRAIN)
 		xfs_drain_wait_enable();
 
+	if (scrub_fshooks & XCHK_FSHOOKS_QUOTA)
+		xfs_dqtrx_hook_enable();
+
 	sc->flags |= scrub_fshooks;
 }
