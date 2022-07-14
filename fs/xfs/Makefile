@@ -179,6 +179,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   agheader_repair.o \
 				   alloc_repair.o \
 				   ialloc_repair.o \
+				   inode_repair.o \
 				   newbt.o \
 				   reap.o \
 				   refcount_repair.o \
