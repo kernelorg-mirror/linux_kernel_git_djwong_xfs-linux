@@ -205,6 +205,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   refcount_repair.o \
 				   repair.o \
 				   rmap_repair.o \
+				   symlink_repair.o \
 				   tempfile.o \
 				   xfblob.o \
 				   xfbtree.o \
