@@ -31,6 +31,7 @@
 #include "xfs_reflink.h"
 #include "xfs_ag.h"
 #include "xfs_error.h"
+#include "xfs_quota.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -1282,6 +1283,9 @@ xchk_fshooks_enable(
 
 	if (scrub_fshooks & XCHK_FSHOOKS_DRAIN)
 		xfs_drain_wait_enable();
+
+	if (scrub_fshooks & XCHK_FSHOOKS_QUOTA)
+		xfs_dqtrx_hook_enable();
 
 	sc->flags |= scrub_fshooks;
 }
