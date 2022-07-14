@@ -407,3 +407,17 @@ xbitmap_take_first_set(
 	*valp = val;
 	return 0;
 }
+
+/* Count the number of set regions in this bitmap. */
+uint64_t
+xbitmap_count_set_regions(
+	struct xbitmap		*bitmap)
+{
+	struct xbitmap_node	*bn;
+	uint64_t		nr = 0;
+
+	for_each_xbitmap_extent(bn, bitmap)
+		nr++;
+
+	return nr;
+}
