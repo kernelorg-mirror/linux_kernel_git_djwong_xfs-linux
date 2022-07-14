@@ -82,6 +82,15 @@ struct xfs_perag {
 	 */
 	uint16_t	pag_checked;
 	uint16_t	pag_sick;
+
+#ifdef CONFIG_XFS_ONLINE_REPAIR
+	/*
+	 * Alternate btree heights so that online repair won't trip the write
+	 * verifiers while rebuilding the AG btrees.
+	 */
+	uint8_t		pagf_alt_levels[XFS_BTNUM_AGF];
+#endif
+
 	spinlock_t	pag_state_lock;
 
 	spinlock_t	pagb_lock;	/* lock for pagb_tree */
@@ -139,6 +148,21 @@ xfs_verify_agbno(struct xfs_perag *pag, xfs_agblock_t agbno)
 	if (agbno <= pag->min_block)
 		return false;
 	return true;
+}
+
+static inline bool
+xfs_verify_agbext(
+	struct xfs_perag	*pag,
+	xfs_agblock_t		agbno,
+	xfs_agblock_t		len)
+{
+	if (agbno + len <= agbno)
+		return false;
+
+	if (!xfs_verify_agbno(pag, agbno))
+		return false;
+
+	return xfs_verify_agbno(pag, agbno + len - 1);
 }
 
 /*
