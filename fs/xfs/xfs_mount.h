@@ -70,6 +70,9 @@ struct xfs_drain {
 	struct wait_queue_head	dr_waiters;
 };
 
+void xfs_drain_waiter_disable(void);
+void xfs_drain_waiter_enable(void);
+
 int xfs_perag_drain_intents(struct xfs_perag *pag);
 
 void xfs_fs_bump_intents(struct xfs_mount *mp, xfs_fsblock_t fsb);
