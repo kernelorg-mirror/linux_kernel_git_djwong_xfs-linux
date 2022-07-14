@@ -652,12 +652,13 @@ int
 xrep_reap_fsblocks(
 	struct xfs_scrub		*sc,
 	struct xfsb_bitmap		*bitmap,
-	const struct xfs_owner_info	*oinfo)
+	const struct xfs_owner_info	*oinfo,
+	enum xfs_ag_resv_type		type)
 {
 	struct xreap_state		rs = {
 		.sc			= sc,
 		.oinfo			= oinfo,
-		.resv			= XFS_AG_RESV_NONE,
+		.resv			= type,
 	};
 	int				error;
 
