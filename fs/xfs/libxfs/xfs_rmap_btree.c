@@ -433,16 +433,55 @@ xfs_rmapbt_recs_inorder(
 	return 0;
 }
 
+STATIC void
+xfs_rmapbt_mask_key(
+	struct xfs_btree_cur		*cur,
+	union xfs_btree_key		*out_key,
+	const union xfs_btree_key	*in_key,
+	const union xfs_btree_key	*mask)
+{
+	memset(out_key, 0, sizeof(union xfs_btree_key));
+
+	if (mask->rmap.rm_startblock)
+		out_key->rmap.rm_startblock = in_key->rmap.rm_startblock;
+	if (mask->rmap.rm_owner)
+		out_key->rmap.rm_owner = in_key->rmap.rm_owner;
+	if (mask->rmap.rm_offset)
+		out_key->rmap.rm_offset = in_key->rmap.rm_offset;
+}
+
 STATIC bool
 xfs_rmapbt_has_key_gap(
 	struct xfs_btree_cur		*cur,
 	const union xfs_btree_key	*key1,
-	const union xfs_btree_key	*key2)
+	const union xfs_btree_key	*key2,
+	const union xfs_btree_key	*mask)
 {
-	xfs_agblock_t			next;
+	bool				reflink = xfs_has_reflink(cur->bc_mp);
+	uint64_t			x, y;
 
-	next = be32_to_cpu(key1->rmap.rm_startblock) + 1;
-	return next != be32_to_cpu(key2->rmap.rm_startblock);
+	if (mask->rmap.rm_offset) {
+		x = be64_to_cpu(key1->rmap.rm_offset) + 1;
+		y = be64_to_cpu(key2->rmap.rm_offset);
+		if ((reflink && x < y) || (!reflink && x != y))
+			return true;
+	}
+
+	if (mask->rmap.rm_owner) {
+		x = be64_to_cpu(key1->rmap.rm_owner) + 1;
+		y = be64_to_cpu(key2->rmap.rm_owner);
+		if ((reflink && x < y) || (!reflink && x != y))
+			return true;
+	}
+
+	if (mask->rmap.rm_startblock) {
+		x = be32_to_cpu(key1->rmap.rm_startblock) + 1;
+		y = be32_to_cpu(key2->rmap.rm_startblock);
+		if ((reflink && x < y) || (!reflink && x != y))
+			return true;
+	}
+
+	return false;
 }
 
 static const struct xfs_btree_ops xfs_rmapbt_ops = {
@@ -465,6 +504,7 @@ static const struct xfs_btree_ops xfs_rmapbt_ops = {
 	.keys_inorder		= xfs_rmapbt_keys_inorder,
 	.recs_inorder		= xfs_rmapbt_recs_inorder,
 	.has_key_gap		= xfs_rmapbt_has_key_gap,
+	.mask_key		= xfs_rmapbt_mask_key,
 };
 
 static struct xfs_btree_cur *
