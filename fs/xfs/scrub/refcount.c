@@ -466,16 +466,16 @@ xchk_xref_is_not_shared(
 	xfs_agblock_t		agbno,
 	xfs_extlen_t		len)
 {
-	bool			shared;
+	enum xfs_btree_keyfill	keyfill;
 	int			error;
 
 	if (!sc->sa.refc_cur || xchk_skip_xref(sc->sm))
 		return;
 
-	error = xfs_refcount_has_record(sc->sa.refc_cur, XFS_RCDOM_SHARED,
-			agbno, len, &shared);
+	error = xfs_refcount_scan_keyfill(sc->sa.refc_cur, XFS_RCDOM_SHARED,
+			agbno, len, &keyfill);
 	if (!xchk_should_check_xref(sc, &error, &sc->sa.refc_cur))
 		return;
-	if (shared)
+	if (keyfill != XFS_BTREE_KEYFILL_EMPTY)
 		xchk_btree_xref_set_corrupt(sc, sc->sa.refc_cur, 0);
 }
