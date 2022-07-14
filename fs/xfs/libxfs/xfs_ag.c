@@ -928,7 +928,8 @@ xfs_ag_shrink_space(
 		if (err2 != -ENOSPC)
 			goto resv_err;
 
-		__xfs_free_extent_later(*tpp, args.fsbno, delta, NULL, true);
+		xfs_free_extent_later(*tpp, args.fsbno, delta, NULL,
+				XFS_FREE_EXTENT_SKIP_DISCARD);
 
 		/*
 		 * Roll the transaction before trying to re-init the per-ag
