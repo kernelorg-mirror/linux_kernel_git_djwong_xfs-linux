@@ -211,8 +211,6 @@ static inline bool xchk_could_repair(const struct xfs_scrub *sc)
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
 int xchk_metadata_inode_forks(struct xfs_scrub *sc);
-void xchk_stop_reaping(struct xfs_scrub *sc);
-void xchk_start_reaping(struct xfs_scrub *sc);
 
 /*
  * Setting up a hook to wait for intents to drain is costly -- we have to take
