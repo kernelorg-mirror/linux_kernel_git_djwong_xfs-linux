@@ -412,6 +412,7 @@ xfs_rmap_update_get_group(
 
 		rgno = xfs_rtb_to_rgno(mp, ri->ri_bmap.br_startblock);
 		ri->ri_rtg = xfs_rtgroup_get(mp, rgno);
+		xfs_rtgroup_bump_intents(ri->ri_rtg);
 		return;
 	}
 
@@ -426,6 +427,7 @@ xfs_rmap_update_put_group(
 	struct xfs_rmap_intent	*ri)
 {
 	if (ri->ri_realtime) {
+		xfs_rtgroup_drop_intents(ri->ri_rtg);
 		xfs_rtgroup_put(ri->ri_rtg);
 		return;
 	}
