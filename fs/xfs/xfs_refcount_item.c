@@ -20,6 +20,7 @@
 #include "xfs_error.h"
 #include "xfs_log_priv.h"
 #include "xfs_log_recover.h"
+#include "xfs_rtgroup.h"
 
 struct kmem_cache	*xfs_cui_cache;
 struct kmem_cache	*xfs_cud_cache;
@@ -282,11 +283,25 @@ xfs_refcount_update_diff_items(
 	struct xfs_mount		*mp = priv;
 	struct xfs_refcount_intent	*ra;
 	struct xfs_refcount_intent	*rb;
+	unsigned long long		a_ag, b_ag;
 
 	ra = container_of(a, struct xfs_refcount_intent, ri_list);
 	rb = container_of(b, struct xfs_refcount_intent, ri_list);
-	return  XFS_FSB_TO_AGNO(mp, ra->ri_startblock) -
-		XFS_FSB_TO_AGNO(mp, rb->ri_startblock);
+	if (ra->ri_realtime) {
+		a_ag = xfs_rtb_to_rgno(mp, ra->ri_startblock);
+		a_ag |= (1ULL << 63);
+	} else
+		a_ag = XFS_FSB_TO_AGNO(mp, ra->ri_startblock);
+	if (rb->ri_realtime) {
+		b_ag = xfs_rtb_to_rgno(mp, rb->ri_startblock);
+		b_ag |= (1ULL << 63);
+	} else
+		b_ag = XFS_FSB_TO_AGNO(mp, rb->ri_startblock);
+	if (a_ag > b_ag)
+		return 1;
+	if (a_ag < b_ag)
+		return -1;
+	return 0;
 }
 
 /* Log refcount updates in the intent item. */
@@ -324,6 +339,8 @@ xfs_refcount_update_log_item(
 		ext->pe_flags = 0;
 		break;
 	}
+	if (refc->ri_realtime)
+		ext->pe_flags |= XFS_REFCOUNT_EXTENT_REALTIME;
 }
 
 static struct xfs_log_item *
@@ -388,7 +405,7 @@ xfs_refcount_update_finish_item(
 	 * work or failed.  Be careful to use the original startblock because
 	 * the finishing functions can update the intent state.
 	 */
-	xfs_fs_drop_intents(mp, false, orig_startblock);
+	xfs_fs_drop_intents(mp, ri->ri_realtime, orig_startblock);
 	kmem_cache_free(xfs_refcount_intent_cache, ri);
 	return error;
 }
@@ -410,7 +427,7 @@ xfs_refcount_update_cancel_item(
 	struct xfs_refcount_intent	*refc;
 
 	refc = container_of(item, struct xfs_refcount_intent, ri_list);
-	xfs_fs_drop_intents(mp, false, refc->ri_startblock);
+	xfs_fs_drop_intents(mp, refc->ri_realtime, refc->ri_startblock);
 	kmem_cache_free(xfs_refcount_intent_cache, refc);
 }
 
@@ -423,7 +440,7 @@ xfs_refcount_update_add_item(
 	const struct xfs_refcount_intent *ri;
 
 	ri = container_of(item, struct xfs_refcount_intent, ri_list);
-	xfs_fs_bump_intents(mp, false, ri->ri_startblock);
+	xfs_fs_bump_intents(mp, ri->ri_realtime, ri->ri_startblock);
 }
 
 const struct xfs_defer_op_type xfs_refcount_update_defer_type = {
@@ -521,6 +538,7 @@ xfs_cui_item_recover(
 
 		refc = &cuip->cui_format.cui_extents[i];
 		refc_type = refc->pe_flags & XFS_REFCOUNT_EXTENT_TYPE_MASK;
+		fake.ri_realtime = refc->pe_flags & XFS_REFCOUNT_EXTENT_REALTIME;
 		switch (refc_type) {
 		case XFS_REFCOUNT_INCREASE:
 		case XFS_REFCOUNT_DECREASE:
@@ -554,18 +572,22 @@ xfs_cui_item_recover(
 
 			switch (fake.ri_type) {
 			case XFS_REFCOUNT_INCREASE:
-				xfs_refcount_increase_extent(tp, &irec);
+				xfs_refcount_increase_extent(tp,
+						fake.ri_realtime, &irec);
 				break;
 			case XFS_REFCOUNT_DECREASE:
-				xfs_refcount_decrease_extent(tp, &irec);
+				xfs_refcount_decrease_extent(tp,
+						fake.ri_realtime, &irec);
 				break;
 			case XFS_REFCOUNT_ALLOC_COW:
 				xfs_refcount_alloc_cow_extent(tp,
+						fake.ri_realtime,
 						irec.br_startblock,
 						irec.br_blockcount);
 				break;
 			case XFS_REFCOUNT_FREE_COW:
 				xfs_refcount_free_cow_extent(tp,
+						fake.ri_realtime,
 						irec.br_startblock,
 						irec.br_blockcount);
 				break;
