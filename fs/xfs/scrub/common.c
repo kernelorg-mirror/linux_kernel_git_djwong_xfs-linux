@@ -1272,5 +1272,8 @@ xchk_fshooks_enable(
 	if (scrub_fshooks & XCHK_FSHOOKS_DIRENTS)
 		xfs_dirent_hook_enable();
 
+	if (scrub_fshooks & XCHK_FSHOOKS_RMAP)
+		xfs_rmap_hook_enable();
+
 	sc->flags |= scrub_fshooks;
 }
