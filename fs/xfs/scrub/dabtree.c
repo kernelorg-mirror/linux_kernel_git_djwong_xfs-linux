@@ -47,9 +47,26 @@ xchk_da_process_error(
 	case -EFSCORRUPTED:
 		/* Note the badness but don't abort. */
 		sc->sm->sm_flags |= XFS_SCRUB_OFLAG_CORRUPT;
+		xchk_whine(sc->mp, "ino 0x%llx fork %d type %s dablk 0x%llx error %d ret_ip %pS",
+				sc->ip->i_ino,
+				ds->dargs.whichfork,
+				xchk_type_string(sc->sm->sm_type),
+				xfs_dir2_da_to_db(ds->dargs.geo,
+					ds->state->path.blk[level].blkno),
+				*error,
+				__return_address);
 		*error = 0;
 		fallthrough;
 	default:
+		if (*error)
+			xchk_whine(sc->mp, "ino 0x%llx fork %d type %s dablk 0x%llx error %d ret_ip %pS",
+					sc->ip->i_ino,
+					ds->dargs.whichfork,
+					xchk_type_string(sc->sm->sm_type),
+					xfs_dir2_da_to_db(ds->dargs.geo,
+						ds->state->path.blk[level].blkno),
+					*error,
+					__return_address);
 		trace_xchk_file_op_error(sc, ds->dargs.whichfork,
 				xfs_dir2_da_to_db(ds->dargs.geo,
 					ds->state->path.blk[level].blkno),
@@ -72,6 +89,13 @@ xchk_da_set_corrupt(
 
 	sc->sm->sm_flags |= XFS_SCRUB_OFLAG_CORRUPT;
 
+	xchk_whine(sc->mp, "ino 0x%llx fork %d type %s dablk 0x%llx ret_ip %pS",
+			sc->ip->i_ino,
+			ds->dargs.whichfork,
+			xchk_type_string(sc->sm->sm_type),
+			xfs_dir2_da_to_db(ds->dargs.geo,
+				ds->state->path.blk[level].blkno),
+			__return_address);
 	trace_xchk_fblock_error(sc, ds->dargs.whichfork,
 			xfs_dir2_da_to_db(ds->dargs.geo,
 				ds->state->path.blk[level].blkno),
