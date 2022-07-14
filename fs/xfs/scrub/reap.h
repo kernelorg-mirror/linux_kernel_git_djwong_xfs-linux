@@ -11,6 +11,7 @@ int xrep_reap_ag_metadata(struct xfs_scrub *sc, struct xbitmap *bitmap,
 		enum xfs_ag_resv_type type);
 int xrep_reap_inode_metadata(struct xfs_scrub *sc, struct xbitmap *bitmap,
 		const struct xfs_owner_info *oinfo, enum xfs_ag_resv_type type);
+int xrep_reap_ifork(struct xfs_scrub *sc, struct xfs_inode *ip, int whichfork);
 
 /* Buffer cache scan context. */
 struct xrep_bufscan {
