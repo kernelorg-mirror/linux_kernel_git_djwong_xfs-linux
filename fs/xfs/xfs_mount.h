@@ -64,7 +64,7 @@ struct xfs_error_cfg {
  */
 struct xfs_drain {
 	/* Number of items pending in some part of the filesystem. */
-	atomic_t		dr_count;
+	struct percpu_counter	dr_count;
 
 	/* Queue to wait for dri_count to go to zero */
 	struct wait_queue_head	dr_waiters;
@@ -75,21 +75,30 @@ int xfs_perag_drain_intents(struct xfs_perag *pag);
 void xfs_fs_bump_intents(struct xfs_mount *mp, xfs_fsblock_t fsb);
 void xfs_fs_drop_intents(struct xfs_mount *mp, xfs_fsblock_t fsb);
 
+/*
+ * Use a large batch value for the drain counter so that writer threads
+ * can queue a large number of log intents before having to update the main
+ * counter.
+ */
+#define XFS_DRAIN_BATCH		(1024)
+
 /* Are there work items pending? */
 static inline bool xfs_drain_busy(struct xfs_drain *dr)
 {
-	return atomic_read(&dr->dr_count) > 0;
+	return __percpu_counter_compare(&dr->dr_count, 0, XFS_DRAIN_BATCH) > 0;
 }
 
-static inline void xfs_drain_init(struct xfs_drain *dr)
+static inline int xfs_drain_init(struct xfs_drain *dr)
 {
-	atomic_set(&dr->dr_count, 0);
 	init_waitqueue_head(&dr->dr_waiters);
+	return percpu_counter_init(&dr->dr_count, 0, GFP_KERNEL);
 }
 
 static inline void xfs_drain_free(struct xfs_drain *dr)
 {
 	ASSERT(!xfs_drain_busy(dr));
+
+	percpu_counter_destroy(&dr->dr_count);
 }
 #else
 struct xfs_drain { /* empty */ };
@@ -103,7 +112,7 @@ static inline void
 xfs_fs_drop_intents(struct xfs_mount *mp, xfs_fsblock_t fsb)
 {
 }
-# define xfs_drain_init(dr)	((void)0)
+# define xfs_drain_init(dr)	(0)
 # define xfs_drain_free(dr)	((void)0)
 #endif /* CONFIG_XFS_DRAIN_INTENTS */
 
