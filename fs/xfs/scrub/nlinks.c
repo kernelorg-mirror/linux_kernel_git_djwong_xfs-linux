@@ -43,9 +43,18 @@ int
 xchk_setup_nlinks(
 	struct xfs_scrub	*sc)
 {
+	unsigned int		buf_bytes = sizeof(struct xchk_nlink_ctrs);
+	int			error;
+
 	xchk_fshooks_enable(sc, XCHK_FSHOOKS_NLINKS);
 
-	sc->buf = kzalloc(sizeof(struct xchk_nlink_ctrs), XCHK_GFP_FLAGS);
+	if (xchk_could_repair(sc)) {
+		error = xrep_setup_nlinks(sc, &buf_bytes);
+		if (error)
+			return error;
+	}
+
+	sc->buf = kvzalloc(buf_bytes, XCHK_GFP_FLAGS);
 	if (!sc->buf)
 		return -ENOMEM;
 
