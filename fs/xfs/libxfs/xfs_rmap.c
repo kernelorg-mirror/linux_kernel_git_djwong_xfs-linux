@@ -24,6 +24,8 @@
 #include "xfs_inode.h"
 #include "xfs_ag.h"
 #include "xfs_health.h"
+#include "xfs_rtrmap_btree.h"
+#include "xfs_rtalloc.h"
 
 struct kmem_cache	*xfs_rmap_intent_cache;
 
@@ -2516,13 +2518,14 @@ xfs_rmap_finish_one_cleanup(
 	struct xfs_btree_cur	*rcur,
 	int			error)
 {
-	struct xfs_buf		*agbp;
+	struct xfs_buf		*agbp = NULL;
 
 	if (rcur == NULL)
 		return;
-	agbp = rcur->bc_ag.agbp;
+	if (rcur->bc_btnum == XFS_BTNUM_RMAP)
+		agbp = rcur->bc_ag.agbp;
 	xfs_btree_del_cursor(rcur, error);
-	if (error)
+	if (error && agbp)
 		xfs_trans_brelse(tp, agbp);
 }
 
@@ -2563,6 +2566,20 @@ __xfs_rmap_finish_intent(
 	}
 }
 
+/* Does this btree cursor match the given AG? */
+static inline bool
+xfs_rmap_is_wrong_cursor(
+	struct xfs_btree_cur	*cur,
+	struct xfs_perag	*pag)
+{
+	if (!pag) {
+		/* finishing a realtime rmap */
+		return cur->bc_btnum != XFS_BTNUM_RTRMAP;
+	}
+
+	return cur->bc_ag.pag != pag;
+}
+
 /*
  * Process one of the deferred rmap operations.  We pass back the
  * btree cursor to maintain our lock on the rmapbt between calls.
@@ -2576,25 +2593,25 @@ xfs_rmap_finish_one(
 	struct xfs_rmap_intent		*ri,
 	struct xfs_btree_cur		**pcur)
 {
+	struct xfs_owner_info		oinfo;
 	struct xfs_mount		*mp = tp->t_mountp;
 	struct xfs_perag		*pag;
 	struct xfs_btree_cur		*rcur;
 	struct xfs_buf			*agbp = NULL;
-	int				error = 0;
-	struct xfs_owner_info		oinfo;
 	xfs_fsblock_t			bno;
 	bool				unwritten;
-
-	if (ri->ri_realtime) {
-		/* coming in a subsequent patch */
-		ASSERT(0);
-		return -EFSCORRUPTED;
-	}
-
-	pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, ri->ri_bmap.br_startblock));
-	bno = XFS_FSB_TO_AGBNO(mp, ri->ri_bmap.br_startblock);
+	int				error = 0;
 
 	trace_xfs_rmap_deferred(mp, ri);
+
+	if (ri->ri_realtime) {
+		pag = NULL;
+		bno = ri->ri_bmap.br_startblock;
+	} else {
+		pag = xfs_perag_get(mp,
+				XFS_FSB_TO_AGNO(mp, ri->ri_bmap.br_startblock));
+		bno = XFS_FSB_TO_AGBNO(mp, ri->ri_bmap.br_startblock);
+	}
 
 	if (XFS_TEST_ERROR(false, mp, XFS_ERRTAG_RMAP_FINISH_ONE)) {
 		error = -EIO;
@@ -2606,33 +2623,38 @@ xfs_rmap_finish_one(
 	 * the startblock, get one now.
 	 */
 	rcur = *pcur;
-	if (rcur != NULL && rcur->bc_ag.pag != pag) {
+	if (rcur != NULL && xfs_rmap_is_wrong_cursor(rcur, pag)) {
 		xfs_rmap_finish_one_cleanup(tp, rcur, 0);
 		rcur = NULL;
 		*pcur = NULL;
 	}
 	if (rcur == NULL) {
-		/*
-		 * Refresh the freelist before we start changing the
-		 * rmapbt, because a shape change could cause us to
-		 * allocate blocks.
-		 */
-		error = xfs_free_extent_fix_freelist(tp, pag, &agbp);
-		if (error)
-			goto out_drop;
-		if (XFS_IS_CORRUPT(tp->t_mountp, !agbp)) {
-			error = -EFSCORRUPTED;
-			goto out_drop;
-		}
+		if (ri->ri_realtime) {
+			xfs_rtlock(tp, mp, XFS_RTLOCK_RMAP);
+			rcur = xfs_rtrmapbt_init_cursor(mp, tp, mp->m_rrmapip);
+			rcur->bc_ino.flags = 0;
+		} else {
+			/*
+			 * Refresh the freelist before we start changing the
+			 * rmapbt, because a shape change could cause us to
+			 * allocate blocks.
+			 */
+			error = xfs_free_extent_fix_freelist(tp, pag, &agbp);
+			if (error)
+				goto out_drop;
+			if (XFS_IS_CORRUPT(tp->t_mountp, !agbp)) {
+				error = -EFSCORRUPTED;
+				goto out_drop;
+			}
 
-		rcur = xfs_rmapbt_init_cursor(mp, tp, agbp, pag);
+			rcur = xfs_rmapbt_init_cursor(mp, tp, agbp, pag);
+		}
 	}
 	*pcur = rcur;
 
 	xfs_rmap_ino_owner(&oinfo, ri->ri_owner, ri->ri_whichfork,
 			ri->ri_bmap.br_startoff);
 	unwritten = ri->ri_bmap.br_state == XFS_EXT_UNWRITTEN;
-	bno = XFS_FSB_TO_AGBNO(rcur->bc_mp, ri->ri_bmap.br_startblock);
 
 	error = __xfs_rmap_finish_intent(rcur, ri->ri_type, bno,
 			ri->ri_bmap.br_blockcount, &oinfo, unwritten);
@@ -2642,7 +2664,8 @@ xfs_rmap_finish_one(
 	xfs_rmap_update_hook(tp, pag, ri->ri_type, bno,
 			ri->ri_bmap.br_blockcount, unwritten, &oinfo);
 out_drop:
-	xfs_perag_put(pag);
+	if (pag)
+		xfs_perag_put(pag);
 	return error;
 }
 
