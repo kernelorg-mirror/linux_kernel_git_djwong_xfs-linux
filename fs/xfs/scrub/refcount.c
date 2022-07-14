@@ -442,7 +442,7 @@ xchk_refcountbt_rec(
 	struct xfs_refcount_irec irec;
 	struct xchk_refcbt_records *rrc = bs->private;
 
-	xfs_refcount_btrec_to_irec(rec, &irec);
+	xfs_refcount_btrec_to_irec(bs->cur, rec, &irec);
 	if (xfs_refcount_check_irec(bs->cur, &irec) != NULL) {
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 		return 0;
