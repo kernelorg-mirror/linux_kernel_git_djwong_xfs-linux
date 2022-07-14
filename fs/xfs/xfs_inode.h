@@ -444,6 +444,7 @@ static inline bool xfs_inode_has_bigrtextents(struct xfs_inode *ip)
 #define XFS_IOLOCK_SHIFT		16
 #define XFS_IOLOCK_MAX_SUBCLASS		3
 #define XFS_IOLOCK_DEP_MASK		0x000f0000u
+#define XFS_IOLOCK_PARENT		(I_MUTEX_PARENT << XFS_ILOCK_SHIFT)
 
 #define XFS_MMAPLOCK_SHIFT		20
 #define XFS_MMAPLOCK_NUMORDER		0
@@ -522,6 +523,9 @@ uint		xfs_ilock_data_map_shared(struct xfs_inode *);
 uint		xfs_ilock_attr_map_shared(struct xfs_inode *);
 
 int		xfs_ifree(struct xfs_trans *, struct xfs_inode *);
+int		xfs_ifree_cluster(struct xfs_trans *tp, struct xfs_perag *pag,
+				struct xfs_inode *free_ip,
+				struct xfs_icluster *xic);
 int		xfs_itruncate_extents_flags(struct xfs_trans **,
 				struct xfs_inode *, int, xfs_fsize_t, int);
 void		xfs_iext_realloc(xfs_inode_t *, int, int);
