@@ -39,52 +39,28 @@ struct xchk_dir_ctx {
 };
 
 /* Check that an inode's mode matches a given DT_ type. */
-STATIC int
+STATIC void
 xchk_dir_check_ftype(
 	struct xchk_dir_ctx	*sdc,
 	xfs_fileoff_t		offset,
-	xfs_ino_t		inum,
+	struct xfs_inode	*ip,
 	int			dtype)
 {
 	struct xfs_mount	*mp = sdc->sc->mp;
-	struct xfs_inode	*ip;
 	int			ino_dtype;
-	int			error = 0;
 
 	if (!xfs_has_ftype(mp)) {
 		if (dtype != DT_UNKNOWN && dtype != DT_DIR)
 			xchk_fblock_set_corrupt(sdc->sc, XFS_DATA_FORK,
 					offset);
-		goto out;
+		return;
 	}
-
-	/*
-	 * Grab the inode pointed to by the dirent.  Use UNTRUSTED here to
-	 * check the allocation status of the inode in the inode btrees.
-	 *
-	 * If _iget returns -EINVAL or -ENOENT then the child inode number is
-	 * garbage and the directory is corrupt.  If the _iget returns
-	 * -EFSCORRUPTED or -EFSBADCRC then the child is corrupt which is a
-	 *  cross referencing error.  Any other error is an operational error.
-	 */
-	error = xchk_iget(sdc->sc, inum, &ip);
-	if (error == -EINVAL || error == -ENOENT) {
-		error = -EFSCORRUPTED;
-		xchk_fblock_process_error(sdc->sc, XFS_DATA_FORK, 0, &error);
-		goto out;
-	}
-	if (!xchk_fblock_xref_process_error(sdc->sc, XFS_DATA_FORK, offset,
-			&error))
-		goto out;
 
 	/* Convert mode to the DT_* values that dir_emit uses. */
 	ino_dtype = xfs_dir3_get_dtype(mp,
 			xfs_mode_to_ftype(VFS_I(ip)->i_mode));
 	if (ino_dtype != dtype)
 		xchk_fblock_set_corrupt(sdc->sc, XFS_DATA_FORK, offset);
-	xchk_irele(sdc->sc, ip);
-out:
-	return error;
 }
 
 /*
@@ -105,17 +81,17 @@ xchk_dir_actor(
 	unsigned		type)
 {
 	struct xfs_mount	*mp;
+	struct xfs_inode	*dp;
 	struct xfs_inode	*ip;
 	struct xchk_dir_ctx	*sdc;
 	struct xfs_name		xname;
 	xfs_ino_t		lookup_ino;
 	xfs_dablk_t		offset;
-	bool			checked_ftype = false;
 	int			error = 0;
 
 	sdc = container_of(dir_iter, struct xchk_dir_ctx, dir_iter);
-	ip = sdc->sc->ip;
-	mp = ip->i_mount;
+	dp = sdc->sc->ip;
+	mp = dp->i_mount;
 	offset = xfs_dir2_db_to_da(mp->m_dir_geo,
 			xfs_dir2_dataptr_to_db(mp->m_dir_geo, pos));
 
@@ -136,11 +112,7 @@ xchk_dir_actor(
 
 	if (!strncmp(".", name, namelen)) {
 		/* If this is "." then check that the inum matches the dir. */
-		if (xfs_has_ftype(mp) && type != DT_DIR)
-			xchk_fblock_set_corrupt(sdc->sc, XFS_DATA_FORK,
-					offset);
-		checked_ftype = true;
-		if (ino != ip->i_ino)
+		if (ino != dp->i_ino)
 			xchk_fblock_set_corrupt(sdc->sc, XFS_DATA_FORK,
 					offset);
 	} else if (!strncmp("..", name, namelen)) {
@@ -148,11 +120,7 @@ xchk_dir_actor(
 		 * If this is ".." in the root inode, check that the inum
 		 * matches this dir.
 		 */
-		if (xfs_has_ftype(mp) && type != DT_DIR)
-			xchk_fblock_set_corrupt(sdc->sc, XFS_DATA_FORK,
-					offset);
-		checked_ftype = true;
-		if (ip->i_ino == mp->m_sb.sb_rootino && ino != ip->i_ino)
+		if (dp->i_ino == mp->m_sb.sb_rootino && ino != dp->i_ino)
 			xchk_fblock_set_corrupt(sdc->sc, XFS_DATA_FORK,
 					offset);
 	}
@@ -162,7 +130,7 @@ xchk_dir_actor(
 	xname.len = namelen;
 	xname.type = XFS_DIR3_FT_UNKNOWN;
 
-	error = xfs_dir_lookup(sdc->sc->tp, ip, &xname, &lookup_ino, NULL);
+	error = xfs_dir_lookup(sdc->sc->tp, dp, &xname, &lookup_ino, NULL);
 	/* ENOENT means the hash lookup failed and the dir is corrupt */
 	if (error == -ENOENT)
 		error = -EFSCORRUPTED;
@@ -174,12 +142,27 @@ xchk_dir_actor(
 		goto out;
 	}
 
-	/* Verify the file type.  This function absorbs error codes. */
-	if (!checked_ftype) {
-		error = xchk_dir_check_ftype(sdc, offset, lookup_ino, type);
-		if (error)
-			goto out;
+	/*
+	 * Grab the inode pointed to by the dirent.  Use UNTRUSTED here to
+	 * check the allocation status of the inode in the inode btrees.
+	 *
+	 * If _iget returns -EINVAL or -ENOENT then the child inode number is
+	 * garbage and the directory is corrupt.  If the _iget returns
+	 * -EFSCORRUPTED or -EFSBADCRC then the child is corrupt which is a
+	 *  cross referencing error.  Any other error is an operational error.
+	 */
+	error = xchk_iget(sdc->sc, ino, &ip);
+	if (error == -EINVAL || error == -ENOENT) {
+		error = -EFSCORRUPTED;
+		xchk_fblock_process_error(sdc->sc, XFS_DATA_FORK, 0, &error);
+		goto out;
 	}
+	if (!xchk_fblock_xref_process_error(sdc->sc, XFS_DATA_FORK, offset,
+			&error))
+		goto out;
+
+	xchk_dir_check_ftype(sdc, offset, ip, type);
+	xchk_irele(sdc->sc, ip);
 out:
 	/*
 	 * A negative error code returned here is supposed to cause the
