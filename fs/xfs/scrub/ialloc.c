@@ -79,25 +79,7 @@ xchk_iallocbt_chunk_xref_other(
 		xchk_btree_xref_set_corrupt(sc, *pcur, 0);
 }
 
-/* Cross-reference with the other btrees. */
-STATIC void
-xchk_iallocbt_chunk_xref(
-	struct xfs_scrub		*sc,
-	struct xfs_inobt_rec_incore	*irec,
-	xfs_agino_t			agino,
-	xfs_agblock_t			agbno,
-	xfs_extlen_t			len)
-{
-	if (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
-		return;
-
-	xchk_xref_is_used_space(sc, agbno, len);
-	xchk_iallocbt_chunk_xref_other(sc, irec, agino);
-	xchk_xref_is_owned_by(sc, agbno, len, &XFS_RMAP_OINFO_INODES);
-	xchk_xref_is_not_shared(sc, agbno, len);
-}
-
-/* Is this chunk worth checking? */
+/* Is this chunk worth checking and cross-referencing? */
 STATIC bool
 xchk_iallocbt_chunk(
 	struct xchk_btree		*bs,
@@ -105,18 +87,25 @@ xchk_iallocbt_chunk(
 	xfs_agino_t			agino,
 	xfs_extlen_t			len)
 {
+	struct xfs_scrub		*sc = bs->sc;
 	struct xfs_mount		*mp = bs->cur->bc_mp;
 	struct xfs_perag		*pag = bs->cur->bc_ag.pag;
-	xfs_agblock_t			bno;
+	xfs_agblock_t			agbno;
 
-	bno = XFS_AGINO_TO_AGBNO(mp, agino);
-	if (bno + len <= bno ||
-	    !xfs_verify_agbno(pag, bno) ||
-	    !xfs_verify_agbno(pag, bno + len - 1))
+	agbno = XFS_AGINO_TO_AGBNO(mp, agino);
+	if (agbno + len <= agbno ||
+	    !xfs_verify_agbno(pag, agbno) ||
+	    !xfs_verify_agbno(pag, agbno + len - 1))
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 
-	xchk_iallocbt_chunk_xref(bs->sc, irec, agino, bno, len);
-	xchk_xref_is_not_cow_staging(bs->sc, bno, len);
+	if (bs->sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
+		return false;
+
+	xchk_xref_is_used_space(sc, agbno, len);
+	xchk_iallocbt_chunk_xref_other(sc, irec, agino);
+	xchk_xref_is_owned_by(sc, agbno, len, &XFS_RMAP_OINFO_INODES);
+	xchk_xref_is_not_shared(sc, agbno, len);
+	xchk_xref_is_not_cow_staging(sc, agbno, len);
 	return true;
 }
 
@@ -486,7 +475,7 @@ xchk_iallocbt_rec(
 		if (holemask & 1)
 			holecount += XFS_INODES_PER_HOLEMASK_BIT;
 		else if (!xchk_iallocbt_chunk(bs, &irec, agino, len))
-			break;
+			goto out;
 		holemask >>= 1;
 		agino += XFS_INODES_PER_HOLEMASK_BIT;
 	}
@@ -496,6 +485,9 @@ xchk_iallocbt_rec(
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 
 check_clusters:
+	if (bs->sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
+		goto out;
+
 	error = xchk_iallocbt_check_clusters(bs, &irec);
 	if (error)
 		goto out;
