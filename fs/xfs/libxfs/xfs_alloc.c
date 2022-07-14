@@ -280,6 +280,7 @@ out_bad_rec:
 		pag->pag_agno);
 	xfs_warn(mp,
 		"start block 0x%x block count 0x%x", *bno, *len);
+	xfs_btree_mark_sick(cur);
 	return -EFSCORRUPTED;
 }
 
@@ -2576,6 +2577,7 @@ xfs_exact_minlen_extent_available(
 		goto out;
 
 	if (*stat == 0) {
+		xfs_btree_mark_sick(cnt_cur);
 		error = -EFSCORRUPTED;
 		goto out;
 	}
