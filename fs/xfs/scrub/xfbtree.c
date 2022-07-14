@@ -17,6 +17,7 @@
 #include "xfs_error.h"
 #include "xfs_btree_mem.h"
 #include "xfs_ag.h"
+#include "xfs_rtgroup.h"
 #include "scrub/scrub.h"
 #include "scrub/xfile.h"
 #include "scrub/xfbtree.h"
@@ -267,6 +268,8 @@ xfbtree_dup_cursor(
 
 	if (cur->bc_mem.pag)
 		ncur->bc_mem.pag = xfs_perag_bump(cur->bc_mem.pag);
+	if (cur->bc_mem.rtg)
+		ncur->bc_mem.rtg = xfs_rtgroup_bump(cur->bc_mem.rtg);
 
 	return ncur;
 }
