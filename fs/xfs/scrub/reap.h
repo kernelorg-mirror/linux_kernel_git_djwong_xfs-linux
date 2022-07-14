@@ -9,5 +9,7 @@
 int xrep_reap_ag_metadata(struct xfs_scrub *sc, struct xbitmap *bitmap,
 		const struct xfs_owner_info *oinfo,
 		enum xfs_ag_resv_type type);
+int xrep_reap_inode_metadata(struct xfs_scrub *sc, struct xbitmap *bitmap,
+		const struct xfs_owner_info *oinfo, enum xfs_ag_resv_type type);
 
 #endif /* __XFS_SCRUB_REAP_H__ */
