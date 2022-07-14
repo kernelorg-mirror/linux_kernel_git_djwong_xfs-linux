@@ -25,6 +25,10 @@
 #include "xfs_error.h"
 #include "xfs_log_priv.h"
 #include "xfs_log_recover.h"
+#include "xfs_rtalloc.h"
+#include "xfs_inode.h"
+#include "xfs_rtbitmap.h"
+#include "xfs_rtgroup.h"
 
 struct kmem_cache	*xfs_efi_cache;
 struct kmem_cache	*xfs_efd_cache;
@@ -385,9 +389,17 @@ xfs_trans_free_extent(
 
 	trace_xfs_extent_free_deferred(mp, xefi);
 
-	error = __xfs_free_extent(tp, xefi->xefi_pag, agbno,
-			xefi->xefi_blockcount, &oinfo, XFS_AG_RESV_NONE,
-			xefi->xefi_flags & XFS_EFI_SKIP_DISCARD);
+	if (xfs_efi_is_realtime(xefi)) {
+		ASSERT(xefi->xefi_owner == XFS_RMAP_OWN_NULL ||
+		       xefi->xefi_owner == XFS_RMAP_OWN_UNKNOWN);
+
+		error = xfs_rtfree_blocks(tp, xefi->xefi_startblock,
+				xefi->xefi_blockcount);
+	} else {
+		error = __xfs_free_extent(tp, xefi->xefi_pag, agbno,
+				xefi->xefi_blockcount, &oinfo, XFS_AG_RESV_NONE,
+				xefi->xefi_flags & XFS_EFI_SKIP_DISCARD);
+	}
 
 	/*
 	 * Mark the transaction dirty, even on error. This ensures the
@@ -419,11 +431,19 @@ xfs_extent_free_diff_items(
 	struct xfs_mount		*mp = priv;
 	struct xfs_extent_free_item	*ra;
 	struct xfs_extent_free_item	*rb;
+	xfs_agnumber_t			a_ag, b_ag;
 
 	ra = container_of(a, struct xfs_extent_free_item, xefi_list);
 	rb = container_of(b, struct xfs_extent_free_item, xefi_list);
-	return  XFS_FSB_TO_AGNO(mp, ra->xefi_startblock) -
-		XFS_FSB_TO_AGNO(mp, rb->xefi_startblock);
+	if (xfs_efi_is_realtime(ra))
+		a_ag = NULLAGNUMBER;
+	else
+		a_ag = XFS_FSB_TO_AGNO(mp, ra->xefi_startblock);
+	if (xfs_efi_is_realtime(rb))
+		b_ag = NULLAGNUMBER;
+	else
+		b_ag = XFS_FSB_TO_AGNO(mp, rb->xefi_startblock);
+	return a_ag - b_ag;
 }
 
 /* Log a free extent to the intent item. */
@@ -449,6 +469,8 @@ xfs_extent_free_log_item(
 	extp = &efip->efi_format.efi_extents[next_extent];
 	extp->ext_start = xefi->xefi_startblock;
 	extp->ext_len = xefi->xefi_blockcount;
+	if (xfs_efi_is_realtime(xefi))
+		extp->ext_len |= XFS_EFI_EXTLEN_REALTIME_EXT;
 }
 
 static struct xfs_log_item *
@@ -490,6 +512,14 @@ xfs_extent_free_get_group(
 {
 	xfs_agnumber_t			agno;
 
+	if (xfs_efi_is_realtime(xefi)) {
+		xfs_rgnumber_t		rgno;
+
+		rgno = xfs_rtb_to_rgno(mp, xefi->xefi_startblock);
+		xefi->xefi_rtg = xfs_rtgroup_get(mp, rgno);
+		return;
+	}
+
 	agno = XFS_FSB_TO_AGNO(mp, xefi->xefi_startblock);
 	xefi->xefi_pag = xfs_perag_get(mp, agno);
 	xfs_perag_bump_intents(xefi->xefi_pag);
@@ -500,6 +530,11 @@ static inline void
 xfs_extent_free_put_group(
 	struct xfs_extent_free_item	*xefi)
 {
+	if (xfs_efi_is_realtime(xefi)) {
+		xfs_rtgroup_put(xefi->xefi_rtg);
+		return;
+	}
+
 	xfs_perag_drop_intents(xefi->xefi_pag);
 	xfs_perag_put(xefi->xefi_pag);
 }
@@ -516,6 +551,15 @@ xfs_extent_free_finish_item(
 	int				error;
 
 	xefi = container_of(item, struct xfs_extent_free_item, xefi_list);
+
+	/*
+	 * Lock the rt bitmap if we've any realtime extents to free and we
+	 * haven't locked the rt inodes yet.
+	 */
+	if (*state == NULL && xfs_efi_is_realtime(xefi)) {
+		xfs_rtbitmap_lock(tp, tp->t_mountp);
+		*state = (struct xfs_btree_cur *)1;
+	}
 
 	error = xfs_trans_free_extent(tp, EFD_ITEM(done), xefi);
 
@@ -578,6 +622,7 @@ xfs_agfl_free_finish_item(
 
 	xefi = container_of(item, struct xfs_extent_free_item, xefi_list);
 	ASSERT(xefi->xefi_blockcount == 1);
+	ASSERT(!xfs_efi_is_realtime(xefi));
 	agno = XFS_FSB_TO_AGNO(mp, xefi->xefi_startblock);
 	agbno = XFS_FSB_TO_AGBNO(mp, xefi->xefi_startblock);
 	oinfo.oi_owner = xefi->xefi_owner;
@@ -626,6 +671,10 @@ xfs_efi_validate_ext(
 	struct xfs_mount		*mp,
 	struct xfs_extent		*extp)
 {
+	if (extp->ext_len & XFS_EFI_EXTLEN_REALTIME_EXT)
+		return xfs_verify_rtbext(mp, extp->ext_start,
+				extp->ext_len & ~XFS_EFI_EXTLEN_REALTIME_EXT);
+
 	return xfs_verify_fsbext(mp, extp->ext_start, extp->ext_len);
 }
 
@@ -666,15 +715,29 @@ xfs_efi_item_recover(
 		return error;
 	efdp = xfs_trans_get_efd(tp, efip, efip->efi_format.efi_nextents);
 
+	/* Lock the rt bitmap if we've any realtime extents to free. */
+	for (i = 0; i < efip->efi_format.efi_nextents; i++) {
+		extp = &efip->efi_format.efi_extents[i];
+		if (extp->ext_len & XFS_EFI_EXTLEN_REALTIME_EXT) {
+			xfs_rtbitmap_lock(tp, mp);
+			break;
+		}
+	}
+
 	for (i = 0; i < efip->efi_format.efi_nextents; i++) {
 		struct xfs_extent_free_item	fake = {
 			.xefi_owner		= XFS_RMAP_OWN_UNKNOWN,
 		};
+		unsigned int			len = extp->ext_len;
 
 		extp = &efip->efi_format.efi_extents[i];
 
 		fake.xefi_startblock = extp->ext_start;
-		fake.xefi_blockcount = extp->ext_len;
+		if (len & XFS_EFI_EXTLEN_REALTIME_EXT) {
+			len &= ~XFS_EFI_EXTLEN_REALTIME_EXT;
+			fake.xefi_flags |= XFS_EFI_REALTIME;
+		}
+		fake.xefi_blockcount = len;
 
 		xfs_extent_free_get_group(mp, &fake);
 		error = xfs_trans_free_extent(tp, efdp, &fake);
