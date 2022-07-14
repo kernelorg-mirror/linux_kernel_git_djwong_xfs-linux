@@ -40,6 +40,7 @@
 #include "scrub/readdir.h"
 #include "scrub/reap.h"
 #include "scrub/parent.h"
+#include "scrub/orphanage.h"
 
 /*
  * Directory Repair
@@ -91,8 +92,14 @@ struct xrep_dir {
 	/* nlink value of the corrected directory. */
 	xfs_nlink_t		new_nlink;
 
+	/* Should we move this directory to the orphanage? */
+	bool			move_orphanage;
+
 	/* Preallocated args struct for performing dir operations */
 	struct xfs_da_args	args;
+
+	/* Orphanage reparinting request. */
+	struct xrep_orphanage_req adoption;
 
 	/* Directory entry name, plus the trailing null. */
 	char			namebuf[MAXNAMELEN];
@@ -107,6 +114,10 @@ xrep_setup_directory(
 	struct xfs_scrub	*sc)
 {
 	int			error;
+
+	error = xrep_orphanage_try_create(sc);
+	if (error)
+		return error;
 
 	error = xrep_tempfile_create(sc, S_IFDIR);
 	if (error)
@@ -1088,8 +1099,76 @@ xrep_dir_find_parent(
 	if (rd->parent_ino != NULLFSINO)
 		return 0;
 
-	/* NOTE: A future patch will deal with moving orphans. */
-	return -EFSCORRUPTED;
+	/*
+	 * Temporarily assign the root dir as the parent; we'll move this to
+	 * the orphanage after swapping the dir contents.
+	 */
+	rd->move_orphanage = true;
+	rd->parent_ino = rd->sc->mp->m_sb.sb_rootino;
+	return 0;
+}
+
+/*
+ * Move the current file to the orphanage.
+ *
+ * Caller must hold IOLOCK_EXCL on @sc->ip, and no other inode locks.  Upon
+ * successful return, the scrub transaction will have enough extra reservation
+ * to make the move; it will hold IOLOCK_EXCL and ILOCK_EXCL of @sc->ip and the
+ * orphanage; and both inodes will be ijoined.
+ */
+STATIC int
+xrep_dir_move_to_orphanage(
+	struct xrep_dir		*rd)
+{
+	struct xfs_scrub	*sc = rd->sc;
+	int			error;
+
+	/* No orphanage?  We can't fix this. */
+	if (!sc->orphanage)
+		return -EFSCORRUPTED;
+
+	/* If we can take the orphanage's iolock then we're ready to move. */
+	if (!xrep_orphanage_ilock_nowait(sc, XFS_IOLOCK_EXCL)) {
+		xfs_ino_t	orig_parent, new_parent;
+
+		/*
+		 * We may have to drop the lock on sc->ip to try to lock the
+		 * orphanage.  Therefore, look up the old dotdot entry for
+		 * sc->ip so that we can compare it after we re-lock sc->ip.
+		 */
+		orig_parent = xrep_dotdot_lookup(sc);
+
+		xchk_iunlock(sc, sc->ilock_flags);
+		error = xrep_orphanage_iolock_two(sc);
+		if (error)
+			return error;
+
+		/*
+		 * If the parent changed or the child was unlinked while the
+		 * child directory was unlocked, we don't need to move the
+		 * child to the orphanage after all.
+		 */
+		new_parent = xrep_dotdot_lookup(sc);
+
+		if (orig_parent != new_parent || VFS_I(sc->ip)->i_nlink == 0)
+			return 0;
+	}
+
+	/*
+	 * Move the directory to the orphanage, and let scrub teardown unlock
+	 * everything for us.
+	 */
+	xrep_orphanage_compute_blkres(sc, &rd->adoption);
+
+	error = xrep_orphanage_compute_name(&rd->adoption, rd->namebuf);
+	if (error)
+		return error;
+
+	error = xrep_orphanage_adoption_prep(&rd->adoption);
+	if (error)
+		return error;
+
+	return xrep_orphanage_adopt(&rd->adoption);
 }
 
 /*
@@ -1167,6 +1246,24 @@ xrep_directory(
 
 	/* Swap in the good contents. */
 	error = xrep_dir_rebuild_tree(rd);
+	if (error || !rd->move_orphanage)
+		goto out_rd;
+
+	/*
+	 * We hold ILOCK_EXCL on both the directory and the tempdir after a
+	 * successful rebuild.  Before we can move the directory to the
+	 * orphanage, we must roll to a clean unjoined transaction and drop the
+	 * ILOCKs on the dir and the temp dir.  We still hold IOLOCK_EXCL on
+	 * the dir, so nobody will be able to access it in the mean time.
+	 */
+	error = xfs_trans_roll(&sc->tp);
+	if (error)
+		goto out_rd;
+
+	xchk_iunlock(sc, XFS_ILOCK_EXCL);
+	xrep_tempfile_iunlock(sc);
+
+	error = xrep_dir_move_to_orphanage(rd);
 
 out_names:
 	if (rd->dir_names)
