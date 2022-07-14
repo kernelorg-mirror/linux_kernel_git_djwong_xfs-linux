@@ -491,6 +491,7 @@ xfs_extent_free_get_group(
 
 		rgno = xfs_rtb_to_rgno(mp, xefi->xefi_startblock);
 		xefi->xefi_rtg = xfs_rtgroup_get(mp, rgno);
+		xfs_rtgroup_bump_intents(xefi->xefi_rtg);
 		return;
 	}
 
@@ -505,6 +506,7 @@ xfs_extent_free_put_group(
 	struct xfs_extent_free_item	*xefi)
 {
 	if (xfs_efi_is_realtime(xefi)) {
+		xfs_rtgroup_drop_intents(xefi->xefi_rtg);
 		xfs_rtgroup_put(xefi->xefi_rtg);
 		return;
 	}
