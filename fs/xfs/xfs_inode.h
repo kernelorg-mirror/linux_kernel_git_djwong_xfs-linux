@@ -314,6 +314,12 @@ static inline bool xfs_inode_has_bigrtextents(struct xfs_inode *ip)
 	return XFS_IS_REALTIME_INODE(ip) && ip->i_mount->m_sb.sb_rextsize > 1;
 }
 
+/* Decide if we need to unshare the blocks around a range that we're writing. */
+static inline bool xfs_inode_needs_cow_around(struct xfs_inode *ip)
+{
+	return xfs_is_reflink_inode(ip) && xfs_inode_has_bigrtextents(ip);
+}
+
 /*
  * Return the buftarg used for data allocations on a given inode.
  */
@@ -640,5 +646,8 @@ void xfs_icreate_args_rootfile(struct xfs_icreate_args *args, umode_t mode);
 int xfs_icreate_dqalloc(const struct xfs_icreate_args *args,
 		struct xfs_dquot **udqpp, struct xfs_dquot **gdqpp,
 		struct xfs_dquot **pdqpp);
+
+int xfs_file_cow_around(struct xfs_inode *ip, loff_t pos,
+		long long int count);
 
 #endif	/* __XFS_INODE_H__ */
