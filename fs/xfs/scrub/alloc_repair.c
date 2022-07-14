@@ -505,9 +505,9 @@ xrep_abt_dispose_reservations(
 		 * online.
 		 */
 		if (resv->used < resv->len)
-			__xfs_free_extent_later(sc->tp,
-					resv->fsbno + resv->used,
-					resv->len - resv->used, NULL, true);
+			xfs_free_extent_later(sc->tp, resv->fsbno + resv->used,
+					resv->len - resv->used, NULL,
+					XFS_FREE_EXTENT_SKIP_DISCARD);
 	}
 
 junkit:
