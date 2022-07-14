@@ -792,7 +792,7 @@ again:
 }
 
 /* Install an inode that we opened by handle for scrubbing. */
-static int
+int
 xchk_install_handle_inode(
 	struct xfs_scrub	*sc,
 	struct xfs_inode	*ip)
@@ -807,9 +807,10 @@ xchk_install_handle_inode(
 }
 
 /*
- * Given an inode and the scrub control structure, grab either the
- * inode referenced in the control structure or the inode passed in.
- * The inode is not locked.
+ * Given an inode and the scrub control structure, grab either the inode
+ * referenced in the control structure or the inode passed in.  The inode is
+ * not locked.  Returns -EFSCORRUPTED if the inode is corrupt, or -ENOENT if
+ * the inode is not allocated or allocatable.
  */
 int
 xchk_get_inode(
