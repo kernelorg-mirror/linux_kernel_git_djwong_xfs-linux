@@ -133,7 +133,7 @@ xfs_initialize_rtgroups(
 		/* Place kernel structure only init below this point. */
 		spin_lock_init(&rtg->rtg_state_lock);
 		xfs_drain_init(&rtg->rtg_intents);
-
+		xfs_hooks_init(&rtg->rtg_rmap_update_hooks);
 #endif /* __KERNEL__ */
 
 		/* first new rtg is fully initialized */
