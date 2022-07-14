@@ -2685,13 +2685,18 @@ xfs_rmap_scan_keyfill(
 {
 	union xfs_btree_irec	low;
 	union xfs_btree_irec	high;
+	union xfs_btree_irec	mask;
+
+	/* Only care about space scans here */
+	memset(&mask, 0, sizeof(low));
+	memset(&mask.r.rm_startblock, 0xFF, sizeof(mask.r.rm_startblock));
 
 	memset(&low, 0, sizeof(low));
 	low.r.rm_startblock = bno;
 	memset(&high, 0xFF, sizeof(high));
 	high.r.rm_startblock = bno + len - 1;
 
-	return xfs_btree_scan_keyfill(cur, &low, &high, outcome);
+	return xfs_btree_scan_keyfill(cur, &low, &high, &mask, outcome);
 }
 
 /*
