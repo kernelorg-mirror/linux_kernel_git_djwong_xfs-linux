@@ -42,6 +42,9 @@ xchk_setup_rtsummary(
 	unsigned int		resblks = 0;
 	int			error;
 
+	if (xchk_need_fshook_drain(sc))
+		xchk_fshooks_enable(sc, XCHK_FSHOOKS_DRAIN);
+
 	if (xchk_could_repair(sc)) {
 		error = xrep_setup_rtsummary(sc, &resblks, &bufsize);
 		if (error)

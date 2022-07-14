@@ -1492,6 +1492,28 @@ static inline int xfs_drain_wait(struct xfs_drain *dr)
 	return wait_event_killable(dr->dr_waiters, !xfs_drain_busy(dr));
 }
 
+#ifdef CONFIG_XFS_RT
+# define xfs_rt_drain_bump(dr)	xfs_drain_bump(dr)
+# define xfs_rt_drain_drop(dr)	xfs_drain_drop(dr)
+
+/*
+ * Wait for the pending intent count for realtime metadata to hit zero.
+ * Callers must not hold any rt metadata inode locks.
+ */
+int
+xfs_rt_drain_intents(
+	struct xfs_mount	*mp)
+{
+	trace_xfs_rt_wait_intents(mp, __return_address);
+	return xfs_drain_wait(&mp->m_rt_intents);
+}
+#else
+# define trace_xfs_rt_bump_intents(...)
+# define trace_xfs_rt_drop_intents(...)
+# define xfs_rt_drain_bump(dr)
+# define xfs_rt_drain_drop(dr)
+#endif /* CONFIG_XFS_RT */
+
 /* Add an item to the pending count. */
 void
 xfs_fs_bump_intents(
@@ -1501,8 +1523,11 @@ xfs_fs_bump_intents(
 {
 	struct xfs_perag	*pag;
 
-	if (isrt)
+	if (isrt) {
+		trace_xfs_rt_bump_intents(mp, __return_address);
+		xfs_rt_drain_bump(&mp->m_rt_intents);
 		return;
+	}
 
 	pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, fsb));
 	trace_xfs_perag_bump_intents(pag, __return_address);
@@ -1519,8 +1544,11 @@ xfs_fs_drop_intents(
 {
 	struct xfs_perag	*pag;
 
-	if (isrt)
+	if (isrt) {
+		trace_xfs_rt_drop_intents(mp, __return_address);
+		xfs_rt_drain_drop(&mp->m_rt_intents);
 		return;
+	}
 
 	pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, fsb));
 	trace_xfs_perag_drop_intents(pag, __return_address);
