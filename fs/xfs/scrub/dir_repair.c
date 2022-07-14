@@ -39,6 +39,7 @@
 #include "scrub/xfblob.h"
 #include "scrub/readdir.h"
 #include "scrub/reap.h"
+#include "scrub/parent.h"
 
 /*
  * Directory Repair
@@ -1010,54 +1011,53 @@ xrep_dir_rebuild_tree(
 }
 
 /*
- * If we're the root of a directory tree, we are our own parent.  If we're an
- * unlinked directory, the parent /won't/ have a link to us.  Set the parent
- * directory to the root for both cases.  Returns NULLFSINO if we don't know
- * what to do.
- */
-static inline xfs_ino_t
-xrep_dir_self_parent(
-	struct xrep_dir		*rd)
-{
-	struct xfs_scrub	*sc = rd->sc;
-
-	if (sc->ip->i_ino == sc->mp->m_sb.sb_rootino)
-		return sc->mp->m_sb.sb_rootino;
-
-	if (VFS_I(sc->ip)->i_nlink == 0)
-		return sc->mp->m_sb.sb_rootino;
-
-	return NULLFSINO;
-}
-
-/*
- * Look up the dotdot entry.  Returns NULLFSINO if we don't know what to do.
- * The next patch will check this more carefully.
+ * Look up the dotdot entry and confirm that it's really the parent.
+ * Returns NULLFSINO if we don't know what to do.
  */
 static inline xfs_ino_t
 xrep_dir_lookup_parent(
 	struct xrep_dir		*rd)
 {
-	return xrep_dotdot_lookup(rd->sc);
+	struct xfs_scrub	*sc = rd->sc;
+	xfs_ino_t		parent_ino;
+	int			error;
+
+	parent_ino = xrep_dotdot_lookup(sc);
+	if (parent_ino == NULLFSINO)
+		return parent_ino;
+
+	error = xrep_parent_confirm(sc, &parent_ino);
+	if (error)
+		return NULLFSINO;
+
+	return parent_ino;
 }
 
-/*
- * Try to find the parent of the directory being repaired.
- *
- * NOTE: This function will someday be augmented by the directory parent repair
- * code, which will know how to check the parent and scan the filesystem if
- * we cannot find anything.  Inode scans will have to be done before we start
- * salvaging directory entries, so we do this now.
- */
+/* Try to find the parent of the directory being repaired. */
 STATIC int
 xrep_dir_find_parent(
 	struct xrep_dir		*rd)
 {
-	rd->parent_ino = xrep_dir_self_parent(rd);
+	int			error;
+
+	rd->parent_ino = xrep_parent_self_reference(rd->sc);
 	if (rd->parent_ino != NULLFSINO)
 		return 0;
 
 	rd->parent_ino = xrep_dir_lookup_parent(rd);
+	if (rd->parent_ino != NULLFSINO)
+		return 0;
+
+	/*
+	 * A full filesystem scan is the last resort.  On a busy filesystem,
+	 * the scan can fail with -EBUSY if we cannot grab IOLOCKs.  That means
+	 * that we don't know what who the parent is, so we should return to
+	 * userspace.
+	 */
+	error = xrep_parent_scan(rd->sc, &rd->parent_ino);
+	if (error)
+		return error;
+
 	if (rd->parent_ino != NULLFSINO)
 		return 0;
 
