@@ -11,6 +11,7 @@
 #include "xfs_mount.h"
 #include "xfs_ag.h"
 #include "xfs_trace.h"
+#include "xfs_rtgroup.h"
 
 /*
  * Use a static key here to reduce the overhead of xfs_drain_drop.  If the
@@ -119,3 +120,43 @@ xfs_perag_intents_busy(
 {
 	return xfs_drain_busy(&pag->pag_intents);
 }
+
+#ifdef CONFIG_XFS_RT
+/* Add an item to the pending count. */
+void
+xfs_rtgroup_bump_intents(
+	struct xfs_rtgroup	*rtg)
+{
+	trace_xfs_rtgroup_bump_intents(rtg, __return_address);
+	xfs_drain_bump(&rtg->rtg_intents);
+}
+
+/* Remove an item from the pending count. */
+void
+xfs_rtgroup_drop_intents(
+	struct xfs_rtgroup	*rtg)
+{
+	trace_xfs_rtgroup_drop_intents(rtg, __return_address);
+	xfs_drain_drop(&rtg->rtg_intents);
+}
+
+/*
+ * Wait for the pending intent count for realtime metadata to hit zero.
+ * Callers must not hold any rt metadata inode locks.
+ */
+int
+xfs_rtgroup_drain_intents(
+	struct xfs_rtgroup	*rtg)
+{
+	trace_xfs_rtgroup_wait_intents(rtg, __return_address);
+	return xfs_drain_wait(&rtg->rtg_intents);
+}
+
+/* Might someone else be processing intents for this rt group? */
+bool
+xfs_rtgroup_intents_busy(
+	struct xfs_rtgroup	*rtg)
+{
+	return xfs_drain_busy(&rtg->rtg_intents);
+}
+#endif /* CONFIG_XFS_RT */
