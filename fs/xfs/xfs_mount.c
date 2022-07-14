@@ -1390,15 +1390,14 @@ xfs_mod_delalloc(
 /* Increase the pending intent count. */
 static inline void xfs_drain_bump(struct xfs_drain *dr)
 {
-	atomic_inc(&dr->dr_count);
+	percpu_counter_add_batch(&dr->dr_count, 1, XFS_DRAIN_BATCH);
 }
 
 /* Decrease the pending intent count, and wake any waiters, if appropriate. */
 static inline void xfs_drain_drop(struct xfs_drain *dr)
 {
-	if (atomic_dec_and_test(&dr->dr_count) &&
-	    wq_has_sleeper(&dr->dr_waiters))
-		wake_up(&dr->dr_waiters);
+	percpu_counter_add_batch(&dr->dr_count, -1, XFS_DRAIN_BATCH);
+	wake_up(&dr->dr_waiters);
 }
 
 /*
@@ -1409,6 +1408,9 @@ static inline void xfs_drain_drop(struct xfs_drain *dr)
  */
 static inline int xfs_drain_wait(struct xfs_drain *dr)
 {
+	if (!xfs_drain_busy(dr))
+		return 0;
+
 	return wait_event_killable(dr->dr_waiters, !xfs_drain_busy(dr));
 }
 
