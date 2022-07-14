@@ -13,6 +13,7 @@ struct xfs_ail;
 struct xfs_quotainfo;
 struct xfs_da_geometry;
 struct xfs_perag;
+struct xfs_rtgroup;
 
 /* dynamic preallocation free space thresholds, 5% down to 1% */
 enum {
@@ -139,6 +140,16 @@ void xfs_ag_drop_intents(struct xfs_perag *pag);
 int xfs_ag_drain_intents(struct xfs_perag *pag);
 bool xfs_ag_intents_busy(struct xfs_perag *pag);
 
+#ifdef CONFIG_XFS_RT
+void xfs_rtgroup_bump_intents(struct xfs_rtgroup *rtg);
+void xfs_rtgroup_drop_intents(struct xfs_rtgroup *rtg);
+int xfs_rtgroup_drain_intents(struct xfs_rtgroup *rtg);
+bool xfs_rtgroup_intents_busy(struct xfs_rtgroup *rtg);
+#else
+static inline void xfs_rtgroup_bump_intents(struct xfs_rtgroup *rtg) { }
+static inline void xfs_rtgroup_drop_intents(struct xfs_rtgroup *rtg) { }
+#endif /* CONFIG_XFS_RT */
+
 void xfs_drain_wait_disable(void);
 void xfs_drain_wait_enable(void);
 
@@ -163,6 +174,8 @@ struct xfs_drain { /* empty */ };
 
 static inline void xfs_ag_bump_intents(struct xfs_perag *pag) { }
 static inline void xfs_ag_drop_intents(struct xfs_perag *pag) { }
+static inline void xfs_rtgroup_bump_intents(struct xfs_rtgroup *rtg) { }
+static inline void xfs_rtgroup_drop_intents(struct xfs_rtgroup *rtg) { }
 
 # define xfs_drain_init(dr)	((void)0)
 # define xfs_drain_free(dr)	((void)0)
