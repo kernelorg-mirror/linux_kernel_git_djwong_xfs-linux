@@ -925,7 +925,7 @@ xrep_ag_init(
 }
 
 /* Initialize all the btree cursors for a RT repair. */
-static void
+void
 xrep_rtgroup_btcur_init(
 	struct xfs_scrub	*sc,
 	struct xchk_rt		*sr)
