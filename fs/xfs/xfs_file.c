@@ -1181,7 +1181,7 @@ xfs_file_xchg_range(
 		goto out_err;
 
 	/* Prepare and then exchange file contents. */
-	error = xfs_xchg_range_prep(file1, file2, fxr);
+	error = xfs_xchg_range_prep(file1, file2, fxr, priv_flags);
 	if (error)
 		goto out_unlock;
 
