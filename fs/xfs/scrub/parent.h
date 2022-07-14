@@ -10,6 +10,7 @@ int xchk_parent_lock_two_dirs(struct xfs_scrub *sc, struct xfs_inode *dp);
 
 int xrep_parent_confirm(struct xfs_scrub *sc, xfs_ino_t *parent_ino);
 int xrep_parent_scan(struct xfs_scrub *sc, xfs_ino_t *parent_ino);
+xfs_ino_t xrep_parent_from_dcache(struct xfs_scrub *sc);
 
 xfs_ino_t xrep_parent_self_reference(struct xfs_scrub *sc);
 
