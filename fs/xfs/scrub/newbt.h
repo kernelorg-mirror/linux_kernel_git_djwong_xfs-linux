@@ -50,6 +50,9 @@ struct xrep_newbt {
 	enum xfs_ag_resv_type	resv;
 };
 
+#define for_each_xrep_newbt_reservation(xnr, resv, n)	\
+	list_for_each_entry_safe((resv), (n), &(xnr)->resv_list, list)
+
 void xrep_newbt_init_bare(struct xrep_newbt *xnr, struct xfs_scrub *sc);
 void xrep_newbt_init_ag(struct xrep_newbt *xnr, struct xfs_scrub *sc,
 		const struct xfs_owner_info *oinfo, xfs_fsblock_t alloc_hint,
