@@ -29,6 +29,7 @@
 #include "xfs_iomap.h"
 #include "xfs_reflink.h"
 #include "xfs_swapext.h"
+#include "xfs_rtrmap_btree.h"
 
 /* Kernel only BMAP related definitions and functions */
 
@@ -241,6 +242,29 @@ xfs_bmap_count_leaves(
 	return numrecs;
 }
 
+/* Count the number of blocks used by a btree rooted in an inode fork. */
+static int
+xfs_bmap_count_btblocks(
+	struct xfs_btree_cur	*cur,
+	xfs_filblks_t		*count)
+{
+	xfs_extlen_t		btblocks = 0;
+	int			error;
+
+	error = xfs_btree_count_blocks(cur, &btblocks);
+	xfs_btree_del_cursor(cur, error);
+	if (error)
+		return error;
+
+	/*
+	 * xfs_btree_count_blocks includes the root block contained in
+	 * the inode fork in @btblocks, so subtract one because we're
+	 * only interested in allocated disk blocks.
+	 */
+	*count += btblocks - 1;
+	return 0;
+}
+
 /*
  * Count fsblocks of the given fork.  Delayed allocation extents are
  * not counted towards the totals.
@@ -256,7 +280,6 @@ xfs_bmap_count_blocks(
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_ifork	*ifp = xfs_ifork_ptr(ip, whichfork);
 	struct xfs_btree_cur	*cur;
-	xfs_extlen_t		btblocks = 0;
 	int			error;
 
 	*nextents = 0;
@@ -266,23 +289,18 @@ xfs_bmap_count_blocks(
 		return 0;
 
 	switch (ifp->if_format) {
+	case XFS_DINODE_FMT_RMAP:
+		cur = xfs_rtrmapbt_init_cursor(mp, tp, ip);
+		return xfs_bmap_count_btblocks(cur, count);
 	case XFS_DINODE_FMT_BTREE:
 		error = xfs_iread_extents(tp, ip, whichfork);
 		if (error)
 			return error;
 
 		cur = xfs_bmbt_init_cursor(mp, tp, ip, whichfork);
-		error = xfs_btree_count_blocks(cur, &btblocks);
-		xfs_btree_del_cursor(cur, error);
+		error = xfs_bmap_count_btblocks(cur, count);
 		if (error)
 			return error;
-
-		/*
-		 * xfs_btree_count_blocks includes the root block contained in
-		 * the inode fork in @btblocks, so subtract one because we're
-		 * only interested in allocated disk blocks.
-		 */
-		*count += btblocks - 1;
 
 		fallthrough;
 	case XFS_DINODE_FMT_EXTENTS:
