@@ -49,6 +49,7 @@ xfs_check_ondisk_structs(void)
 	XFS_CHECK_STRUCT_SIZE(struct xfs_legacy_timestamp,	8);
 	XFS_CHECK_STRUCT_SIZE(struct xfs_rtrefcount_key,	4);
 	XFS_CHECK_STRUCT_SIZE(struct xfs_rtrefcount_rec,	12);
+	XFS_CHECK_STRUCT_SIZE(struct xfs_rtrefcount_root,	4);
 	XFS_CHECK_STRUCT_SIZE(struct xfs_rtrmap_key,		20);
 	XFS_CHECK_STRUCT_SIZE(struct xfs_rtrmap_rec,		24);
 	XFS_CHECK_STRUCT_SIZE(struct xfs_rtrmap_root,		4);
