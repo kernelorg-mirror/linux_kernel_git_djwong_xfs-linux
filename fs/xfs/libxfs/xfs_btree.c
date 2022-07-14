@@ -5020,11 +5020,32 @@ struct xfs_btree_scan_keyfill {
 	union xfs_btree_key	start_key;
 	union xfs_btree_key	end_key;
 
+	/* Mask for key comparisons, if desired. */
+	union xfs_btree_key	*key_mask;
+
 	/* Highest record key we've seen so far. */
 	union xfs_btree_key	high_key;
 
 	enum xfs_btree_keyfill	outcome;
 };
+
+STATIC int64_t
+xfs_btree_diff_two_masked_keys(
+	struct xfs_btree_cur		*cur,
+	const union xfs_btree_key	*key1,
+	const union xfs_btree_key	*key2,
+	const union xfs_btree_key	*mask)
+{
+	union xfs_btree_key		mk1, mk2;
+
+	if (likely(!mask))
+		return cur->bc_ops->diff_two_keys(cur, key1, key2);
+
+	cur->bc_ops->mask_key(cur, &mk1, key1, mask);
+	cur->bc_ops->mask_key(cur, &mk2, key2, mask);
+
+	return cur->bc_ops->diff_two_keys(cur, &mk1, &mk2);
+}
 
 STATIC int
 xfs_btree_scan_keyfill_helper(
@@ -5043,19 +5064,22 @@ xfs_btree_scan_keyfill_helper(
 		info->outcome = XFS_BTREE_KEYFILL_SPARSE;
 
 		/* Bail if the first record starts after the start key. */
-		res = cur->bc_ops->diff_two_keys(cur, &info->start_key,
-				&rec_key);
+		res = xfs_btree_diff_two_masked_keys(cur, &info->start_key,
+				&rec_key, info->key_mask);
 		if (res < 0)
 			return -ECANCELED;
 	} else {
 		/* Bail if there's a gap with the previous record. */
-		if (cur->bc_ops->has_key_gap(cur, &info->high_key, &rec_key))
+		if (cur->bc_ops->has_key_gap(cur, &info->high_key, &rec_key,
+					info->key_mask))
 			return -ECANCELED;
 	}
 
 	/* If the current record is higher than what we've seen, remember it. */
 	cur->bc_ops->init_high_key_from_rec(&rec_high_key, rec);
-	res = cur->bc_ops->diff_two_keys(cur, &rec_high_key, &info->high_key);
+
+	res = xfs_btree_diff_two_masked_keys(cur, &rec_high_key,
+			&info->high_key, info->key_mask);
 	if (res > 0)
 		info->high_key = rec_high_key; /* struct copy */
 
@@ -5071,11 +5095,13 @@ xfs_btree_scan_keyfill(
 	struct xfs_btree_cur		*cur,
 	const union xfs_btree_irec	*low,
 	const union xfs_btree_irec	*high,
+	const union xfs_btree_irec	*mask,
 	enum xfs_btree_keyfill		*outcome)
 {
 	struct xfs_btree_scan_keyfill	info = {
 		.outcome		= XFS_BTREE_KEYFILL_EMPTY,
 	};
+	union xfs_btree_key		key_mask;
 	int64_t				res;
 	int				error;
 
@@ -5084,6 +5110,10 @@ xfs_btree_scan_keyfill(
 
 	xfs_btree_key_from_irec(cur, &info.start_key, low);
 	xfs_btree_key_from_irec(cur, &info.end_key, high);
+	if (mask) {
+		xfs_btree_key_from_irec(cur, &key_mask, mask);
+		info.key_mask = &key_mask;
+	}
 
 	error = xfs_btree_query_range(cur, low, high,
 			xfs_btree_scan_keyfill_helper, &info);
@@ -5096,7 +5126,8 @@ xfs_btree_scan_keyfill(
 		goto out;
 
 	/* Did the record set go at least as far as the end? */
-	res = cur->bc_ops->diff_two_keys(cur, &info.high_key, &info.end_key);
+	res = xfs_btree_diff_two_masked_keys(cur, &info.high_key,
+			&info.end_key, info.key_mask);
 	if (res >= 0)
 		info.outcome = XFS_BTREE_KEYFILL_FULL;
 
