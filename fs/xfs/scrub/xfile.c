@@ -333,3 +333,114 @@ xfile_stat(
 	statbuf->bytes = ks.blocks << SECTOR_SHIFT;
 	return 0;
 }
+
+/*
+ * Grab the (locked) page for a memory object.  The object cannot span a page
+ * boundary.  Returns 0 (and a locked page) if successful, -ENOTBLK if we
+ * cannot grab the page, or the usual negative errno.
+ */
+int
+xfile_obj_get_page(
+	struct xfile		*xf,
+	loff_t			pos,
+	unsigned int		len,
+	struct page		**pagep,
+	void			**fsdatap)
+{
+	struct inode		*inode = file_inode(xf->file);
+	struct address_space	*mapping = inode->i_mapping;
+	const struct address_space_operations *aops = mapping->a_ops;
+	struct page		*page = NULL;
+	void			*fsdata = NULL;
+	unsigned int		pflags;
+	int			error;
+
+	if (inode->i_sb->s_maxbytes - pos < len)
+		return -ENOMEM;
+	if (len > PAGE_SIZE - offset_in_page(pos))
+		return -ENOTBLK;
+
+	trace_xfile_obj_get_page(xf, pos, len);
+
+	pflags = memalloc_nofs_save();
+
+	/*
+	 * We call write_begin directly here to avoid all the freezer
+	 * protection lock-taking that happens in the normal path.  shmem
+	 * doesn't support fs freeze, but lockdep doesn't know that and will
+	 * trip over that.
+	 */
+	error = aops->write_begin(NULL, mapping, pos, len, &page, &fsdata);
+	if (error)
+		goto out_pflags;
+
+	/* Bail out if the memory page is poisoned. */
+	if (PageHWPoison(page)) {
+		int	ret;
+
+		ret = aops->write_end(NULL, mapping, pos, len, 0, page,
+				fsdata);
+		if (ret < 0)
+			error = ret;
+		else
+			error = -EIO;
+		goto out_pflags;
+	}
+
+	/* We got the page, so make sure we push out EOF. */
+	if (i_size_read(inode) < pos + len)
+		i_size_write(inode, pos + len);
+
+	/*
+	 * If the page isn't up to date, fill it with zeroes before we hand it
+	 * to the caller and make sure the backing store will hold on to them.
+	 */
+	if (!PageUptodate(page)) {
+		void	*kaddr;
+
+		kaddr = kmap_local_page(page);
+		memset(kaddr, 0, PAGE_SIZE);
+		kunmap_local(kaddr);
+		SetPageUptodate(page);
+		set_page_dirty(page);
+	}
+
+	*pagep = page;
+	*fsdatap = fsdata;
+out_pflags:
+	memalloc_nofs_restore(pflags);
+	return error;
+}
+
+/*
+ * Release the (locked) page for a memory object.  The page must have been
+ * obtained by xfile_obj_get_page.  Returns 0 or a negative errno.
+ */
+int
+xfile_obj_put_page(
+	struct xfile		*xf,
+	loff_t			pos,
+	unsigned int		len,
+	struct page		*page,
+	void			*fsdata)
+{
+	struct inode		*inode = file_inode(xf->file);
+	struct address_space	*mapping = inode->i_mapping;
+	const struct address_space_operations *aops = mapping->a_ops;
+	unsigned int		pflags;
+	int			ret;
+
+	ASSERT(len <= PAGE_SIZE - offset_in_page(pos));
+
+	trace_xfile_obj_put_page(xf, pos, len);
+
+	pflags = memalloc_nofs_save();
+	ret = aops->write_end(NULL, mapping, pos, len, len, page, fsdata);
+	memalloc_nofs_restore(pflags);
+
+	if (ret < 0)
+		return ret;
+	if (ret != len)
+		return -EIO;
+	return 0;
+}
