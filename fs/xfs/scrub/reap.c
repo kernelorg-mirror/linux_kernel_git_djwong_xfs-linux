@@ -382,7 +382,8 @@ xreap_agextent(
 
 		rs->force_roll = true;
 		xfs_refcount_free_cow_extent(sc->tp, fsbno, *aglenp);
-		__xfs_free_extent_later(sc->tp, fsbno, *aglenp, NULL, true);
+		xfs_free_extent_later(sc->tp, fsbno, *aglenp, NULL,
+				XFS_FREE_EXTENT_SKIP_DISCARD);
 		return 0;
 	}
 
@@ -412,7 +413,8 @@ xreap_agextent(
 		 * to minimize the window in which we could crash and lose the
 		 * old blocks.
 		 */
-		__xfs_free_extent_later(sc->tp, fsbno, *aglenp, rs->oinfo, true);
+		xfs_free_extent_later(sc->tp, fsbno, *aglenp, rs->oinfo,
+				XFS_FREE_EXTENT_SKIP_DISCARD);
 		rs->deferred++;
 		break;
 	}
@@ -966,8 +968,9 @@ xreap_ifork_extent(
 		xfs_bmap_unmap_extent(sc->tp, ip, whichfork, imap);
 		xfs_trans_mod_dquot_byino(sc->tp, ip, XFS_TRANS_DQ_BCOUNT,
 				-(int64_t)imap->br_blockcount);
-		__xfs_free_extent_later(sc->tp, imap->br_startblock,
-				imap->br_blockcount, NULL, true);
+		xfs_free_extent_later(sc->tp, imap->br_startblock,
+				imap->br_blockcount, NULL,
+				XFS_FREE_EXTENT_SKIP_DISCARD);
 	}
 
 out_agf:
