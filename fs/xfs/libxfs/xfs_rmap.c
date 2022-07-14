@@ -254,7 +254,11 @@ xfs_rmap_get_rec(
 	if (irec->rm_blockcount == 0)
 		goto out_bad_rec;
 	if (cur->bc_flags & XFS_BTREE_IN_MEMORY) {
-		if (!xfs_rmapbt_mem_verify_rec(cur, irec))
+		if (cur->bc_btnum == XFS_BTNUM_RMAP &&
+		    !xfs_rmapbt_mem_verify_rec(cur, irec))
+			goto out_bad_rec;
+		if (cur->bc_btnum == XFS_BTNUM_RTRMAP &&
+		    !xfs_rtrmapbt_mem_verify_rec(cur, irec))
 			goto out_bad_rec;
 	} else if (cur->bc_btnum == XFS_BTNUM_RTRMAP) {
 		struct xfs_rtgroup	*rtg = cur->bc_ino.rtg;
