@@ -293,7 +293,7 @@ xrep_bmap_check_rtfork_rmap(
 
 	/* Make sure this isn't free space. */
 	return xrep_require_rtext_inuse(sc, rec->rm_startblock,
-			rec->rm_blockcount);
+			rec->rm_blockcount, false);
 }
 
 /* Record realtime extents that belong to this inode's fork. */
