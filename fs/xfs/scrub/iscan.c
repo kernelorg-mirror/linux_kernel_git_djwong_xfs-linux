@@ -342,8 +342,13 @@ xchk_iscan_iget(
 		 * It's possible that this inode has lost all of its links but
 		 * hasn't yet been inactivated.  If we don't have a transaction
 		 * or it's not writable, flush the inodegc workers and wait.
+		 * Otherwise, we have a dirty transaction in progress and the
+		 * best we can do is to queue the inodegc workers.
 		 */
-		xfs_inodegc_flush(mp);
+		if (!iscan->iget_nowait)
+			xfs_inodegc_flush(mp);
+		else
+			xfs_inodegc_push(mp);
 		return xchk_iscan_iget_retry(mp, iscan, true);
 	}
 
