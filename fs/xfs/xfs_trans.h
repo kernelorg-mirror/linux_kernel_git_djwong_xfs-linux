@@ -155,6 +155,13 @@ typedef struct xfs_trans {
 	struct list_head	t_busy;		/* list of busy extents */
 	struct list_head	t_dfops;	/* deferred operations */
 	unsigned long		t_pflags;	/* saved process flags state */
+
+	/* Count of deferred ops attached to transaction. */
+	unsigned int		t_dfops_nr;
+	/* Maximum t_dfops_nr seen in a loop. */
+	unsigned int		t_dfops_nr_max;
+	/* Number of dfops finished. */
+	unsigned int		t_dfops_finished;
 } xfs_trans_t;
 
 /*
