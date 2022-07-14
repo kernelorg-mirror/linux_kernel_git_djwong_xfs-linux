@@ -93,9 +93,8 @@ void xfs_inobt_btrec_to_irec(struct xfs_mount *mp,
 		const union xfs_btree_rec *rec,
 		struct xfs_inobt_rec_incore *irec);
 int xfs_ialloc_has_inodes_at_extent(struct xfs_btree_cur *cur,
-		xfs_agblock_t bno, xfs_extlen_t len, bool *exists);
-int xfs_ialloc_has_inode_record(struct xfs_btree_cur *cur, xfs_agino_t low,
-		xfs_agino_t high, bool *exists);
+		xfs_agblock_t bno, xfs_extlen_t len,
+		enum xfs_btree_keyfill *outcome);
 int xfs_ialloc_count_inodes(struct xfs_btree_cur *cur, xfs_agino_t *count,
 		xfs_agino_t *freecount);
 int xfs_inobt_insert_rec(struct xfs_btree_cur *cur, uint16_t holemask,
