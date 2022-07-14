@@ -431,10 +431,10 @@ xchk_btree_check_owner(
 	 * later scanning.
 	 */
 	if (cur->bc_btnum == XFS_BTNUM_BNO || cur->bc_btnum == XFS_BTNUM_RMAP) {
-		co = kmem_alloc(sizeof(struct check_owner),
-				KM_MAYFAIL);
+		co = kmalloc(sizeof(struct check_owner), XCHK_GFP_FLAGS);
 		if (!co)
 			return -ENOMEM;
+		INIT_LIST_HEAD(&co->list);
 		co->level = level;
 		co->daddr = xfs_buf_daddr(bp);
 		list_add_tail(&co->list, &bs->to_check);
@@ -649,7 +649,7 @@ xchk_btree(
 		xchk_btree_set_corrupt(sc, cur, 0);
 		return 0;
 	}
-	bs = kmem_zalloc(cur_sz, KM_NOFS | KM_MAYFAIL);
+	bs = kzalloc(cur_sz, XCHK_GFP_FLAGS);
 	if (!bs)
 		return -ENOMEM;
 	bs->cur = cur;
@@ -740,9 +740,9 @@ out:
 			error = xchk_btree_check_block_owner(bs, co->level,
 					co->daddr);
 		list_del(&co->list);
-		kmem_free(co);
+		kfree(co);
 	}
-	kmem_free(bs);
+	kfree(bs);
 
 	return error;
 }
