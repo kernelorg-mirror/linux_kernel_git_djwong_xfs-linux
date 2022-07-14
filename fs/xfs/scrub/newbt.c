@@ -338,7 +338,10 @@ xrep_newbt_alloc_blocks(
 			.resv		= xnr->resv,
 		};
 
-		error = xfs_alloc_vextent(&args);
+		if (xnr->alloc_vextent)
+			error = xnr->alloc_vextent(sc, &args);
+		else
+			error = xfs_alloc_vextent(&args);
 		if (error)
 			return error;
 		if (args.fsbno == NULLFSBLOCK)
