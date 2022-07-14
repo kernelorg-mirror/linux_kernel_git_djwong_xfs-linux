@@ -26,6 +26,9 @@ xchk_setup_rgbitmap(
 {
 	int			error;
 
+	if (xchk_need_fshook_drain(sc))
+		xchk_fshooks_enable(sc, XCHK_FSHOOKS_DRAIN);
+
 	error = xchk_trans_alloc(sc, 0);
 	if (error)
 		return error;
