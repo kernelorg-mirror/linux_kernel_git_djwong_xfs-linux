@@ -172,6 +172,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   agheader_repair.o \
 				   alloc_repair.o \
 				   ialloc_repair.o \
+				   refcount_repair.o \
 				   repair.o \
 				   )
 endif
