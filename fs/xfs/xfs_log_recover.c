@@ -137,7 +137,8 @@ xlog_do_io(
 	nbblks = round_up(nbblks, log->l_sectBBsize);
 	ASSERT(nbblks > 0);
 
-	error = xfs_rw_bdev(log->l_targ->bt_bdev, log->l_logBBstart + blk_no,
+	error = xfs_rw_bdev(xfs_buftarg_bdev(log->l_targ),
+			log->l_logBBstart + blk_no,
 			BBTOB(nbblks), data, op);
 	if (error && !xlog_is_shutdown(log)) {
 		xfs_alert(log->l_mp,
