@@ -851,7 +851,12 @@ xchk_install_handle_inode(
 	struct xfs_scrub	*sc,
 	struct xfs_inode	*ip)
 {
-	if (VFS_I(ip)->i_generation != sc->sm->sm_gen) {
+	/*
+	 * Only the directories in the metadata directory tree can be scrubbed
+	 * by handle -- files must be checked through an explicit scrub type.
+	 */
+	if ((xfs_is_metadata_inode(ip) && !S_ISDIR(VFS_I(ip)->i_mode)) ||
+	    VFS_I(ip)->i_generation != sc->sm->sm_gen) {
 		xchk_irele(sc, ip);
 		return -ENOENT;
 	}
