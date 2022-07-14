@@ -153,6 +153,7 @@ xchk_ag_init_existing(
 
 int xchk_rt_init(struct xfs_scrub *sc, struct xchk_rt *sr);
 void xchk_rtgroup_btcur_free(struct xchk_rt *sr);
+int xchk_rtgroup_lock(struct xfs_scrub *sc, struct xchk_rt *sr);
 void xchk_rt_unlock(struct xfs_scrub *sc, struct xchk_rt *sr);
 int xchk_rtgroup_init(struct xfs_scrub *sc, xfs_rgnumber_t rgno,
 		struct xchk_rt *sr);
