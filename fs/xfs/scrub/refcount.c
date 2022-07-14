@@ -333,6 +333,9 @@ xchk_refcountbt_xref(
 }
 
 struct xchk_refcbt_records {
+	/* Previous refcount record. */
+	struct xfs_refcount_irec prev_rec;
+
 	/* The next AG block where we aren't expecting shared extents. */
 	xfs_agblock_t		next_unshared_agbno;
 
@@ -387,6 +390,52 @@ xchk_refcountbt_xref_gaps(
 		xchk_should_check_xref(sc, &error, &sc->sa.rmap_cur);
 }
 
+static inline bool
+xchk_refcount_mergeable(
+	struct xchk_refcbt_records	*rrc,
+	const struct xfs_refcount_irec	*r2)
+{
+	const struct xfs_refcount_irec	*r1 = &rrc->prev_rec;
+
+	/* Ignore if prev_rec is not yet initialized. */
+	if (r1->rc_blockcount > 0)
+		return false;
+
+	if (r1->rc_startblock + r1->rc_blockcount != r2->rc_startblock)
+		return false;
+	if (r1->rc_refcount != r2->rc_refcount)
+		return false;
+	if ((unsigned long long)r1->rc_blockcount + r2->rc_blockcount >
+			MAXREFCEXTLEN)
+		return false;
+
+	return true;
+}
+
+/* Flag failures for records that could be merged. */
+STATIC void
+xchk_refcountbt_check_mergeable(
+	struct xchk_btree		*bs,
+	struct xchk_refcbt_records	*rrc,
+	xfs_agblock_t			bno,
+	xfs_extlen_t			len,
+	xfs_nlink_t			refcount)
+{
+	struct xfs_refcount_irec	irec = {
+		.rc_startblock		= bno,
+		.rc_blockcount		= len,
+		.rc_refcount		= refcount,
+	};
+
+	if (bs->sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
+		return;
+
+	if (xchk_refcount_mergeable(rrc, &irec))
+		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
+
+	memcpy(&rrc->prev_rec, &irec, sizeof(struct xfs_refcount_irec));
+}
+
 /* Scrub a refcountbt record. */
 STATIC int
 xchk_refcountbt_rec(
@@ -421,6 +470,7 @@ xchk_refcountbt_rec(
 	if (refcount == 0)
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 
+	xchk_refcountbt_check_mergeable(bs, rrc, bno, len, refcount);
 	xchk_refcountbt_xref(bs->sc, bno, len, refcount);
 
 	/*
