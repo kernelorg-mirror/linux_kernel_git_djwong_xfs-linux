@@ -649,7 +649,7 @@ xrep_bmap_cow(
 	 * like inode metadata.
 	 */
 	error = xrep_reap_fsblocks(sc, &xc->old_cowfork_fsblocks,
-			&XFS_RMAP_OINFO_COW);
+			&XFS_RMAP_OINFO_COW, XFS_AG_RESV_NONE);
 	if (error)
 		goto out_bitmap;
 
