@@ -335,7 +335,7 @@ xrep_cow_alloc(
 	if (args.fsbno == NULLFSBLOCK)
 		return -ENOSPC;
 
-	xfs_refcount_alloc_cow_extent(sc->tp, args.fsbno, args.len);
+	xfs_refcount_alloc_cow_extent(sc->tp, false, args.fsbno, args.len);
 
 	irec->br_startblock = args.fsbno;
 	irec->br_blockcount = args.len;
