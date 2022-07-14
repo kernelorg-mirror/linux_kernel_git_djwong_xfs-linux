@@ -114,7 +114,7 @@ xreap_put_freelist(
 	int			error;
 
 	/* Make sure there's space on the freelist. */
-	error = xrep_fix_freelist(sc, true);
+	error = xrep_fix_freelist(sc, 0);
 	if (error)
 		return error;
 
@@ -366,10 +366,14 @@ xreap_agextent(
 		rs->force_roll = true;
 		break;
 	case XFS_AG_RESV_IGNORE:
+	case XFS_AG_RESV_RMAPBT:
 		/*
 		 * bnobt/cntbt blocks are counted as free space, so we pass
 		 * XFS_AG_RESV_IGNORE when reaping the old free space btree
 		 * blocks to avoid changing fdblocks.
+		 *
+		 * rmapbt blocks are also counted as free space, but they have
+		 * their own per-AG reservation type.
 		 */
 		error = __xfs_free_extent(sc->tp, fsbno, *aglenp, rs->oinfo,
 				rs->resv, true);
