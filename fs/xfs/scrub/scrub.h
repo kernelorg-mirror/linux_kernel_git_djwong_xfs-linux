@@ -121,10 +121,12 @@ struct xfs_scrub {
 #define XCHK_REAPING_DISABLED	(1 << 1)  /* background block reaping paused */
 #define XCHK_FSHOOKS_DRAIN	(1 << 2)  /* defer ops draining enabled */
 #define XCHK_NEED_DRAIN		(1 << 3)  /* scrub needs to use intent drain */
+#define XCHK_FSHOOKS_QUOTA	(1 << 4)  /* quota live update enabled */
 #define XREP_RESET_PERAG_RESV	(1 << 30) /* must reset AG space reservation */
 #define XREP_ALREADY_FIXED	(1 << 31) /* checking our repair work */
 
-#define XCHK_FSHOOKS_ALL	(XCHK_FSHOOKS_DRAIN)
+#define XCHK_FSHOOKS_ALL	(XCHK_FSHOOKS_DRAIN | \
+				 XCHK_FSHOOKS_QUOTA)
 
 /* Metadata scrubbers */
 int xchk_tester(struct xfs_scrub *sc);
