@@ -36,6 +36,16 @@ int xrep_init_btblock(struct xfs_scrub *sc, xfs_fsblock_t fsb,
 		struct xfs_buf **bpp, xfs_btnum_t btnum,
 		const struct xfs_buf_ops *ops);
 
+static inline int
+xrep_trans_commit(
+	struct xfs_scrub	*sc)
+{
+	int			error = xfs_trans_commit(sc->tp);
+
+	sc->tp = NULL;
+	return error;
+}
+
 struct xbitmap;
 
 int xrep_fix_freelist(struct xfs_scrub *sc, bool can_shrink);
@@ -61,10 +71,15 @@ int xrep_find_ag_btree_roots(struct xfs_scrub *sc, struct xfs_buf *agf_bp,
 		struct xrep_find_ag_btree *btree_info, struct xfs_buf *agfl_bp);
 void xrep_force_quotacheck(struct xfs_scrub *sc, xfs_dqtype_t type);
 int xrep_ino_dqattach(struct xfs_scrub *sc);
+int xrep_ino_ensure_extent_count(struct xfs_scrub *sc, int whichfork,
+		xfs_extnum_t nextents);
 int xrep_reset_perag_resv(struct xfs_scrub *sc);
 
 /* Repair setup functions */
 int xrep_setup_ag_allocbt(struct xfs_scrub *sc);
+
+struct xfs_imap;
+int xrep_setup_inode(struct xfs_scrub *sc, struct xfs_imap *imap);
 
 void xrep_ag_btcur_init(struct xfs_scrub *sc, struct xchk_ag *sa);
 
@@ -83,6 +98,7 @@ int xrep_agi(struct xfs_scrub *sc);
 int xrep_allocbt(struct xfs_scrub *sc);
 int xrep_iallocbt(struct xfs_scrub *sc);
 int xrep_refcountbt(struct xfs_scrub *sc);
+int xrep_inode(struct xfs_scrub *sc);
 
 struct xrep_newbt_resv {
 	/* Link to list of extents that we've reserved. */
@@ -182,6 +198,8 @@ xrep_setup_nothing(
 }
 #define xrep_setup_ag_allocbt		xrep_setup_nothing
 
+#define xrep_setup_inode(sc, imap)	((void)0)
+
 #define xrep_revalidate_allocbt		(NULL)
 #define xrep_revalidate_iallocbt	(NULL)
 
@@ -193,6 +211,7 @@ xrep_setup_nothing(
 #define xrep_allocbt			xrep_notsupported
 #define xrep_iallocbt			xrep_notsupported
 #define xrep_refcountbt			xrep_notsupported
+#define xrep_inode			xrep_notsupported
 
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
