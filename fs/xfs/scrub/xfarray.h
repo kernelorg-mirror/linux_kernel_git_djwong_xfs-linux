@@ -81,6 +81,13 @@ struct xfarray_sortinfo {
 	/* XFARRAY_SORT_* flags; see below. */
 	unsigned int		flags;
 
+	/* Cache a page here for faster access. */
+	unsigned int		page_len;
+	struct page		*page;
+	void			*page_fsdata;
+	void			*page_kaddr;
+	loff_t			page_pos;
+
 #ifdef DEBUG
 	/* Performance statistics. */
 	uint64_t		loads;
