@@ -12,6 +12,9 @@ struct xrep_newbt_resv {
 
 	struct xfs_perag	*pag;
 
+	/* EFI tracking this space reservation */
+	struct xfs_log_item	*efi;
+
 	/* AG block of the extent we reserved. */
 	xfs_agblock_t		agbno;
 
@@ -60,5 +63,6 @@ void xrep_newbt_cancel(struct xrep_newbt *xnr);
 int xrep_newbt_commit(struct xrep_newbt *xnr);
 int xrep_newbt_claim_block(struct xfs_btree_cur *cur, struct xrep_newbt *xnr,
 		union xfs_btree_ptr *ptr);
+int xrep_newbt_relog_autoreap(struct xrep_newbt *xnr);
 
 #endif /* __XFS_SCRUB_NEWBT_H__ */
