@@ -1869,6 +1869,35 @@ typedef __be32 xfs_refcount_ptr_t;
 #define	XFS_RTREFC_CRC_MAGIC	0x52434e54	/* 'RCNT' */
 
 /*
+ * Extents that are being used to stage a copy on write are stored
+ * in the refcount btree with a refcount of 1 and the upper bit set
+ * on the startblock.  This speeds up mount time deletion of stale
+ * staging extents because they're all at the right side of the tree.
+ */
+#define XFS_RTREFC_COW_START		((xfs_rgblock_t)(1U << 31))
+#define RTREFCNTBT_COWFLAG_BITLEN	1
+#define RTREFCNTBT_RTBLOCK_BITLEN	31
+#define XFS_RTREFC_REFCOUNT_MAX		((xfs_nlink_t)~0U)
+#define XFS_RTREFC_LEN_MAX		((xfs_extlen_t)~0U)
+
+/*
+ * Reference count record for realtime volumes.  Note that the units here are
+ * rt group blocks, even though allocations are done in units of rt extents.
+ */
+struct xfs_rtrefcount_rec {
+	__be32		rc_startblock;	/* starting block number */
+	__be32		rc_blockcount;	/* count of blocks */
+	__be32		rc_refcount;	/* number of inodes linked here */
+} __attribute__((packed));
+
+struct xfs_rtrefcount_key {
+	__be32		rc_startblock;	/* starting block number */
+};
+
+/* btree pointer type */
+typedef __be64 xfs_rtrefcount_ptr_t;
+
+/*
  * BMAP Btree format definitions
  *
  * This includes both the root block definition that sits inside an inode fork
