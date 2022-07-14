@@ -20,6 +20,8 @@
 #include "xfs_rmap.h"
 #include "xfs_rmap_btree.h"
 #include "xfs_rtgroup.h"
+#include "xfs_rtalloc.h"
+#include "xfs_rtrmap_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/btree.h"
@@ -669,12 +671,20 @@ xchk_bmap_check_rmap(
 	 */
 	check_rec = *rec;
 	while (have_map) {
+		xfs_fsblock_t	startblock;
+
 		if (irec.br_startoff != check_rec.rm_offset)
 			xchk_fblock_set_corrupt(sc, sbcri->whichfork,
 					check_rec.rm_offset);
-		if (irec.br_startblock != XFS_AGB_TO_FSB(sc->mp,
-				cur->bc_ag.pag->pag_agno,
-				check_rec.rm_startblock))
+		if (cur->bc_btnum == XFS_BTNUM_RMAP)
+			startblock = XFS_AGB_TO_FSB(sc->mp,
+					cur->bc_ag.pag->pag_agno,
+					check_rec.rm_startblock);
+		else
+			startblock = xfs_rgbno_to_rtb(sc->mp,
+					cur->bc_ino.rtg->rtg_rgno,
+					check_rec.rm_startblock);
+		if (irec.br_startblock != startblock)
 			xchk_fblock_set_corrupt(sc, sbcri->whichfork,
 					check_rec.rm_offset);
 		if (irec.br_blockcount > check_rec.rm_blockcount)
@@ -728,6 +738,30 @@ xchk_bmap_check_ag_rmaps(
 	return error;
 }
 
+/* Make sure each rt rmap has a corresponding bmbt entry. */
+STATIC int
+xchk_bmap_check_rt_rmaps(
+	struct xfs_scrub		*sc,
+	struct xfs_rtgroup		*rtg)
+{
+	struct xchk_bmap_check_rmap_info sbcri;
+	struct xfs_btree_cur		*cur;
+	int				error;
+
+	xfs_rtgroup_lock(NULL, rtg, XFS_RTGLOCK_RMAP);
+	cur = xfs_rtrmapbt_init_cursor(sc->mp, sc->tp, rtg, rtg->rtg_rmapip);
+
+	sbcri.sc = sc;
+	sbcri.whichfork = XFS_DATA_FORK;
+	error = xfs_rmap_query_all(cur, xchk_bmap_check_rmap, &sbcri);
+	if (error == -ECANCELED)
+		error = 0;
+
+	xfs_btree_del_cursor(cur, error);
+	xfs_rtgroup_unlock(rtg, XFS_RTGLOCK_RMAP);
+	return error;
+}
+
 /* Make sure each rmap has a corresponding bmbt entry. */
 STATIC int
 xchk_bmap_check_rmaps(
@@ -743,10 +777,6 @@ xchk_bmap_check_rmaps(
 	if (!xfs_has_rmapbt(sc->mp) ||
 	    whichfork == XFS_COW_FORK ||
 	    (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT))
-		return 0;
-
-	/* Don't support realtime rmap checks yet. */
-	if (xfs_ifork_is_realtime(sc->ip, whichfork))
 		return 0;
 
 	ASSERT(xfs_ifork_ptr(sc->ip, whichfork) != NULL);
@@ -767,6 +797,22 @@ xchk_bmap_check_rmaps(
 	if (ifp->if_format != XFS_DINODE_FMT_BTREE &&
 	    (zero_size || ifp->if_nextents > 0))
 		return 0;
+
+	if (xfs_ifork_is_realtime(sc->ip, whichfork)) {
+		struct xfs_rtgroup	*rtg;
+		xfs_rgnumber_t		rgno;
+
+		for_each_rtgroup(sc->mp, rgno, rtg) {
+			error = xchk_bmap_check_rt_rmaps(sc, rtg);
+			if (error ||
+			    (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)) {
+				xfs_rtgroup_put(rtg);
+				return error;
+			}
+		}
+
+		return 0;
+	}
 
 	for_each_perag(sc->mp, agno, pag) {
 		error = xchk_bmap_check_ag_rmaps(sc, whichfork, pag);
