@@ -27,6 +27,7 @@
 #include "xfs_quota.h"
 #include "xfs_error.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_rtrefcount_btree.h"
 
 /*
  * Realtime metadata files are not quite regular files because userspace can't
@@ -1481,6 +1482,7 @@ void
 xfs_rt_resv_free(
 	struct xfs_mount	*mp)
 {
+	xfs_imeta_resv_free_inode(mp->m_rrefcountip);
 	xfs_imeta_resv_free_inode(mp->m_rrmapip);
 }
 
@@ -1490,9 +1492,15 @@ xfs_rt_resv_init(
 	struct xfs_mount	*mp)
 {
 	xfs_filblks_t		ask;
+	int			error;
 
 	ask = xfs_rtrmapbt_calc_reserves(mp);
-	return xfs_imeta_resv_init_inode(mp->m_rrmapip, ask);
+	error = xfs_imeta_resv_init_inode(mp->m_rrmapip, ask);
+	if (error)
+		return error;
+
+	ask = xfs_rtrefcountbt_calc_reserves(mp);
+	return xfs_imeta_resv_init_inode(mp->m_rrefcountip, ask);
 }
 
 static inline int
