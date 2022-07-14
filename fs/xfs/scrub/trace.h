@@ -112,6 +112,7 @@ TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_NLINKS);
 	{ XCHK_FSHOOKS_DRAIN,			"fshooks_drain" }, \
 	{ XCHK_NEED_DRAIN,			"need_drain" }, \
 	{ XCHK_FSHOOKS_QUOTA,			"fshooks_quota" }, \
+	{ XCHK_FSHOOKS_NLINKS,			"fshooks_nlinks" }, \
 	{ XREP_RESET_PERAG_RESV,		"reset_perag_resv" }, \
 	{ XREP_ALREADY_FIXED,			"already_fixed" }
 
@@ -1131,6 +1132,48 @@ TRACE_EVENT(xchk_nlinks_collect_metafile,
 	TP_printk("dev %d:%d ino 0x%llx",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ino)
+);
+
+TRACE_DEFINE_ENUM(XFS_DIRENT_NLINK_DELTA);
+TRACE_DEFINE_ENUM(XFS_BACKREF_NLINK_DELTA);
+TRACE_DEFINE_ENUM(XFS_SELF_NLINK_DELTA);
+
+#define XFS_NLINK_DELTA_STRINGS \
+	{ XFS_DIRENT_NLINK_DELTA,	"->" }, \
+	{ XFS_BACKREF_NLINK_DELTA,	"<-" }, \
+	{ XFS_SELF_NLINK_DELTA,		"<>" }
+
+TRACE_EVENT(xchk_nlinks_live_update,
+	TP_PROTO(struct xfs_mount *mp, const struct xfs_inode *dp,
+		 int action, xfs_ino_t ino, int delta,
+		 const char *name, unsigned int namelen),
+	TP_ARGS(mp, dp, action, ino, delta, name, namelen),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, dir)
+		__field(int, action)
+		__field(xfs_ino_t, ino)
+		__field(int, delta)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, namelen)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->dir = dp ? dp->i_ino : NULLFSINO;
+		__entry->action = action;
+		__entry->ino = ino;
+		__entry->delta = delta;
+		__entry->namelen = namelen;
+		memcpy(__get_str(name), name, namelen);
+	),
+	TP_printk("dev %d:%d dir 0x%llx %s ino 0x%llx nlink_delta %d name '%.*s'",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->dir,
+		  __print_symbolic(__entry->action, XFS_NLINK_DELTA_STRINGS),
+		  __entry->ino,
+		  __entry->delta,
+		  __entry->namelen,
+		  __get_str(name))
 );
 
 TRACE_EVENT(xchk_nlinks_check_zero,
