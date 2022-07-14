@@ -42,6 +42,7 @@
 #include "xfs_xchgrange.h"
 #include "xfs_rtgroup.h"
 #include "xfs_rmap.h"
+#include "xfs_refcount.h"
 
 static inline void
 xfs_rmapbt_crack_agno_opdev(
