@@ -132,6 +132,8 @@ xfs_initialize_rtgroups(
 #ifdef __KERNEL__
 		/* Place kernel structure only init below this point. */
 		spin_lock_init(&rtg->rtg_state_lock);
+		xfs_drain_init(&rtg->rtg_intents);
+
 #endif /* __KERNEL__ */
 
 		/* first new rtg is fully initialized */
@@ -183,6 +185,7 @@ xfs_free_rtgroups(
 		spin_unlock(&mp->m_rtgroup_lock);
 		ASSERT(rtg);
 		XFS_IS_CORRUPT(rtg->rtg_mount, atomic_read(&rtg->rtg_ref) != 0);
+		xfs_drain_free(&rtg->rtg_intents);
 
 		call_rcu(&rtg->rcu_head, __xfs_free_rtgroups);
 	}
