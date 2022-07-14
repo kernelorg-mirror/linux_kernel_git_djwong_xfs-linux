@@ -31,6 +31,7 @@
 #include <linux/mman.h>
 #include <linux/fadvise.h>
 #include <linux/mount.h>
+#include <linux/buffer_head.h>
 
 static const struct vm_operations_struct xfs_file_vm_ops;
 
@@ -395,6 +396,13 @@ restart:
 			goto restart;
 		}
 
+		if (xfs_inode_needs_cow_around(ip)) {
+			error = xfs_file_cow_around(ip, isize,
+					iocb->ki_pos - isize);
+			if (error)
+				return error;
+		}
+
 		trace_xfs_zero_eof(ip, isize, iocb->ki_pos - isize);
 		error = xfs_zero_range(ip, isize, iocb->ki_pos - isize, NULL);
 		if (error)
@@ -507,6 +515,7 @@ xfs_file_dio_write_aligned(
 	struct iov_iter		*from)
 {
 	unsigned int		iolock = XFS_IOLOCK_SHARED;
+	size_t			count = iov_iter_count(from);
 	ssize_t			ret;
 
 	ret = xfs_ilock_iocb(iocb, iolock);
@@ -515,6 +524,17 @@ xfs_file_dio_write_aligned(
 	ret = xfs_file_write_checks(iocb, from, &iolock);
 	if (ret)
 		goto out_unlock;
+
+	/*
+	 * We can't unshare a partial rt extent yet, which means that we can't
+	 * handle direct writes that are block-aligned but not rtextent-aligned.
+	 */
+	if (xfs_inode_needs_cow_around(ip) &&
+	    !xfs_is_falloc_aligned(ip, iocb->ki_pos, count)) {
+		trace_xfs_reflink_bounce_dio_write(iocb, from);
+		ret = -ENOTBLK;
+		goto out_unlock;
+	}
 
 	/*
 	 * We don't need to hold the IOLOCK exclusively across the IO, so demote
@@ -753,6 +773,82 @@ out:
 	return ret;
 }
 
+/*
+ * Start the process of unsharing part of a file by dirtying the pagecache for
+ * any shared extents in the given region.  Caller must ensure the range is
+ * within EOF.
+ */
+static inline int
+xfs_file_cow_around_bytes(
+	struct xfs_inode	*ip,
+	xfs_off_t		off,
+	xfs_off_t		len)
+{
+	trace_xfs_file_cow_around(ip, off, len);
+
+	return iomap_file_unshare(VFS_I(ip), off, len,
+			&xfs_buffered_write_iomap_ops);
+}
+
+/*
+ * Dirty the pages on either side of a write request as needed to satisfy
+ * alignment requirements if we're going to perform a copy-write.
+ *
+ * This is only needed for realtime files when the rt extent size is larger
+ * than 1 fs block, because we don't allow a logical rt extent in a file to map
+ * to multiple physical rt extents.  In other words, we can only map and unmap
+ * full rt extents.  Note that page cache doesn't exist above EOF, so be
+ * careful to stay below EOF.
+ */
+int
+xfs_file_cow_around(
+	struct xfs_inode	*ip,
+	loff_t			pos,
+	long long int		count)
+{
+	unsigned int		extsize = xfs_inode_alloc_unitsize(ip);
+	loff_t			next = pos + count;
+	loff_t			isize = i_size_read(VFS_I(ip));
+	loff_t			upos;
+	uint32_t		mod;
+	int			error;
+
+	if (xfs_is_falloc_aligned(ip, pos, count))
+		return 0;
+
+	inode_dio_wait(VFS_I(ip));
+
+	/* Unshare at the start of the extent. */
+	div_u64_rem(pos, extsize, &mod);
+	upos = pos - mod;
+	if (mod != 0 && upos < isize) {
+		loff_t		ulen = extsize;
+
+		if (upos + ulen > isize)
+			ulen = isize - upos;
+
+		error = xfs_file_cow_around_bytes(ip, upos, ulen);
+		if (error)
+			return error;
+	}
+
+	/* Unshare at the end. */
+	div_u64_rem(next, extsize, &mod);
+	upos = next - mod;
+	if (mod != 0 && upos < isize) {
+		loff_t		ulen = extsize;
+
+		if (upos + ulen > isize)
+			ulen = isize - upos;
+
+		error = xfs_file_cow_around_bytes(ip, upos, ulen);
+		if (error)
+			return error;
+	}
+
+	return 0;
+}
+
 STATIC ssize_t
 xfs_file_write_iter(
 	struct kiocb		*iocb,
@@ -773,6 +869,12 @@ xfs_file_write_iter(
 
 	if (IS_DAX(inode))
 		return xfs_file_dax_write(iocb, from);
+
+	if (xfs_inode_needs_cow_around(ip)) {
+		ret = xfs_file_cow_around(ip, iocb->ki_pos, ocount);
+		if (ret)
+			return ret;
+	}
 
 	if (iocb->ki_flags & IOCB_DIRECT) {
 		/*
@@ -929,6 +1031,13 @@ xfs_file_fallocate(
 		goto out_unlock;
 
 	if (mode & FALLOC_FL_PUNCH_HOLE) {
+		/* Unshare around the region to punch, if needed. */
+		if (xfs_inode_needs_cow_around(ip)) {
+			error = xfs_file_cow_around(ip, offset, len);
+			if (error)
+				goto out_unlock;
+		}
+
 		error = xfs_free_file_space(ip, offset, len);
 		if (error)
 			goto out_unlock;
@@ -999,6 +1108,14 @@ xfs_file_fallocate(
 
 			trace_xfs_zero_file_space(ip);
 
+			/* Unshare around the region to zero, if needed. */
+			if (xfs_inode_needs_cow_around(ip)) {
+				error = xfs_file_cow_around(ip, offset,
+						len);
+				if (error)
+					goto out_unlock;
+			}
+
 			error = xfs_free_file_space(ip, offset, len);
 			if (error)
 				goto out_unlock;
@@ -1007,6 +1124,26 @@ xfs_file_fallocate(
 			      round_down(offset, blksize);
 			offset = round_down(offset, blksize);
 		} else if (mode & FALLOC_FL_UNSHARE_RANGE) {
+			/*
+			 * Enlarge the unshare region to align to a full
+			 * allocation unit.
+			 */
+			if (xfs_inode_needs_cow_around(ip)) {
+				loff_t		isize = i_size_read(VFS_I(ip));
+				unsigned int	rextsize;
+				uint32_t	mod;
+
+				rextsize = xfs_inode_alloc_unitsize(ip);
+				div_u64_rem(offset, rextsize, &mod);
+				offset -= mod;
+				len += mod;
+
+				div_u64_rem(offset + len, rextsize, &mod);
+				if (mod)
+					len += rextsize - mod;
+				if (offset + len > isize)
+					len = isize - offset;
+			}
 			error = xfs_reflink_unshare(ip, offset, len);
 			if (error)
 				goto out_unlock;
@@ -1315,6 +1452,35 @@ xfs_file_llseek(
 	return vfs_setpos(file, offset, inode->i_sb->s_maxbytes);
 }
 
+static int
+xfs_filemap_fault_around(
+	struct vm_fault		*vmf,
+	struct inode		*inode)
+{
+	struct folio		*folio = page_folio(vmf->page);
+	loff_t			pos;
+	ssize_t			len;
+	int			error;
+
+	if (!xfs_inode_needs_cow_around(XFS_I(inode)))
+		return 0;
+
+	folio_lock(folio);
+	len = folio_mkwrite_check_truncate(folio, inode);
+	if (len < 0) {
+		folio_unlock(folio);
+		return len;
+	}
+	pos = folio_pos(folio);
+	folio_unlock(folio);
+
+	error = xfs_file_cow_around(XFS_I(inode), pos, len);
+	if (error)
+		return error;
+
+	return 0;
+}
+
 /*
  * Locking for serialisation of IO during page faults. This results in a lock
  * ordering of:
@@ -1355,7 +1521,21 @@ __xfs_filemap_fault(
 		xfs_iunlock(XFS_I(inode), XFS_MMAPLOCK_SHARED);
 	} else {
 		if (write_fault) {
+			int	error;
+
 			xfs_ilock(XFS_I(inode), XFS_MMAPLOCK_SHARED);
+
+			/*
+			 * Unshare all the blocks in this rt extent surrounding
+			 * this page.
+			 */
+			error = xfs_filemap_fault_around(vmf, inode);
+			if (error) {
+				xfs_iunlock(XFS_I(inode), XFS_MMAPLOCK_SHARED);
+				ret = block_page_mkwrite_return(error);
+				goto out;
+			}
+
 			ret = iomap_page_mkwrite(vmf,
 					&xfs_buffered_write_iomap_ops);
 			xfs_iunlock(XFS_I(inode), XFS_MMAPLOCK_SHARED);
@@ -1364,6 +1544,7 @@ __xfs_filemap_fault(
 		}
 	}
 
+out:
 	if (write_fault)
 		sb_end_pagefault(inode->i_sb);
 	return ret;
