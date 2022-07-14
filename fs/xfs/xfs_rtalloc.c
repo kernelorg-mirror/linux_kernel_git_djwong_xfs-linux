@@ -1605,6 +1605,7 @@ xfs_rtmount_refcountbt(
 		goto out_end;
 
 	if (XFS_IS_CORRUPT(mp, ip->i_df.if_format != XFS_DINODE_FMT_REFCOUNT)) {
+		xfs_rt_mark_sick(mp, XFS_SICK_RT_REFCNTBT);
 		error = -EFSCORRUPTED;
 		goto out_rele;
 	}
