@@ -32,6 +32,9 @@ struct xchk_iscan {
 
 	/* Wait this many ms to retry an iget. */
 	unsigned int		iget_retry_delay;
+
+	/* True if we cannot allow iget to wait indefinitely. */
+	bool			iget_nowait:1;
 };
 
 /* Set if the scan has been aborted due to some event in the fs. */
