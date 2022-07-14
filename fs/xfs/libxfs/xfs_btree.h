@@ -64,6 +64,7 @@ union xfs_btree_rec {
 #define	XFS_BTNUM_RMAP	((xfs_btnum_t)XFS_BTNUM_RMAPi)
 #define	XFS_BTNUM_REFC	((xfs_btnum_t)XFS_BTNUM_REFCi)
 #define	XFS_BTNUM_RTRMAP	((xfs_btnum_t)XFS_BTNUM_RTRMAPi)
+#define XFS_BTNUM_RTREFC	((xfs_btnum_t)XFS_BTNUM_RTREFCi)
 
 uint32_t xfs_btree_magic(int crc, xfs_btnum_t btnum);
 
