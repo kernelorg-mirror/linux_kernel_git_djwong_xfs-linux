@@ -1205,17 +1205,16 @@ xfs_refcount_finish_one_cleanup(
 static inline int
 xfs_refcount_continue_op(
 	struct xfs_btree_cur		*cur,
-	xfs_fsblock_t			startblock,
+	struct xfs_refcount_intent	*ri,
 	xfs_agblock_t			new_agbno,
-	xfs_extlen_t			new_len,
-	xfs_fsblock_t			*fsbp)
+	xfs_extlen_t			new_len)
 {
 	struct xfs_mount		*mp = cur->bc_mp;
 	struct xfs_perag		*pag = cur->bc_ag.pag;
 	xfs_fsblock_t			new_fsbno;
 	xfs_agnumber_t			old_agno;
 
-	old_agno = XFS_FSB_TO_AGNO(mp, startblock);
+	old_agno = XFS_FSB_TO_AGNO(mp, ri->ri_startblock);
 	new_fsbno = XFS_AGB_TO_FSB(mp, pag->pag_agno, new_agbno);
 
 	/*
@@ -1237,7 +1236,8 @@ xfs_refcount_continue_op(
 	}
 
 done:
-	*fsbp = new_fsbno;
+	ri->ri_startblock = new_fsbno;
+	ri->ri_blockcount = new_len;
 	return 0;
 }
 
@@ -1251,11 +1251,7 @@ done:
 int
 xfs_refcount_finish_one(
 	struct xfs_trans		*tp,
-	enum xfs_refcount_intent_type	type,
-	xfs_fsblock_t			startblock,
-	xfs_extlen_t			blockcount,
-	xfs_fsblock_t			*new_fsb,
-	xfs_extlen_t			*new_len,
+	struct xfs_refcount_intent	*ri,
 	struct xfs_btree_cur		**pcur)
 {
 	struct xfs_mount		*mp = tp->t_mountp;
@@ -1264,16 +1260,19 @@ xfs_refcount_finish_one(
 	int				error = 0;
 	xfs_agblock_t			bno;
 	xfs_agblock_t			new_agbno;
+	xfs_extlen_t			new_len;
 	unsigned long			nr_ops = 0;
 	int				shape_changes = 0;
 	struct xfs_perag		*pag;
 
-	pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, startblock));
-	bno = XFS_FSB_TO_AGBNO(mp, startblock);
+	pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, ri->ri_startblock));
+	bno = XFS_FSB_TO_AGBNO(mp, ri->ri_startblock);
 
-	trace_xfs_refcount_deferred(mp, XFS_FSB_TO_AGNO(mp, startblock),
-			type, XFS_FSB_TO_AGBNO(mp, startblock),
-			blockcount);
+	trace_xfs_refcount_deferred(mp,
+			XFS_FSB_TO_AGNO(mp, ri->ri_startblock),
+			ri->ri_type,
+			XFS_FSB_TO_AGBNO(mp, ri->ri_startblock),
+			ri->ri_blockcount);
 
 	if (XFS_TEST_ERROR(false, mp, XFS_ERRTAG_REFCOUNT_FINISH_ONE)) {
 		error = -EIO;
@@ -1304,40 +1303,41 @@ xfs_refcount_finish_one(
 	}
 	*pcur = rcur;
 
-	switch (type) {
+	switch (ri->ri_type) {
 	case XFS_REFCOUNT_INCREASE:
-		error = xfs_refcount_adjust(rcur, bno, blockcount, &new_agbno,
-				new_len, XFS_REFCOUNT_ADJUST_INCREASE);
+		error = xfs_refcount_adjust(rcur, bno, ri->ri_blockcount,
+				&new_agbno, &new_len,
+				XFS_REFCOUNT_ADJUST_INCREASE);
 		if (error)
 			goto out_drop;
-		error = xfs_refcount_continue_op(rcur, startblock, new_agbno,
-				*new_len, new_fsb);
+		error = xfs_refcount_continue_op(rcur, ri, new_agbno, new_len);
 		break;
 	case XFS_REFCOUNT_DECREASE:
-		error = xfs_refcount_adjust(rcur, bno, blockcount, &new_agbno,
-				new_len, XFS_REFCOUNT_ADJUST_DECREASE);
+		error = xfs_refcount_adjust(rcur, bno, ri->ri_blockcount,
+				&new_agbno, &new_len,
+				XFS_REFCOUNT_ADJUST_DECREASE);
 		if (error)
 			goto out_drop;
-		error = xfs_refcount_continue_op(rcur, startblock, new_agbno,
-				*new_len, new_fsb);
+		error = xfs_refcount_continue_op(rcur, ri, new_agbno, new_len);
 		break;
 	case XFS_REFCOUNT_ALLOC_COW:
-		*new_fsb = startblock + blockcount;
-		*new_len = 0;
-		error = __xfs_refcount_cow_alloc(rcur, bno, blockcount);
+		error = __xfs_refcount_cow_alloc(rcur, bno, ri->ri_blockcount);
+		ri->ri_startblock += ri->ri_blockcount;
+		ri->ri_blockcount = 0;
 		break;
 	case XFS_REFCOUNT_FREE_COW:
-		*new_fsb = startblock + blockcount;
-		*new_len = 0;
-		error = __xfs_refcount_cow_free(rcur, bno, blockcount);
+		error = __xfs_refcount_cow_free(rcur, bno, ri->ri_blockcount);
+		ri->ri_startblock += ri->ri_blockcount;
+		ri->ri_blockcount = 0;
 		break;
 	default:
 		ASSERT(0);
 		error = -EFSCORRUPTED;
 	}
-	if (!error && *new_len > 0)
-		trace_xfs_refcount_finish_one_leftover(mp, pag->pag_agno, type,
-				bno, blockcount, new_agbno, *new_len);
+	if (!error && ri->ri_blockcount > 0)
+		trace_xfs_refcount_finish_one_leftover(mp, pag->pag_agno,
+				ri->ri_type, bno, ri->ri_blockcount,
+				new_agbno, new_len);
 out_drop:
 	xfs_perag_put(pag);
 	return error;
