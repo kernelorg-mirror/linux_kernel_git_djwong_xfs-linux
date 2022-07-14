@@ -349,7 +349,8 @@ xreap_agextent(
 			 * If we're unmapping CoW staging extents, remove the
 			 * records from the refcountbt as well.
 			 */
-			xfs_refcount_free_cow_extent(sc->tp, fsbno, *aglenp);
+			xfs_refcount_free_cow_extent(sc->tp, false, fsbno,
+					*aglenp);
 			return 0;
 		}
 		return xfs_rmap_free(sc->tp, sc->sa.agf_bp, sc->sa.pag, agbno,
@@ -381,7 +382,7 @@ xreap_agextent(
 		ASSERT(rs->resv == XFS_AG_RESV_NONE);
 
 		rs->force_roll = true;
-		xfs_refcount_free_cow_extent(sc->tp, fsbno, *aglenp);
+		xfs_refcount_free_cow_extent(sc->tp, false, fsbno, *aglenp);
 		xfs_free_extent_later(sc->tp, fsbno, *aglenp, NULL,
 				XFS_FREE_EXTENT_SKIP_DISCARD);
 		return 0;
