@@ -272,6 +272,61 @@ _xfs_buf_alloc(
 	return 0;
 }
 
+#ifdef CONFIG_XFS_IN_MEMORY_FILE
+/* Free an xfile page that was directly mapped into the buffer cache. */
+static int
+xfs_buf_free_xfpage(
+	struct xfile		*xfile,
+	loff_t			pos,
+	struct page		**pagep)
+{
+	struct xfile_page	xfpage = {
+		.page		= *pagep,
+		.pos		= round_down(pos, PAGE_SIZE),
+	};
+
+	*pagep = NULL;
+	lock_page(xfpage.page);
+
+	return xfile_put_page(xfile, &xfpage);
+}
+
+/* Unmap all the direct-mapped buffer pages. */
+static void
+xfs_buf_free_direct_pages(
+	struct xfs_buf		*bp)
+{
+	struct xfs_buf_map	*map;
+	unsigned int		m, p, n;
+	int			error = 0, err2;
+
+	ASSERT(bp->b_target->bt_flags & XFS_BUFTARG_DIRECT_MAP);
+
+	if (xfs_buf_is_vmapped(bp))
+		vm_unmap_ram(bp->b_addr, bp->b_page_count);
+
+	for (m = 0, p = 0, map = bp->b_maps; m < bp->b_map_count; m++, map++) {
+		for (n = 0; n < map->bm_len; n += BTOBB(PAGE_SIZE)) {
+			err2 = xfs_buf_free_xfpage(bp->b_target->bt_xfile,
+					BBTOB(map->bm_bn + n),
+					&bp->b_pages[p++]);
+			if (!error && err2)
+				error = err2;
+		}
+	}
+
+	if (error)
+		xfs_err(bp->b_mount, "%s failed errno %d", __func__, error);
+
+	if (bp->b_pages != bp->b_page_array)
+		kmem_free(bp->b_pages);
+	bp->b_pages = NULL;
+	bp->b_flags &= ~_XBF_DIRECT_MAP;
+}
+#else
+# define xfs_buf_free_direct_pages(b)	((void)0)
+#endif /* CONFIG_XFS_IN_MEMORY_FILE */
+
 static void
 xfs_buf_free_pages(
 	struct xfs_buf	*bp)
@@ -314,7 +369,9 @@ xfs_buf_free(
 
 	ASSERT(list_empty(&bp->b_lru));
 
-	if (bp->b_flags & _XBF_PAGES)
+	if (bp->b_flags & _XBF_DIRECT_MAP)
+		xfs_buf_free_direct_pages(bp);
+	else if (bp->b_flags & _XBF_PAGES)
 		xfs_buf_free_pages(bp);
 	else if (bp->b_flags & _XBF_KMEM)
 		kmem_free(bp->b_addr);
@@ -411,6 +468,118 @@ xfs_buf_alloc_pages(
 	return 0;
 }
 
+#ifdef CONFIG_XFS_IN_MEMORY_FILE
+/* Grab the xfile page for this part of the xfile. */
+static int
+xfs_buf_get_xfpage(
+	struct xfile		*xfile,
+	loff_t			pos,
+	unsigned int		len,
+	struct page		**pagep)
+{
+	struct xfile_page	xfpage = { NULL };
+	int			error;
+
+	error = xfile_get_page(xfile, pos, len, &xfpage);
+	if (error)
+		return error;
+
+	/*
+	 * Fall back to regular DRAM buffers if tmpfs gives us fsdata or the
+	 * page pos isn't what we were expecting.
+	 */
+	if (xfpage.fsdata || xfpage.pos != round_down(pos, PAGE_SIZE)) {
+		xfile_put_page(xfile, &xfpage);
+		return -ENOTBLK;
+	}
+
+	/* Unlock the page before we start using them for the buffer cache. */
+	ASSERT(PageUptodate(xfpage.page));
+	unlock_page(xfpage.page);
+
+	*pagep = xfpage.page;
+	return 0;
+}
+
+/*
+ * Try to map storage directly, if the target supports it.  Returns 0 for
+ * success, -ENOTBLK to mean "not supported", or the usual negative errno.
+ */
+static int
+xfs_buf_alloc_direct_pages(
+	struct xfs_buf		*bp,
+	xfs_buf_flags_t		flags)
+{
+	struct xfs_buf_map	*map;
+	gfp_t			gfp_mask = __GFP_NOWARN;
+	const unsigned int	page_align_mask = PAGE_SIZE - 1;
+	unsigned int		m, p, n;
+	int			error;
+
+	ASSERT(bp->b_target->bt_flags & XFS_BUFTARG_IN_MEMORY);
+
+	/* For direct-map buffers, each map has to be page aligned. */
+	for (m = 0, map = bp->b_maps; m < bp->b_map_count; m++, map++)
+		if (BBTOB(map->bm_bn | map->bm_len) & page_align_mask)
+			return -ENOTBLK;
+
+	if (flags & XBF_READ_AHEAD)
+		gfp_mask |= __GFP_NORETRY;
+	else
+		gfp_mask |= GFP_NOFS;
+
+	/* Make sure that we have a page list */
+	bp->b_page_count = DIV_ROUND_UP(BBTOB(bp->b_length), PAGE_SIZE);
+	if (bp->b_page_count <= XB_PAGES) {
+		bp->b_pages = bp->b_page_array;
+	} else {
+		bp->b_pages = kzalloc(sizeof(struct page *) * bp->b_page_count,
+					gfp_mask);
+		if (!bp->b_pages)
+			return -ENOMEM;
+	}
+
+	/* Map in the xfile pages. */
+	for (m = 0, p = 0, map = bp->b_maps; m < bp->b_map_count; m++, map++) {
+		for (n = 0; n < map->bm_len; n += BTOBB(PAGE_SIZE)) {
+			unsigned int	len;
+
+			len = min_t(unsigned int, BBTOB(map->bm_len - n),
+					PAGE_SIZE);
+
+			error = xfs_buf_get_xfpage(bp->b_target->bt_xfile,
+					BBTOB(map->bm_bn + n), len,
+					&bp->b_pages[p++]);
+			if (error)
+				goto fail;
+		}
+	}
+
+	bp->b_flags |= _XBF_DIRECT_MAP;
+	return 0;
+
+fail:
+	for (m = 0, p = 0, map = bp->b_maps; m < bp->b_map_count; m++, map++) {
+		for (n = 0; n < map->bm_len; n += BTOBB(PAGE_SIZE)) {
+			if (bp->b_pages[p] == NULL)
+				continue;
+
+			xfs_buf_free_xfpage(bp->b_target->bt_xfile,
+					BBTOB(map->bm_bn + n),
+					&bp->b_pages[p++]);
+		}
+	}
+
+	if (bp->b_pages != bp->b_page_array)
+		kmem_free(bp->b_pages);
+	bp->b_pages = NULL;
+	bp->b_page_count = 0;
+	return error;
+}
+#else
+# define xfs_buf_alloc_direct_pages(b,f)	(-ENOTBLK)
+#endif /* CONFIG_XFS_IN_MEMORY_FILE */
+
 /*
  *	Map buffer into kernel address-space if necessary.
  */
@@ -419,7 +588,8 @@ _xfs_buf_map_pages(
 	struct xfs_buf		*bp,
 	xfs_buf_flags_t		flags)
 {
-	ASSERT(bp->b_flags & _XBF_PAGES);
+	ASSERT(bp->b_flags & (_XBF_PAGES | _XBF_DIRECT_MAP));
+
 	if (bp->b_page_count == 1) {
 		/* A single page buffer is always mappable */
 		bp->b_addr = page_address(bp->b_pages[0]);
@@ -566,7 +736,7 @@ xfs_buf_find_lock(
 	 */
 	if (bp->b_flags & XBF_STALE) {
 		ASSERT((bp->b_flags & _XBF_DELWRI_Q) == 0);
-		bp->b_flags &= _XBF_KMEM | _XBF_PAGES;
+		bp->b_flags &= _XBF_KMEM | _XBF_PAGES | _XBF_DIRECT_MAP;
 		bp->b_ops = NULL;
 	}
 	return 0;
@@ -624,6 +794,13 @@ xfs_buf_find_insert(
 	error = _xfs_buf_alloc(btp, map, nmaps, flags, &new_bp);
 	if (error)
 		goto out_drop_pag;
+
+	/* Try to map pages directly, or fall back to memory. */
+	if (btp->bt_flags & XFS_BUFTARG_DIRECT_MAP) {
+		error = xfs_buf_alloc_direct_pages(new_bp, flags);
+		if (error && error != -ENOTBLK)
+			goto out_free_buf;
+	}
 
 	/*
 	 * For buffers that fit entirely within a single page, first attempt to
@@ -1569,7 +1746,10 @@ xfs_buf_ioapply_in_memory(
 
 	atomic_inc(&bp->b_io_remaining);
 
-	if (bp->b_map_count > 1) {
+	if (bp->b_target->bt_flags & XFS_BUFTARG_DIRECT_MAP) {
+		/* direct mapping means no io necessary */
+		error = 0;
+	} else if (bp->b_map_count > 1) {
 		/* We don't need or support multi-map buffers. */
 		ASSERT(0);
 		error = -EIO;
@@ -1586,6 +1766,20 @@ xfs_buf_ioapply_in_memory(
 
 	if (atomic_dec_and_test(&bp->b_io_remaining) == 1)
 		xfs_buf_ioend(bp);
+}
+
+bool
+xfs_buf_check_poisoned(
+	struct xfs_buf		*bp)
+{
+	unsigned int		i;
+
+	for (i = 0; i < bp->b_page_count; i++) {
+		if (PageHWPoison(bp->b_pages[i]))
+			return true;
+	}
+
+	return false;
 }
 
 STATIC void
