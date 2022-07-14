@@ -239,6 +239,7 @@ xfs-$(CONFIG_XFS_RT)		+= $(addprefix scrub/, \
 xfs-$(CONFIG_XFS_QUOTA)		+= $(addprefix scrub/, \
 				   iscan.o \
 				   quota.o \
+				   quotacheck.o \
 				   )
 
 # online repair
