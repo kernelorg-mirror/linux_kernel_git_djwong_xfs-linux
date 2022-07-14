@@ -78,6 +78,47 @@ int xfile_get_page(struct xfile *xf, loff_t offset, unsigned int len,
 int xfile_put_page(struct xfile *xf, struct xfile_page *xbuf);
 
 int xfile_dump(struct xfile *xf);
+
+static inline loff_t xfile_size(struct xfile *xf)
+{
+	return i_size_read(file_inode(xf->file));
+}
+
+/* file block (aka system page size) to basic block conversions. */
+typedef unsigned long long	xfileoff_t;
+#define XFB_BLOCKSIZE		(PAGE_SIZE)
+#define XFB_BSHIFT		(PAGE_SHIFT)
+#define XFB_SHIFT		(XFB_BSHIFT - BBSHIFT)
+
+static inline loff_t xfo_to_b(xfileoff_t xfoff)
+{
+	return xfoff << XFB_BSHIFT;
+}
+
+static inline xfileoff_t b_to_xfo(loff_t pos)
+{
+	return (pos + (XFB_BLOCKSIZE - 1)) >> XFB_BSHIFT;
+}
+
+static inline xfileoff_t b_to_xfot(loff_t pos)
+{
+	return pos >> XFB_BSHIFT;
+}
+
+static inline xfs_daddr_t xfo_to_daddr(xfileoff_t xfoff)
+{
+	return xfoff << XFB_SHIFT;
+}
+
+static inline xfileoff_t xfs_daddr_to_xfo(xfs_daddr_t bb)
+{
+	return (bb + (xfo_to_daddr(1) - 1)) >> XFB_SHIFT;
+}
+
+static inline xfileoff_t xfs_daddr_to_xfot(xfs_daddr_t bb)
+{
+	return bb >> XFB_SHIFT;
+}
 #else
 static inline int
 xfile_obj_load(struct xfile *xf, void *buf, size_t count, loff_t offset)
@@ -89,6 +130,11 @@ static inline int
 xfile_obj_store(struct xfile *xf, const void *buf, size_t count, loff_t offset)
 {
 	return -EIO;
+}
+
+static inline loff_t xfile_size(struct xfile *xf)
+{
+	return 0;
 }
 #endif /* CONFIG_XFS_IN_MEMORY_FILE */
 
