@@ -295,7 +295,7 @@ xchk_rmapbt_rec(
 	struct xchk_rmap	*cr = bs->private;
 	struct xfs_rmap_irec	irec;
 
-	if (xfs_rmap_btrec_to_irec(rec, &irec) != NULL ||
+	if (xfs_rmap_btrec_to_irec(bs->cur, rec, &irec) != NULL ||
 	    xfs_rmap_check_irec(bs->cur, &irec) != NULL) {
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 		return 0;
