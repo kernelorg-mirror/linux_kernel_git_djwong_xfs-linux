@@ -24,6 +24,7 @@
 #include "xfs_inode.h"
 #include "xfs_ag.h"
 #include "xfs_health.h"
+#include "xfs_rtgroup.h"
 
 struct kmem_cache	*xfs_rmap_intent_cache;
 
@@ -103,11 +104,19 @@ xfs_rmap_update(
 	trace_xfs_rmap_update(cur, irec->rm_startblock, irec->rm_blockcount,
 			irec->rm_owner, irec->rm_offset, irec->rm_flags);
 
-	rec.rmap.rm_startblock = cpu_to_be32(irec->rm_startblock);
-	rec.rmap.rm_blockcount = cpu_to_be32(irec->rm_blockcount);
-	rec.rmap.rm_owner = cpu_to_be64(irec->rm_owner);
-	rec.rmap.rm_offset = cpu_to_be64(
-			xfs_rmap_irec_offset_pack(irec));
+	if (cur->bc_btnum == XFS_BTNUM_RTRMAP) {
+		rec.rtrmap.rm_startblock = cpu_to_be32(irec->rm_startblock);
+		rec.rtrmap.rm_blockcount = cpu_to_be32(irec->rm_blockcount);
+		rec.rtrmap.rm_owner = cpu_to_be64(irec->rm_owner);
+		rec.rtrmap.rm_offset = cpu_to_be64(
+				xfs_rmap_irec_offset_pack(irec));
+	} else {
+		rec.rmap.rm_startblock = cpu_to_be32(irec->rm_startblock);
+		rec.rmap.rm_blockcount = cpu_to_be32(irec->rm_blockcount);
+		rec.rmap.rm_owner = cpu_to_be64(irec->rm_owner);
+		rec.rmap.rm_offset = cpu_to_be64(
+				xfs_rmap_irec_offset_pack(irec));
+	}
 	error = xfs_btree_update(cur, &rec);
 	if (error)
 		trace_xfs_rmap_update_error(cur, error, _RET_IP_);
@@ -202,11 +211,20 @@ xfs_rmap_btrec_to_irec(
 {
 	int			error;
 
-	irec->rm_startblock = be32_to_cpu(rec->rmap.rm_startblock);
-	irec->rm_blockcount = be32_to_cpu(rec->rmap.rm_blockcount);
-	irec->rm_owner = be64_to_cpu(rec->rmap.rm_owner);
-	error = xfs_rmap_irec_offset_unpack(be64_to_cpu(rec->rmap.rm_offset),
-			irec);
+	if (cur->bc_btnum == XFS_BTNUM_RTRMAP) {
+		irec->rm_startblock = be32_to_cpu(rec->rtrmap.rm_startblock);
+		irec->rm_blockcount = be32_to_cpu(rec->rtrmap.rm_blockcount);
+		irec->rm_owner = be64_to_cpu(rec->rtrmap.rm_owner);
+		error = xfs_rmap_irec_offset_unpack(
+				be64_to_cpu(rec->rtrmap.rm_offset), irec);
+	} else {
+		irec->rm_startblock = be32_to_cpu(rec->rmap.rm_startblock);
+		irec->rm_blockcount = be32_to_cpu(rec->rmap.rm_blockcount);
+		irec->rm_owner = be64_to_cpu(rec->rmap.rm_owner);
+		error = xfs_rmap_irec_offset_unpack(
+				be64_to_cpu(rec->rmap.rm_offset), irec);
+	}
+
 	if (xfs_metadata_is_sick(error))
 		xfs_btree_mark_sick(cur);
 	return error;
@@ -222,7 +240,6 @@ xfs_rmap_get_rec(
 	int			*stat)
 {
 	struct xfs_mount	*mp = cur->bc_mp;
-	struct xfs_perag	*pag = cur->bc_ag.pag;
 	union xfs_btree_rec	*rec;
 	int			error;
 
@@ -238,12 +255,31 @@ xfs_rmap_get_rec(
 	if (cur->bc_flags & XFS_BTREE_IN_MEMORY) {
 		if (!xfs_rmapbt_mem_verify_rec(cur, irec))
 			goto out_bad_rec;
+	} else if (cur->bc_btnum == XFS_BTNUM_RTRMAP) {
+		struct xfs_rtgroup	*rtg = cur->bc_ino.rtg;
+
+		if (irec->rm_owner == XFS_RMAP_OWN_FS) {
+			if (irec->rm_startblock != 0)
+				goto out_bad_rec;
+			if (irec->rm_blockcount != mp->m_sb.sb_rextsize)
+				goto out_bad_rec;
+			if (irec->rm_offset != 0)
+				goto out_bad_rec;
+		} else {
+			if (!xfs_verify_rgbext(rtg, irec->rm_startblock,
+						    irec->rm_blockcount))
+				goto out_bad_rec;
+			if (XFS_RMAP_NON_INODE_OWNER(irec->rm_owner))
+				goto out_bad_rec;
+		}
 	} else if (irec->rm_startblock <= XFS_AGFL_BLOCK(mp)) {
 		if (irec->rm_owner != XFS_RMAP_OWN_FS)
 			goto out_bad_rec;
 		if (irec->rm_blockcount != XFS_AGFL_BLOCK(mp) + 1)
 			goto out_bad_rec;
 	} else {
+		struct xfs_perag	*pag = cur->bc_ag.pag;
+
 		/* check for valid extent range, including overflow */
 		if (!xfs_verify_agbno(pag, irec->rm_startblock))
 			goto out_bad_rec;
@@ -265,10 +301,14 @@ out_bad_rec:
 	if (cur->bc_flags & XFS_BTREE_IN_MEMORY)
 		xfs_warn(mp,
  "In-Memory Reverse Mapping BTree record corruption detected!");
+	else if (cur->bc_btnum == XFS_BTNUM_RTRMAP)
+		xfs_warn(mp,
+ "RT Reverse Mapping BTree record corruption in rtgroup %u detected!",
+				cur->bc_ino.rtg->rtg_rgno);
 	else
 		xfs_warn(mp,
  "Reverse Mapping BTree record corruption in AG %d detected!",
-				pag->pag_agno);
+				cur->bc_ag.pag->pag_agno);
 	xfs_warn(mp,
 		"Owner 0x%llx, flags 0x%x, start block 0x%x block count 0x%x",
 		irec->rm_owner, irec->rm_flags, irec->rm_startblock,
