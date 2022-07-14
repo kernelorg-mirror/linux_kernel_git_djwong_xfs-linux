@@ -76,4 +76,11 @@ int xfs_bmap_count_blocks(struct xfs_trans *tp, struct xfs_inode *ip,
 int	xfs_flush_unmap_range(struct xfs_inode *ip, xfs_off_t offset,
 			      xfs_off_t len);
 
+int xfs_map_free_space(struct xfs_inode *ip, xfs_off_t off, xfs_off_t len);
+#ifdef CONFIG_XFS_RT
+int xfs_map_free_rt_space(struct xfs_inode *ip, xfs_off_t off, xfs_off_t len);
+#else
+# define xfs_map_free_rt_space(ip, off, len)	(-EOPNOTSUPP)
+#endif
+
 #endif	/* __XFS_BMAP_UTIL_H__ */
