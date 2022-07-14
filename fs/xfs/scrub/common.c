@@ -757,12 +757,78 @@ xchk_rt_unlock(
 }
 
 #ifdef CONFIG_XFS_RT
+/* Lock all the rt group metadata inode ILOCKs and wait for intents. */
+static int
+xchk_rtgroup_lock(
+	struct xfs_scrub	*sc,
+	struct xchk_rt		*sr,
+	unsigned int		rtglock_flags)
+{
+	int			error = 0;
+
+	ASSERT(sr->rtg != NULL);
+
+	/*
+	 * If we're /only/ locking the rtbitmap in shared mode, then we're
+	 * obviously not trying to compare records in two metadata inodes.
+	 * There's no need to drain intents here because the caller (most
+	 * likely the rgsuper scanner) doesn't need that level of consistency.
+	 */
+	if (rtglock_flags == XFS_RTGLOCK_BITMAP_SHARED) {
+		xfs_rtgroup_lock(NULL, sr->rtg, rtglock_flags);
+		sr->rtlock_flags = rtglock_flags;
+		return 0;
+	}
+
+	do {
+		if (xchk_should_terminate(sc, &error))
+			return error;
+
+		xfs_rtgroup_lock(NULL, sr->rtg, rtglock_flags);
+
+		/*
+		 * Decide if the rt group is quiet enough for all metadata to
+		 * be consistent with each other.  Regular file IO doesn't get
+		 * to lock all the rt inodes at the same time, which means that
+		 * there could be other threads in the middle of processing a
+		 * chain of deferred ops.
+		 *
+		 * We just locked all the metadata inodes for this rt group;
+		 * now take a look to see if there are any intents in progress.
+		 * If there are, drop the rt group inode locks and wait for the
+		 * intents to drain.  Since we hold the rt group inode locks
+		 * for the duration of the scrub, this is the only time we have
+		 * to sample the intents counter; any threads increasing it
+		 * after this point can't possibly be in the middle of a chain
+		 * of rt metadata updates.
+		 *
+		 * Obviously, this should be slanted against scrub and in favor
+		 * of runtime threads.
+		 */
+		if (!xfs_rtgroup_intents_busy(sr->rtg)) {
+			sr->rtlock_flags = rtglock_flags;
+			return 0;
+		}
+
+		xfs_rtgroup_unlock(sr->rtg, rtglock_flags);
+
+		if (!(sc->flags & XCHK_FSHOOKS_DRAIN))
+			return -ECHRNG;
+		error = xfs_rtgroup_drain_intents(sr->rtg);
+		if (error == -ERESTARTSYS)
+			error = -EINTR;
+	} while (!error);
+
+	return error;
+}
+
 /*
  * For scrubbing a realtime group, grab all the in-core resources we'll need to
  * check the metadata, which means taking the ILOCK of the realtime group's
- * metadata inodes.  Callers must not join these inodes to the transaction with
- * non-zero lockflags or concurrency problems will result.  The @rtglock_flags
- * argument takes XFS_RTGLOCK_* flags.
+ * metadata inodes and draining any running intent chains.  Callers must not
+ * join these inodes to the transaction with non-zero lockflags or concurrency
+ * problems will result.  The @rtglock_flags argument takes XFS_RTGLOCK_*
+ * flags.
  */
 int
 xchk_rtgroup_init(
@@ -778,9 +844,7 @@ xchk_rtgroup_init(
 	if (!sr->rtg)
 		return -ENOENT;
 
-	xfs_rtgroup_lock(NULL, sr->rtg, rtglock_flags);
-	sr->rtlock_flags = rtglock_flags;
-	return 0;
+	return xchk_rtgroup_lock(sc, sr, rtglock_flags);
 }
 
 /*

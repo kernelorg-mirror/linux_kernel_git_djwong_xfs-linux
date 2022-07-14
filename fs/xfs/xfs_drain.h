@@ -7,6 +7,7 @@
 #define XFS_DRAIN_H_
 
 struct xfs_perag;
+struct xfs_rtgroup;
 
 #ifdef CONFIG_XFS_DRAIN_INTENTS
 /*
@@ -60,12 +61,27 @@ void xfs_drain_wait_enable(void);
  * All functions that create work items must increment the intent counter as
  * soon as the item is added to the transaction and cannot drop the counter
  * until the item is finished or cancelled.
+ *
+ * The same principles apply to realtime groups because the rt metadata inode
+ * ILOCKs are not held across transaction rolls.
  */
 void xfs_perag_bump_intents(struct xfs_perag *pag);
 void xfs_perag_drop_intents(struct xfs_perag *pag);
 
 int xfs_perag_drain_intents(struct xfs_perag *pag);
 bool xfs_perag_intents_busy(struct xfs_perag *pag);
+
+#ifdef CONFIG_XFS_RT
+void xfs_rtgroup_bump_intents(struct xfs_rtgroup *rtg);
+void xfs_rtgroup_drop_intents(struct xfs_rtgroup *rtg);
+
+int xfs_rtgroup_drain_intents(struct xfs_rtgroup *rtg);
+bool xfs_rtgroup_intents_busy(struct xfs_rtgroup *rtg);
+#else
+static inline void xfs_rtgroup_bump_intents(struct xfs_rtgroup *rtg) { }
+static inline void xfs_rtgroup_drop_intents(struct xfs_rtgroup *rtg) { }
+#endif /* CONFIG_XFS_RT */
+
 #else
 struct xfs_drain { /* empty */ };
 
@@ -74,6 +90,9 @@ struct xfs_drain { /* empty */ };
 
 static inline void xfs_perag_bump_intents(struct xfs_perag *pag) { }
 static inline void xfs_perag_drop_intents(struct xfs_perag *pag) { }
+
+static inline void xfs_rtgroup_bump_intents(struct xfs_rtgroup *rtg) { }
+static inline void xfs_rtgroup_drop_intents(struct xfs_rtgroup *rtg) { }
 
 #endif /* CONFIG_XFS_DRAIN_INTENTS */
 
