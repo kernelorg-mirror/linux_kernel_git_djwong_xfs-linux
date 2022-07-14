@@ -76,6 +76,9 @@ void xfs_ag_drop_intents(struct xfs_perag *pag);
 int xfs_ag_drain_intents(struct xfs_perag *pag);
 bool xfs_ag_intents_busy(struct xfs_perag *pag);
 
+void xfs_drain_wait_disable(void);
+void xfs_drain_wait_enable(void);
+
 /* Are there work items pending? */
 static inline bool xfs_drain_busy(struct xfs_drain *dr)
 {
