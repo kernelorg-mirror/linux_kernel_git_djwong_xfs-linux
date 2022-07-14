@@ -495,6 +495,7 @@ xfs_extent_free_get_group(
 
 	agno = XFS_FSB_TO_AGNO(mp, xefi->xefi_startblock);
 	xefi->xefi_pag = xfs_perag_get(mp, agno);
+	xfs_ag_bump_intents(xefi->xefi_pag);
 }
 
 /* Release an active AG ref after some freeing work. */
@@ -502,6 +503,7 @@ static inline void
 xfs_extent_free_put_group(
 	struct xfs_extent_free_item	*xefi)
 {
+	xfs_ag_drop_intents(xefi->xefi_pag);
 	xfs_perag_put(xefi->xefi_pag);
 }
 
