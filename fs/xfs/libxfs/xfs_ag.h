@@ -38,6 +38,7 @@ struct xfs_perag {
 	uint8_t		pagf_metadata:1; /* the agf is preferred to be metadata */
 	uint8_t		pagi_inodeok:1;	/* The agi is ok for inodes */
 	uint8_t		pagf_agflreset:1; /* agfl requires reset before use */
+	uint8_t		pagf_noalloc:1;	/* Do not allocate space from AG */
 	uint8_t		pagf_levels[XFS_BTNUM_AGF];
 					/* # of levels in bno & cnt btree */
 	uint32_t	pagf_flcount;	/* count of blocks in freelist */
@@ -143,6 +144,10 @@ struct xfs_perag *xfs_perag_get(struct xfs_mount *mp, xfs_agnumber_t agno);
 struct xfs_perag *xfs_perag_get_tag(struct xfs_mount *mp, xfs_agnumber_t agno,
 		unsigned int tag);
 void xfs_perag_put(struct xfs_perag *pag);
+
+xfs_extlen_t xfs_ag_fdblocks(struct xfs_perag *pag);
+int xfs_ag_set_noalloc(struct xfs_perag *pag);
+void xfs_ag_clear_noalloc(struct xfs_perag *pag);
 
 /*
  * Per-ag geometry infomation and validation
