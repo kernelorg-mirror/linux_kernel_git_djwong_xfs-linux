@@ -1759,8 +1759,8 @@ struct xfs_refcount_key {
 };
 
 struct xfs_refcount_irec {
-	xfs_agblock_t	rc_startblock;	/* starting block number */
-	xfs_extlen_t	rc_blockcount;	/* count of free blocks */
+	xfs_fsblock_t	rc_startblock;	/* starting block number */
+	xfs_filblks_t	rc_blockcount;	/* count of free blocks */
 	xfs_nlink_t	rc_refcount;	/* number of inodes linked here */
 };
 
