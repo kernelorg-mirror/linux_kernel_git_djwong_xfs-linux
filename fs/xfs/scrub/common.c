@@ -1300,5 +1300,8 @@ xchk_fsgates_enable(
 	if (scrub_fsgates & XCHK_FSGATES_QUOTA)
 		xfs_dqtrx_hook_enable();
 
+	if (scrub_fsgates & XCHK_FSGATES_DIRENTS)
+		xfs_dirent_hook_enable();
+
 	sc->flags |= scrub_fsgates;
 }
