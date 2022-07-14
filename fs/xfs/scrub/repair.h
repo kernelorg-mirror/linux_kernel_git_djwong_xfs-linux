@@ -27,7 +27,6 @@ xfs_extlen_t xrep_calc_ag_resblks(struct xfs_scrub *sc);
 struct xbitmap;
 
 int xrep_fix_freelist(struct xfs_scrub *sc, bool can_shrink);
-int xrep_invalidate_blocks(struct xfs_scrub *sc, struct xbitmap *btlist);
 
 struct xrep_find_ag_btree {
 	/* in: rmap owner of the btree we're looking for */
