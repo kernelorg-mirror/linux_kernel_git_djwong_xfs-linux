@@ -856,6 +856,32 @@ xrep_reinit_pagi(
 	return 0;
 }
 
+/* Given a reference to a perag structure, load AG headers and cursors. */
+int
+xrep_ag_init(
+	struct xfs_scrub	*sc,
+	struct xfs_perag	*pag,
+	struct xchk_ag		*sa)
+{
+	int			error;
+
+	ASSERT(!sa->pag);
+
+	error = xfs_ialloc_read_agi(pag, sc->tp, &sa->agi_bp);
+	if (error)
+		return error;
+
+	error = xfs_alloc_read_agf(pag, sc->tp, 0, &sa->agf_bp);
+	if (error)
+		return error;
+
+	/* Grab our own reference to the perag structure. */
+	atomic_inc(&pag->pag_ref);
+	sa->pag = pag;
+	xrep_ag_btcur_init(sc, sa);
+	return 0;
+}
+
 /* Reinitialize the per-AG block reservation for the AG we just fixed. */
 int
 xrep_reset_perag_resv(
