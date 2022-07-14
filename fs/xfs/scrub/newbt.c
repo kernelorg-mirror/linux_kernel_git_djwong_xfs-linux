@@ -412,8 +412,8 @@ xrep_newbt_cancel_resv(
 			XFS_FSB_TO_AGBNO(sc->mp, resv->fsbno),
 			resv->len, xnr->oinfo.oi_owner);
 
-	__xfs_free_extent_later(sc->tp, resv->fsbno, resv->len,
-			&xnr->oinfo, true);
+	xfs_free_extent_later(sc->tp, resv->fsbno, resv->len, &xnr->oinfo,
+			XFS_FREE_EXTENT_SKIP_DISCARD);
 	xrep_newbt_finish_autoreap(sc, resv);
 }
 
@@ -500,8 +500,8 @@ xrep_newbt_destroy_resv(
 				XFS_FSB_TO_AGBNO(sc->mp, resv->fsbno),
 				resv->len, xnr->oinfo.oi_owner);
 
-		__xfs_free_extent_later(sc->tp, resv->fsbno, resv->len,
-				&xnr->oinfo, true);
+		xfs_free_extent_later(sc->tp, resv->fsbno, resv->len,
+				&xnr->oinfo, XFS_FREE_EXTENT_SKIP_DISCARD);
 	}
 
 	xrep_newbt_finish_autoreap(sc, resv);
