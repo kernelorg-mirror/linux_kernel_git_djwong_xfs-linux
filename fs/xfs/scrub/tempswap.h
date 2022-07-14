@@ -13,7 +13,7 @@ struct xrep_tempswap {
 
 int xrep_tempswap_grab_log_assist(struct xfs_scrub *sc);
 int xrep_tempswap_trans_reserve(struct xfs_scrub *sc, int whichfork,
-		struct xrep_tempswap *ti);
+		xfs_fileoff_t off, xfs_filblks_t len, struct xrep_tempswap *ti);
 int xrep_tempswap_trans_alloc(struct xfs_scrub *sc, int whichfork,
 		struct xrep_tempswap *ti);
 
