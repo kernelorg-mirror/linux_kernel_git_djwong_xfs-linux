@@ -102,9 +102,17 @@ xchk_setup_rtsummary(struct xfs_scrub *sc)
 	return -ENOENT;
 }
 #endif
+
 #ifdef CONFIG_XFS_QUOTA
+void xchk_try_dqattach(struct xfs_scrub *sc);
 int xchk_setup_quota(struct xfs_scrub *sc);
 #else
+static inline void
+xchk_try_dqattach(struct xfs_scrub *sc)
+{
+	ASSERT(sc->ip != NULL);
+}
+
 static inline int
 xchk_setup_quota(struct xfs_scrub *sc)
 {
