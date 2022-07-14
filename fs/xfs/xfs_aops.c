@@ -488,12 +488,41 @@ static const struct iomap_writeback_ops xfs_writeback_ops = {
 	.discard_folio		= xfs_discard_folio,
 };
 
+/*
+ * Extend the writeback range to allocation unit granularity and alignment.
+ * This is a requirement for blocksize > pagesize scenarios such as realtime
+ * copy on write, since we can only share full rt extents.
+ */
+static void
+xfs_vm_writepage_extend(
+	struct xfs_inode		*ip,
+	struct writeback_control	*wbc)
+{
+	unsigned int			bsize = xfs_inode_alloc_unitsize(ip);
+	long long int			pages_to_write;
+
+	wbc->range_start = rounddown_64(wbc->range_start, bsize);
+	if (wbc->range_end != LLONG_MAX)
+		wbc->range_end = roundup_64(wbc->range_end, bsize);
+
+	if (wbc->nr_to_write == LONG_MAX)
+		return;
+
+	pages_to_write = roundup_64(wbc->range_end - wbc->range_start,
+				    PAGE_SIZE);
+	if (pages_to_write >= LONG_MAX)
+		pages_to_write = LONG_MAX;
+	if (wbc->nr_to_write < pages_to_write)
+		wbc->nr_to_write = pages_to_write;
+}
+
 STATIC int
 xfs_vm_writepages(
-	struct address_space	*mapping,
-	struct writeback_control *wbc)
+	struct address_space		*mapping,
+	struct writeback_control	*wbc)
 {
-	struct xfs_writepage_ctx wpc = { };
+	struct xfs_writepage_ctx	wpc = { };
+	struct xfs_inode		*ip = XFS_I(mapping->host);
 
 	/*
 	 * Writing back data in a transaction context can result in recursive
@@ -502,7 +531,10 @@ xfs_vm_writepages(
 	if (WARN_ON_ONCE(current->journal_info))
 		return 0;
 
-	xfs_iflags_clear(XFS_I(mapping->host), XFS_ITRUNCATED);
+	if (xfs_inode_needs_cow_around(ip))
+		xfs_vm_writepage_extend(ip, wbc);
+
+	xfs_iflags_clear(ip, XFS_ITRUNCATED);
 	return iomap_writepages(mapping, wbc, &wpc.ctx, &xfs_writeback_ops);
 }
 
