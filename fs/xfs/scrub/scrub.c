@@ -17,6 +17,7 @@
 #include "xfs_scrub.h"
 #include "xfs_btree.h"
 #include "xfs_btree_staging.h"
+#include "xfs_rmap.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -160,6 +161,9 @@ xchk_fshooks_disable(
 
 	if (sc->flags & XCHK_FSHOOKS_NLINKS)
 		xfs_nlink_hook_disable();
+
+	if (sc->flags & XCHK_FSHOOKS_RMAP)
+		xfs_rmap_hook_disable();
 
 	sc->flags &= ~XCHK_FSHOOKS_ALL;
 }
