@@ -61,6 +61,7 @@ static unsigned int xfs_errortag_random_default[] = {
 	XFS_RANDOM_DA_LEAF_SPLIT,
 	XFS_RANDOM_ATTR_LEAF_TO_NODE,
 	XFS_RANDOM_SWAPEXT_FINISH_ONE,
+	XFS_RANDOM_IMETA_RESV_CRITICAL,
 };
 
 struct xfs_errortag_attr {
@@ -178,6 +179,7 @@ XFS_ERRORTAG_ATTR_RW(larp,		XFS_ERRTAG_LARP);
 XFS_ERRORTAG_ATTR_RW(da_leaf_split,	XFS_ERRTAG_DA_LEAF_SPLIT);
 XFS_ERRORTAG_ATTR_RW(attr_leaf_to_node,	XFS_ERRTAG_ATTR_LEAF_TO_NODE);
 XFS_ERRORTAG_ATTR_RW(swapext_finish_one, XFS_RANDOM_SWAPEXT_FINISH_ONE);
+XFS_ERRORTAG_ATTR_RW(imeta_resv_critical, XFS_RANDOM_IMETA_RESV_CRITICAL);
 
 static struct attribute *xfs_errortag_attrs[] = {
 	XFS_ERRORTAG_ATTR_LIST(noerror),
@@ -223,6 +225,7 @@ static struct attribute *xfs_errortag_attrs[] = {
 	XFS_ERRORTAG_ATTR_LIST(da_leaf_split),
 	XFS_ERRORTAG_ATTR_LIST(attr_leaf_to_node),
 	XFS_ERRORTAG_ATTR_LIST(swapext_finish_one),
+	XFS_ERRORTAG_ATTR_LIST(imeta_resv_critical),
 	NULL,
 };
 ATTRIBUTE_GROUPS(xfs_errortag);
