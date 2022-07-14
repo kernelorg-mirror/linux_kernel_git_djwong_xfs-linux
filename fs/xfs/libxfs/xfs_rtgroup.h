@@ -227,8 +227,10 @@ int xfs_rtgroup_init_secondary_super(struct xfs_mount *mp, xfs_rgnumber_t rgno,
 
 #define XFS_RTLOCK_ALLOC	(1 << 0) /* rt bitmap and summary */
 #define XFS_RTLOCK_RMAP		(1 << 1) /* rmap btree */
+#define XFS_RTLOCK_REFCOUNT	(1 << 2) /* refcount operations */
 #define XFS_RTLOCK_ALL		(XFS_RTLOCK_ALLOC | \
-				 XFS_RTLOCK_RMAP)
+				 XFS_RTLOCK_RMAP | \
+				 XFS_RTLOCK_REFCOUNT)
 void xfs_rtgroup_lock(struct xfs_trans *tp, struct xfs_rtgroup *rtg,
 		unsigned int rtlock_flags);
 void xfs_rtgroup_unlock(struct xfs_rtgroup *rtg, unsigned int rtlock_flags);
