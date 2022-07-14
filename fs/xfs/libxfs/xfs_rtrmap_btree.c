@@ -18,12 +18,14 @@
 #include "xfs_alloc.h"
 #include "xfs_btree.h"
 #include "xfs_btree_staging.h"
+#include "xfs_rmap.h"
 #include "xfs_rtrmap_btree.h"
 #include "xfs_trace.h"
 #include "xfs_cksum.h"
 #include "xfs_error.h"
 #include "xfs_extent_busy.h"
 #include "xfs_rtgroup.h"
+#include "xfs_bmap.h"
 
 static struct kmem_cache	*xfs_rtrmapbt_cur_cache;
 
@@ -51,6 +53,162 @@ xfs_rtrmapbt_dup_cursor(
 	new->bc_ino.flags = cur->bc_ino.flags;
 
 	return new;
+}
+
+STATIC int
+xfs_rtrmapbt_get_minrecs(
+	struct xfs_btree_cur	*cur,
+	int			level)
+{
+	if (level == cur->bc_nlevels - 1) {
+		struct xfs_ifork	*ifp = xfs_btree_ifork_ptr(cur);
+
+		return xfs_rtrmapbt_maxrecs(cur->bc_mp, ifp->if_broot_bytes,
+				level == 0) / 2;
+	}
+
+	return cur->bc_mp->m_rtrmap_mnr[level != 0];
+}
+
+STATIC int
+xfs_rtrmapbt_get_maxrecs(
+	struct xfs_btree_cur	*cur,
+	int			level)
+{
+	if (level == cur->bc_nlevels - 1) {
+		struct xfs_ifork	*ifp = xfs_btree_ifork_ptr(cur);
+
+		return xfs_rtrmapbt_maxrecs(cur->bc_mp, ifp->if_broot_bytes,
+				level == 0);
+	}
+
+	return cur->bc_mp->m_rtrmap_mxr[level != 0];
+}
+
+STATIC void
+xfs_rtrmapbt_init_key_from_rec(
+	union xfs_btree_key		*key,
+	const union xfs_btree_rec	*rec)
+{
+	key->rtrmap.rm_startblock = rec->rtrmap.rm_startblock;
+	key->rtrmap.rm_owner = rec->rtrmap.rm_owner;
+	key->rtrmap.rm_offset = rec->rtrmap.rm_offset;
+}
+
+STATIC void
+xfs_rtrmapbt_init_high_key_from_rec(
+	union xfs_btree_key		*key,
+	const union xfs_btree_rec	*rec)
+{
+	uint64_t			off;
+	int				adj;
+
+	adj = be32_to_cpu(rec->rtrmap.rm_blockcount) - 1;
+
+	key->rtrmap.rm_startblock = rec->rtrmap.rm_startblock;
+	be32_add_cpu(&key->rtrmap.rm_startblock, adj);
+	key->rtrmap.rm_owner = rec->rtrmap.rm_owner;
+	key->rtrmap.rm_offset = rec->rtrmap.rm_offset;
+	if (XFS_RMAP_NON_INODE_OWNER(be64_to_cpu(rec->rtrmap.rm_owner)) ||
+	    XFS_RMAP_IS_BMBT_BLOCK(be64_to_cpu(rec->rtrmap.rm_offset)))
+		return;
+	off = be64_to_cpu(key->rtrmap.rm_offset);
+	off = (XFS_RMAP_OFF(off) + adj) | (off & ~XFS_RMAP_OFF_MASK);
+	key->rtrmap.rm_offset = cpu_to_be64(off);
+}
+
+STATIC void
+xfs_rtrmapbt_init_rec_from_cur(
+	struct xfs_btree_cur	*cur,
+	union xfs_btree_rec	*rec)
+{
+	rec->rtrmap.rm_startblock = cpu_to_be32(cur->bc_rec.r.rm_startblock);
+	rec->rtrmap.rm_blockcount = cpu_to_be32(cur->bc_rec.r.rm_blockcount);
+	rec->rtrmap.rm_owner = cpu_to_be64(cur->bc_rec.r.rm_owner);
+	rec->rtrmap.rm_offset = cpu_to_be64(
+			xfs_rmap_irec_offset_pack(&cur->bc_rec.r));
+}
+
+STATIC void
+xfs_rtrmapbt_init_ptr_from_cur(
+	struct xfs_btree_cur	*cur,
+	union xfs_btree_ptr	*ptr)
+{
+	ptr->l = 0;
+}
+
+/*
+ * Fork and bmbt are significant parts of the rmap record key, but written
+ * status is merely a record attribute.
+ */
+static inline uint64_t offset_keymask(uint64_t offset)
+{
+	return offset & ~XFS_RMAP_OFF_UNWRITTEN;
+}
+
+STATIC int64_t
+xfs_rtrmapbt_key_diff(
+	struct xfs_btree_cur		*cur,
+	const union xfs_btree_key	*key)
+{
+	struct xfs_rmap_irec		*rec = &cur->bc_rec.r;
+	const struct xfs_rtrmap_key	*kp = &key->rtrmap;
+	__u64				x, y;
+
+	x = be32_to_cpu(kp->rm_startblock);
+	y = rec->rm_startblock;
+	if (x > y)
+		return 1;
+	else if (y > x)
+		return -1;
+
+	x = be64_to_cpu(kp->rm_owner);
+	y = rec->rm_owner;
+	if (x > y)
+		return 1;
+	else if (y > x)
+		return -1;
+
+	x = offset_keymask(be64_to_cpu(kp->rm_offset));
+	y = offset_keymask(xfs_rmap_irec_offset_pack(rec));
+	if (x > y)
+		return 1;
+	else if (y > x)
+		return -1;
+	return 0;
+}
+
+STATIC int64_t
+xfs_rtrmapbt_diff_two_keys(
+	struct xfs_btree_cur		*cur,
+	const union xfs_btree_key	*k1,
+	const union xfs_btree_key	*k2)
+{
+	const struct xfs_rtrmap_key	*kp1 = &k1->rtrmap;
+	const struct xfs_rtrmap_key	*kp2 = &k2->rtrmap;
+	__u64				x, y;
+
+	x = be32_to_cpu(kp1->rm_startblock);
+	y = be32_to_cpu(kp2->rm_startblock);
+	if (x > y)
+		return 1;
+	else if (y > x)
+		return -1;
+
+	x = be64_to_cpu(kp1->rm_owner);
+	y = be64_to_cpu(kp2->rm_owner);
+	if (x > y)
+		return 1;
+	else if (y > x)
+		return -1;
+
+	x = offset_keymask(be64_to_cpu(kp1->rm_offset));
+	y = offset_keymask(be64_to_cpu(kp2->rm_offset));
+	if (x > y)
+		return 1;
+	else if (y > x)
+		return -1;
+	return 0;
 }
 
 static xfs_failaddr_t
@@ -119,12 +277,133 @@ const struct xfs_buf_ops xfs_rtrmapbt_buf_ops = {
 	.verify_struct		= xfs_rtrmapbt_verify,
 };
 
+STATIC int
+xfs_rtrmapbt_keys_inorder(
+	struct xfs_btree_cur		*cur,
+	const union xfs_btree_key	*k1,
+	const union xfs_btree_key	*k2)
+{
+	uint64_t			a;
+	uint64_t			b;
+
+	a = be32_to_cpu(k1->rtrmap.rm_startblock);
+	b = be32_to_cpu(k2->rtrmap.rm_startblock);
+	if (a < b)
+		return 1;
+	else if (a > b)
+		return 0;
+	a = be64_to_cpu(k1->rtrmap.rm_owner);
+	b = be64_to_cpu(k2->rtrmap.rm_owner);
+	if (a < b)
+		return 1;
+	else if (a > b)
+		return 0;
+	a = offset_keymask(be64_to_cpu(k1->rtrmap.rm_offset));
+	b = offset_keymask(be64_to_cpu(k2->rtrmap.rm_offset));
+	if (a <= b)
+		return 1;
+	return 0;
+}
+
+STATIC int
+xfs_rtrmapbt_recs_inorder(
+	struct xfs_btree_cur		*cur,
+	const union xfs_btree_rec	*r1,
+	const union xfs_btree_rec	*r2)
+{
+	uint64_t			a;
+	uint64_t			b;
+
+	a = be32_to_cpu(r1->rtrmap.rm_startblock);
+	b = be32_to_cpu(r2->rtrmap.rm_startblock);
+	if (a < b)
+		return 1;
+	else if (a > b)
+		return 0;
+	a = be64_to_cpu(r1->rtrmap.rm_owner);
+	b = be64_to_cpu(r2->rtrmap.rm_owner);
+	if (a < b)
+		return 1;
+	else if (a > b)
+		return 0;
+	a = offset_keymask(be64_to_cpu(r1->rtrmap.rm_offset));
+	b = offset_keymask(be64_to_cpu(r2->rtrmap.rm_offset));
+	if (a <= b)
+		return 1;
+	return 0;
+}
+
+STATIC void
+xfs_rtrmapbt_mask_key(
+	struct xfs_btree_cur		*cur,
+	union xfs_btree_key		*out_key,
+	const union xfs_btree_key	*in_key,
+	const union xfs_btree_key	*mask)
+{
+	memset(out_key, 0, sizeof(union xfs_btree_key));
+
+	if (mask->rtrmap.rm_startblock)
+		out_key->rtrmap.rm_startblock = in_key->rtrmap.rm_startblock;
+	if (mask->rtrmap.rm_owner)
+		out_key->rtrmap.rm_owner = in_key->rtrmap.rm_owner;
+	if (mask->rtrmap.rm_offset)
+		out_key->rtrmap.rm_offset = in_key->rtrmap.rm_offset;
+}
+
+STATIC bool
+xfs_rtrmapbt_has_key_gap(
+	struct xfs_btree_cur		*cur,
+	const union xfs_btree_key	*key1,
+	const union xfs_btree_key	*key2,
+	const union xfs_btree_key	*mask)
+{
+	bool				reflink = xfs_has_reflink(cur->bc_mp);
+	uint64_t			x, y;
+
+	if (mask->rtrmap.rm_offset) {
+		x = be64_to_cpu(key1->rtrmap.rm_offset) + 1;
+		y = be64_to_cpu(key2->rtrmap.rm_offset);
+		if ((reflink && x < y) || (!reflink && x != y))
+			return true;
+	}
+
+	if (mask->rtrmap.rm_owner) {
+		x = be64_to_cpu(key1->rtrmap.rm_owner) + 1;
+		y = be64_to_cpu(key2->rtrmap.rm_owner);
+		if ((reflink && x < y) || (!reflink && x != y))
+			return true;
+	}
+
+	if (mask->rtrmap.rm_startblock) {
+		x = be32_to_cpu(key1->rtrmap.rm_startblock) + 1;
+		y = be32_to_cpu(key2->rtrmap.rm_startblock);
+		if ((reflink && x < y) || (!reflink && x != y))
+			return true;
+	}
+
+	return false;
+}
+
 static const struct xfs_btree_ops xfs_rtrmapbt_ops = {
 	.rec_len		= sizeof(struct xfs_rtrmap_rec),
 	.key_len		= 2 * sizeof(struct xfs_rtrmap_key),
 
 	.dup_cursor		= xfs_rtrmapbt_dup_cursor,
+	.alloc_block		= xfs_btree_alloc_imeta_block,
+	.free_block		= xfs_btree_free_imeta_block,
+	.get_minrecs		= xfs_rtrmapbt_get_minrecs,
+	.get_maxrecs		= xfs_rtrmapbt_get_maxrecs,
+	.init_key_from_rec	= xfs_rtrmapbt_init_key_from_rec,
+	.init_high_key_from_rec	= xfs_rtrmapbt_init_high_key_from_rec,
+	.init_rec_from_cur	= xfs_rtrmapbt_init_rec_from_cur,
+	.init_ptr_from_cur	= xfs_rtrmapbt_init_ptr_from_cur,
+	.key_diff		= xfs_rtrmapbt_key_diff,
 	.buf_ops		= &xfs_rtrmapbt_buf_ops,
+	.diff_two_keys		= xfs_rtrmapbt_diff_two_keys,
+	.keys_inorder		= xfs_rtrmapbt_keys_inorder,
+	.recs_inorder		= xfs_rtrmapbt_recs_inorder,
+	.has_key_gap		= xfs_rtrmapbt_has_key_gap,
+	.mask_key		= xfs_rtrmapbt_mask_key,
 };
 
 /* Initialize a new rt rmap btree cursor. */
