@@ -20,6 +20,7 @@
 #include "scrub/common.h"
 #include "scrub/trace.h"
 #include "scrub/xfile.h"
+#include "scrub/repair.h"
 
 /*
  * Realtime Summary
@@ -37,7 +38,15 @@ xchk_setup_rtsummary(
 	struct xfs_scrub	*sc)
 {
 	struct xfs_mount	*mp = sc->mp;
+	size_t			bufsize = mp->m_sb.sb_blocksize;
+	unsigned int		resblks = 0;
 	int			error;
+
+	if (xchk_could_repair(sc)) {
+		error = xrep_setup_rtsummary(sc, &resblks, &bufsize);
+		if (error)
+			return error;
+	}
 
 	/*
 	 * Create an xfile to construct a new rtsummary file.  The xfile allows
@@ -48,12 +57,12 @@ xchk_setup_rtsummary(
 	if (error)
 		return error;
 
-	error = xchk_trans_alloc(sc, 0);
+	error = xchk_trans_alloc(sc, resblks);
 	if (error)
 		return error;
 
 	/* Allocate a memory buffer for the summary comparison. */
-	sc->buf = kvmalloc(mp->m_sb.sb_blocksize, XCHK_GFP_FLAGS);
+	sc->buf = kvmalloc(bufsize, XCHK_GFP_FLAGS);
 	if (!sc->buf)
 		return -ENOMEM;
 
