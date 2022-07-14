@@ -68,6 +68,8 @@ int xrep_reset_perag_resv(struct xfs_scrub *sc);
 int xrep_bmap(struct xfs_scrub *sc, int whichfork, bool allow_unwritten);
 int xrep_metadata_inode_forks(struct xfs_scrub *sc);
 int xrep_setup_ag_rmapbt(struct xfs_scrub *sc);
+int xrep_setup_rtsummary(struct xfs_scrub *sc, unsigned int *resblks,
+		size_t *bufsize);
 
 /* Repair setup functions */
 int xrep_setup_ag_allocbt(struct xfs_scrub *sc);
@@ -105,8 +107,10 @@ int xrep_fscounters(struct xfs_scrub *sc);
 
 #ifdef CONFIG_XFS_RT
 int xrep_rtbitmap(struct xfs_scrub *sc);
+int xrep_rtsummary(struct xfs_scrub *sc);
 #else
 # define xrep_rtbitmap			xrep_notsupported
+# define xrep_rtsummary			xrep_notsupported
 #endif /* CONFIG_XFS_RT */
 
 #ifdef CONFIG_XFS_QUOTA
@@ -172,6 +176,15 @@ static inline int xrep_setup_rtbitmap(struct xfs_scrub *sc, unsigned int *x)
 	return 0;
 }
 
+static inline int
+xrep_setup_rtsummary(
+	struct xfs_scrub	*sc,
+	unsigned int		*whatever,
+	size_t			*dontcare)
+{
+	return 0;
+}
+
 #define xrep_revalidate_allocbt		(NULL)
 #define xrep_revalidate_iallocbt	(NULL)
 
@@ -193,6 +206,7 @@ static inline int xrep_setup_rtbitmap(struct xfs_scrub *sc, unsigned int *x)
 #define xrep_quotacheck			xrep_notsupported
 #define xrep_nlinks			xrep_notsupported
 #define xrep_fscounters			xrep_notsupported
+#define xrep_rtsummary			xrep_notsupported
 
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
