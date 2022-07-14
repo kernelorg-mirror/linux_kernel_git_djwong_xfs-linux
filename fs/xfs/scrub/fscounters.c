@@ -470,7 +470,7 @@ xchk_fscount_count_frextents(
 	if (!xfs_has_realtime(mp))
 		return 0;
 
-	xfs_ilock(sc->mp->m_rbmip, XFS_ILOCK_EXCL);
+	xfs_rtbitmap_lock(NULL, sc->mp);
 	error = xfs_rtalloc_query_all(sc->mp, sc->tp,
 			xchk_fscount_add_frextent, fsc);
 	if (error) {
@@ -479,7 +479,7 @@ xchk_fscount_count_frextents(
 	}
 
 out_unlock:
-	xfs_iunlock(sc->mp->m_rbmip, XFS_ILOCK_EXCL);
+	xfs_rtbitmap_unlock(sc->mp);
 	return error;
 }
 #else
