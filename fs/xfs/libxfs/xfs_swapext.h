@@ -13,12 +13,11 @@
  * This can be done to individual file extents by using the block mapping log
  * intent items introduced with reflink and rmap; or to entire file ranges
  * using swapext log intent items to track the overall progress across multiple
- * extent mappings.  Realtime is not supported yet.
+ * extent mappings.
  */
 static inline bool xfs_swapext_supported(struct xfs_mount *mp)
 {
-	return (xfs_has_reflink(mp) || xfs_has_rmapbt(mp)) &&
-	       !xfs_has_realtime(mp);
+	return xfs_has_reflink(mp) || xfs_has_rmapbt(mp);
 }
 
 /*
