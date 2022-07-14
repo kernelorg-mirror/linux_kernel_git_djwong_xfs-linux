@@ -774,7 +774,8 @@ xrep_bmap_remove_old_tree(
 
 	/* Free the old bmbt blocks if they're not in use. */
 	xfs_rmap_ino_bmbt_owner(&oinfo, sc->ip->i_ino, rb->whichfork);
-	return xrep_reap_fsblocks(sc, &rb->old_bmbt_blocks, &oinfo);
+	return xrep_reap_fsblocks(sc, &rb->old_bmbt_blocks, &oinfo,
+			XFS_AG_RESV_NONE);
 }
 
 /* Check for garbage inputs.  Returns -ECANCELED if there's nothing to do. */
