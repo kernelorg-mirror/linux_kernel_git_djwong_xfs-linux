@@ -1454,8 +1454,9 @@ TRACE_EVENT(xrep_ibt_found,
 
 TRACE_EVENT(xrep_refc_found,
 	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno,
-		 const struct xfs_refcount_irec *rec),
-	TP_ARGS(mp, agno, rec),
+		 xfs_agblock_t startblock, xfs_extlen_t blockcount,
+		 xfs_nlink_t refcount),
+	TP_ARGS(mp, agno, startblock, blockcount, refcount),
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_agnumber_t, agno)
@@ -1466,9 +1467,9 @@ TRACE_EVENT(xrep_refc_found,
 	TP_fast_assign(
 		__entry->dev = mp->m_super->s_dev;
 		__entry->agno = agno;
-		__entry->startblock = rec->rc_startblock;
-		__entry->blockcount = rec->rc_blockcount;
-		__entry->refcount = rec->rc_refcount;
+		__entry->startblock = startblock;
+		__entry->blockcount = blockcount;
+		__entry->refcount = refcount;
 	),
 	TP_printk("dev %d:%d agno 0x%x agbno 0x%x fsbcount 0x%x refcount %u",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
