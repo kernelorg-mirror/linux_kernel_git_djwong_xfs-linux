@@ -1304,6 +1304,9 @@ xfs_imeta_resv_alloc_extent(
 		xfs_trans_mod_sb(args->tp, XFS_TRANS_SB_FDBLOCKS, -len);
 
 	ip->i_nblocks += args->len;
+	xfs_trans_mod_dquot_byino(args->tp, ip, XFS_TRANS_DQ_BCOUNT, args->len);
+
+	xfs_trans_log_inode(args->tp, ip, XFS_ILOG_CORE);
 }
 
 /* Free a block to the metadata file's reservation. */
@@ -1319,6 +1322,7 @@ xfs_imeta_resv_free_extent(
 	trace_xfs_imeta_resv_free_extent(ip, len);
 
 	ip->i_nblocks -= len;
+	xfs_trans_mod_dquot_byino(tp, ip, XFS_TRANS_DQ_BCOUNT, -len);
 
 	/*
 	 * Add the freed blocks back into the inode's delalloc reservation
@@ -1339,6 +1343,8 @@ xfs_imeta_resv_free_extent(
 	 */
 	if (len)
 		xfs_trans_mod_sb(tp, XFS_TRANS_SB_FDBLOCKS, len);
+
+	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
 }
 
 /* Release a metadata file's space reservation. */
