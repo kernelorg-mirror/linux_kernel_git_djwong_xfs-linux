@@ -192,8 +192,8 @@ xrep_cow_mark_missing_staging(
 {
 	struct xrep_cow			*xc = priv;
 	xfs_fsblock_t			fsbno;
-	xfs_agblock_t			rec_bno;
-	xfs_extlen_t			rec_len;
+	xfs_fsblock_t			rec_bno;
+	xfs_filblks_t			rec_len;
 	unsigned int			adj;
 
 	if (rec->rm_owner == XFS_RMAP_OWN_COW)
