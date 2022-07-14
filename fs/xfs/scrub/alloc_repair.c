@@ -535,8 +535,9 @@ xrep_abt_dispose_one(
 	if (resv->used == resv->len)
 		return;
 
-	__xfs_free_extent_later(sc->tp, fsbno + resv->used,
-			resv->len - resv->used, NULL, true);
+	xfs_free_extent_later(sc->tp, fsbno + resv->used,
+			resv->len - resv->used, NULL,
+			XFS_FREE_EXTENT_SKIP_DISCARD);
 }
 
 /*
