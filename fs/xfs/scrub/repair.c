@@ -166,6 +166,16 @@ xrep_roll_ag_trans(
 	return 0;
 }
 
+/* Roll the scrub transaction, holding the primary metadata locked. */
+int
+xrep_roll_trans(
+	struct xfs_scrub	*sc)
+{
+	if (!sc->ip)
+		return xrep_roll_ag_trans(sc);
+	return xfs_trans_roll_inode(&sc->tp, sc->ip);
+}
+
 /* Finish all deferred work attached to the repair transaction. */
 int
 xrep_defer_finish(
