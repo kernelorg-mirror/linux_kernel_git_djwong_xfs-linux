@@ -30,6 +30,7 @@ int xrep_roll_trans(struct xfs_scrub *sc);
 bool xrep_ag_has_space(struct xfs_perag *pag, xfs_extlen_t nr_blocks,
 		enum xfs_ag_resv_type type);
 xfs_extlen_t xrep_calc_ag_resblks(struct xfs_scrub *sc);
+xfs_extlen_t xrep_calc_rtgroup_resblks(struct xfs_scrub *sc);
 int xrep_alloc_ag_block(struct xfs_scrub *sc,
 		const struct xfs_owner_info *oinfo, xfs_fsblock_t *fsbno,
 		enum xfs_ag_resv_type resv);
@@ -89,6 +90,7 @@ int xrep_setup_parent(struct xfs_scrub *sc);
 int xrep_setup_nlinks(struct xfs_scrub *sc);
 int xrep_setup_symlink(struct xfs_scrub *sc, unsigned int *resblks);
 int xrep_setup_rgbitmap(struct xfs_scrub *sc, unsigned int *resblks);
+int xrep_setup_rtrmapbt(struct xfs_scrub *sc);
 
 int xrep_xattr_reset_fork(struct xfs_scrub *sc);
 
@@ -105,6 +107,9 @@ int xrep_ag_init(struct xfs_scrub *sc, struct xfs_perag *pag,
 int xrep_rtgroup_init(struct xfs_scrub *sc, struct xfs_rtgroup *rtg,
 		struct xchk_rt *sr);
 void xrep_rtgroup_btcur_init(struct xfs_scrub *sc, struct xchk_rt *sr);
+
+int xrep_check_ino_btree_mapping(struct xfs_scrub *sc,
+		const struct xfs_rmap_irec *rec);
 
 #ifdef CONFIG_XFS_RT
 int xrep_require_rtext_inuse(struct xfs_scrub *sc, xfs_rtblock_t rtbno,
@@ -177,10 +182,12 @@ int xrep_quotacheck(struct xfs_scrub *sc);
 int xrep_rtsummary(struct xfs_scrub *sc);
 int xrep_rgsuperblock(struct xfs_scrub *sc);
 int xrep_rgbitmap(struct xfs_scrub *sc);
+int xrep_rtrmapbt(struct xfs_scrub *sc);
 #else
 # define xrep_rtsummary			xrep_notsupported
 # define xrep_rgsuperblock		xrep_notsupported
 # define xrep_rgbitmap			xrep_notsupported
+# define xrep_rtrmapbt			xrep_notsupported
 #endif /* CONFIG_XFS_RT */
 
 struct xrep_newbt_resv {
@@ -255,6 +262,8 @@ void xrep_trans_cancel_hook_dummy(void **cookiep, struct xfs_trans *tp);
 
 bool xrep_buf_verify_struct(struct xfs_buf *bp, const struct xfs_buf_ops *ops);
 xfs_ino_t xrep_dotdot_lookup(struct xfs_scrub *sc);
+void xrep_inode_set_nblocks(struct xfs_scrub *sc, int64_t new_blocks);
+int xrep_reset_imeta_reservation(struct xfs_scrub *sc);
 
 #else
 
@@ -275,6 +284,8 @@ xrep_calc_ag_resblks(
 {
 	return 0;
 }
+
+#define xrep_calc_rtgroup_resblks	xrep_calc_ag_resblks
 
 static inline int
 xrep_reset_perag_resv(
@@ -300,6 +311,7 @@ xrep_setup_nothing(
 #define xrep_setup_directory		xrep_setup_nothing
 #define xrep_setup_parent		xrep_setup_nothing
 #define xrep_setup_nlinks		xrep_setup_nothing
+#define xrep_setup_rtrmapbt		xrep_setup_nothing
 
 #define xrep_setup_inode(sc, imap)	((void)0)
 
@@ -355,6 +367,7 @@ static inline int xrep_setup_rgbitmap(struct xfs_scrub *sc, unsigned int *x)
 #define xrep_symlink			xrep_notsupported
 #define xrep_rgsuperblock		xrep_notsupported
 #define xrep_rgbitmap			xrep_notsupported
+#define xrep_rtrmapbt			xrep_notsupported
 
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
