@@ -158,10 +158,17 @@ struct xfs_btree_ops {
 				const union xfs_btree_rec *r1,
 				const union xfs_btree_rec *r2);
 
+	/* mask a key for us */
+	void	(*mask_key)(struct xfs_btree_cur *cur,
+			    union xfs_btree_key *out_key,
+			    const union xfs_btree_key *in_key,
+			    const union xfs_btree_key *mask);
+
 	/* decide if there's a gap in the keyspace between two keys */
 	bool	(*has_key_gap)(struct xfs_btree_cur *cur,
 			       const union xfs_btree_key *key1,
-			       const union xfs_btree_key *key2);
+			       const union xfs_btree_key *key2,
+			       const union xfs_btree_key *mask);
 };
 
 /*
@@ -552,6 +559,7 @@ typedef bool (*xfs_btree_key_gap_fn)(struct xfs_btree_cur *cur,
 int xfs_btree_scan_keyfill(struct xfs_btree_cur *cur,
 		const union xfs_btree_irec *low,
 		const union xfs_btree_irec *high,
+		const union xfs_btree_irec *mask,
 		enum xfs_btree_keyfill *outcome);
 
 bool xfs_btree_has_more_records(struct xfs_btree_cur *cur);
