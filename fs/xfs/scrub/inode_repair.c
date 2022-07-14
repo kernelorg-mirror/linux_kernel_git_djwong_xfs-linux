@@ -35,6 +35,7 @@
 #include "xfs_ag.h"
 #include "xfs_attr_leaf.h"
 #include "xfs_log_priv.h"
+#include "xfs_symlink_remote.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
