@@ -1004,7 +1004,9 @@ xfs_reflink_recover_cow(
 	struct xfs_mount	*mp)
 {
 	struct xfs_perag	*pag;
+	struct xfs_rtgroup	*rtg;
 	xfs_agnumber_t		agno;
+	xfs_rgnumber_t		rgno;
 	int			error = 0;
 
 	if (!xfs_has_reflink(mp))
@@ -1014,11 +1016,19 @@ xfs_reflink_recover_cow(
 		error = xfs_refcount_recover_cow_leftovers(mp, pag);
 		if (error) {
 			xfs_perag_put(pag);
-			break;
+			return error;
 		}
 	}
 
-	return error;
+	for_each_rtgroup(mp, rgno, rtg) {
+		error = xfs_refcount_recover_rtcow_leftovers(mp, rtg);
+		if (error) {
+			xfs_rtgroup_put(rtg);
+			return error;
+		}
+	}
+
+	return 0;
 }
 
 /*
