@@ -19,6 +19,7 @@
 #include "xfs_da_format.h"
 #include "xfs_btree_mem.h"
 #include "xfs_rmap.h"
+#include "xfs_rtgroup.h"
 #include "scrub/scrub.h"
 #include "scrub/xfile.h"
 #include "scrub/xfarray.h"
