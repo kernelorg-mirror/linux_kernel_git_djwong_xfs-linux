@@ -158,6 +158,9 @@ xchk_fshooks_disable(
 	if (sc->flags & XCHK_FSHOOKS_DRAIN)
 		xfs_drain_wait_disable();
 
+	if (sc->flags & XCHK_FSHOOKS_QUOTA)
+		xfs_dqtrx_hook_disable();
+
 	sc->flags &= ~XCHK_FSHOOKS_ALL;
 }
 
