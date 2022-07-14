@@ -333,11 +333,30 @@ xchk_bmap_rt_iextent_xref(
 	xchk_xref_is_used_rt_space(info->sc, irec->br_startblock,
 			irec->br_blockcount);
 	xchk_bmap_xref_rmap(info, irec, irec->br_startblock);
-
-	xfs_rmap_ino_owner(&oinfo, info->sc->ip->i_ino, info->whichfork,
-			irec->br_startoff);
-	xchk_xref_is_only_rt_owned_by(info->sc, irec->br_startblock,
-			irec->br_blockcount, &oinfo);
+	switch (info->whichfork) {
+	case XFS_DATA_FORK:
+		if (!xfs_is_reflink_inode(info->sc->ip)) {
+			xfs_rmap_ino_owner(&oinfo, info->sc->ip->i_ino,
+					info->whichfork, irec->br_startoff);
+			xchk_xref_is_only_rt_owned_by(info->sc,
+					irec->br_startblock,
+					irec->br_blockcount, &oinfo);
+			xchk_xref_is_not_rt_shared(info->sc,
+					irec->br_startblock,
+					irec->br_blockcount);
+		}
+		xchk_xref_is_not_rt_cow_staging(info->sc, irec->br_startblock,
+				irec->br_blockcount);
+		break;
+	case XFS_COW_FORK:
+		xchk_xref_is_only_rt_owned_by(info->sc, irec->br_startblock,
+				irec->br_blockcount, &XFS_RMAP_OINFO_COW);
+		xchk_xref_is_rt_cow_staging(info->sc, irec->br_startblock,
+				irec->br_blockcount);
+		xchk_xref_is_not_rt_shared(info->sc, irec->br_startblock,
+				irec->br_blockcount);
+		break;
+	}
 
 out_free:
 	xchk_rt_btcur_free(&info->sc->sr);
