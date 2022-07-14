@@ -31,6 +31,9 @@ xchk_setup_inode_bmap(
 {
 	int			error;
 
+	if (xchk_need_fshook_drain(sc))
+		xchk_fshooks_enable(sc, XCHK_FSHOOKS_DRAIN);
+
 	error = xchk_get_inode(sc);
 	if (error)
 		goto out;
