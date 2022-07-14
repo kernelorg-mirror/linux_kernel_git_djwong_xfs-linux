@@ -2490,3 +2490,13 @@ xfs_verify_magic16(
 		return false;
 	return dmagic == bp->b_ops->magic16[idx];
 }
+
+/* Return the number of sectors for a buffer target. */
+xfs_daddr_t
+xfs_buftarg_nr_sectors(
+	struct xfs_buftarg	*btp)
+{
+	if (btp->bt_flags & XFS_BUFTARG_IN_MEMORY)
+		return xfile_size(btp->bt_xfile) >> SECTOR_SHIFT;
+	return bdev_nr_sectors(btp->bt_bdev);
+}
