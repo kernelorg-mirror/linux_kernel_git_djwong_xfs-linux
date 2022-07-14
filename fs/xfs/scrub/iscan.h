@@ -51,6 +51,7 @@ xchk_iscan_abort(struct xchk_iscan *iscan)
 
 void xchk_iscan_start(struct xchk_iscan *iscan, unsigned int iget_timeout,
 		unsigned int iget_retry_delay);
+void xchk_iscan_finish_early(struct xchk_iscan *iscan);
 void xchk_iscan_teardown(struct xchk_iscan *iscan);
 
 int xchk_iscan_iter(struct xfs_scrub *sc, struct xchk_iscan *iscan,
