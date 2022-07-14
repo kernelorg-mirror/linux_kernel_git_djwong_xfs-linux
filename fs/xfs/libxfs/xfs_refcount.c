@@ -1886,7 +1886,7 @@ xfs_refcount_scan_keyfill(
 	high.rc.rc_startblock = bno + len - 1;
 	low.rc.rc_domain = high.rc.rc_domain = domain;
 
-	return xfs_btree_scan_keyfill(cur, &low, &high, outcome);
+	return xfs_btree_scan_keyfill(cur, &low, &high, NULL, outcome);
 }
 
 int __init

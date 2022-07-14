@@ -387,11 +387,14 @@ STATIC bool
 xfs_inobt_has_key_gap(
 	struct xfs_btree_cur		*cur,
 	const union xfs_btree_key	*key1,
-	const union xfs_btree_key	*key2)
+	const union xfs_btree_key	*key2,
+	const union xfs_btree_key	*mask)
 {
 	xfs_agino_t			next;
 
-	next = be32_to_cpu(key1->inobt.ir_startino) + XFS_INODES_PER_CHUNK;
+	ASSERT(!mask || mask->inobt.ir_startino);
+
+	next = be32_to_cpu(key1->inobt.ir_startino) + 1;
 	return next != be32_to_cpu(key2->inobt.ir_startino);
 }
 
