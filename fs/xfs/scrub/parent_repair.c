@@ -135,6 +135,10 @@ xrep_findparent_walk_directory(
 	if (xrep_is_tempfile(dp))
 		return 0;
 
+	/* Don't mix metadata and regular directory trees. */
+	if (xfs_is_metadata_inode(dp) ^ xfs_is_metadata_inode(sc->ip))
+		return 0;
+
 	/* Try to lock dp; if we can, we're ready to scan! */
 	if (!xfs_ilock_nowait(dp, XFS_IOLOCK_SHARED)) {
 		xfs_ino_t	orig_parent, new_parent;
@@ -219,12 +223,27 @@ xrep_parent_confirm(
 	};
 	int			error;
 
-	/*
-	 * The root directory always points to itself.  Unlinked dirs can point
-	 * anywhere, so we point them at the root dir too.
-	 */
-	if (sc->ip == sc->mp->m_rootip || VFS_I(sc->ip)->i_nlink == 0) {
+	/* The root directory always points to itself. */
+	if (sc->ip == sc->mp->m_rootip) {
 		*parent_ino = sc->mp->m_sb.sb_rootino;
+		return 0;
+	}
+
+	/* The metadata root directory always points to itself. */
+	if (sc->ip == sc->mp->m_metadirip) {
+		*parent_ino = sc->mp->m_sb.sb_metadirino;
+		return 0;
+	}
+
+	/*
+	 * Unlinked dirs can point anywhere, so we point them at the root dir
+	 * of whichever tree is appropriate.
+	 */
+	if (VFS_I(sc->ip)->i_nlink == 0) {
+		if (xfs_is_metadata_inode(sc->ip))
+			*parent_ino = sc->mp->m_sb.sb_metadirino;
+		else
+			*parent_ino = sc->mp->m_sb.sb_rootino;
 		return 0;
 	}
 
@@ -381,8 +400,14 @@ xrep_parent_self_reference(
 	if (sc->ip->i_ino == sc->mp->m_sb.sb_rootino)
 		return sc->mp->m_sb.sb_rootino;
 
-	if (VFS_I(sc->ip)->i_nlink == 0)
+	if (sc->ip->i_ino == sc->mp->m_sb.sb_metadirino)
+		return sc->mp->m_sb.sb_metadirino;
+
+	if (VFS_I(sc->ip)->i_nlink == 0) {
+		if (xfs_is_metadata_inode(sc->ip))
+			return sc->mp->m_sb.sb_metadirino;
 		return sc->mp->m_sb.sb_rootino;
+	}
 
 	return NULLFSINO;
 }
