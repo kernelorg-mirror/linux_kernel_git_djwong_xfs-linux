@@ -121,7 +121,7 @@ xfs_initialize_rtgroups(
 		error = xfs_drain_init(&rtg->rtg_intents);
 		if (error)
 			goto out_remove_rtg;
-
+		xfs_hooks_init(&rtg->rtg_rmap_update_hooks);
 #endif /* __KERNEL__ */
 
 		/* first new rtg is fully initialized */
