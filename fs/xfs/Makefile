@@ -58,6 +58,10 @@ ccflags-y += $(call cc-option, -Wunused-macros)
 # wait_event shadows variables intentionally
 ccflags-y += -Wno-error=shadow
 
+ifneq ($(CONFIG_XFS_RT),y)
+ccflags-y += -Wno-error=unused-variable
+endif
+
 ifneq ($(CONFIG_XFS_QUOTA),y)
 ccflags-y += -Wno-error=empty-body
 endif
