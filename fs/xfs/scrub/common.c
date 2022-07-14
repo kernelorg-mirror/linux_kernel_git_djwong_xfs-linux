@@ -36,6 +36,7 @@
 #include "xfs_rtgroup.h"
 #include "xfs_rtrmap_btree.h"
 #include "xfs_bmap_util.h"
+#include "xfs_rtrefcount_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -855,6 +856,10 @@ xchk_rtgroup_init(
 		sr->rmap_cur = xfs_rtrmapbt_init_cursor(sc->mp, sc->tp,
 				sr->rtg, sr->rtg->rtg_rmapip);
 
+	if (xfs_has_rtreflink(sc->mp) && (rtglock_flags & XFS_RTGLOCK_REFCOUNT))
+		sr->refc_cur = xfs_rtrefcountbt_init_cursor(sc->mp, sc->tp,
+				sr->rtg, sr->rtg->rtg_refcountip);
+
 	return 0;
 }
 
@@ -869,7 +874,10 @@ xchk_rtgroup_btcur_free(
 {
 	if (sr->rmap_cur)
 		xfs_btree_del_cursor(sr->rmap_cur, XFS_BTREE_ERROR);
+	if (sr->refc_cur)
+		xfs_btree_del_cursor(sr->refc_cur, XFS_BTREE_ERROR);
 
+	sr->refc_cur = NULL;
 	sr->rmap_cur = NULL;
 }
 
@@ -1547,6 +1555,21 @@ xchk_inode_count_blocks(
 			return -EFSCORRUPTED;
 		}
 		cur = xfs_rtrmapbt_init_cursor(sc->mp, sc->tp, sc->sr.rtg,
+				sc->ip);
+		error = xfs_btree_count_blocks(cur, &btblocks);
+		xfs_btree_del_cursor(cur, error);
+		if (error)
+			return error;
+
+		*nextents = 0;
+		*count = btblocks - 1;
+		return 0;
+	case XFS_DINODE_FMT_REFCOUNT:
+		if (!sc->sr.rtg) {
+			ASSERT(0);
+			return -EFSCORRUPTED;
+		}
+		cur = xfs_rtrefcountbt_init_cursor(sc->mp, sc->tp, sc->sr.rtg,
 				sc->ip);
 		error = xfs_btree_count_blocks(cur, &btblocks);
 		xfs_btree_del_cursor(cur, error);
