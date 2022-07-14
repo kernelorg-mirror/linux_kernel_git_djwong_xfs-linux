@@ -190,6 +190,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   ialloc_repair.o \
 				   inode_repair.o \
 				   newbt.o \
+				   nlinks_repair.o \
 				   reap.o \
 				   refcount_repair.o \
 				   repair.o \
