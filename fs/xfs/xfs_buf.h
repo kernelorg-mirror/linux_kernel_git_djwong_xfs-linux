@@ -43,6 +43,7 @@ struct xfile;
 #define _XBF_PAGES	 (1u << 20)/* backed by refcounted pages */
 #define _XBF_KMEM	 (1u << 21)/* backed by heap memory */
 #define _XBF_DELWRI_Q	 (1u << 22)/* buffer on a delwri queue */
+#define _XBF_DIRECT_MAP	 (1u << 23)/* pages directly mapped to storage */
 
 /* flags used only as arguments to access routines */
 /*
@@ -72,6 +73,7 @@ typedef unsigned int xfs_buf_flags_t;
 	{ _XBF_PAGES,		"PAGES" }, \
 	{ _XBF_KMEM,		"KMEM" }, \
 	{ _XBF_DELWRI_Q,	"DELWRI_Q" }, \
+	{ _XBF_DIRECT_MAP,	"DIRECT_MAP" }, \
 	/* The following interface flags should never be set */ \
 	{ XBF_BCACHE_SCAN,	"BCACHE_SCAN" }, \
 	{ XBF_INCORE,		"INCORE" }, \
@@ -133,6 +135,13 @@ typedef struct xfs_buftarg {
 # define XFS_BUFTARG_IN_MEMORY	(1U << 1)
 #else
 # define XFS_BUFTARG_IN_MEMORY	(0)
+#endif
+
+/* buffer pages are direct-mapped (implies IN_MEMORY) */
+#ifdef CONFIG_XFS_IN_MEMORY_FILE
+# define XFS_BUFTARG_DIRECT_MAP	(1U << 2)
+#else
+# define XFS_BUFTARG_DIRECT_MAP	(0)
 #endif
 
 static inline bool
@@ -458,5 +467,6 @@ xfs_buftarg_verify_daddr(
 int xfs_buf_reverify(struct xfs_buf *bp, const struct xfs_buf_ops *ops);
 bool xfs_verify_magic(struct xfs_buf *bp, __be32 dmagic);
 bool xfs_verify_magic16(struct xfs_buf *bp, __be16 dmagic);
+bool xfs_buf_check_poisoned(struct xfs_buf *bp);
 
 #endif	/* __XFS_BUF_H__ */
