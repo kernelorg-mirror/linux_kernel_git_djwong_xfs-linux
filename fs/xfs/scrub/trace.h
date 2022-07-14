@@ -2710,6 +2710,39 @@ TRACE_EVENT(xrep_rtrmap_found,
 		  __entry->flags)
 );
 
+TRACE_EVENT(xrep_rtrmap_live_update,
+	TP_PROTO(struct xfs_mount *mp, unsigned int op,
+		 const struct xfs_rmap_update_params *p),
+	TP_ARGS(mp, op, p),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned int, op)
+		__field(xfs_rtblock_t, rtbno)
+		__field(xfs_filblks_t, len)
+		__field(uint64_t, owner)
+		__field(uint64_t, offset)
+		__field(unsigned int, flags)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->op = op;
+		__entry->rtbno = p->startblock;
+		__entry->len = p->blockcount;
+		xfs_owner_info_unpack(&p->oinfo, &__entry->owner,
+				&__entry->offset, &__entry->flags);
+		if (p->unwritten)
+			__entry->flags |= XFS_RMAP_UNWRITTEN;
+	),
+	TP_printk("dev %d:%d op %s rtbno 0x%llx fsbcount 0x%llx owner 0x%llx fileoff 0x%llx flags 0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __print_symbolic(__entry->op, XFS_RMAP_INTENT_STRINGS),
+		  __entry->rtbno,
+		  __entry->len,
+		  __entry->owner,
+		  __entry->offset,
+		  __entry->flags)
+);
+
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
 
 
