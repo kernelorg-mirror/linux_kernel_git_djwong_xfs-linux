@@ -66,6 +66,7 @@ struct xfs_da_args;
 #define XFS_SICK_RT_BITMAP	(1 << 0)  /* realtime bitmap */
 #define XFS_SICK_RT_SUMMARY	(1 << 1)  /* realtime summary */
 #define XFS_SICK_RT_RMAPBT	(1 << 2)  /* realtime rmapbt */
+#define XFS_SICK_RT_REFCNTBT	(1 << 3)  /* realtime refcountbt */
 
 /* Observable health issues for AG metadata. */
 #define XFS_SICK_AG_SB		(1 << 0)  /* superblock */
@@ -102,7 +103,8 @@ struct xfs_da_args;
 
 #define XFS_SICK_RT_PRIMARY	(XFS_SICK_RT_BITMAP | \
 				 XFS_SICK_RT_SUMMARY | \
-				 XFS_SICK_RT_RMAPBT)
+				 XFS_SICK_RT_RMAPBT | \
+				 XFS_SICK_RT_REFCNTBT)
 
 #define XFS_SICK_AG_PRIMARY	(XFS_SICK_AG_SB | \
 				 XFS_SICK_AG_AGF | \
