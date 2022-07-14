@@ -1766,13 +1766,16 @@ out_free:
 	return error;
 }
 
-/* Is there a record covering a given extent? */
+/*
+ * Scan part of the keyspace of the refcount records and tell us if the area
+ * has no records, is fully mapped by records, or is partially filled.
+ */
 int
-xfs_refcount_has_record(
+xfs_refcount_scan_keyfill(
 	struct xfs_btree_cur	*cur,
 	xfs_agblock_t		bno,
 	xfs_extlen_t		len,
-	bool			*exists)
+	enum xfs_btree_keyfill	*outcome)
 {
 	union xfs_btree_irec	low;
 	union xfs_btree_irec	high;
@@ -1782,7 +1785,7 @@ xfs_refcount_has_record(
 	memset(&high, 0xFF, sizeof(high));
 	high.rc.rc_startblock = bno + len - 1;
 
-	return xfs_btree_has_record(cur, &low, &high, exists);
+	return xfs_btree_scan_keyfill(cur, &low, &high, outcome);
 }
 
 int __init
