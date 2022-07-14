@@ -12,6 +12,31 @@
 #include "xfs_ag.h"
 #include "xfs_trace.h"
 
+/*
+ * Use a static key here to reduce the overhead of xfs_drain_drop.  If the
+ * compiler supports jump labels, the static branch will be replaced by a nop
+ * sled when there are no xfs_drain_wait callers.  Online fsck is currently
+ * the only caller, so this is a reasonable tradeoff.
+ *
+ * Note: Patching the kernel code requires taking the cpu hotplug lock.  Other
+ * parts of the kernel allocate memory with that lock held, which means that
+ * XFS callers cannot hold any locks that might be used by memory reclaim or
+ * writeback when calling the static_branch_{inc,dec} functions.
+ */
+static DEFINE_STATIC_KEY_FALSE(xfs_drain_waiter_hook);
+
+void
+xfs_drain_wait_disable(void)
+{
+	static_branch_dec(&xfs_drain_waiter_hook);
+}
+
+void
+xfs_drain_wait_enable(void)
+{
+	static_branch_inc(&xfs_drain_waiter_hook);
+}
+
 void
 xfs_drain_init(
 	struct xfs_drain	*dr)
@@ -36,7 +61,7 @@ static inline void xfs_drain_bump(struct xfs_drain *dr)
 static inline void xfs_drain_drop(struct xfs_drain *dr)
 {
 	if (atomic_dec_and_test(&dr->dr_count) &&
-	    wq_has_sleeper(&dr->dr_waiters))
+	    static_branch_unlikely(&xfs_drain_waiter_hook))
 		wake_up(&dr->dr_waiters);
 }
 
