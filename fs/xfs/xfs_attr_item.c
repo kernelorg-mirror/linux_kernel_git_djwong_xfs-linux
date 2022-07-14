@@ -504,6 +504,7 @@ xfs_attr_abort_intent(
 /* Cancel an attr */
 STATIC void
 xfs_attr_cancel_item(
+	struct xfs_mount		*mp,
 	struct list_head		*item)
 {
 	struct xfs_attr_intent		*attr;
