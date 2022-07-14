@@ -70,6 +70,8 @@ struct xrep_find_ag_btree {
 
 int xrep_find_ag_btree_roots(struct xfs_scrub *sc, struct xfs_buf *agf_bp,
 		struct xrep_find_ag_btree *btree_info, struct xfs_buf *agfl_bp);
+void xrep_update_qflags(struct xfs_scrub *sc, unsigned int clear_flags,
+		unsigned int set_flags);
 void xrep_force_quotacheck(struct xfs_scrub *sc, xfs_dqtype_t type);
 int xrep_ino_dqattach(struct xfs_scrub *sc);
 int xrep_ino_ensure_extent_count(struct xfs_scrub *sc, int whichfork,
@@ -117,8 +119,10 @@ int xrep_rtbitmap(struct xfs_scrub *sc);
 
 #ifdef CONFIG_XFS_QUOTA
 int xrep_quota(struct xfs_scrub *sc);
+int xrep_quotacheck(struct xfs_scrub *sc);
 #else
 # define xrep_quota			xrep_notsupported
+# define xrep_quotacheck		xrep_notsupported
 #endif /* CONFIG_XFS_QUOTA */
 
 struct xrep_newbt_resv {
@@ -245,6 +249,7 @@ static inline int xrep_setup_rtbitmap(struct xfs_scrub *sc, unsigned int *x)
 #define xrep_bmap_cow			xrep_notsupported
 #define xrep_rtbitmap			xrep_notsupported
 #define xrep_quota			xrep_notsupported
+#define xrep_quotacheck			xrep_notsupported
 
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
