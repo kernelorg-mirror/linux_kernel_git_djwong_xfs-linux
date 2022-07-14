@@ -310,6 +310,18 @@ xfs_refcountbt_recs_inorder(
 		be32_to_cpu(r2->refc.rc_startblock);
 }
 
+STATIC bool
+xfs_refcountbt_has_key_gap(
+	struct xfs_btree_cur		*cur,
+	const union xfs_btree_key	*key1,
+	const union xfs_btree_key	*key2)
+{
+	xfs_agblock_t			next;
+
+	next = be32_to_cpu(key1->refc.rc_startblock) + 1;
+	return next != be32_to_cpu(key2->refc.rc_startblock);
+}
+
 static const struct xfs_btree_ops xfs_refcountbt_ops = {
 	.rec_len		= sizeof(struct xfs_refcount_rec),
 	.key_len		= sizeof(struct xfs_refcount_key),
@@ -329,6 +341,7 @@ static const struct xfs_btree_ops xfs_refcountbt_ops = {
 	.diff_two_keys		= xfs_refcountbt_diff_two_keys,
 	.keys_inorder		= xfs_refcountbt_keys_inorder,
 	.recs_inorder		= xfs_refcountbt_recs_inorder,
+	.has_key_gap		= xfs_refcountbt_has_key_gap,
 };
 
 /*
