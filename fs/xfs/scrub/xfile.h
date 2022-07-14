@@ -60,4 +60,6 @@ int xfile_obj_get_page(struct xfile *xf, loff_t offset, unsigned int len,
 int xfile_obj_put_page(struct xfile *xf, loff_t offset, unsigned int len,
 		struct page *page, void *fsdata);
 
+int xfile_dump(struct xfile *xf);
+
 #endif /* __XFS_SCRUB_XFILE_H__ */
