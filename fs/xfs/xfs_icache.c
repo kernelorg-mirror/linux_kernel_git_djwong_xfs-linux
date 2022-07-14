@@ -765,7 +765,8 @@ again:
 	return 0;
 
 out_error_or_again:
-	if (!(flags & XFS_IGET_INCORE) && error == -EAGAIN) {
+	if (!(flags & (XFS_IGET_INCORE | XFS_IGET_NOWAIT)) &&
+	    error == -EAGAIN) {
 		delay(1);
 		goto again;
 	}
