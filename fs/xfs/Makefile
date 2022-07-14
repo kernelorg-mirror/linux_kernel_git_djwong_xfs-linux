@@ -208,6 +208,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   cow_repair.o \
 				   ialloc_repair.o \
 				   inode_repair.o \
+				   nlinks_repair.o \
 				   refcount_repair.o \
 				   repair.o \
 				   )
