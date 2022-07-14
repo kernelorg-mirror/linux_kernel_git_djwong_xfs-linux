@@ -302,7 +302,7 @@ __xfs_rmap_check_rt_irec(
 	const struct xfs_rmap_irec	*irec)
 {
 	struct xfs_mount		*mp = cur->bc_mp;
-	struct xfs_rtgroup		*rtg = cur->bc_ino.rtg;
+	struct xfs_rtgroup		*rtg;
 	bool				is_inode;
 	bool				is_unwritten;
 	bool				is_bmbt;
@@ -310,6 +310,11 @@ __xfs_rmap_check_rt_irec(
 
 	if (irec->rm_blockcount == 0)
 		return __this_address;
+
+	if (cur->bc_flags & XFS_BTREE_IN_MEMORY)
+		rtg = cur->bc_mem.rtg;
+	else
+		rtg = cur->bc_ino.rtg;
 
 	if (irec->rm_owner == XFS_RMAP_OWN_FS) {
 		if (irec->rm_startblock != 0)
