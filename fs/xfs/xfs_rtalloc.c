@@ -28,6 +28,8 @@
 #include "xfs_rtgroup.h"
 #include "xfs_quota.h"
 #include "xfs_error.h"
+#include "xfs_btree.h"
+#include "xfs_rmap.h"
 #include "xfs_rtrmap_btree.h"
 
 /*
@@ -1049,6 +1051,87 @@ xfs_growfs_rt_init_primary(
 	return 0;
 }
 
+/* Add a metadata inode for a realtime rmap btree. */
+static int
+xfs_growfsrt_create_rtrmap(
+	struct xfs_rtgroup	*rtg)
+{
+	struct xfs_mount	*mp = rtg->rtg_mount;
+	struct xfs_imeta_update	upd;
+	struct xfs_rmap_irec	rmap = {
+		.rm_startblock	= 0,
+		.rm_blockcount	= mp->m_sb.sb_rextsize,
+		.rm_owner	= XFS_RMAP_OWN_FS,
+		.rm_offset	= 0,
+		.rm_flags	= 0,
+	};
+	struct xfs_btree_cur	*cur;
+	struct xfs_imeta_path	*path;
+	struct xfs_trans	*tp;
+	struct xfs_inode	*ip = NULL;
+	int			error;
+
+	if (!xfs_has_rtrmapbt(mp) || rtg->rtg_rmapip)
+		return 0;
+
+	error = xfs_rtrmapbt_create_path(mp, rtg->rtg_rgno, &path);
+	if (error)
+		return error;
+
+	error = xfs_imeta_ensure_dirpath(mp, path);
+	if (error)
+		goto out_path;
+
+	error = xfs_imeta_start_update(mp, path, &upd);
+	if (error)
+		goto out_path;
+
+	error = xfs_qm_dqattach(upd.dp);
+	if (error)
+		goto out_upd;
+
+	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_imeta_create,
+			xfs_imeta_create_space_res(mp), 0, 0, &tp);
+	if (error)
+		goto out_end;
+
+	error = xfs_rtrmapbt_create(&tp, path, &upd, &ip);
+	if (error)
+		goto out_cancel;
+
+	lockdep_set_class(&ip->i_lock.mr_lock, &xfs_rrmapip_key);
+
+	cur = xfs_rtrmapbt_init_cursor(mp, tp, rtg, ip);
+	error = xfs_rmap_map_raw(cur, &rmap);
+	xfs_btree_del_cursor(cur, error);
+	if (error)
+		goto out_cancel;
+
+	error = xfs_trans_commit(tp);
+	if (error)
+		goto out_end;
+
+	xfs_imeta_end_update(mp, &upd, error);
+	xfs_imeta_free_path(path);
+	xfs_finish_inode_setup(ip);
+	rtg->rtg_rmapip = ip;
+	return 0;
+
+out_cancel:
+	xfs_trans_cancel(tp);
+out_end:
+	/* Have to finish setting up the inode to ensure it's deleted. */
+	if (ip) {
+		xfs_finish_inode_setup(ip);
+		xfs_irele(ip);
+	}
+out_upd:
+	xfs_imeta_end_update(mp, &upd, error);
+out_path:
+	xfs_imeta_free_path(path);
+	return error;
+}
+
 /*
  * Check that changes to the realtime geometry won't affect the minimum
  * log size, which would cause the fs to become unusable.
@@ -1155,7 +1238,9 @@ xfs_growfs_rt(
 		return -EINVAL;
 
 	/* Unsupported realtime features. */
-	if (xfs_has_rmapbt(mp) || xfs_has_reflink(mp) || xfs_has_quota(mp))
+	if (!xfs_has_rtgroups(mp) && xfs_has_rmapbt(mp))
+		return -EOPNOTSUPP;
+	if (xfs_has_reflink(mp) || xfs_has_quota(mp))
 		return -EOPNOTSUPP;
 
 	nrblocks = in->newblocks;
@@ -1278,9 +1363,20 @@ xfs_growfs_rt(
 				nsbp->sb_rbmblocks);
 		nmp->m_rsumsize = nrsumsize = XFS_FSB_TO_B(mp, nrsumblocks);
 
-		if (xfs_has_rtgroups(mp))
+		if (xfs_has_rtgroups(mp)) {
+			xfs_rgnumber_t	rgno = last_rgno;
+
 			nsbp->sb_rgcount = howmany_64(nsbp->sb_rblocks,
 						      nsbp->sb_rgblocks);
+
+			for_each_rtgroup_range(mp, rgno, nsbp->sb_rgcount, rtg) {
+				error = xfs_growfsrt_create_rtrmap(rtg);
+				if (error) {
+					xfs_rtgroup_put(rtg);
+					break;
+				}
+			}
+		}
 
 		/*
 		 * Start a transaction, get the log reservation.
