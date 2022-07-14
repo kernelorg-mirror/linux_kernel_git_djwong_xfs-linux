@@ -41,6 +41,9 @@
 #include "xfs_error.h"
 #include "xfs_reflink.h"
 #include "xfs_health.h"
+#include "xfs_rtrmap_btree.h"
+#include "xfs_rtbitmap.h"
+#include "xfs_rtgroup.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -2487,6 +2490,44 @@ xrep_ag_init(
 	return 0;
 }
 
+/* Initialize all the btree cursors for a RT repair. */
+static void
+xrep_rtgroup_btcur_init(
+	struct xfs_scrub	*sc,
+	struct xchk_rt		*sr)
+{
+	struct xfs_mount	*mp = sc->mp;
+
+	ASSERT(sr->rtg != NULL);
+
+	if (sc->sm->sm_type != XFS_SCRUB_TYPE_RTRMAPBT &&
+	    xfs_has_rtrmapbt(mp))
+		sr->rmap_cur = xfs_rtrmapbt_init_cursor(mp, sc->tp, sr->rtg,
+				sr->rtg->rtg_rmapip);
+}
+
+/*
+ * Given a reference to a rtgroup structure, lock rtgroup btree inodes and
+ * cursors.
+ */
+int
+xrep_rtgroup_init(
+	struct xfs_scrub	*sc,
+	struct xfs_rtgroup	*rtg,
+	struct xchk_rt		*sr)
+{
+	ASSERT(!sr->rtg);
+
+	xfs_rtgroup_lock(NULL, rtg, XFS_RTLOCK_ALL);
+	sr->locked = true;
+
+	/* Grab our own reference to the rtgroup structure. */
+	atomic_inc(&rtg->rtg_ref);
+	sr->rtg = rtg;
+	xrep_rtgroup_btcur_init(sc, sr);
+	return 0;
+}
+
 /* Reinitialize the per-AG block reservation for the AG we just fixed. */
 int
 xrep_reset_perag_resv(
@@ -2788,4 +2829,55 @@ xrep_dotdot_lookup(
 		return NULLFSINO;
 
 	return ino;
+}
+
+#ifdef CONFIG_XFS_RT
+/* Ensure that all rt blocks in the given range are not marked free. */
+int
+xrep_require_rtext_inuse(
+	struct xfs_scrub	*sc,
+	xfs_rtblock_t		rtbno,
+	xfs_filblks_t		len)
+{
+	struct xfs_mount	*mp = sc->mp;
+	xfs_rtxnum_t		startrtx;
+	xfs_rtxnum_t		endrtx;
+	bool			is_free = false;
+	int			error;
+
+	startrtx = xfs_rtb_to_rtxt(mp, rtbno);
+	endrtx = xfs_rtb_to_rtxt(mp, rtbno + len - 1);
+
+	error = xfs_rtalloc_extent_is_free(mp, sc->tp, startrtx,
+			endrtx - startrtx + 1, &is_free);
+	if (error)
+		return error;
+	if (is_free)
+		return -EFSCORRUPTED;
+
+	return 0;
+}
+#endif
+
+/* Are we looking at a realtime metadata inode? */
+bool
+xrep_is_rtmeta_ino(
+	struct xfs_scrub	*sc,
+	struct xfs_rtgroup	*rtg,
+	xfs_ino_t		ino)
+{
+	/*
+	 * All filesystems have rt bitmap and summary inodes, even if they
+	 * don't have an rt section.
+	 */
+	if (ino == sc->mp->m_rbmip->i_ino)
+		return true;
+	if (ino == sc->mp->m_rsumip->i_ino)
+		return true;
+
+	/* Newer rt metadata files are not guaranteed to exist */
+	if (rtg->rtg_rmapip && ino == rtg->rtg_rmapip->i_ino)
+		return true;
+
+	return false;
 }
