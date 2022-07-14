@@ -259,6 +259,30 @@ static long ioctl_file_clone_range(struct file *file,
 				args.src_length, args.dest_offset);
 }
 
+static long ioctl_file_xchg_range(struct file *file2,
+				  struct file_xchg_range __user *argp)
+{
+	struct file_xchg_range args;
+	struct fd file1;
+	int ret;
+
+	if (copy_from_user(&args, argp, sizeof(args)))
+		return -EFAULT;
+
+	file1 = fdget(args.file1_fd);
+	if (!file1.file)
+		return -EBADF;
+
+	ret = -EXDEV;
+	if (file1.file->f_path.mnt != file2->f_path.mnt)
+		goto fdput;
+
+	ret = vfs_xchg_file_range(file1.file, file2, &args);
+fdput:
+	fdput(file1);
+	return ret;
+}
+
 /*
  * This provides compatibility with legacy XFS pre-allocation ioctls
  * which predate the fallocate syscall.
@@ -824,6 +848,9 @@ static int do_vfs_ioctl(struct file *filp, unsigned int fd,
 
 	case FIDEDUPERANGE:
 		return ioctl_file_dedupe_range(filp, argp);
+
+	case FIEXCHANGE_RANGE:
+		return ioctl_file_xchg_range(filp, argp);
 
 	case FIONREAD:
 		if (!S_ISREG(inode->i_mode))
