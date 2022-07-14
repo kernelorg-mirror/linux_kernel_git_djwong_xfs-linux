@@ -443,7 +443,7 @@ xchk_refcountbt_rec(
 	struct xchk_refcbt_records *rrc = bs->private;
 	struct xfs_perag	*pag = bs->cur->bc_ag.pag;
 
-	xfs_refcount_btrec_to_irec(rec, &irec);
+	xfs_refcount_btrec_to_irec(bs->cur, rec, &irec);
 
 	/* Check the domain and refcount are not incompatible. */
 	if (!xfs_refcount_check_domain(&irec))
