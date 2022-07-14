@@ -601,7 +601,7 @@ xfs_rmapbt_mem_verify(
 	}
 
 	return xfbtree_sblock_verify(bp,
-			xfs_rmapbt_maxrecs(xfo_to_b(1), level == 0));
+			xfs_rmapbt_maxrecs(mp, xfo_to_b(1), level == 0));
 }
 
 static void
@@ -762,10 +762,11 @@ xfs_rmapbt_block_maxrecs(
 /*
  * Calculate number of records in an rmap btree block.
  */
-int
+unsigned int
 xfs_rmapbt_maxrecs(
-	int			blocklen,
-	int			leaf)
+	struct xfs_mount	*mp,
+	unsigned int		blocklen,
+	bool			leaf)
 {
 	blocklen -= XFS_RMAP_BLOCK_LEN;
 	return xfs_rmapbt_block_maxrecs(blocklen, leaf);
