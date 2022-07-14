@@ -21,6 +21,7 @@
 #include "xfs_log_priv.h"
 #include "xfs_log_recover.h"
 #include "xfs_ag.h"
+#include "xfs_rtgroup.h"
 
 struct kmem_cache	*xfs_cui_cache;
 struct kmem_cache	*xfs_cud_cache;
@@ -283,11 +284,25 @@ xfs_refcount_update_diff_items(
 	struct xfs_mount		*mp = priv;
 	struct xfs_refcount_intent	*ra;
 	struct xfs_refcount_intent	*rb;
+	unsigned long long		a_ag, b_ag;
 
 	ra = container_of(a, struct xfs_refcount_intent, ri_list);
 	rb = container_of(b, struct xfs_refcount_intent, ri_list);
-	return  XFS_FSB_TO_AGNO(mp, ra->ri_startblock) -
-		XFS_FSB_TO_AGNO(mp, rb->ri_startblock);
+	if (ra->ri_realtime) {
+		a_ag = xfs_rtb_to_rgno(mp, ra->ri_startblock);
+		a_ag |= (1ULL << 63);
+	} else
+		a_ag = XFS_FSB_TO_AGNO(mp, ra->ri_startblock);
+	if (rb->ri_realtime) {
+		b_ag = xfs_rtb_to_rgno(mp, rb->ri_startblock);
+		b_ag |= (1ULL << 63);
+	} else
+		b_ag = XFS_FSB_TO_AGNO(mp, rb->ri_startblock);
+	if (a_ag > b_ag)
+		return 1;
+	if (a_ag < b_ag)
+		return -1;
+	return 0;
 }
 
 /* Log refcount updates in the intent item. */
@@ -325,6 +340,8 @@ xfs_refcount_update_log_item(
 	default:
 		ASSERT(0);
 	}
+	if (ri->ri_realtime)
+		pmap->pe_flags |= XFS_REFCOUNT_EXTENT_REALTIME;
 }
 
 static struct xfs_log_item *
@@ -366,6 +383,15 @@ xfs_refcount_update_get_group(
 {
 	xfs_agnumber_t			agno;
 
+	if (ri->ri_realtime) {
+		xfs_rgnumber_t	rgno;
+
+		rgno = xfs_rtb_to_rgno(mp, ri->ri_startblock);
+		ri->ri_rtg = xfs_rtgroup_get(mp, rgno);
+		xfs_rtgroup_bump_intents(ri->ri_rtg);
+		return;
+	}
+
 	agno = XFS_FSB_TO_AGNO(mp, ri->ri_startblock);
 	ri->ri_pag = xfs_perag_get(mp, agno);
 	xfs_ag_bump_intents(ri->ri_pag);
@@ -376,6 +402,12 @@ static inline void
 xfs_refcount_update_put_group(
 	struct xfs_refcount_intent	*ri)
 {
+	if (ri->ri_realtime) {
+		xfs_rtgroup_drop_intents(ri->ri_rtg);
+		xfs_rtgroup_put(ri->ri_rtg);
+		return;
+	}
+
 	xfs_ag_drop_intents(ri->ri_pag);
 	xfs_perag_put(ri->ri_pag);
 }
@@ -535,6 +567,7 @@ xfs_cui_item_recover(
 			goto abort_error;
 		}
 
+		fake.ri_realtime = pmap->pe_flags & XFS_REFCOUNT_EXTENT_REALTIME;
 		fake.ri_startblock = pmap->pe_startblock;
 		fake.ri_blockcount = pmap->pe_len;
 
@@ -559,18 +592,22 @@ xfs_cui_item_recover(
 
 			switch (fake.ri_type) {
 			case XFS_REFCOUNT_INCREASE:
-				xfs_refcount_increase_extent(tp, &irec);
+				xfs_refcount_increase_extent(tp,
+						fake.ri_realtime, &irec);
 				break;
 			case XFS_REFCOUNT_DECREASE:
-				xfs_refcount_decrease_extent(tp, &irec);
+				xfs_refcount_decrease_extent(tp,
+						fake.ri_realtime, &irec);
 				break;
 			case XFS_REFCOUNT_ALLOC_COW:
 				xfs_refcount_alloc_cow_extent(tp,
+						fake.ri_realtime,
 						irec.br_startblock,
 						irec.br_blockcount);
 				break;
 			case XFS_REFCOUNT_FREE_COW:
 				xfs_refcount_free_cow_extent(tp,
+						fake.ri_realtime,
 						irec.br_startblock,
 						irec.br_blockcount);
 				break;
