@@ -123,16 +123,16 @@
  * within that range and return the range in fbno/flen.  If
  * find_end_of_shared is true, return the longest contiguous extent of
  * shared blocks.  If there are no shared extents, fbno and flen will
- * be set to NULLAGBLOCK and 0, respectively.
+ * be set to NULLFSBLOCK and 0, respectively.
  */
 static int
 xfs_reflink_find_shared(
 	struct xfs_perag	*pag,
 	struct xfs_trans	*tp,
-	xfs_agblock_t		agbno,
-	xfs_extlen_t		aglen,
-	xfs_agblock_t		*fbno,
-	xfs_extlen_t		*flen,
+	xfs_fsblock_t		agbno,
+	xfs_filblks_t		aglen,
+	xfs_fsblock_t		*fbno,
+	xfs_filblks_t		*flen,
 	bool			find_end_of_shared)
 {
 	struct xfs_buf		*agbp;
@@ -174,8 +174,8 @@ xfs_reflink_trim_around_shared(
 	struct xfs_perag	*pag;
 	xfs_agblock_t		agbno;
 	xfs_extlen_t		aglen;
-	xfs_agblock_t		fbno;
-	xfs_extlen_t		flen;
+	xfs_fsblock_t		fbno;
+	xfs_filblks_t		flen;
 	int			error = 0;
 
 	/* Holes, unwritten, and delalloc extents cannot be shared */
@@ -197,7 +197,7 @@ xfs_reflink_trim_around_shared(
 		return error;
 
 	*shared = false;
-	if (fbno == NULLAGBLOCK) {
+	if (fbno == NULLFSBLOCK) {
 		/* No shared blocks at all. */
 		return 0;
 	} else if (fbno == agbno) {
@@ -1564,8 +1564,8 @@ xfs_reflink_inode_has_shared_extents(
 		struct xfs_perag	*pag;
 		xfs_agblock_t		agbno;
 		xfs_extlen_t		aglen;
-		xfs_agblock_t		rbno;
-		xfs_extlen_t		rlen;
+		xfs_fsblock_t		rbno;
+		xfs_filblks_t		rlen;
 
 		if (isnullstartblock(got.br_startblock) ||
 		    got.br_state != XFS_EXT_NORM)
@@ -1581,7 +1581,7 @@ xfs_reflink_inode_has_shared_extents(
 			return error;
 
 		/* Is there still a shared block here? */
-		if (rbno != NULLAGBLOCK) {
+		if (rbno != NULLFSBLOCK) {
 			*has_shared = true;
 			return 0;
 		}

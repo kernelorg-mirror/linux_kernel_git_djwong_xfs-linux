@@ -64,10 +64,10 @@ struct xrep_cow {
 	struct xfs_bmbt_irec	irec;
 
 	/* refcount btree block number of irec.br_startblock */
-	unsigned int		irec_startbno;
+	unsigned long long	irec_startbno;
 
 	/* refcount btree block number of the next refcount record we expect */
-	unsigned int		next_bno;
+	unsigned long long	next_bno;
 };
 
 /*
