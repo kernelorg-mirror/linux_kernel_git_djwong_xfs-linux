@@ -1090,3 +1090,27 @@ out_free:
 	kvfree(si);
 	return error;
 }
+
+/* How many bytes is this array consuming? */
+long long
+xfarray_bytes(
+	struct xfarray		*array)
+{
+	struct xfile_stat	statbuf;
+	int			error;
+
+	error = xfile_stat(array->xfile, &statbuf);
+	if (error)
+		return error;
+
+	return statbuf.bytes;
+}
+
+/* Empty the entire array. */
+void
+xfarray_truncate(
+	struct xfarray	*array)
+{
+	xfile_discard(array->xfile, 0, MAX_LFS_FILESIZE);
+	array->nr = 0;
+}
