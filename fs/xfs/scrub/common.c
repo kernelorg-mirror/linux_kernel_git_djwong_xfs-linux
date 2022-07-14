@@ -757,7 +757,7 @@ xchk_rt_unlock(
 
 #ifdef CONFIG_XFS_RT
 /* Lock all the rt group metadata inode ILOCKs and wait for intents. */
-static int
+int
 xchk_rtgroup_lock(
 	struct xfs_scrub	*sc,
 	struct xchk_rt		*sr,
@@ -822,7 +822,7 @@ xchk_rtgroup_lock(
 }
 #else
 /* There are no rtgroups to lock when there's no rt support. */
-static int
+int
 xchk_rtgroup_lock(
 	struct xfs_scrub	*sc,
 	struct xchk_rt		*sr,
