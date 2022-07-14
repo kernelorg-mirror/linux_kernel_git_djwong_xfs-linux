@@ -16,6 +16,7 @@
 #include "xfs_inode_item.h"
 #include "xfs_icache.h"
 #include "xfs_pnfs.h"
+#include "xfs_health.h"
 
 /*
  * Note that we only accept fileids which are long enough rather than allow
@@ -135,9 +136,11 @@ xfs_nfs_get_inode(
 		 * confuse applications using bulkstat that expect EINVAL.
 		 */
 		switch (error) {
+		case -EFSCORRUPTED:
+			xfs_inode_mark_sick(ip, XFS_SICK_INO_CORE);
+			fallthrough;
 		case -EINVAL:
 		case -ENOENT:
-		case -EFSCORRUPTED:
 			error = -ESTALE;
 			break;
 		default:
