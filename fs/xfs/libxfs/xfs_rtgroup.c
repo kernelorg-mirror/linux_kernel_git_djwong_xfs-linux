@@ -118,6 +118,10 @@ xfs_initialize_rtgroups(
 #ifdef __KERNEL__
 		/* Place kernel structure only init below this point. */
 		spin_lock_init(&rtg->rtg_state_lock);
+		error = xfs_drain_init(&rtg->rtg_intents);
+		if (error)
+			goto out_remove_rtg;
+
 #endif /* __KERNEL__ */
 
 		/* first new rtg is fully initialized */
@@ -127,6 +131,11 @@ xfs_initialize_rtgroups(
 
 	return 0;
 
+#ifdef __KERNEL__
+out_remove_rtg:
+	xfs_drain_free(&rtg->rtg_intents);
+	radix_tree_delete(&mp->m_rtgroup_tree, index);
+#endif /* __KERNEL__ */
 out_free_rtg:
 	kmem_free(rtg);
 out_unwind_new_rtgs:
@@ -169,6 +178,7 @@ xfs_free_rtgroups(
 		spin_unlock(&mp->m_rtgroup_lock);
 		ASSERT(rtg);
 		XFS_IS_CORRUPT(rtg->rtg_mount, atomic_read(&rtg->rtg_ref) != 0);
+		xfs_drain_free(&rtg->rtg_intents);
 
 		call_rcu(&rtg->rcu_head, __xfs_free_rtgroups);
 	}
