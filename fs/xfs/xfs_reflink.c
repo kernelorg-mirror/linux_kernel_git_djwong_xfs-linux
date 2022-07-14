@@ -30,6 +30,8 @@
 #include "xfs_ag.h"
 #include "xfs_ag_resv.h"
 #include "xfs_health.h"
+#include "xfs_rtrefcount_btree.h"
+#include "xfs_rtalloc.h"
 
 /*
  * Copy on Write of Shared Blocks
@@ -156,6 +158,35 @@ xfs_reflink_find_shared(
 }
 
 /*
+ * Given an RT extent, find the lowest-numbered run of shared blocks
+ * within that range and return the range in fbno/flen.  If
+ * find_end_of_shared is true, return the longest contiguous extent of
+ * shared blocks.  If there are no shared extents, fbno and flen will
+ * be set to NULLFSBLOCK and 0, respectively.
+ */
+static int
+xfs_reflink_find_rtshared(
+	struct xfs_mount	*mp,
+	struct xfs_trans	*tp,
+	xfs_fsblock_t		rtbno,
+	xfs_filblks_t		rtlen,
+	xfs_fsblock_t		*fbno,
+	xfs_filblks_t		*flen,
+	bool			find_end_of_shared)
+{
+	struct xfs_btree_cur	*cur;
+	int			error;
+
+	xfs_rtlock(NULL, mp, XFS_RTLOCK_REFCOUNT);
+	cur = xfs_rtrefcountbt_init_cursor(mp, tp, mp->m_rrefcountip);
+	error = xfs_refcount_find_shared(cur, rtbno, rtlen, fbno, flen,
+			find_end_of_shared);
+	xfs_btree_del_cursor(cur, error);
+	xfs_rtunlock(mp, XFS_RTLOCK_REFCOUNT);
+	return error;
+}
+
+/*
  * Trim the mapping to the next block where there's a change in the
  * shared/unshared status.  More specifically, this means that we
  * find the lowest-numbered extent of shared blocks that coincides with
@@ -172,9 +203,7 @@ xfs_reflink_trim_around_shared(
 	bool			*shared)
 {
 	struct xfs_mount	*mp = ip->i_mount;
-	struct xfs_perag	*pag;
-	xfs_agblock_t		agbno;
-	xfs_extlen_t		aglen;
+	xfs_fsblock_t		orig_bno;
 	xfs_fsblock_t		fbno;
 	xfs_filblks_t		flen;
 	int			error = 0;
@@ -187,13 +216,20 @@ xfs_reflink_trim_around_shared(
 
 	trace_xfs_reflink_trim_around_shared(ip, irec);
 
-	pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, irec->br_startblock));
-	agbno = XFS_FSB_TO_AGBNO(mp, irec->br_startblock);
-	aglen = irec->br_blockcount;
+	if (XFS_IS_REALTIME_INODE(ip)) {
+		orig_bno = irec->br_startblock;
+		error = xfs_reflink_find_rtshared(mp, NULL, orig_bno,
+				irec->br_blockcount, &fbno, &flen, true);
+	} else {
+		struct xfs_perag	*pag;
 
-	error = xfs_reflink_find_shared(pag, NULL, agbno, aglen, &fbno, &flen,
-			true);
-	xfs_perag_put(pag);
+		pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp,
+					irec->br_startblock));
+		orig_bno = XFS_FSB_TO_AGBNO(mp, irec->br_startblock);
+		error = xfs_reflink_find_shared(pag, NULL, orig_bno,
+				irec->br_blockcount, &fbno, &flen, true);
+		xfs_perag_put(pag);
+	}
 	if (error)
 		return error;
 
@@ -201,7 +237,7 @@ xfs_reflink_trim_around_shared(
 	if (fbno == NULLFSBLOCK) {
 		/* No shared blocks at all. */
 		return 0;
-	} else if (fbno == agbno) {
+	} else if (fbno == orig_bno) {
 		/*
 		 * The start of this extent is shared.  Truncate the
 		 * mapping at the end of the shared region so that a
@@ -218,7 +254,7 @@ xfs_reflink_trim_around_shared(
 		 * extent so that a subsequent iteration starts at the
 		 * start of the shared region.
 		 */
-		irec->br_blockcount = fbno - agbno;
+		irec->br_blockcount = fbno - orig_bno;
 		return 0;
 	}
 }
@@ -1570,9 +1606,6 @@ xfs_reflink_inode_has_shared_extents(
 	*has_shared = false;
 	found = xfs_iext_lookup_extent(ip, ifp, 0, &icur, &got);
 	while (found) {
-		struct xfs_perag	*pag;
-		xfs_agblock_t		agbno;
-		xfs_extlen_t		aglen;
 		xfs_fsblock_t		rbno;
 		xfs_filblks_t		rlen;
 
@@ -1580,12 +1613,22 @@ xfs_reflink_inode_has_shared_extents(
 		    got.br_state != XFS_EXT_NORM)
 			goto next;
 
-		pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp, got.br_startblock));
-		agbno = XFS_FSB_TO_AGBNO(mp, got.br_startblock);
-		aglen = got.br_blockcount;
-		error = xfs_reflink_find_shared(pag, tp, agbno, aglen,
-				&rbno, &rlen, false);
-		xfs_perag_put(pag);
+		if (XFS_IS_REALTIME_INODE(ip)) {
+			error = xfs_reflink_find_rtshared(mp, tp,
+					got.br_startblock, got.br_blockcount,
+					&rbno, &rlen, false);
+		} else {
+			struct xfs_perag	*pag;
+			xfs_agblock_t		agbno;
+
+			pag = xfs_perag_get(mp, XFS_FSB_TO_AGNO(mp,
+						got.br_startblock));
+			agbno = XFS_FSB_TO_AGBNO(mp, got.br_startblock);
+			error = xfs_reflink_find_shared(pag, tp, agbno,
+					got.br_blockcount, &rbno, &rlen,
+					false);
+			xfs_perag_put(pag);
+		}
 		if (error)
 			return error;
 
