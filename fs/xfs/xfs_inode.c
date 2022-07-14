@@ -2558,33 +2558,6 @@ retry:
 	}
 
 	/*
-	 * Check for expected errors before we dirty the transaction
-	 * so we can return an error without a transaction abort.
-	 */
-	if (target_ip == NULL) {
-		/*
-		 * If there's no space reservation, check the entry will
-		 * fit before actually inserting it.
-		 */
-		if (!spaceres) {
-			error = xfs_dir_canenter(tp, target_dp, target_name);
-			if (error)
-				goto out_trans_cancel;
-		}
-	} else {
-		/*
-		 * If target exists and it's a directory, check that whether
-		 * it can be destroyed.
-		 */
-		if (S_ISDIR(VFS_I(target_ip)->i_mode) &&
-		    (!xfs_dir_isempty(target_ip) ||
-		     (VFS_I(target_ip)->i_nlink > 2))) {
-			error = -EEXIST;
-			goto out_trans_cancel;
-		}
-	}
-
-	/*
 	 * Lock the AGI buffers we need to handle bumping the nlink of the
 	 * whiteout inode off the unlinked list and to handle dropping the
 	 * nlink of the target inode.  Per locking order rules, do this in
@@ -2610,149 +2583,19 @@ retry:
 		}
 	}
 
-	/*
-	 * Directory entry creation below may acquire the AGF. Remove
-	 * the whiteout from the unlinked list first to preserve correct
-	 * AGI/AGF locking order. This dirties the transaction so failures
-	 * after this point will abort and log recovery will clean up the
-	 * mess.
-	 *
-	 * For whiteouts, we need to bump the link count on the whiteout
-	 * inode. After this point, we have a real link, clear the tmpfile
-	 * state flag from the inode so it doesn't accidentally get misused
-	 * in future.
-	 */
-	if (wip) {
-		struct xfs_perag	*pag;
-
-		ASSERT(VFS_I(wip)->i_nlink == 0);
-
-		pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, wip->i_ino));
-		error = xfs_iunlink_remove(tp, pag, wip);
-		xfs_perag_put(pag);
-		if (error)
-			goto out_trans_cancel;
-
-		xfs_bumplink(tp, wip);
-		VFS_I(wip)->i_state &= ~I_LINKABLE;
-	}
-
-	/*
-	 * Set up the target.
-	 */
-	if (target_ip == NULL) {
-		/*
-		 * If target does not exist and the rename crosses
-		 * directories, adjust the target directory link count
-		 * to account for the ".." reference from the new entry.
-		 */
-		error = xfs_dir_createname(tp, target_dp, target_name,
-					   src_ip->i_ino, spaceres);
-		if (error)
-			goto out_trans_cancel;
-
-		xfs_trans_ichgtime(tp, target_dp,
-					XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
-
-		if (new_parent && src_is_directory) {
-			xfs_bumplink(tp, target_dp);
-		}
-	} else { /* target_ip != NULL */
-		/*
-		 * Link the source inode under the target name.
-		 * If the source inode is a directory and we are moving
-		 * it across directories, its ".." entry will be
-		 * inconsistent until we replace that down below.
-		 *
-		 * In case there is already an entry with the same
-		 * name at the destination directory, remove it first.
-		 */
-		error = xfs_dir_replace(tp, target_dp, target_name,
-					src_ip->i_ino, spaceres);
-		if (error)
-			goto out_trans_cancel;
-
-		xfs_trans_ichgtime(tp, target_dp,
-					XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
-
-		/*
-		 * Decrement the link count on the target since the target
-		 * dir no longer points to it.
-		 */
-		error = xfs_droplink(tp, target_ip);
-		if (error)
-			goto out_trans_cancel;
-
-		if (src_is_directory) {
-			/*
-			 * Drop the link from the old "." entry.
-			 */
-			error = xfs_droplink(tp, target_ip);
-			if (error)
-				goto out_trans_cancel;
-		}
-	} /* target_ip != NULL */
-
-	/*
-	 * Remove the source.
-	 */
-	if (new_parent && src_is_directory) {
-		/*
-		 * Rewrite the ".." entry to point to the new
-		 * directory.
-		 */
-		error = xfs_dir_replace(tp, src_ip, &xfs_name_dotdot,
-					target_dp->i_ino, spaceres);
-		ASSERT(error != -EEXIST);
-		if (error)
-			goto out_trans_cancel;
-	}
-
-	/*
-	 * We always want to hit the ctime on the source inode.
-	 *
-	 * This isn't strictly required by the standards since the source
-	 * inode isn't really being changed, but old unix file systems did
-	 * it and some incremental backup programs won't work without it.
-	 */
-	xfs_trans_ichgtime(tp, src_ip, XFS_ICHGTIME_CHG);
-	xfs_trans_log_inode(tp, src_ip, XFS_ILOG_CORE);
-
-	/*
-	 * Adjust the link count on src_dp.  This is necessary when
-	 * renaming a directory, either within one parent when
-	 * the target existed, or across two parent directories.
-	 */
-	if (src_is_directory && (new_parent || target_ip != NULL)) {
-
-		/*
-		 * Decrement link count on src_directory since the
-		 * entry that's moved no longer points to it.
-		 */
-		error = xfs_droplink(tp, src_dp);
-		if (error)
-			goto out_trans_cancel;
-	}
-
-	/*
-	 * For whiteouts, we only need to update the source dirent with the
-	 * inode number of the whiteout inode rather than removing it
-	 * altogether.
-	 */
-	if (wip)
-		error = xfs_dir_replace(tp, src_dp, src_name, wip->i_ino,
-					spaceres);
-	else
-		error = xfs_dir_removename(tp, src_dp, src_name, src_ip->i_ino,
-					   spaceres);
-
+	error = xfs_dir_rename(tp, src_dp, src_name, src_ip, target_dp,
+			target_name, target_ip, spaceres, wip);
 	if (error)
 		goto out_trans_cancel;
 
-	xfs_trans_ichgtime(tp, src_dp, XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
-	xfs_trans_log_inode(tp, src_dp, XFS_ILOG_CORE);
-	if (new_parent)
-		xfs_trans_log_inode(tp, target_dp, XFS_ILOG_CORE);
+	if (wip) {
+		/*
+		 * Now we have a real link, clear the "I'm a tmpfile" state
+		 * flag from the inode so it doesn't accidentally get misused in
+		 * future.
+		 */
+		VFS_I(wip)->i_state &= ~I_LINKABLE;
+	}
 
 	if (xfs_hooks_switched_on(&xfs_nlinks_hooks_switch))
 		xfs_rename_call_nlink_hooks(src_dp, src_name, src_ip,
