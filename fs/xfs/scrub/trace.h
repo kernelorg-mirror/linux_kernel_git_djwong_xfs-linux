@@ -2451,6 +2451,7 @@ DEFINE_EVENT(xrep_dir_class, name, \
 	TP_ARGS(dp, parent_ino))
 DEFINE_XREP_DIR_CLASS(xrep_dir_rebuild_tree);
 DEFINE_XREP_DIR_CLASS(xrep_dir_reset_fork);
+DEFINE_XREP_DIR_CLASS(xrep_parent_reset_dir);
 
 DECLARE_EVENT_CLASS(xrep_dirent_class,
 	TP_PROTO(struct xfs_inode *dp, struct xfs_name *name, xfs_ino_t ino),
@@ -2508,6 +2509,7 @@ DEFINE_EVENT(xrep_parent_salvage_class, name, \
 	TP_PROTO(struct xfs_inode *dp, xfs_ino_t ino), \
 	TP_ARGS(dp, ino))
 DEFINE_XREP_PARENT_SALVAGE_CLASS(xrep_dir_salvaged_parent);
+DEFINE_XREP_PARENT_SALVAGE_CLASS(xrep_findparent_dirent);
 
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
 
