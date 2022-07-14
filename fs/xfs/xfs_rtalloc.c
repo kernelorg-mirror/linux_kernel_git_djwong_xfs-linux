@@ -25,6 +25,7 @@
 #include "xfs_da_format.h"
 #include "xfs_imeta.h"
 #include "xfs_quota.h"
+#include "xfs_error.h"
 
 /*
  * Realtime metadata files are not quite regular files because userspace can't
@@ -35,6 +36,7 @@
  */
 static struct lock_class_key xfs_rbmip_key;
 static struct lock_class_key xfs_rsumip_key;
+static struct lock_class_key xfs_rrmapip_key;
 
 /*
  * Read and return the summary information for a given extent size,
@@ -1381,16 +1383,54 @@ __xfs_rt_iget(
 #define xfs_rt_iget(mp, ino, lockdep_key, ipp) \
 	__xfs_rt_iget((mp), (ino), (lockdep_key), #lockdep_key, (ipp))
 
+/* Load realtime rmap btree inode. */
+STATIC int
+xfs_rtmount_rmapbt(
+	struct xfs_mount	*mp)
+{
+	struct xfs_imeta_update	upd;
+	struct xfs_inode	*ip;
+	xfs_ino_t		ino;
+	int			error;
+
+	error = xfs_imeta_start_update(mp, &XFS_IMETA_RTRMAPBT, &upd);
+	if (error)
+		return error;
+
+	error = xfs_imeta_lookup_update(mp, &XFS_IMETA_RTRMAPBT, &upd,
+			&ino);
+	if (error)
+		goto out_end;
+
+	error = xfs_rt_iget(mp, ino, &xfs_rrmapip_key, &ip);
+	if (error)
+		goto out_end;
+
+	if (XFS_IS_CORRUPT(mp, ip->i_df.if_format != XFS_DINODE_FMT_RMAP)) {
+		error = -EFSCORRUPTED;
+		goto out_rele;
+	}
+
+	mp->m_rrmapip = ip;
+	ip = NULL;
+out_rele:
+	if (ip)
+		xfs_imeta_irele(ip);
+out_end:
+	xfs_imeta_end_update(mp, &upd, error);
+	return error;
+}
+
 /*
  * Get the bitmap and summary inodes and the summary cache into the mount
  * structure at mount time.
  */
-int					/* error */
+int
 xfs_rtmount_inodes(
-	xfs_mount_t	*mp)		/* file system mount structure */
+	struct xfs_mount	*mp)
 {
-	int		error;		/* error return value */
-	xfs_sb_t	*sbp;
+	struct xfs_sb		*sbp;
+	int			error;
 
 	sbp = &mp->m_sb;
 	error = xfs_rt_iget(mp, mp->m_sb.sb_rbmino, &xfs_rbmip_key,
@@ -1408,9 +1448,19 @@ xfs_rtmount_inodes(
 	if (error)
 		goto out_rele_bitmap;
 	ASSERT(mp->m_rsumip != NULL);
+
+	/* If we have rmap and a realtime device, look for the rtrmapbt. */
+	if (xfs_has_rtrmapbt(mp)) {
+		error = xfs_rtmount_rmapbt(mp);
+		if (error)
+			goto out_rele_summary;
+	}
+
 	xfs_alloc_rsum_cache(mp, sbp->sb_rbmblocks);
 	return 0;
 
+out_rele_summary:
+	xfs_imeta_irele(mp->m_rsumip);
 out_rele_bitmap:
 	xfs_imeta_irele(mp->m_rbmip);
 	return error;
@@ -1431,6 +1481,12 @@ xfs_rtmount_dqattach(
 	if (error)
 		return error;
 
+	if (xfs_has_rtrmapbt(mp)) {
+		error = xfs_qm_dqattach(mp->m_rrmapip);
+		if (error)
+			return error;
+	}
+
 	return 0;
 }
 
@@ -1439,6 +1495,8 @@ xfs_rtunmount_inodes(
 	struct xfs_mount	*mp)
 {
 	kmem_free(mp->m_rsum_cache);
+	if (mp->m_rrmapip)
+		xfs_imeta_irele(mp->m_rrmapip);
 	if (mp->m_rbmip)
 		xfs_imeta_irele(mp->m_rbmip);
 	if (mp->m_rsumip)
