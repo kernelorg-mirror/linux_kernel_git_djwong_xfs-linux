@@ -46,6 +46,7 @@
 
 #include <asm/byteorder.h>
 #include <uapi/linux/fs.h>
+#include <uapi/linux/fiexchange.h>
 
 struct backing_dev_info;
 struct bdi_writeback;
@@ -2132,6 +2133,8 @@ struct file_operations {
 	loff_t (*remap_file_range)(struct file *file_in, loff_t pos_in,
 				   struct file *file_out, loff_t pos_out,
 				   loff_t len, unsigned int remap_flags);
+	int (*xchg_file_range)(struct file *file1, struct file *file2,
+			       struct file_xchg_range *fsr);
 	int (*fadvise)(struct file *, loff_t, loff_t, int);
 	int (*uring_cmd)(struct io_uring_cmd *ioucmd, unsigned int issue_flags);
 	int (*uring_cmd_iopoll)(struct io_uring_cmd *, struct io_comp_batch *,
@@ -2210,6 +2213,10 @@ int __generic_remap_file_range_prep(struct file *file_in, loff_t pos_in,
 int generic_remap_file_range_prep(struct file *file_in, loff_t pos_in,
 				  struct file *file_out, loff_t pos_out,
 				  loff_t *count, unsigned int remap_flags);
+int generic_xchg_file_range_prep(struct file *file1, struct file *file2,
+				 struct file_xchg_range *fsr,
+				 unsigned int blocksize);
+int generic_xchg_file_range_finish(struct file *file1, struct file *file2);
 extern loff_t do_clone_file_range(struct file *file_in, loff_t pos_in,
 				  struct file *file_out, loff_t pos_out,
 				  loff_t len, unsigned int remap_flags);
@@ -2221,7 +2228,12 @@ extern int vfs_dedupe_file_range(struct file *file,
 extern loff_t vfs_dedupe_file_range_one(struct file *src_file, loff_t src_pos,
 					struct file *dst_file, loff_t dst_pos,
 					loff_t len, unsigned int remap_flags);
-
+extern int do_xchg_file_range(struct file *file1, struct file *file2,
+			      struct file_xchg_range *fsr);
+extern int vfs_xchg_file_range(struct file *file1, struct file *file2,
+			       struct file_xchg_range *fsr);
+extern int generic_xchg_file_range_check_fresh(struct inode *inode2,
+					const struct file_xchg_range *fsr);
 
 struct super_operations {
    	struct inode *(*alloc_inode)(struct super_block *sb);
