@@ -2066,7 +2066,11 @@ __xfs_alloc_buftarg(
 	xfs_km_flags_t		km_flags)
 {
 	struct xfs_buftarg	*btp;
+	gfp_t			gfp = GFP_KERNEL;
 	int			error;
+
+	if (km_flags & KM_MAYFAIL)
+		gfp |= __GFP_RETRY_MAYFAIL;
 
 	btp = kmem_zalloc(sizeof(*btp), KM_NOFS | km_flags);
 	if (!btp)
@@ -2085,7 +2089,7 @@ __xfs_alloc_buftarg(
 	if (list_lru_init(&btp->bt_lru))
 		goto error_free;
 
-	if (percpu_counter_init(&btp->bt_io_count, 0, GFP_KERNEL))
+	if (percpu_counter_init(&btp->bt_io_count, 0, gfp))
 		goto error_lru;
 
 	btp->bt_shrinker.count_objects = xfs_buftarg_shrink_count;
