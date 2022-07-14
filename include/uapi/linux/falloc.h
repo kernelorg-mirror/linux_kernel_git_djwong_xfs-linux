@@ -2,6 +2,14 @@
 #ifndef _UAPI_FALLOC_H_
 #define _UAPI_FALLOC_H_
 
+/*
+ * FALLOC_FL_MAP_FREE_SPACE maps all the free physical space in the
+ * filesystem into the file at the same offsets.  This flag requires
+ * CAP_SYS_ADMIN, and cannot be used with any other flags.  It probably
+ * only works on filesystems that are backed by physical media.
+ */
+#define FALLOC_FL_MAP_FREE_SPACE	(1U << 30)
+
 #define FALLOC_FL_KEEP_SIZE	0x01 /* default is extend size */
 #define FALLOC_FL_PUNCH_HOLE	0x02 /* de-allocates range */
 #define FALLOC_FL_NO_HIDE_STALE	0x04 /* reserved codepoint */
