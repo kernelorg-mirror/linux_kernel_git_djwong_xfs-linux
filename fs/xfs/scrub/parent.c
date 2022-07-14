@@ -18,6 +18,7 @@
 #include "scrub/common.h"
 #include "scrub/readdir.h"
 #include "scrub/tempfile.h"
+#include "scrub/parent.h"
 
 /* Set us up to scrub parents. */
 int
