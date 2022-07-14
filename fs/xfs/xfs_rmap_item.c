@@ -21,6 +21,7 @@
 #include "xfs_log_priv.h"
 #include "xfs_log_recover.h"
 #include "xfs_ag.h"
+#include "xfs_rtgroup.h"
 
 struct kmem_cache	*xfs_rui_cache;
 struct kmem_cache	*xfs_rud_cache;
@@ -296,7 +297,7 @@ xfs_trans_log_finish_rmap_update(
 	return error;
 }
 
-/* Sort rmap intents by AG. */
+/* Sort rmap intents by group.  AGs first, rtgroups last. */
 static int
 xfs_rmap_update_diff_items(
 	void				*priv,
@@ -306,11 +307,27 @@ xfs_rmap_update_diff_items(
 	struct xfs_mount		*mp = priv;
 	struct xfs_rmap_intent		*ra;
 	struct xfs_rmap_intent		*rb;
+	unsigned long long		a_ag, b_ag;
 
 	ra = container_of(a, struct xfs_rmap_intent, ri_list);
 	rb = container_of(b, struct xfs_rmap_intent, ri_list);
-	return  XFS_FSB_TO_AGNO(mp, ra->ri_bmap.br_startblock) -
-		XFS_FSB_TO_AGNO(mp, rb->ri_bmap.br_startblock);
+	if (ra->ri_realtime) {
+		a_ag = xfs_rtb_to_rgno(mp, ra->ri_bmap.br_startblock);
+		a_ag |= (1ULL << 63);
+	} else {
+		a_ag = XFS_FSB_TO_AGNO(mp, ra->ri_bmap.br_startblock);
+	}
+	if (rb->ri_realtime) {
+		b_ag = xfs_rtb_to_rgno(mp, rb->ri_bmap.br_startblock);
+		b_ag |= (1ULL << 63);
+	} else {
+		b_ag = XFS_FSB_TO_AGNO(mp, rb->ri_bmap.br_startblock);
+	}
+	if (a_ag > b_ag)
+		return 1;
+	if (a_ag < b_ag)
+		return -1;
+	return 0;
 }
 
 /* Log rmap updates in the intent item. */
@@ -344,6 +361,8 @@ xfs_rmap_update_log_item(
 		map->me_flags |= XFS_RMAP_EXTENT_UNWRITTEN;
 	if (ri->ri_whichfork == XFS_ATTR_FORK)
 		map->me_flags |= XFS_RMAP_EXTENT_ATTR_FORK;
+	if (ri->ri_realtime)
+		map->me_flags |= XFS_RMAP_EXTENT_REALTIME;
 	switch (ri->ri_type) {
 	case XFS_RMAP_MAP:
 		map->me_flags |= XFS_RMAP_EXTENT_MAP;
@@ -413,6 +432,14 @@ xfs_rmap_update_get_group(
 {
 	xfs_agnumber_t		agno;
 
+	if (ri->ri_realtime) {
+		xfs_rgnumber_t	rgno;
+
+		rgno = xfs_rtb_to_rgno(mp, ri->ri_bmap.br_startblock);
+		ri->ri_rtg = xfs_rtgroup_get(mp, rgno);
+		return;
+	}
+
 	agno = XFS_FSB_TO_AGNO(mp, ri->ri_bmap.br_startblock);
 	ri->ri_pag = xfs_perag_get(mp, agno);
 	xfs_ag_bump_intents(ri->ri_pag);
@@ -423,6 +450,11 @@ static inline void
 xfs_rmap_update_put_group(
 	struct xfs_rmap_intent	*ri)
 {
+	if (ri->ri_realtime) {
+		xfs_rtgroup_put(ri->ri_rtg);
+		return;
+	}
+
 	xfs_ag_drop_intents(ri->ri_pag);
 	xfs_perag_put(ri->ri_pag);
 }
@@ -589,6 +621,7 @@ xfs_rui_item_recover(
 			goto abort_error;
 		}
 
+		fake.ri_realtime = !!(map->me_flags & XFS_RMAP_EXTENT_REALTIME);
 		fake.ri_owner = map->me_owner;
 		fake.ri_whichfork = (map->me_flags & XFS_RMAP_EXTENT_ATTR_FORK) ?
 				XFS_ATTR_FORK : XFS_DATA_FORK;
