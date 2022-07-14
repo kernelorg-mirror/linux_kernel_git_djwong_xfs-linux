@@ -46,6 +46,9 @@ struct xfs_rtgroup {
 	 * inconsistencies.
 	 */
 	struct xfs_drain	rtg_intents;
+
+	/* Hook to feed rt rmapbt updates to an active online repair. */
+	struct xfs_hooks	rtg_rmap_update_hooks;
 #endif /* __KERNEL__ */
 };
 
