@@ -270,6 +270,12 @@ xfs_rmap_get_rec(
 				goto out_bad_rec;
 			if (irec->rm_offset != 0)
 				goto out_bad_rec;
+		} else if (irec->rm_owner == XFS_RMAP_OWN_COW) {
+			if (!xfs_has_rtreflink(mp))
+				goto out_bad_rec;
+			if (!xfs_verify_rgbext(rtg, irec->rm_startblock,
+						    irec->rm_blockcount))
+				goto out_bad_rec;
 		} else {
 			if (!xfs_verify_rgbext(rtg, irec->rm_startblock,
 						    irec->rm_blockcount))
