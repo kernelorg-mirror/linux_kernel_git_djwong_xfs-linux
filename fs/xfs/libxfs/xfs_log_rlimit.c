@@ -49,6 +49,15 @@ xfs_log_calc_trans_resv_for_minlogblocks(
 	unsigned int		rmap_maxlevels = mp->m_rmap_maxlevels;
 
 	/*
+	 * The metadata directory tree feature drops the oversized minimum log
+	 * size computations introduced by the original reflink code.
+	 */
+	if (xfs_has_metadir(mp)) {
+		xfs_trans_resv_calc(mp, resv);
+		return;
+	}
+
+	/*
 	 * In the early days of rmap+reflink, we always set the rmap maxlevels
 	 * to 9 even if the AG was small enough that it would never grow to
 	 * that height.  Transaction reservation sizes influence the minimum
