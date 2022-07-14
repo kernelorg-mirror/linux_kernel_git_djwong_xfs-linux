@@ -101,6 +101,15 @@ int xrep_setup_rtbitmap(struct xfs_scrub *sc, unsigned int *resblks);
 void xrep_ag_btcur_init(struct xfs_scrub *sc, struct xchk_ag *sa);
 int xrep_ag_init(struct xfs_scrub *sc, struct xfs_perag *pag,
 		struct xchk_ag *sa);
+int xrep_rtgroup_init(struct xfs_scrub *sc, struct xfs_rtgroup *rtg,
+		struct xchk_rt *sr);
+
+#ifdef CONFIG_XFS_RT
+int xrep_require_rtext_inuse(struct xfs_scrub *sc, xfs_rtblock_t rtbno,
+		xfs_filblks_t len);
+#endif
+bool xrep_is_rtmeta_ino(struct xfs_scrub *sc, struct xfs_rtgroup *rtg,
+		xfs_ino_t ino);
 
 /* Metadata revalidators */
 
