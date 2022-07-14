@@ -443,7 +443,7 @@ xchk_refcountbt_rec(
 	struct xchk_refcbt_records *rrc = bs->private;
 	struct xfs_perag	*pag = bs->cur->bc_ag.pag;
 
-	xfs_refcount_btrec_to_irec(rec, &irec);
+	xfs_refcount_btrec_to_irec(bs->cur, rec, &irec);
 
 	/* Only CoW records can have refcount == 1. */
 	if (irec.rc_domain == XFS_RCDOM_SHARED && irec.rc_refcount == 1)
