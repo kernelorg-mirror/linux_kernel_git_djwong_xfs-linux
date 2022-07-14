@@ -55,4 +55,9 @@ struct xfile_stat {
 
 int xfile_stat(struct xfile *xf, struct xfile_stat *statbuf);
 
+int xfile_obj_get_page(struct xfile *xf, loff_t offset, unsigned int len,
+		struct page **pagep, void **fsdatap);
+int xfile_obj_put_page(struct xfile *xf, loff_t offset, unsigned int len,
+		struct page *page, void *fsdata);
+
 #endif /* __XFS_SCRUB_XFILE_H__ */
