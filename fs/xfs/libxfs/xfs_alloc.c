@@ -3515,7 +3515,7 @@ xfs_alloc_scan_keyfill(
 	memset(&high, 0xFF, sizeof(high));
 	high.a.ar_startblock = bno + len - 1;
 
-	return xfs_btree_scan_keyfill(cur, &low, &high, outcome);
+	return xfs_btree_scan_keyfill(cur, &low, &high, NULL, outcome);
 }
 
 /*
