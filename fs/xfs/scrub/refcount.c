@@ -332,14 +332,69 @@ xchk_refcountbt_xref(
 	xchk_refcountbt_xref_rmap(sc, agbno, len, refcount);
 }
 
+struct xchk_refcbt_records {
+	/* The next AG block where we aren't expecting shared extents. */
+	xfs_agblock_t		next_unshared_agbno;
+
+	/* Number of CoW blocks we expect. */
+	xfs_agblock_t		cow_blocks;
+};
+
+STATIC int
+xchk_refcountbt_rmap_check_gap(
+	struct xfs_btree_cur		*cur,
+	const struct xfs_rmap_irec	*rec,
+	void				*priv)
+{
+	xfs_agblock_t			*next_bno = priv;
+
+	if (*next_bno != NULLAGBLOCK && rec->rm_startblock < *next_bno)
+		return -ECANCELED;
+
+	*next_bno = rec->rm_startblock + rec->rm_blockcount;
+	return 0;
+}
+
+/*
+ * Make sure that a gap in the reference count records does not correspond to
+ * overlapping records (i.e. shared extents) in the reverse mappings.
+ */
+static inline void
+xchk_refcountbt_xref_gaps(
+	struct xfs_scrub	*sc,
+	struct xchk_refcbt_records *rrc,
+	xfs_agblock_t		bno)
+{
+	struct xfs_rmap_irec	low;
+	struct xfs_rmap_irec	high;
+	xfs_agblock_t		next_bno = NULLAGBLOCK;
+	int			error;
+
+	if (bno <= rrc->next_unshared_agbno || !sc->sa.rmap_cur ||
+            xchk_skip_xref(sc->sm))
+		return;
+
+	memset(&low, 0, sizeof(low));
+	low.rm_startblock = rrc->next_unshared_agbno;
+	memset(&high, 0xFF, sizeof(high));
+	high.rm_startblock = bno - 1;
+
+	error = xfs_rmap_query_range(sc->sa.rmap_cur, &low, &high,
+			xchk_refcountbt_rmap_check_gap, &next_bno);
+	if (error == -ECANCELED)
+		xchk_btree_xref_set_corrupt(sc, sc->sa.rmap_cur, 0);
+	else
+		xchk_should_check_xref(sc, &error, &sc->sa.rmap_cur);
+}
+
 /* Scrub a refcountbt record. */
 STATIC int
 xchk_refcountbt_rec(
 	struct xchk_btree	*bs,
 	const union xfs_btree_rec *rec)
 {
-	xfs_agblock_t		*cow_blocks = bs->private;
 	struct xfs_perag	*pag = bs->cur->bc_ag.pag;
+	struct xchk_refcbt_records *rrc = bs->private;
 	xfs_agblock_t		bno;
 	xfs_extlen_t		len;
 	xfs_nlink_t		refcount;
@@ -354,7 +409,7 @@ xchk_refcountbt_rec(
 	if ((refcount == 1 && !has_cowflag) || (refcount != 1 && has_cowflag))
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 	if (has_cowflag)
-		(*cow_blocks) += len;
+		rrc->cow_blocks += len;
 
 	/* Check the extent. */
 	bno &= ~XFS_REFC_COW_START;
@@ -367,6 +422,16 @@ xchk_refcountbt_rec(
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 
 	xchk_refcountbt_xref(bs->sc, bno, len, refcount);
+
+	/*
+	 * If this is a record for a shared extent, check that all blocks
+	 * between the previous record and this one have at most one reverse
+	 * mapping.
+	 */
+	if (!has_cowflag) {
+		xchk_refcountbt_xref_gaps(bs->sc, rrc, bno);
+		rrc->next_unshared_agbno = bno + len;
+	}
 
 	return 0;
 }
@@ -409,15 +474,24 @@ int
 xchk_refcountbt(
 	struct xfs_scrub	*sc)
 {
-	xfs_agblock_t		cow_blocks = 0;
+	struct xchk_refcbt_records rrc = {
+		.cow_blocks		= 0,
+		.next_unshared_agbno	= 0,
+	};
 	int			error;
 
 	error = xchk_btree(sc, sc->sa.refc_cur, xchk_refcountbt_rec,
-			&XFS_RMAP_OINFO_REFC, &cow_blocks);
+			&XFS_RMAP_OINFO_REFC, &rrc);
 	if (error)
 		return error;
 
-	xchk_refcount_xref_rmap(sc, cow_blocks);
+	/*
+	 * Check that all blocks between the last refcount > 1 record and the
+	 * end of the AG have at most one reverse mapping.
+	 */
+	xchk_refcountbt_xref_gaps(sc, &rrc, sc->mp->m_sb.sb_agblocks);
+
+	xchk_refcount_xref_rmap(sc, rrc.cow_blocks);
 
 	return 0;
 }
