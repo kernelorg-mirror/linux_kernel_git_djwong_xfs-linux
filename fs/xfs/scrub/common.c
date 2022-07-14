@@ -1256,5 +1256,8 @@ xchk_fshooks_enable(
 	if (scrub_fshooks & XCHK_FSHOOKS_NLINKS)
 		xfs_nlink_hook_enable();
 
+	if (scrub_fshooks & XCHK_FSHOOKS_RMAP)
+		xfs_rmap_hook_enable();
+
 	sc->flags |= scrub_fshooks;
 }
