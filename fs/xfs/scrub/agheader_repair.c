@@ -624,8 +624,10 @@ xrep_agfl_update_agf(
 	xfs_force_summary_recalc(sc->mp);
 
 	/* Update the AGF counters. */
-	if (sc->sa.pag->pagf_init)
+	if (sc->sa.pag->pagf_init) {
 		sc->sa.pag->pagf_flcount = flcount;
+		sc->sa.pag->pagf_agflreset = false;
+	}
 	agf->agf_flfirst = cpu_to_be32(0);
 	agf->agf_flcount = cpu_to_be32(flcount);
 	agf->agf_fllast = cpu_to_be32(flcount - 1);
