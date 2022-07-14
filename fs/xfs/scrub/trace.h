@@ -1911,6 +1911,9 @@ DEFINE_XREP_DQUOT_EVENT(xrep_dquot_item);
 DEFINE_XREP_DQUOT_EVENT(xrep_disk_dquot);
 DEFINE_XREP_DQUOT_EVENT(xrep_quotacheck_dquot);
 
+DEFINE_SCRUB_NLINKS_DIFF_EVENT(xrep_nlinks_update_inode);
+DEFINE_SCRUB_NLINKS_DIFF_EVENT(xrep_nlinks_unfixable_inode);
+
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
 
 #endif /* _TRACE_XFS_SCRUB_TRACE_H */
