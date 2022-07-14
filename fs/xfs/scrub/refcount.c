@@ -623,7 +623,7 @@ xchk_xref_is_not_cow_staging(
 	if (!sc->sa.refc_cur || xchk_skip_xref(sc->sm))
 		return;
 
-	error = xfs_refcount_scan_keyfill(sc->sa.refc_cur, XFS_RCDOM_COW,
+	error = xfs_refcount_scan_keyfill(sc->sa.refc_cur, XFS_REFC_DOMAIN_COW,
 			agbno, len, &keyfill);
 	if (!xchk_should_check_xref(sc, &error, &sc->sa.refc_cur))
 		return;
