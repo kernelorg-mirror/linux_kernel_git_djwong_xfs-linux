@@ -2551,8 +2551,7 @@ xfs_defer_agfl_block(
 	new->xefi_blockcount = 1;
 	new->xefi_owner = oinfo->oi_owner;
 
-	trace_xfs_agfl_free_defer(mp, agno, 0, agbno, 1);
-
+	trace_xfs_agfl_free_defer(mp, new);
 	xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_AGFL_FREE, &new->xefi_list);
 }
 
@@ -2604,9 +2603,7 @@ __xfs_free_extent_later(
 	} else {
 		new->xefi_owner = XFS_RMAP_OWN_NULL;
 	}
-	trace_xfs_bmap_free_defer(tp->t_mountp,
-			XFS_FSB_TO_AGNO(tp->t_mountp, bno), 0,
-			XFS_FSB_TO_AGBNO(tp->t_mountp, bno), len);
+	trace_xfs_extent_free_defer(tp->t_mountp, new);
 	xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_FREE, &new->xefi_list);
 }
 
