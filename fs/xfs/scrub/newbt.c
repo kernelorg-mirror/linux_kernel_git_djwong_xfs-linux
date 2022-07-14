@@ -416,8 +416,8 @@ xrep_newbt_free_extent(
 		 * if the system goes down.
 		 */
 		fsbno = XFS_AGB_TO_FSB(sc->mp, resv->pag->pag_agno, free_agbno);
-		__xfs_free_extent_later(sc->tp, fsbno, free_aglen, &xnr->oinfo,
-				true);
+		xfs_free_extent_later(sc->tp, fsbno, free_aglen, &xnr->oinfo,
+				XFS_FREE_EXTENT_SKIP_DISCARD);
 		return 1;
 	}
 
