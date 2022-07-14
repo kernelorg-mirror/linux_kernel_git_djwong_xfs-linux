@@ -760,7 +760,7 @@ xchk_rt_unlock(
 
 #ifdef CONFIG_XFS_RT
 /* Lock all the rt group metadata inode ILOCKs and wait for intents. */
-static int
+int
 xchk_rtgroup_lock(
 	struct xfs_scrub	*sc,
 	struct xchk_rt		*sr,
