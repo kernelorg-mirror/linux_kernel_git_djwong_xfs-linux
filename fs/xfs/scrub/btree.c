@@ -11,12 +11,70 @@
 #include "xfs_mount.h"
 #include "xfs_inode.h"
 #include "xfs_btree.h"
+#include "xfs_log_format.h"
+#include "xfs_ag.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/btree.h"
 #include "scrub/trace.h"
 
 /* btree scrubbing */
+
+/* Figure out which block the btree cursor was pointing to. */
+static inline xfs_fsblock_t
+xchk_btree_cur_fsbno(
+	struct xfs_btree_cur		*cur,
+	int				level)
+{
+	if (level < cur->bc_nlevels && cur->bc_levels[level].bp)
+		return XFS_DADDR_TO_FSB(cur->bc_mp,
+				xfs_buf_daddr(cur->bc_levels[level].bp));
+	else if (level == cur->bc_nlevels - 1 &&
+		 (cur->bc_flags & XFS_BTREE_ROOT_IN_INODE))
+		return XFS_INO_TO_FSB(cur->bc_mp, cur->bc_ino.ip->i_ino);
+	else if (!(cur->bc_flags & XFS_BTREE_LONG_PTRS))
+		return XFS_AGB_TO_FSB(cur->bc_mp, cur->bc_ag.pag->pag_agno, 0);
+	return NULLFSBLOCK;
+}
+
+static inline void
+process_error_whine(
+	struct xfs_scrub	*sc,
+	struct xfs_btree_cur	*cur,
+	int			level,
+	int			*error,
+	__u32			errflag,
+	void			*ret_ip)
+{
+	xfs_fsblock_t		fsbno = xchk_btree_cur_fsbno(cur, level);
+
+	if (cur->bc_flags & XFS_BTREE_ROOT_IN_INODE) {
+		xchk_whine(sc->mp, "ino 0x%llx fork %d type %s btnum %d level %d ptr %d agno 0x%x agbno 0x%x error %d errflag 0x%x ret_ip %pS",
+				cur->bc_ino.ip->i_ino,
+				cur->bc_ino.whichfork,
+				xchk_type_string(sc->sm->sm_type),
+				cur->bc_btnum,
+				level,
+				cur->bc_levels[level].ptr,
+				XFS_FSB_TO_AGNO(cur->bc_mp, fsbno),
+				XFS_FSB_TO_AGBNO(cur->bc_mp, fsbno),
+				*error,
+				errflag,
+				ret_ip);
+		return;
+	}
+
+	xchk_whine(sc->mp, "type %s btnum %d level %d ptr %d agno 0x%x agbno 0x%x error %d errflag 0x%x ret_ip %pS",
+			xchk_type_string(sc->sm->sm_type),
+			cur->bc_btnum,
+			level,
+			cur->bc_levels[level].ptr,
+			XFS_FSB_TO_AGNO(cur->bc_mp, fsbno),
+			XFS_FSB_TO_AGBNO(cur->bc_mp, fsbno),
+			*error,
+			errflag,
+			ret_ip);
+}
 
 /*
  * Check for btree operation errors.  See the section about handling
@@ -44,9 +102,13 @@ __xchk_btree_process_error(
 	case -EFSCORRUPTED:
 		/* Note the badness but don't abort. */
 		sc->sm->sm_flags |= errflag;
+		process_error_whine(sc, cur, level, error, errflag, ret_ip);
 		*error = 0;
 		fallthrough;
 	default:
+		if (*error)
+			process_error_whine(sc, cur, level, error, errflag,
+					ret_ip);
 		if (cur->bc_flags & XFS_BTREE_ROOT_IN_INODE)
 			trace_xchk_ifork_btree_op_error(sc, cur, level,
 					*error, ret_ip);
@@ -92,11 +154,37 @@ __xchk_btree_set_corrupt(
 	sc->sm->sm_flags |= errflag;
 
 	if (cur->bc_flags & XFS_BTREE_ROOT_IN_INODE)
+	{
+		xfs_fsblock_t fsbno = xchk_btree_cur_fsbno(cur, level);
+		xchk_whine(sc->mp, "ino 0x%llx fork %d type %s btnum %d level %d ptr %d agno 0x%x agbno 0x%x errflag 0x%x ret_ip %pS",
+				cur->bc_ino.ip->i_ino,
+				cur->bc_ino.whichfork,
+				xchk_type_string(sc->sm->sm_type),
+				cur->bc_btnum,
+				level,
+				cur->bc_levels[level].ptr,
+				XFS_FSB_TO_AGNO(cur->bc_mp, fsbno),
+				XFS_FSB_TO_AGBNO(cur->bc_mp, fsbno),
+				errflag,
+				ret_ip);
 		trace_xchk_ifork_btree_error(sc, cur, level,
 				ret_ip);
+	}
 	else
+	{
+		xfs_fsblock_t fsbno = xchk_btree_cur_fsbno(cur, level);
+		xchk_whine(sc->mp, "type %s btnum %d level %d ptr %d agno 0x%x agbno 0x%x errflag 0x%x ret_ip %pS",
+				xchk_type_string(sc->sm->sm_type),
+				cur->bc_btnum,
+				level,
+				cur->bc_levels[level].ptr,
+				XFS_FSB_TO_AGNO(cur->bc_mp, fsbno),
+				XFS_FSB_TO_AGBNO(cur->bc_mp, fsbno),
+				errflag,
+				ret_ip);
 		trace_xchk_btree_error(sc, cur, level,
 				ret_ip);
+	}
 }
 
 void
