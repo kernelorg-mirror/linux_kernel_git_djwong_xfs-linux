@@ -53,6 +53,122 @@ xfs_rtrefcountbt_dup_cursor(
 	return new;
 }
 
+STATIC int
+xfs_rtrefcountbt_get_minrecs(
+	struct xfs_btree_cur	*cur,
+	int			level)
+{
+	if (level == cur->bc_nlevels - 1) {
+		struct xfs_ifork	*ifp = xfs_btree_ifork_ptr(cur);
+
+		return xfs_rtrefcountbt_maxrecs(cur->bc_mp, ifp->if_broot_bytes,
+				level == 0) / 2;
+	}
+
+	return cur->bc_mp->m_rtrefc_mnr[level != 0];
+}
+
+STATIC int
+xfs_rtrefcountbt_get_maxrecs(
+	struct xfs_btree_cur	*cur,
+	int			level)
+{
+	if (level == cur->bc_nlevels - 1) {
+		struct xfs_ifork	*ifp = xfs_btree_ifork_ptr(cur);
+
+		return xfs_rtrefcountbt_maxrecs(cur->bc_mp, ifp->if_broot_bytes,
+				level == 0);
+	}
+
+	return cur->bc_mp->m_rtrefc_mxr[level != 0];
+}
+
+STATIC void
+xfs_rtrefcountbt_init_key_from_rec(
+	union xfs_btree_key		*key,
+	const union xfs_btree_rec	*rec)
+{
+	key->rtrefc.rc_startblock = rec->rtrefc.rc_startblock;
+}
+
+STATIC void
+xfs_rtrefcountbt_init_high_key_from_rec(
+	union xfs_btree_key		*key,
+	const union xfs_btree_rec	*rec)
+{
+	__u64				x;
+
+	x = be32_to_cpu(rec->rtrefc.rc_startblock);
+	x += be32_to_cpu(rec->rtrefc.rc_blockcount) - 1;
+	key->rtrefc.rc_startblock = cpu_to_be32(x);
+}
+
+static inline __u32
+xfs_rtrefcountbt_encode_startblock(
+	struct xfs_btree_cur	*cur)
+{
+	__u32			start;
+
+	/*
+	 * low level btree operations need to handle the generic btree range
+	 * query functions (which set rc_domain == -1U), so we check that the
+	 * domain is /not/ shared.
+	 */
+	start = cur->bc_rec.rc.rc_startblock & ~XFS_RTREFC_COWFLAG;
+	if (cur->bc_rec.rc.rc_domain != XFS_RCDOM_SHARED)
+		start |= XFS_RTREFC_COWFLAG;
+	return start;
+}
+
+STATIC void
+xfs_rtrefcountbt_init_rec_from_cur(
+	struct xfs_btree_cur	*cur,
+	union xfs_btree_rec	*rec)
+{
+	__u32			start = xfs_rtrefcountbt_encode_startblock(cur);
+
+	rec->rtrefc.rc_startblock = cpu_to_be32(start);
+	rec->rtrefc.rc_blockcount = cpu_to_be32(cur->bc_rec.rc.rc_blockcount);
+	rec->rtrefc.rc_refcount = cpu_to_be32(cur->bc_rec.rc.rc_refcount);
+}
+
+STATIC void
+xfs_rtrefcountbt_init_ptr_from_cur(
+	struct xfs_btree_cur	*cur,
+	union xfs_btree_ptr	*ptr)
+{
+	ptr->l = 0;
+}
+
+STATIC int64_t
+xfs_rtrefcountbt_key_diff(
+	struct xfs_btree_cur		*cur,
+	const union xfs_btree_key	*key)
+{
+	const struct xfs_rtrefcount_key	*kp = &key->rtrefc;
+	__u32				start;
+
+	start = xfs_rtrefcountbt_encode_startblock(cur);
+	return (int64_t)be32_to_cpu(kp->rc_startblock) - start;
+}
+
+STATIC int64_t
+xfs_rtrefcountbt_diff_two_keys(
+	struct xfs_btree_cur		*cur,
+	const union xfs_btree_key	*k1,
+	const union xfs_btree_key	*k2)
+{
+	uint64_t			key1_start, key2_start;
+
+	key1_start = be32_to_cpu(k1->rtrefc.rc_startblock);
+	key2_start = be32_to_cpu(k2->rtrefc.rc_startblock);
+	if (key1_start > key2_start)
+		return 1;
+	if (key1_start < key2_start)
+		return -1;
+	return 0;
+}
+
 static xfs_failaddr_t
 xfs_rtrefcountbt_verify(
 	struct xfs_buf		*bp)
@@ -119,12 +235,61 @@ const struct xfs_buf_ops xfs_rtrefcountbt_buf_ops = {
 	.verify_struct		= xfs_rtrefcountbt_verify,
 };
 
+STATIC int
+xfs_rtrefcountbt_keys_inorder(
+	struct xfs_btree_cur		*cur,
+	const union xfs_btree_key	*k1,
+	const union xfs_btree_key	*k2)
+{
+	return be32_to_cpu(k1->rtrefc.rc_startblock) <
+	       be32_to_cpu(k2->rtrefc.rc_startblock);
+}
+
+STATIC int
+xfs_rtrefcountbt_recs_inorder(
+	struct xfs_btree_cur		*cur,
+	const union xfs_btree_rec	*r1,
+	const union xfs_btree_rec	*r2)
+{
+	return  be32_to_cpu(r1->rtrefc.rc_startblock) +
+		be32_to_cpu(r1->rtrefc.rc_blockcount) <=
+		be32_to_cpu(r2->rtrefc.rc_startblock);
+}
+
+STATIC bool
+xfs_rtrefcountbt_has_key_gap(
+	struct xfs_btree_cur		*cur,
+	const union xfs_btree_key	*key1,
+	const union xfs_btree_key	*key2,
+	const union xfs_btree_key	*mask)
+{
+	xfs_fsblock_t			next;
+
+	ASSERT(!mask || mask->rtrefc.rc_startblock);
+
+	next = be32_to_cpu(key1->rtrefc.rc_startblock) + 1;
+	return next != be32_to_cpu(key2->rtrefc.rc_startblock);
+}
+
 static const struct xfs_btree_ops xfs_rtrefcountbt_ops = {
 	.rec_len		= sizeof(struct xfs_rtrefcount_rec),
 	.key_len		= sizeof(struct xfs_rtrefcount_key),
 
 	.dup_cursor		= xfs_rtrefcountbt_dup_cursor,
+	.alloc_block		= xfs_btree_alloc_imeta_block,
+	.free_block		= xfs_btree_free_imeta_block,
+	.get_minrecs		= xfs_rtrefcountbt_get_minrecs,
+	.get_maxrecs		= xfs_rtrefcountbt_get_maxrecs,
+	.init_key_from_rec	= xfs_rtrefcountbt_init_key_from_rec,
+	.init_high_key_from_rec	= xfs_rtrefcountbt_init_high_key_from_rec,
+	.init_rec_from_cur	= xfs_rtrefcountbt_init_rec_from_cur,
+	.init_ptr_from_cur	= xfs_rtrefcountbt_init_ptr_from_cur,
+	.key_diff		= xfs_rtrefcountbt_key_diff,
 	.buf_ops		= &xfs_rtrefcountbt_buf_ops,
+	.diff_two_keys		= xfs_rtrefcountbt_diff_two_keys,
+	.keys_inorder		= xfs_rtrefcountbt_keys_inorder,
+	.recs_inorder		= xfs_rtrefcountbt_recs_inorder,
+	.has_key_gap		= xfs_rtrefcountbt_has_key_gap,
 };
 
 /* Initialize a new rt refcount btree cursor. */
