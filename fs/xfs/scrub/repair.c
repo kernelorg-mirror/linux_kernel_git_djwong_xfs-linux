@@ -61,7 +61,6 @@ xrep_attempt(
 		sc->flags |= XREP_ALREADY_FIXED;
 		return -EAGAIN;
 	case -EDEADLOCK:
-	case -EAGAIN:
 		/* Tell the caller to try again having grabbed all the locks. */
 		if (!(sc->flags & XCHK_TRY_HARDER)) {
 			sc->flags |= XCHK_TRY_HARDER;
@@ -73,6 +72,10 @@ xrep_attempt(
 		 * so report back to userspace.
 		 */
 		return -EFSCORRUPTED;
+	case -EAGAIN:
+		/* Repair functions should return EDEADLOCK, not EAGAIN. */
+		ASSERT(0);
+		fallthrough;
 	default:
 		return error;
 	}
