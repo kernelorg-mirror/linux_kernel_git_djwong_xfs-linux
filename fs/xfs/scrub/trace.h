@@ -2534,6 +2534,38 @@ TRACE_EVENT(xrep_nlinks_set_record,
 		  __entry->children)
 );
 
+DECLARE_EVENT_CLASS(xrep_dentry_class,
+	TP_PROTO(struct xfs_mount *mp, const struct dentry *dentry),
+	TP_ARGS(mp, dentry),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned int, type)
+		__field(unsigned long, ino)
+		__field(bool, positive)
+		__field(bool, has_parent)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->type = __d_entry_type(dentry);
+		__entry->positive = d_is_positive(dentry);
+		__entry->has_parent = dentry->d_parent != NULL;
+		__entry->ino = d_inode(dentry) ? d_inode(dentry)->i_ino : 0;
+	),
+	TP_printk("dev %d:%d type 0x%x positive? %d parent? %d ino 0x%lx",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->type,
+		  __entry->positive,
+		  __entry->has_parent,
+		  __entry->ino)
+);
+#define DEFINE_REPAIR_DENTRY_EVENT(name) \
+DEFINE_EVENT(xrep_dentry_class, name, \
+	TP_PROTO(struct xfs_mount *mp, const struct dentry *dentry), \
+	TP_ARGS(mp, dentry))
+DEFINE_REPAIR_DENTRY_EVENT(xrep_orphanage_check_child);
+DEFINE_REPAIR_DENTRY_EVENT(xrep_orphanage_check_dentry);
+DEFINE_REPAIR_DENTRY_EVENT(xrep_orphanage_zap_child);
+
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
 
 
