@@ -2937,3 +2937,587 @@ The proposed patchset is the
 `summary counter cleanup
 <https://git.kernel.org/pub/scm/linux/kernel/git/djwong/xfs-linux.git/log/?h=repair-fscounters>`_
 series.
+
+Full Filesystem Scans
+---------------------
+
+Certain types of metadata can only be checked by walking every file in the
+entire filesystem to record observations and comparing the observations against
+what's recorded on disk.
+Repairs will be made by writing those observations to disk in a replacement
+structure.
+However, it is not practical to shut down the entire filesystem to examine
+hundreds of millions of files because the downtime would be excessive.
+Therefore, online fsck must build the infrastructure to manage a live scan of
+all the files in the filesystem.
+There are two questions that need to be solved to perform a live walk:
+
+- How does scrub manage the scan while it is collecting data?
+
+- How does the scan keep abreast of changes being made to the system by other
+  threads?
+
+.. _iscan:
+
+Coordinated Inode Scans
+```````````````````````
+
+Inode numbers are search keys that filesystems use to identify files uniquely.
+XFS inode numbers form a continuous keyspace that can be expressed as a 64-bit
+integer.
+Note that the inode records themselves are sparsely distributed within the
+keyspace.
+Scans therefore proceed in a linear fashion across the keyspace, starting from
+0 and ending at 0xFFFFFFFFFFFFFFFF.
+Naturally, a scan through a keyspace requires a scan cursor object to track the scan
+progress.
+The first part of this scan cursor object tracks the inode that will be visited
+next; call this the examination cursor.
+Somewhat less obviously, the scan cursor object must also track which parts of
+the keyspace have already been scanned, which is critical for deciding if a
+concurrent filesystem update needs to be incorporated into the scan data.
+Call this the scanned inode cursor.
+
+Advancing the scan is a multi-step process:
+
+1. Lock the AGI buffer of the AG containing the inode pointed to by the scanned
+   inode cursor.
+   This guarantee that inodes in this AG cannot be allocated or freed while
+   are moving the cursor.
+
+2. Use the per-AG inode btree to look up the next inode after the one that was
+   just visited, since it may not be keyspace adjacent to the one just
+   examined.
+
+3. If there are no more inodes left in this AG:
+
+   a. Move the examination cursor to the start of the next AG.
+
+   b. Adjust the scanned inode cursor to indicate that it has "scanned" the
+      last possible inode in this AG's inode keyspace.
+      XFS inode numbers are segmented, so the cursor needs to be marked as
+      having scanned the entire keyspace up to just before the start of the
+      next AG's inode keyspace.
+
+   c. Unlock the AGI and return to step 1 if there are unexamined AGs in the
+      filesystem.
+
+4. Otherwise, there is at least one more inode to scan in this AG:
+
+   a. Move the examination cursor ahead to the next inode marked as allocated
+      by the inode btree.
+
+   b. Adjust the scanned inode cursor to point to the inode just prior to where
+      the examination cursor is now.
+      Because the scanner holds the AGI buffer lock, no inodes could have been
+      created in the part of the inode keyspace that the scan cursor just
+      advanced.
+
+5. Load the incore inode for the selected ondisk inode.
+   By maintaining the AGI buffer lock until this point, the scanner knows that
+   it was safe to advance the cursor across the entire keyspace, and that it
+   has stabilized the next inode so that it cannot disappear from the
+   filesystem until the scan releases the incore inode.
+
+6. Drop the AGI lock and return the incore inode to the caller.
+
+The caller then examines the inode:
+
+1. Lock the incore inode to prevent updates during the scan.
+
+2. Scan the inode.
+
+3. While still holding the inode lock, adjust the scanned inode cursor to point
+   to this inode.
+
+4. Unlock the incore inode.
+
+5. Advance the scan.
+
+There are subtleties with the inode cache that complicate grabbing the incore
+inode for the caller.
+Obviously, it is an absolute requirement that the inode metadata be consistent
+enough to load it into the inode cache.
+Second, if the incore inode is stuck in some intermediate state, the scan
+coordinator must release the AGI and push the main filesystem to get the inode
+back into a loadable state.
+
+The proposed patches are at the start of the
+`online quotacheck
+<https://git.kernel.org/pub/scm/linux/kernel/git/djwong/xfs-linux.git/log/?h=repair-quota>`_
+series.
+
+Inode Management
+````````````````
+
+Normally, XFS incore inodes are always grabbed (``xfs_iget``) and released
+(``xfs_irele``) outside of transaction context, because transactions are not
+a VFS-level concept.
+The one exception to the first rule is during inode creation because the
+filesystem must ensure the atomicity of the ondisk inode index updates and the
+initialization of the actual ondisk inode.
+``irele`` is never run in transaction context because there are a handful of
+activities that might require ondisk updates:
+
+- The VFS may decide to kick off writeback as part of a ``DONTCACHE`` inode
+  release
+- Speculative preallocations need to be unreserved
+- An unlinked file may have lost its last reference, in which case the entire
+  file must be inactivated, which involves releasing all of its resources in
+  the ondisk metadata
+
+During normal operation, resource acquisition for an update follows this order
+to avoid deadlocks:
+
+1. Inode reference (``iget``).
+2. Filesystem freeze protection, if repairing (``mnt_want_write_file``).
+3. Inode ``IOLOCK`` (VFS ``i_rwsem``) lock to control file IO.
+4. Inode ``MMAPLOCK`` (page cache ``invalidate_lock``) lock for operations that
+   can update page cache mappings.
+5. Transaction log space grant.
+6. Space on the data and realtime devices for the transaction.
+7. Incore dquot references, if a file is being repaired.
+   Note that they are not locked, merely acquired.
+8. Inode ``ILOCK`` for file metadata updates.
+9. AG header buffer locks / Realtime metadata inode ILOCK.
+10. Realtime metadata buffer locks, if applicable.
+
+Resources are usually released in the reverse order.
+However, online fsck is a very different animal from most regular XFS
+operations because it may examine an object that normally is acquired in a
+later stage of the locking order, and fsck may decide to cross-reference the
+object with an object that is acquired earlier in the order.
+The next few sections detail the specific ways in which online fsck must be
+*very* careful to avoid deadlocks.
+
+iget and irele
+^^^^^^^^^^^^^^
+
+An inode scan performed on behalf of a scrub operation runs in transaction
+context, and possibly with resources already locked and bound to it.
+This isn't much of a problem for ``iget`` since it can operate in the context
+of an existing transaction.
+
+When the VFS ``iput`` function is given a linked inode with no other
+references, it normally puts the inode on an LRU list in the hope that it can
+save time if another process re-opens the file before the system runs out
+of memory and frees it.
+Filesystem callers can short-circuit the LRU process by setting a ``DONTCACHE``
+flag on the inode to cause the kernel to try to drop the inode into the
+inactivation machinery immediately.
+If the inode is instead unlinked (or unconnected after a file handle
+operation), it will always drop the inode into the inactivation machinery
+immediately.
+Inactivation has two parts -- the VFS part, where it initiates writeback on
+all dirty file pages, and the XFS part, where it cleans up XFS-private
+information (speculative preallocations for appends and copy on write) and
+frees the inode if it was unlinked.
+
+In the past, inactivation was always done from the process that dropped the
+inode, which was a problem for scrub because scrub may already hold a
+transaction, and XFS does not support nesting transactions.
+On the other hand, if scrub already dropped the transaction because it is
+exiting to userspace, it is desirable to drop otherwise unused inodes
+immediately to avoid polluting caches.
+To capture these nuances, the online fsck code has a separate ``xchk_irele``
+function to set or clear the ``DONTCACHE`` flag to get the required release
+behavior.
+
+Proposed patchsets include fixing
+`scrub iget usage
+<https://git.kernel.org/pub/scm/linux/kernel/git/djwong/xfs-linux.git/log/?h=scrub-iget-fixes>`_ and
+`dir iget usage
+<https://git.kernel.org/pub/scm/linux/kernel/git/djwong/xfs-linux.git/log/?h=scrub-dir-iget-fixes>`_.
+
+Locking Inodes
+^^^^^^^^^^^^^^
+
+Inode lock acquisition must also be done carefully during a coordinated inode
+scan.
+Normally, the VFS and XFS will acquire multiple IOLOCK locks in a well-known
+order: parent -> child when updating the directory tree and inode number order
+otherwise.
+Due to the structure of existing filesystem code, IOLOCKs must be acquired
+before transactions are allocated.
+Online fsck upends both of these conventions, because for a directory tree
+scanner, the scrub process holds the IOLOCK of the file being scanned and it
+needs to take the IOLOCK of the file at the other end of the directory link.
+If the directory tree is corrupt because it contains a cycle, ``xfs_scrub``
+cannot use the regular inode locking functions and avoid becoming trapped in an
+ABBA deadlock.
+
+Solving both of these problems is straightforward -- any time online fsck
+deviates from the accepted acquisition order, it uses trylock loops for
+resource acquisition to avoid ABBA deadlocks.
+If the first trylock fails, scrub must drop all inode locks and use trylock
+loops to (re)acquire all necessary resources.
+Trylock loops enable scrub to check for pending fatal signals, which is how
+scrub avoids deadlocking the filesystem or becoming an unresponsive process.
+However, trylock loops means that online fsck must be prepared to measure the
+resource being scrubbed before and after the lock cycle to detect changes and
+react accordingly.
+
+.. _dirparent:
+
+Case Study: Finding a Directory Parent
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Consider the directory parent pointer repair code as an example.
+Online fsck must verify that the dotdot entry of a directory points to exactly
+one parent directory that contains exactly one entry pointing to the child
+directory.
+Validating this relationship (and repairing it if possible) requires a walk of
+every directory on the filesystem while directory tree updates are being
+written.
+The inode scan coordinator provides a way to walk the filesystem without the
+possibility of missing an inode.
+The parent pointer scanner uses a neat trick to avoid the need for live update
+hooks: moving or renaming a directory resets the dotdot entry.
+The child directory is kept locked to prevent updates, but if the scanner
+fails to lock a parent, it can drop and relock both inodes.
+Concurrent updates are detected by watching for a change in the dotdot entry;
+if one is detected, the scan can exit early.
+
+The proposed patchset is the
+`directory repair
+<https://git.kernel.org/pub/scm/linux/kernel/git/djwong/xfs-linux.git/log/?h=repair-dirs>`_
+series.
+
+.. _fshooks:
+
+Filesystem Hooks
+`````````````````
+
+The second piece of support that checking functions need during a full
+filesystem scan is the ability to stay informed about updates being made by
+other threads in the filesystem, since comparisons against the past are useless
+in a dynamic environment.
+Two pieces of Linux kernel infrastructure enable online fsck to monitor regular
+filesystem operations: filesystem hooks and :ref:`static keys<jump_labels>`.
+
+Filesystem hooks are used to convey information about a filesystem update
+to a running online fsck function.
+Because multiple fsck functions can be running in parallel, online fsck uses
+the Linux notifier call chain facility to dispatch updates to all interested
+calelrs.
+Call chains are a dynamic list, which means that they can be configured at
+run time.
+Because these hooks are private to the XFS module, the information passed along
+contains exactly what the checking function needs to update its observations.
+
+The current implementation of XFS hooks use SRCU notifier chains to reduce the
+impact to highly threaded workloads.
+Regular blocking notifier chains use a rwsem and seem to have a much lower
+overhead for single-threaded applications
+It may turn out that the combination of blocking chains and static keys are
+a more performant combination; more study is needed here.
+
+Hooked filesystem code embeds a ``struct xfs_hooks`` in a convenient place,
+defines a series of action codes, and a structure containing information about
+the action.
+When it is time to dispatch events down the hook chain, the filesystem should
+call ``xfs_hooks_call`` with event information to get the process rolling.
+In general, when the filesystem calls a hook chain, it should be able to handle
+sleeping and should not be vulnerable to memory reclaim or locking recursion.
+However, the exact requirements are very dependent on the context of the hook
+caller and the callee.
+Therefore, the number of hooks should be kept to a minimum to reduce complexity
+problems.
+Online fsck callers wishing to receive events should set up a ``struct
+xfs_hook`` pointing to a function, and ``xfs_hooks_add`` it to the
+``xfs_hooks``.
+This function is passed the ``xfs_hook``, the action, and a pointer to the
+action information.
+
+Static keys are used to reduce the overhead of filesystem hooks to nearly
+zero when online fsck is not running.
+
+.. _liveupdate:
+
+Live Updates During a Scan
+``````````````````````````
+
+The code paths of the online fsck scanning code and the :ref:`hooked<fshooks>`
+filesystem code look like this::
+
+            other program
+                  ↓
+            inode lock ←────────────────────┐
+                  ↓                         │
+            AG header lock                  │
+                  ↓                         │
+            filesystem function             │
+                  ↓                         │
+            notifier call chain             │    same
+                  ↓                         ├─── inode
+            scrub hook function             │    lock
+                  ↓                         │
+            scan data mutex ←──┐    same    │
+                  ↓            ├─── scan    │
+            update scan data   │    lock    │
+                  ↑            │            │
+            scan data mutex ←──┘            │
+                  ↑                         │
+            inode lock ←────────────────────┘
+                  ↑
+            scrub function
+                  ↑
+            inode scanner
+                  ↑
+            xfs_scrub
+
+These rules must be followed to ensure correct interactions between the
+checking code and the code making an update to the filesystem:
+
+- Prior to invoking the notifier call chain, the filesystem function being
+  hooked must acquire the same lock that the scrub scanning function acquires
+  to scan the inode.
+
+- The scanning function and the scrub hook function must coordinate access to
+  the scan data by acquiring a lock on the scan data.
+
+- The scrub hook function must not allocate a new transaction or acquire any
+  locks that might conflict with the filesystem function being hooked.
+
+- If the hook function adds items to the transaction context of the filesystem
+  function being hooked, it must detach those items before exiting.
+  In other words, the caller's state must be preserved exactly.
+
+- The hook function must not add the live update information to the scan
+  observations unless the inode being updated has already been scanned.
+  The scan coordinator has a helper predicate for this.
+
+- The hook function can abort the inode scan to avoid breaking the other rules.
+
+Notifier call chain functions allow passing of an ``unsigned long`` and a
+pointer to a structure.
+This is sufficient for current users to pass an operation code and some other
+details.
+
+The client APIs are pretty simple:
+
+- ``xchk_iscan_start`` starts a scan
+
+- ``xchk_iscan_iter`` grabs a reference to the next inode in the scan or
+  returns zero if there is nothing left to scan
+
+- ``xchk_iscan_want_live_update`` to decide if an inode has already been
+  visited in the scan.
+  This is critical for hook functions to decide if they need to update the
+  in-memory scan information.
+
+- ``xchk_iscan_mark_visited`` to mark an inode as having been visited in the
+  scan
+
+- ``xchk_iscan_finish`` to finish the scan
+
+The proposed patches are at the start of the
+`online quotacheck
+<https://git.kernel.org/pub/scm/linux/kernel/git/djwong/xfs-linux.git/log/?h=repair-quota>`_
+series.
+
+.. _quotacheck:
+
+Case Study: Quota Counter Checking
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+It is useful to comapre the mount time quotacheck code to the online repair
+quotacheck code.
+Mount time quotacheck does not have to contend with concurrent operations, so
+it does the following:
+
+1. Make sure the ondisk dquots are in good enough shape that all the incore
+   dquots will actually load, and zero the resource usage counters in the
+   ondisk buffer.
+
+2. Walk every inode in the filesystem.
+   Add each file's resource usage to the incore dquot.
+
+3. Walk each incore dquot.
+   If the incore dquot is not being flushed, add the ondisk buffer backing the
+   incore dquot to a delayed write (delwri) list.
+
+4. Write the buffer list to disk.
+
+Obviously, online quotacheck (and repair) cannot do this.
+The strategy for handling both is to create a shadow dquot index using a sparse
+``xfarray`` and walk the filesystem to account file resource usage to each
+shadow dquot.
+However, scrub cannot stop the filesystem while it does this, so it must use
+live updates.
+Handling the live updates, however, is tricky because transactional dquot
+resource usage updates are handled in phases:
+
+1. The inodes involved are joined and locked to a transaction.
+
+2. For each dquot attached to the file:
+
+   a. The dquot is locked.
+
+   b. A quota reservation associated with the dquot is made and added to the
+      transaction.
+
+   c. The dquot is unlocked.
+
+3. Changes in dquot resource usage are tracked by the transaction.
+
+4. At transaction commit time, each dquot is examined again:
+
+   a. The dquot is locked again.
+
+   b. Quota usage changes are logged and unused reservation is given back to
+      the dquot.
+
+   c. The dquot is unlocked.
+
+For live quotacheck, hooks are placed in steps 2 and 4.
+The step 2 hook creates a shadow version of the transaction dquot context
+(``dqtrx``) that operates in a similar manner to the regular code.
+The step 4 hook commits the shadow quota changes to the shadow dquots.
+Notice that both hooks are called with the inode locked, which is how the
+live update coordinates with the inode scanner.
+
+The actual quotacheck scan itself looks like this:
+
+1. Set up a coordinated inode scan.
+
+2. For each inode returned by the inode scan iterator:
+
+   a. Grab and lock the inode.
+
+   b. Determine that inode's resource usage (data blocks, inode counts,
+      realtime blocks) and add that to the shadow dquots for the user, group,
+      and project ids associated with the inode.
+
+   c. Unlock and release the inode.
+
+3. For each dquot in the system:
+
+   a. Grab and lock the dquot.
+
+   b. Check the dquot against the shadow dquots created by the scan and updated
+      by the live hooks.
+
+Live updates are key to being able to walk every quota records without
+needing to hold any locks between quota records.
+If repairs are desired, the real and shadow dquots are locked and their
+resource counts are set to the values in the shadow dquot.
+
+The proposed patchset is the
+`online quotacheck
+<https://git.kernel.org/pub/scm/linux/kernel/git/djwong/xfs-linux.git/log/?h=repair-quota>`_
+series.
+
+.. _nlinks:
+
+Case Study: File Link Count Checking
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+File link count checking is a second usage of live update hooks.
+The coordinated inode scanner is used to visit all directories on the
+filesystem, and per-file link count records are stored in a sparse ``xfarray``
+indexed by inode number.
+During the scanning phase, each entry in a directory generates observation
+data as follows:
+
+1. If the entry is a dotdot (``'..'``) entry of the root directory, the
+   directory's parent link count is bumped because the root directory's dotdot
+   entry is self referential.
+
+2. If the entry is a dotdot entry of a subdirectory, the parent's backref
+   count is bumped.
+
+3. If the entry is neither a dot nor a dotdot entry, the target file's parent
+   count is bumped.
+
+4. If the target is a subdirectory, the parent's child link count is bumped.
+
+A crucial point to understand about how the inode scanner interacts with
+the live update hooks is that the scan cursor tracks which *parent directories*
+have been scanned.
+In other words, the live updates ignore any update about ``A -> B`` when A has
+not been scanned, even if B has been scanned.
+Furthermore, a subdirectory A with a dotdot entry pointing back to B is
+accounted as a backref counter in the shadow data for A, since child dotdot
+entries affect the parent's link count.
+Live update hooks are carefully placed in all parts of the filesystem that
+create, change, or remove directory entries, since those operations involve
+bumplink and droplink.
+
+For any file, the correct link count is the number of parents plus the number
+of child subdirectories.
+The backref information is used to detect inconsistencies in the number of
+links pointing to child subdirectories and the number of dotdot entries
+pointing back.
+
+Checking the link counts of a file is a simple matter of locking the inode and
+the shadow link count table and comparing the link counts.
+Live updates are key to being able to walk every inode without needing to hold
+any locks between inodes.
+If repairs are desired, the inode's link count is set to the value in the
+shadow information.
+If no parents are found, the file must be :ref:`reparented <orphanage>` to the
+orphanage to prevent the file from being lost forever.
+
+The proposed patchset is the
+`file link count repair
+<https://git.kernel.org/pub/scm/linux/kernel/git/djwong/xfs-linux.git/log/?h=scrub-nlinks>`_
+series.
+
+.. _rmap_repair:
+
+Case Study: Rebuilding Reverse Mapping Records
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Collecting reverse mapping records requires the use of the
+:ref:`inode scanner <iscan>`, the :ref:`live update hooks <liveupdate>`, and
+an :ref:`in-memory rmap btree <xfbtree>`.
+
+1. While holding the locks on the AGI and AGF buffers acquired during the
+   scrub, generate reverse mappings for all AG metadata: inodes, btrees, CoW
+   staging extents, and the log.
+
+2. Set up an inode scanner.
+
+3. Hook into rmap updates for the AG being repaired so that the live scan data
+   can receive updates to the rmap btree from the rest of the filesystem during
+   the file scan.
+
+4. For each space mapping found in either fork of each file scanned,
+   decide if the mapping matches the AG of interest.
+   If so:
+
+   a. Create a btree cursor for the in-memory btree.
+   b. Use the rmap code to add the record to the in-memory btree.
+   c. Use the :ref:`special commit function <xfbtree_commit>` to write the
+      xfile.
+
+5. For each live update received via the hook, decide if the owner has already
+   been scanned.
+   If so, apply the live update into the scan data:
+
+   a. Create a btree cursor for the in-memory btree.
+   b. Replay the operation into the in-memory btree.
+   c. Use the :ref:`special commit function <xfbtree_commit>` to write the
+      xfile without altering the hooked transaction.
+
+6. When the inode scan finishes, create a new scrub transaction and relock the
+   two AG headers.
+
+7. Compute the new btree geometry using the number of rmap records in the
+   shadow btree, like all other btree rebuilding functions.
+
+8. Allocate the number of blocks computed in the previous step.
+
+9. Perform the usual btree bulk loading and commit to install the new rmap
+   btree.
+
+10. Reap the old rmap btree blocks as discussed in the case study about how
+    to :ref:`reap after rmap btree repair <rmap_reap>`.
+
+11. Free the xfbtree now that it not needed.
+
+The proposed patchset is the
+`rmap repair
+<https://git.kernel.org/pub/scm/linux/kernel/git/djwong/xfs-linux.git/log/?h=repair-rmap-btree>`_
+series.
