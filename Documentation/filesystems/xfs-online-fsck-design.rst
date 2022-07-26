@@ -4024,3 +4024,224 @@ The proposed patchset is the
 `extended attribute repair
 <https://git.kernel.org/pub/scm/linux/kernel/git/djwong/xfs-linux.git/log/?h=repair-xattrs>`_
 series.
+
+Fixing Directories
+------------------
+
+Fixing directories is difficult with the current filesystem feature sets.
+The offline repair tool scans all inodes to find files with nonzero link count,
+and then it scans all directories to establish parentage of those linked files.
+Damaged files and directories are zapped, and files with no parent are
+moved to the lost+found directory.
+
+The best that online repair can do at this time is to try to salvage directory
+entries by reading the directory data blocks and recoverying anything that
+looks plausible.
+The salvage process is discussed in the case study at the end of this section.
+The second component to fixing the directory tree online is the :ref:`file link
+count fsck <nlinks>`, since it can scan the entire filesystem to make sure that
+files can neither be deleted while there are still parents nor forgotten after
+all parents sever their links to the child.
+However, there may be a solution to this deficiency soon!
+
+Parent Pointers
+```````````````
+
+The lack of secondary directory metadata hinders directory recovery in much the
+same way that the previous lack of reverse space mapping information hindered
+the recreation of filesystem space metadata.
+Specifically, the lack of redundant metadata makes it nearly impossible to
+construct a true replacement for a damaged directory; the best repair can do is
+to salvage the dirents and use the file link count repair function to move
+orphaned files to the lost and found.
+The proposed parent pointer feature, however, will make total directory
+reconstruction possible.
+
+Directory parent pointers were first proposed as an XFS feature more than a
+decade ago by SGI.
+In that implementation, each link from a parent directory to a child file would
+be augmented by an extended attribute in the child that could be used to
+identify the directory.
+Unfortunately, this early implementation had two major shortcomings:
+First, the XFS codebase of the late 2000s did not have the infrastructure to
+enforce strong referential integrity in the directory tree, which is a fancy
+way to say that it could not guarantee that a change in a forward link would
+always be followed up by a corresponding change to the reverse links.
+Second, the extended attribute did not record the name of the directory entry
+in the parent, so the first parent pointer implementation cannot be used to
+reconnect the directory tree.
+
+In the second implementation (currently being developed by Allison Henderson),
+the extended attribute code will be enhanced to use log intent items to
+guarantee that an extended attribute update can always be completed by log
+recovery.
+The parent pointer data will also include the entry name and location in the
+parent.
+In other words, child files will store parent pointer mappings of the form
+``(parent_ino, parent_gen, dirent_pos) => (dirent_name)`` in their extended
+attribute data.
+With that in place, XFS can guarantee strong referential integrity of directory
+tree operations -- forward links will always be complemented with reverse
+links.
+
+When the parent pointer feature lands, the directory checking process can be
+strengthened to ensure that the target of each dirent also contains a parent
+pointer pointing back to the dirent.
+The quality of directory repairs will improve because online fsck will be able
+to reconstruct a directory in its entirety instead of being salvaged.
+This process is imagined to involve a :ref:`coordinated inode scan <iscan>` and
+a :ref:`directory entry live update hook <liveupdate>`.
+Scan every file in the entire filesystem, and every time the scan encounters a
+file with a parent pointer to the directory that is being reconstructed, record
+this entry in the temporary directory.
+When the scan is complete, atomically swap the contents of the temporary
+directory and the directory being repaired.
+This code has not yet been constructed, so there is not yet a case study laying
+out exactly how this process works.
+
+Parent pointers themselves can be checked by scanning each pointer and
+verifying that the target of the pointer is a directory and that it contains a
+dirent that corresponds to the information recorded in the parent pointer.
+Reconstruction of the parent pointer information will work similarly to
+directory reconstruction -- scan the filesystem, record the dirents pointing to
+the file being repaired, and rebuild that part of the xattr namespace.
+
+**Question**: How will repair ensure that the ``dirent_pos`` fields match in
+the reconstructed directory?
+
+The field could be designated advisory, since the other three values are
+sufficient to find the entry in the parent.
+However, this makes indexed key lookup /very/ awkward.
+A second option would be to allow creating directory entries at specified
+offsets, which solves the referential integrity problem but runs the risk that
+dirent creation will fail due to space conflicts.
+A third option might be to amend the xattr code to support updating an xattr
+key and reindexing the dabtree, though this would have to be performed with the
+directory still locked.
+A fourth option would be to remove the parent pointer entry and re-add it
+atomically.
+
+Case Study: Salvaging Directories
+`````````````````````````````````
+
+Unlike extended attributes, directory blocks are all the same size, so
+salvaging directories is straightforward:
+
+1. Find the parent of the directory.
+   If the dotdot entry is not unreadable, try to confirm that the alleged
+   parent has a child entry pointing back to the directory being repaired.
+   Otherwise, walk the filesystem to find it.
+
+2. Walk the first partition of data fork of the directory to find the directory
+   entry data blocks.
+   When one is found,
+
+   a. The data block is walked linearly to find candidate entries.
+      When a directory entry is found with no obvious problems,
+
+      i. Retrieve the inode number and the inode.
+         If that succeeds, add the name, inode number, and file type to the
+         directory entries of the the temporary file.
+
+Next, the directory block headers must be rewritten with the new inode number
+for completeness, even though the main filesystem never checks.
+
+3. Walk every extent in the temporary file's data fork.
+
+   a. Read the block.
+   b. Change the owner field.
+   c. Attach the buffer to the transaction as an ordered buffer to force it to
+      disk before the new fork is committed.
+
+4. Use atomic extent swapping to exchange the new and old directory structures.
+   The old directory blocks are now attached to the temporary file.
+
+5. Reap the temporary file.
+
+**Question**: Should repair invalidate dentries when rebuilding a directory?
+
+**Question**: Can the dentry cache know about a directory entry that cannot be
+salvaged?
+
+In theory, the dentry cache should be a subset of the directory entries on disk
+because there's no way to load a dentry without having something to read in the
+directory.
+However, it is possible for a coherency problem to be introduced if the ondisk
+structures becomes corrupt *after* the cache loads.
+In theory it is necessary to scan all dentry cache entries for a directory to
+ensure that one of the following apply:
+
+1. The cached dentry reflects an ondisk dirent in the new directory.
+
+2. The cached dentry no longer has a corresponding ondisk dirent in the new
+   directory and the dentry can be purged from the cache.
+
+3. The cached dentry no longer has an ondisk dirent but the dentry cannot be
+   purged.
+   This is bad.
+
+Unfortunately, the dentry cache does not have a means to walk all the dentries
+with a particular directory as a parent.
+This makes detecting situations #2 and #3 impossible, and remains an
+interesting question for research.
+
+The proposed patchset is the
+`directory repair
+<https://git.kernel.org/pub/scm/linux/kernel/git/djwong/xfs-linux.git/log/?h=repair-dirs>`_
+series.
+
+.. _orphanage:
+
+The Orphanage
+-------------
+
+Filesystems present files as a directed, and hopefully acyclic, graph.
+The root of the filesystem is a directory, and each entry in a directory points
+downwards either to more subdirectories or to non-directory files.
+Unfortunately, a disruption in the directory graph pointers result in a
+disconnected graph, which makes files impossible to access via regular path
+resolution.
+The directory parent pointer online scrub code can detect a dotdot entry
+pointing to a parent directory that doesn't have a link back to the child
+directory, and the file link count checker can detect a file with positive link
+count that isn't pointed to by any directory in the filesystem.
+If the file in question has a positive link count, the file in question is an
+orphan.
+
+The question is, how does XFS reconnect these files to the directory tree?
+Offline fsck solves the problem by attaching unconnected files into
+``/lost+found``, and so does online repair.
+This process is a little more involved in the kernel than it is in userspace:
+the directory and file link count repair setup functions must use the regular
+VFS mechanisms to create the orphanage directory with all the necessary
+security attributes, just like any other root-owned directory.
+
+Files are reconnected with their inode number as the directory entry name,
+since XFS does not currently store universal directory parent pointers.
+This naming policy mirrors that of the offline repair tool.
+Reparenting a file to the orphanage does not reset any of its permissions or
+ACLs.
+
+Online repair functions that want to reconnect orphaned files to the
+``/lost+found`` directory tree should do the following:
+
+1. Call ``xrep_orphanage_try_create`` at the start of the scrub setup function
+   to try to ensure that the lost and found directory actually exists.
+   This also attaches the orphanage directory to the scrub context.
+
+2. Having decided to reconnect a file, take the IOLOCK of both the orphanage
+   and the file being reattached.
+
+3. Call ``xrep_orphanage_compute_blkres`` and ``xrep_orphanage_compute_name``
+   to compute the new name in the orphanage and the block reservation required.
+
+4. Call ``xrep_orphanage_adoption_prep`` to reserve resources to the repair
+   transaction.
+
+5. Call ``xrep_orphanage_adopt`` to reparent the orphaned file into the lost
+   and found, and update the kernel dentry cache.
+
+The proposed patches are in the
+`orphanage adoption
+<https://git.kernel.org/pub/scm/linux/kernel/git/djwong/xfs-linux.git/log/?h=repair-orphanage>`_
+series.
