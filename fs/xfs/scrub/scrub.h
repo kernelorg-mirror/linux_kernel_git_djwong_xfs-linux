@@ -131,6 +131,7 @@ struct xfs_scrub {
 #define XCHK_FSHOOKS_QUOTA	(1 << 4)  /* quota live update enabled */
 #define XCHK_FSHOOKS_NLINKS	(1 << 5)  /* link count live update enabled */
 #define XCHK_FSHOOKS_RMAP	(1 << 6)  /* rmapbt live update enabled */
+#define XREP_ATOMIC_EXCHANGE	(1 << 29) /* uses atomic file content exchange */
 #define XREP_RESET_PERAG_RESV	(1 << 30) /* must reset AG space reservation */
 #define XREP_ALREADY_FIXED	(1 << 31) /* checking our repair work */
 
