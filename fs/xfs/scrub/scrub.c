@@ -193,6 +193,10 @@ xchk_teardown(
 		xchk_irele(sc, sc->ip);
 		sc->ip = NULL;
 	}
+	if (sc->flags & XREP_ATOMIC_EXCHANGE) {
+		sc->flags &= ~XREP_ATOMIC_EXCHANGE;
+		xfs_xchg_range_rele_log_assist(sc->mp);
+	}
 	if (sc->flags & XCHK_HAVE_FREEZE_PROT) {
 		sc->flags &= ~XCHK_HAVE_FREEZE_PROT;
 		mnt_drop_write_file(sc->file);
