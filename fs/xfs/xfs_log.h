@@ -161,6 +161,7 @@ bool	  xlog_force_shutdown(struct xlog *log, uint32_t shutdown_flags);
 
 enum xlog_incompat_feat {
 	XLOG_INCOMPAT_FEAT_XATTRS = XFS_SB_FEAT_INCOMPAT_LOG_XATTRS,
+	XLOG_INCOMPAT_FEAT_SWAPEXT = XFS_SB_FEAT_INCOMPAT_LOG_SWAPEXT
 };
 
 void xlog_use_incompat_feat(struct xlog *log, enum xlog_incompat_feat what);
