@@ -120,6 +120,7 @@ TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_HEALTHY);
 	{ XCHK_FSHOOKS_QUOTA,			"fshooks_quota" }, \
 	{ XCHK_FSHOOKS_NLINKS,			"fshooks_nlinks" }, \
 	{ XCHK_FSHOOKS_RMAP,			"fshooks_rmap" }, \
+	{ XREP_ATOMIC_EXCHANGE,			"atomic_swapext" }, \
 	{ XREP_RESET_PERAG_RESV,		"reset_perag_resv" }, \
 	{ XREP_ALREADY_FIXED,			"already_fixed" }
 
