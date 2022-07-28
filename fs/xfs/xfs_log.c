@@ -1065,7 +1065,7 @@ xfs_log_quiesce(
 	 * failures, though it's not fatal to have a higher log feature
 	 * protection level than the log contents actually require.
 	 */
-	if (xfs_clear_incompat_log_features(mp)) {
+	if (xfs_clear_incompat_log_features(mp, XFS_SB_FEAT_INCOMPAT_LOG_ALL)) {
 		int error;
 
 		error = xfs_sync_sb(mp, false);
@@ -1464,6 +1464,7 @@ xlog_clear_incompat(
 	struct xlog		*log)
 {
 	struct xfs_mount	*mp = log->l_mp;
+	uint32_t		incompat_mask = 0;
 
 	if (!xfs_sb_has_incompat_log_feature(&mp->m_sb,
 				XFS_SB_FEAT_INCOMPAT_LOG_ALL))
@@ -1472,11 +1473,16 @@ xlog_clear_incompat(
 	if (log->l_covered_state != XLOG_STATE_COVER_DONE2)
 		return;
 
-	if (!down_write_trylock(&log->l_incompat_users))
+	if (down_write_trylock(&log->l_incompat_xattrs))
+		incompat_mask |= XFS_SB_FEAT_INCOMPAT_LOG_XATTRS;
+
+	if (!incompat_mask)
 		return;
 
-	xfs_clear_incompat_log_features(mp);
-	up_write(&log->l_incompat_users);
+	xfs_clear_incompat_log_features(mp, incompat_mask);
+
+	if (incompat_mask & XFS_SB_FEAT_INCOMPAT_LOG_XATTRS)
+		up_write(&log->l_incompat_xattrs);
 }
 
 /*
@@ -1593,7 +1599,7 @@ xlog_alloc_log(
 	}
 	log->l_sectBBsize = 1 << log2_size;
 
-	init_rwsem(&log->l_incompat_users);
+	init_rwsem(&log->l_incompat_xattrs);
 
 	xlog_get_iclog_buffer_size(mp, log);
 
@@ -3895,15 +3901,25 @@ xfs_log_check_lsn(
  */
 void
 xlog_use_incompat_feat(
-	struct xlog		*log)
+	struct xlog		*log,
+	enum xlog_incompat_feat	what)
 {
-	down_read(&log->l_incompat_users);
+	switch (what) {
+	case XLOG_INCOMPAT_FEAT_XATTRS:
+		down_read(&log->l_incompat_xattrs);
+		break;
+	}
 }
 
 /* Notify the log that we've finished using log incompat features. */
 void
 xlog_drop_incompat_feat(
-	struct xlog		*log)
+	struct xlog		*log,
+	enum xlog_incompat_feat	what)
 {
-	up_read(&log->l_incompat_users);
+	switch (what) {
+	case XLOG_INCOMPAT_FEAT_XATTRS:
+		up_read(&log->l_incompat_xattrs);
+		break;
+	}
 }
