@@ -26,6 +26,9 @@
 #include "xfs_errortag.h"
 #include "xfs_icache.h"
 #include "xfs_refcount_btree.h"
+#include "xfs_rtalloc.h"
+#include "xfs_rtbitmap.h"
+#include "xfs_rtgroup.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
@@ -138,8 +141,12 @@ xrep_cow_mark_shared_staging(
 
 	xrep_cow_trim_refcount(xc, &rrec, rec);
 
-	fsbno = XFS_AGB_TO_FSB(xc->sc->mp, cur->bc_ag.pag->pag_agno,
-			rrec.rc_startblock);
+	if (XFS_IS_REALTIME_INODE(xc->sc->ip))
+		fsbno = xfs_rgbno_to_rtb(xc->sc->mp, cur->bc_ino.rtg->rtg_rgno,
+				rrec.rc_startblock);
+	else
+		fsbno = XFS_AGB_TO_FSB(xc->sc->mp, cur->bc_ag.pag->pag_agno,
+				rrec.rc_startblock);
 	return xrep_cow_mark_file_range(xc, fsbno, rrec.rc_blockcount);
 }
 
@@ -159,6 +166,7 @@ xrep_cow_mark_staging(
 {
 	struct xrep_cow			*xc = priv;
 	struct xfs_refcount_irec	rrec;
+	xfs_fsblock_t			fsbno;
 	int				error;
 
 	if (rec->rc_refcount != 1)
@@ -169,9 +177,13 @@ xrep_cow_mark_staging(
 	if (xc->next_bno >= rrec.rc_startblock)
 		goto next;
 
-	error = xrep_cow_mark_file_range(xc,
-			XFS_AGB_TO_FSB(xc->sc->mp, cur->bc_ag.pag->pag_agno,
-				       xc->next_bno),
+	if (XFS_IS_REALTIME_INODE(xc->sc->ip))
+		fsbno = xfs_rgbno_to_rtb(xc->sc->mp, cur->bc_ino.rtg->rtg_rgno,
+				xc->next_bno);
+	else
+		fsbno = XFS_AGB_TO_FSB(xc->sc->mp, cur->bc_ag.pag->pag_agno,
+				xc->next_bno),
+	error = xrep_cow_mark_file_range(xc, fsbno,
 			rrec.rc_startblock - xc->next_bno);
 	if (error)
 		return error;
@@ -214,7 +226,12 @@ xrep_cow_mark_missing_staging(
 		rec_len -= adj;
 	}
 
-	fsbno = XFS_AGB_TO_FSB(xc->sc->mp, cur->bc_ag.pag->pag_agno, rec_bno);
+	if (XFS_IS_REALTIME_INODE(xc->sc->ip))
+		fsbno = xfs_rgbno_to_rtb(xc->sc->mp, cur->bc_ino.rtg->rtg_rgno,
+				rec_bno);
+	else
+		fsbno = XFS_AGB_TO_FSB(xc->sc->mp, cur->bc_ag.pag->pag_agno,
+				rec_bno);
 	return xrep_cow_mark_file_range(xc, fsbno, rec_len);
 }
 
@@ -304,6 +321,97 @@ out_pag:
 }
 
 /*
+ * Find any part of the CoW fork mapping that isn't a single-owner CoW staging
+ * extent and mark the corresponding part of the file range in the bitmap.
+ */
+STATIC int
+xrep_cow_find_bad_rt(
+	struct xrep_cow			*xc)
+{
+	struct xfs_refcount_irec	rc_low = { 0 };
+	struct xfs_refcount_irec	rc_high = { 0 };
+	struct xfs_rmap_irec		rm_low = { 0 };
+	struct xfs_rmap_irec		rm_high = { 0 };
+	struct xfs_scrub		*sc = xc->sc;
+	struct xfs_rtgroup		*rtg;
+	xfs_rgnumber_t			rgno;
+	int				error = 0;
+
+	xc->irec_startbno = xfs_rtb_to_rgbno(sc->mp, xc->irec.br_startblock,
+						&rgno);
+
+	rtg = xfs_rtgroup_get(sc->mp, rgno);
+	if (!rtg)
+		return -EFSCORRUPTED;
+
+	if (xrep_is_rtmeta_ino(sc, rtg, sc->ip->i_ino)) {
+		xfs_rtgroup_put(rtg);
+		goto out_rtg;
+	}
+
+	/*
+	 * Either userspace is forcing us to rebuild the CoW fork, or someone
+	 * turned on the debugging knob.  Either way, replace everything in the
+	 * CoW fork and then scan for staging extents in the refcountbt.
+	 */
+	if ((sc->sm->sm_flags & XFS_SCRUB_IFLAG_FORCE_REBUILD) ||
+	    XFS_TEST_ERROR(false, sc->mp, XFS_ERRTAG_FORCE_SCRUB_REPAIR)) {
+		error = xrep_cow_mark_file_range(xc, xc->irec.br_startblock,
+				xc->irec.br_blockcount);
+		if (error)
+			goto out_rtg;
+	}
+
+	error = xrep_rtgroup_init(sc, rtg, &sc->sr);
+	if (error)
+		goto out_rtg;
+
+	/* Mark any CoW fork extents that are shared. */
+	rc_low.rc_startblock = xc->irec_startbno;
+	rc_high.rc_startblock = xc->irec_startbno + xc->irec.br_blockcount - 1;
+	error = xfs_refcount_query_range(sc->sr.refc_cur, &rc_low, &rc_high,
+			xrep_cow_mark_shared_staging, xc);
+	if (error)
+		goto out_sr;
+
+	/* Make sure there are CoW staging extents for the whole mapping. */
+	rc_low.rc_startblock = xc->irec_startbno + XFS_RTREFC_COW_START;
+	rc_high.rc_startblock = xc->irec_startbno + XFS_RTREFC_COW_START +
+			xc->irec.br_blockcount - 1;
+	xc->next_bno = xc->irec_startbno;
+	error = xfs_refcount_query_range(sc->sr.refc_cur, &rc_low, &rc_high,
+			xrep_cow_mark_staging, xc);
+	if (error)
+		goto out_sr;
+
+	if (xc->next_bno < xc->irec_startbno + xc->irec.br_blockcount) {
+		error = xrep_cow_mark_file_range(xc,
+				xfs_rgbno_to_rtb(sc->mp, rtg->rtg_rgno,
+						 xc->next_bno),
+				xc->irec_startbno + xc->irec.br_blockcount -
+				xc->next_bno);
+		if (error)
+			goto out_sr;
+	}
+
+	/* Mark any area has an rmap that isn't a COW staging extent. */
+	rm_low.rm_startblock = xc->irec_startbno;
+	memset(&rm_high, 0xFF, sizeof(rm_high));
+	rm_high.rm_startblock = xc->irec_startbno + xc->irec.br_blockcount - 1;
+	error = xfs_rmap_query_range(sc->sr.rmap_cur, &rm_low, &rm_high,
+			xrep_cow_mark_missing_staging, xc);
+	if (error)
+		goto out_sr;
+
+out_sr:
+	xchk_rtgroup_btcur_free(&sc->sr);
+	xchk_rtgroup_free(sc, &sc->sr);
+out_rtg:
+	xfs_rtgroup_put(rtg);
+	return error;
+}
+
+/*
  * Allocate a replacement CoW staging extent of up to the given number of
  * blocks, and fill out the mapping.  The caller must set irec->br_blockcount.
  */
@@ -340,6 +448,45 @@ xrep_cow_alloc(
 
 	irec->br_startblock = args.fsbno;
 	irec->br_blockcount = args.len;
+	return 0;
+}
+
+/*
+ * Allocate a replacement rt CoW staging extent of up to the given number of
+ * blocks, and fill out the mapping.  The caller must set irec->br_blockcount.
+ */
+STATIC int
+xrep_cow_alloc_rt(
+	struct xfs_scrub	*sc,
+	struct xfs_bmbt_irec	*irec)
+{
+	xfs_rtxnum_t		rtx;
+	xfs_rtxlen_t		rtxlen = 0;
+	xfs_rtblock_t		rtbno;
+	xfs_extlen_t		len;
+	int			error;
+
+	ASSERT(sc->mp->m_sb.sb_rextsize == 1);
+
+	error = xfs_trans_reserve_more(sc->tp, 0, irec->br_blockcount);
+	if (error)
+		return error;
+
+	xfs_rtbitmap_lock(sc->tp, sc->mp);
+
+	error = xfs_rtallocate_extent(sc->tp, 0, 1, irec->br_blockcount,
+			&rtxlen, 0, 1, &rtx);
+	if (error)
+		return error;
+	if (rtx == NULLRTEXTNO)
+		return -ENOSPC;
+
+	rtbno = xfs_rtx_to_rtb(sc->mp, rtx);
+	len = xfs_rtxlen_to_extlen(sc->mp, rtxlen);
+	xfs_refcount_alloc_cow_extent(sc->tp, true, rtbno, len);
+
+	irec->br_startblock = rtbno;
+	irec->br_blockcount = len;
 	return 0;
 }
 
@@ -514,7 +661,10 @@ xrep_cow_replace_one(
 	 * Allocate a replacement extent.  If we don't fill all the blocks,
 	 * shorten the quantity that will be deleted in this step.
 	 */
-	error = xrep_cow_alloc(sc, &rep);
+	if (XFS_IS_REALTIME_INODE(sc->ip))
+		error = xrep_cow_alloc_rt(sc, &rep);
+	else
+		error = xrep_cow_alloc(sc, &rep);
 	if (error)
 		return error;
 
@@ -588,8 +738,12 @@ xrep_bmap_cow(
 	if (!ifp)
 		return 0;
 
-	/* realtime files aren't supported yet */
-	if (XFS_IS_REALTIME_INODE(sc->ip))
+	/*
+	 * Realtime files with large extent sizes are not supported because
+	 * we could encounter an CoW mapping that has been partially written
+	 * out *and* requires replacement, and there's no solution to that.
+	 */
+	if (XFS_IS_REALTIME_INODE(sc->ip) && sc->mp->m_sb.sb_rextsize != 1)
 		return -EOPNOTSUPP;
 
 	/*
@@ -637,7 +791,10 @@ xrep_bmap_cow(
 		if (xfs_bmap_is_written_extent(&xc->irec))
 			continue;
 
-		error = xrep_cow_find_bad(xc);
+		if (XFS_IS_REALTIME_INODE(sc->ip))
+			error = xrep_cow_find_bad_rt(xc);
+		else
+			error = xrep_cow_find_bad(xc);
 		if (error)
 			goto out_bitmap;
 	}

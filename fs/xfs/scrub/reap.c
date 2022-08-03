@@ -33,6 +33,8 @@
 #include "xfs_attr.h"
 #include "xfs_attr_remote.h"
 #include "xfs_defer.h"
+#include "xfs_rtgroup.h"
+#include "xfs_rtrmap_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -589,6 +591,182 @@ out_pag:
 	return error;
 }
 
+/* Dispose of a single rtgroup extent. */
+STATIC int
+xreap_rgextent(
+	struct xreap_state	*rs,
+	xfs_rgblock_t		rgbno,
+	xfs_extlen_t		*rglenp,
+	bool			crosslinked)
+{
+	struct xfs_scrub	*sc = rs->sc;
+	xfs_rtblock_t		rtbno;
+
+	/*
+	 * The only caller so far is CoW fork repair, so we only know how to
+	 * unlink or free CoW staging extents.
+	 */
+	if (rs->oinfo != &XFS_RMAP_OINFO_COW) {
+		ASSERT(rs->oinfo == &XFS_RMAP_OINFO_COW);
+		return -EFSCORRUPTED;
+	}
+	ASSERT(rs->resv == XFS_AG_RESV_NONE);
+
+	rtbno = xfs_rgbno_to_rtb(sc->mp, sc->sr.rtg->rtg_rgno, rgbno);
+
+	/*
+	 * If there are other rmappings, this block is cross linked and must
+	 * not be freed.  Remove the forward and reverse mapping and move on.
+	 *
+	 * XXX: XFS doesn't support detecting the case where a single block
+	 * metadata structure is crosslinked with a multi-block structure
+	 * because the buffer cache doesn't detect aliasing problems, so we
+	 * can't fix 100% of crosslinking problems (yet).  The verifiers will
+	 * blow on writeout, the filesystem will shut down, and the admin gets
+	 * to run xfs_repair.
+	 */
+	if (crosslinked) {
+		trace_xreap_dispose_unmap_rtextent(sc->sr.rtg, rgbno, *rglenp);
+
+		xfs_refcount_free_cow_extent(sc->tp, true, rtbno, *rglenp);
+		rs->deferred++;
+		return 0;
+	}
+
+	trace_xreap_dispose_free_rtextent(sc->sr.rtg, rgbno, *rglenp);
+
+	/*
+	 * The CoW staging extent is not crosslinked.  Use deferred work items
+	 * to remove the refcountbt records (which removes the rmap records)
+	 * and free the extent.  We're not worried about the system going down
+	 * here because log recovery walks the refcount btree to clean out the
+	 * CoW staging extents.
+	 */
+	xfs_refcount_free_cow_extent(sc->tp, true, rtbno, *rglenp);
+	xfs_free_extent_later(sc->tp, rtbno, *rglenp, NULL,
+			XFS_FREE_EXTENT_REALTIME |
+			XFS_FREE_EXTENT_SKIP_DISCARD);
+	rs->deferred++;
+	return 0;
+}
+
+/*
+ * Figure out the longest run of blocks that we can dispose of with a single
+ * call.  Cross-linked blocks should have their reverse mappings removed, but
+ * single-owner extents can be freed.  Units are rt blocks, not rt extents.
+ */
+STATIC int
+xreap_rgextent_select(
+	struct xreap_state	*rs,
+	xfs_rgblock_t		rgbno,
+	xfs_rgblock_t		rgbno_next,
+	bool			*crosslinked,
+	xfs_extlen_t		*rglenp)
+{
+	struct xfs_scrub	*sc = rs->sc;
+	struct xfs_btree_cur	*cur;
+	xfs_rgblock_t		bno = rgbno + 1;
+	xfs_extlen_t		len = 1;
+	int			error;
+
+	/*
+	 * Determine if there are any other rmap records covering the first
+	 * block of this extent.  If so, the block is crosslinked.
+	 */
+	cur = xfs_rtrmapbt_init_cursor(sc->mp, sc->tp, sc->sr.rtg,
+			sc->sr.rtg->rtg_rmapip);
+	error = xfs_rmap_has_other_keys(cur, rgbno, 1, rs->oinfo,
+			crosslinked);
+	if (error)
+		goto out_cur;
+
+	/*
+	 * Figure out how many of the subsequent blocks have the same crosslink
+	 * status.
+	 */
+	while (bno < rgbno_next) {
+		bool		also_crosslinked;
+
+		error = xfs_rmap_has_other_keys(cur, bno, 1, rs->oinfo,
+				&also_crosslinked);
+		if (error)
+			goto out_cur;
+
+		if (*crosslinked != also_crosslinked)
+			break;
+
+		len++;
+		bno++;
+	}
+
+	*rglenp = len;
+	trace_xreap_rgextent_select(sc->sr.rtg, rgbno, len, *crosslinked);
+out_cur:
+	xfs_btree_del_cursor(cur, error);
+	return error;
+}
+
+/*
+ * Break a rt file metadata extent into sub-extents by fate (crosslinked, not
+ * crosslinked), and dispose of each sub-extent separately.  The extent must
+ * be aligned to a realtime extent.
+ */
+STATIC int
+xreap_imeta_rtextent(
+	uint64_t		rtbno,
+	uint64_t		len,
+	void			*priv)
+{
+	struct xreap_state	*rs = priv;
+	struct xfs_scrub	*sc = rs->sc;
+	xfs_rgnumber_t		rgno;
+	xfs_rgblock_t		rgbno = xfs_rtb_to_rgbno(sc->mp, rtbno, &rgno);
+	xfs_rgblock_t		rgbno_next = rgbno + len;
+	int			error = 0;
+
+	ASSERT(sc->ip != NULL);
+	ASSERT(!sc->sr.rtg);
+
+	/*
+	 * We're reaping blocks after repairing file metadata, which means that
+	 * we have to init the xchk_ag structure ourselves.
+	 */
+	sc->sr.rtg = xfs_rtgroup_get(sc->mp, rgno);
+	if (!sc->sr.rtg)
+		return -EFSCORRUPTED;
+
+	xfs_rtgroup_lock(NULL, sc->sr.rtg, XFS_RTLOCK_ALL);
+
+	while (rgbno < rgbno_next) {
+		xfs_extlen_t	rglen;
+		bool		crosslinked;
+
+		error = xreap_rgextent_select(rs, rgbno, rgbno_next,
+				&crosslinked, &rglen);
+		if (error)
+			goto out_unlock;
+
+		error = xreap_rgextent(rs, rgbno, &rglen, crosslinked);
+		if (error)
+			goto out_unlock;
+
+		if (xreap_want_roll(rs)) {
+			error = xfs_trans_roll_inode(&sc->tp, sc->ip);
+			if (error)
+				goto out_unlock;
+			xreap_reset(rs);
+		}
+
+		rgbno += rglen;
+	}
+
+out_unlock:
+	xfs_rtgroup_unlock(sc->sr.rtg, XFS_RTLOCK_ALL);
+	xfs_rtgroup_put(sc->sr.rtg);
+	sc->sr.rtg = NULL;
+	return error;
+}
+
 /*
  * Dispose of every block of every inode metadata extent in the bitmap.
  * Do not use this for file data/attr fork mappings.
@@ -610,7 +788,11 @@ xrep_reap_inode_metadata(
 	ASSERT(xfs_has_rmapbt(sc->mp));
 	ASSERT(sc->ip != NULL);
 
-	error = xbitmap_walk(bitmap, xreap_imeta_extent, &rs);
+	if (XFS_IS_REALTIME_INODE(sc->ip) &&
+	    oinfo == &XFS_RMAP_OINFO_COW)
+		error = xbitmap_walk(bitmap, xreap_imeta_rtextent, &rs);
+	else
+		error = xbitmap_walk(bitmap, xreap_imeta_extent, &rs);
 	if (error || rs.deferred == 0)
 		return error;
 
