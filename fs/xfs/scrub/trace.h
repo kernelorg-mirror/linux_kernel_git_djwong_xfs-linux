@@ -1550,6 +1550,87 @@ TRACE_EVENT(xrep_dinode_count_rmaps,
 		  __entry->block0)
 );
 
+TRACE_EVENT(xrep_cow_mark_file_range,
+	TP_PROTO(struct xfs_inode *ip, xfs_fsblock_t startblock,
+		 xfs_fileoff_t startoff, xfs_filblks_t blockcount),
+	TP_ARGS(ip, startblock, startoff, blockcount),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(xfs_fsblock_t, startblock)
+		__field(xfs_fileoff_t, startoff)
+		__field(xfs_filblks_t, blockcount)
+	),
+	TP_fast_assign(
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->startoff = startoff;
+		__entry->startblock = startblock;
+		__entry->blockcount = blockcount;
+	),
+	TP_printk("dev %d:%d ino 0x%llx fileoff 0x%llx startblock 0x%llx fsbcount 0x%llx",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->startoff,
+		  __entry->startblock,
+		  __entry->blockcount)
+);
+
+TRACE_EVENT(xrep_cow_replace_one,
+	TP_PROTO(struct xfs_inode *ip, const struct xfs_bmbt_irec *irec,
+		 xfs_fsblock_t old_startblock),
+	TP_ARGS(ip, irec, old_startblock),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(xfs_fsblock_t, startblock)
+		__field(xfs_fileoff_t, startoff)
+		__field(xfs_filblks_t, blockcount)
+		__field(xfs_exntst_t, state)
+		__field(xfs_fsblock_t, old_startblock)
+	),
+	TP_fast_assign(
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->startoff = irec->br_startoff;
+		__entry->startblock = irec->br_startblock;
+		__entry->blockcount = irec->br_blockcount;
+		__entry->state = irec->br_state;
+		__entry->old_startblock = old_startblock;
+	),
+	TP_printk("dev %d:%d ino 0x%llx startoff 0x%llx startblock 0x%llx fsbcount 0x%llx state 0x%x old_startblock 0x%llx",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->startoff,
+		  __entry->startblock,
+		  __entry->blockcount,
+		  __entry->state,
+		  __entry->old_startblock)
+);
+
+TRACE_EVENT(xrep_cow_free_staging,
+	TP_PROTO(struct xfs_perag *pag, xfs_agblock_t agbno,
+		 xfs_extlen_t blockcount),
+	TP_ARGS(pag, agbno, blockcount),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_agnumber_t, agno)
+		__field(xfs_agblock_t, agbno)
+		__field(xfs_extlen_t, blockcount)
+	),
+	TP_fast_assign(
+		__entry->dev = pag->pag_mount->m_super->s_dev;
+		__entry->agno = pag->pag_agno;
+		__entry->agbno = agbno;
+		__entry->blockcount = blockcount;
+	),
+	TP_printk("dev %d:%d agno 0x%x agbno 0x%x fsbcount 0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->agno,
+		  __entry->agbno,
+		  __entry->blockcount)
+);
+
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
 
 #endif /* _TRACE_XFS_SCRUB_TRACE_H */
