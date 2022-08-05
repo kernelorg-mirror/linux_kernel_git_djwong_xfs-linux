@@ -22,10 +22,10 @@
 #include "scrub/repair.h"
 #include "scrub/xfarray.h"
 #include "scrub/iscan.h"
+#include "scrub/orphanage.h"
 #include "scrub/nlinks.h"
 #include "scrub/trace.h"
 #include "scrub/tempfile.h"
-#include "scrub/orphanage.h"
 
 /*
  * Live Inode Link Count Repair
@@ -37,28 +37,12 @@
  * inode is locked.
  */
 
-static inline char *
-xrep_nlinks_namebuf(
-	struct xfs_scrub	*sc)
-{
-	return (char *)(((struct xchk_nlink_ctrs *)sc->buf) + 1);
-}
-
-static inline struct xrep_orphanage_req *
-xrep_nlinks_orphanage_req(
-	struct xfs_scrub	*sc)
-{
-	return (struct xrep_orphanage_req *)
-				(xrep_nlinks_namebuf(sc) + MAXNAMELEN + 1);
-}
-
 /* Set up to repair inode link counts. */
 int
 xrep_setup_nlinks(
 	struct xfs_scrub	*sc,
 	unsigned int		*buf_bytes)
 {
-	*buf_bytes += xrep_orphanage_req_sizeof();
 	return xrep_orphanage_try_create(sc);
 }
 
@@ -118,7 +102,6 @@ xrep_nlinks_repair_and_relink_inode(
 {
 	struct xchk_nlink		obs;
 	struct xfs_scrub		*sc = xnc->sc;
-	struct xrep_orphanage_req	*orph = xrep_nlinks_orphanage_req(sc);
 	struct xfs_mount		*mp = sc->mp;
 	struct xfs_inode		*ip = sc->ip;
 	uint64_t			total_links;
@@ -143,7 +126,7 @@ xrep_nlinks_repair_and_relink_inode(
 	 * Allocate a transaction for the adoption.  We'll reserve space for
 	 * the transaction in the adoption preparation step.
 	 */
-	xrep_orphanage_compute_blkres(sc, orph);
+	xrep_orphanage_compute_blkres(sc, &xnc->adoption);
 
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_link, 0, 0, 0, &sc->tp);
 	if (error)
@@ -153,11 +136,11 @@ xrep_nlinks_repair_and_relink_inode(
 	 * Before we take the ILOCKs, compute the name of the potential
 	 * orphanage directory entry.
 	 */
-	error = xrep_orphanage_compute_name(orph, xrep_nlinks_namebuf(sc));
+	error = xrep_orphanage_compute_name(&xnc->adoption, xnc->namebuf);
 	if (error)
 		goto out_trans;
 
-	error = xrep_orphanage_adoption_prep(orph);
+	error = xrep_orphanage_adoption_prep(&xnc->adoption);
 	if (error)
 		goto out_trans;
 
@@ -242,7 +225,7 @@ xrep_nlinks_repair_and_relink_inode(
 	 * we can set the correct nlink.
 	 */
 	if (orphan) {
-		error = xrep_orphanage_adopt(orph);
+		error = xrep_orphanage_adopt(&xnc->adoption);
 		if (error)
 			goto out_scanlock;
 

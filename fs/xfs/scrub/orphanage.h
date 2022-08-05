@@ -72,6 +72,7 @@ void xrep_orphanage_iunlock(struct xfs_scrub *sc, unsigned int ilock_flags);
 
 void xrep_orphanage_rele(struct xfs_scrub *sc);
 #else
+struct xrep_orphanage_req { /* empty */ };
 # define xrep_orphanage_rele(sc)
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
 
