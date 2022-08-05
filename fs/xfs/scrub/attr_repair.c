@@ -543,7 +543,7 @@ xrep_xattr_insert_rec(
 		.namelen		= key->namelen,
 		.valuelen		= key->valuelen,
 		.op_flags		= XFS_DA_OP_NOTIME,
-		.owner			= rx->sc->tempip->i_ino,
+		.owner			= rx->sc->ip->i_ino,
 	};
 	struct xchk_xattr_buf		*ab = rx->sc->buf;
 	int				error;
@@ -1195,7 +1195,7 @@ xrep_xattr_swap_owner(
 		.sc			= sc,
 	};
 	int				error;
-
+return 0;
 	xbitmap_init(&xso.rmt_blocks);
 
 	/* First pass -- change the owners of the remote blocks. */

@@ -472,6 +472,77 @@ out:
 	return error;
 }
 
+/*
+ * Enter a name in a directory, or check for available space.
+ * If inum is 0, only the available space test is performed.
+ */
+STATIC int
+xrep_dir_createname(
+	struct xfs_scrub	*sc,
+	const struct xfs_name	*name,
+	xfs_ino_t		inum,		/* new entry inode number */
+	xfs_extlen_t		total)		/* bmap's total block count */
+{
+	struct xfs_trans	*tp = sc->tp;
+	struct xfs_inode	*dp = sc->tempip;
+	struct xfs_da_args	*args;
+	int			rval;
+	int			v;		/* type-checking value */
+
+	ASSERT(S_ISDIR(VFS_I(dp)->i_mode));
+
+	if (inum) {
+		rval = xfs_dir_ino_validate(tp->t_mountp, inum);
+		if (rval)
+			return rval;
+		XFS_STATS_INC(dp->i_mount, xs_dir_create);
+	}
+
+	args = kmem_zalloc(sizeof(*args), KM_NOFS);
+	if (!args)
+		return -ENOMEM;
+
+	args->geo = dp->i_mount->m_dir_geo;
+	args->name = name->name;
+	args->namelen = name->len;
+	args->filetype = name->type;
+	args->hashval = xfs_dir2_hashname(dp->i_mount, name);
+	args->inumber = inum;
+	args->dp = dp;
+	args->total = total;
+	args->whichfork = XFS_DATA_FORK;
+	args->trans = tp;
+	args->op_flags = XFS_DA_OP_ADDNAME | XFS_DA_OP_OKNOENT;
+	args->owner = sc->ip->i_ino;
+	if (!inum)
+		args->op_flags |= XFS_DA_OP_JUSTCHECK;
+
+	if (dp->i_df.if_format == XFS_DINODE_FMT_LOCAL) {
+		rval = xfs_dir2_sf_addname(args);
+		goto out_free;
+	}
+
+	rval = xfs_dir2_isblock(args, &v);
+	if (rval)
+		goto out_free;
+	if (v) {
+		rval = xfs_dir2_block_addname(args);
+		goto out_free;
+	}
+
+	rval = xfs_dir2_isleaf(args, &v);
+	if (rval)
+		goto out_free;
+	if (v)
+		rval = xfs_dir2_leaf_addname(args);
+	else
+		rval = xfs_dir2_node_addname(args);
+
+out_free:
+	kmem_free(args);
+	return rval;
+}
+
 /* Insert one dir entry without cycling locks or transactions. */
 STATIC int
 xrep_directory_insert_rec(
@@ -518,8 +589,7 @@ xrep_directory_insert_rec(
 	if (error != -ENOENT)
 		goto out_cancel;
 
-	error = xfs_dir_createname(rd->sc->tp, rd->sc->tempip, &name,
-			entry->ino, resblks);
+	error = xrep_dir_createname(rd->sc, &name, entry->ino, resblks);
 	if (error)
 		goto out_cancel;
 
@@ -765,7 +835,7 @@ xrep_directory_swap_prep(
 			.whichfork	= XFS_DATA_FORK,
 			.trans		= sc->tp,
 			.total		= 1,
-			.owner		= sc->tempip->i_ino,
+			.owner		= sc->ip->i_ino,
 		};
 
 		error = xfs_dir2_sf_to_block(&args);
@@ -925,7 +995,7 @@ xrep_directory_swap_owner(
 	unsigned int			max_logged;
 	int				nmap;
 	int				error;
-
+return 0;
 	/*
 	 * Truncate transactions have to be able to handle at least one full
 	 * split of the space btrees, so we allow that many directory block
@@ -979,6 +1049,69 @@ xrep_directory_swap_owner(
 	return 0;
 }
 
+/*
+ * Replace the inode number of a directory entry.
+ */
+static int
+xrep_dir_replace(
+	struct xfs_scrub	*sc,
+	struct xfs_inode	*dp,
+	const struct xfs_name	*name,		/* name of entry to replace */
+	xfs_ino_t		inum,		/* new inode number */
+	xfs_extlen_t		total)		/* bmap's total block count */
+{
+	struct xfs_trans	*tp = sc->tp;
+	struct xfs_da_args	*args;
+	int			rval;
+	int			v;		/* type-checking value */
+
+	ASSERT(S_ISDIR(VFS_I(dp)->i_mode));
+
+	rval = xfs_dir_ino_validate(tp->t_mountp, inum);
+	if (rval)
+		return rval;
+
+	args = kmem_zalloc(sizeof(*args), KM_NOFS);
+	if (!args)
+		return -ENOMEM;
+
+	args->geo = dp->i_mount->m_dir_geo;
+	args->name = name->name;
+	args->namelen = name->len;
+	args->filetype = name->type;
+	args->hashval = xfs_dir2_hashname(dp->i_mount, name);
+	args->inumber = inum;
+	args->dp = dp;
+	args->total = total;
+	args->whichfork = XFS_DATA_FORK;
+	args->trans = tp;
+	args->owner = sc->ip->i_ino;
+
+	if (dp->i_df.if_format == XFS_DINODE_FMT_LOCAL) {
+		rval = xfs_dir2_sf_replace(args);
+		goto out_free;
+	}
+
+	rval = xfs_dir2_isblock(args, &v);
+	if (rval)
+		goto out_free;
+	if (v) {
+		rval = xfs_dir2_block_replace(args);
+		goto out_free;
+	}
+
+	rval = xfs_dir2_isleaf(args, &v);
+	if (rval)
+		goto out_free;
+	if (v)
+		rval = xfs_dir2_leaf_replace(args);
+	else
+		rval = xfs_dir2_node_replace(args);
+out_free:
+	kmem_free(args);
+	return rval;
+}
+
 /* Swap the temporary directory's data fork with the one being repaired. */
 STATIC int
 xrep_directory_swap(
@@ -1009,8 +1142,8 @@ xrep_directory_swap(
 	 * It's possible that this replacement could also expand a sf tempdir
 	 * into block format.
 	 */
-	if (sc->tempip->i_df.if_format != XFS_DINODE_FMT_LOCAL) {
-		error = xfs_dir_replace(sc->tp, sc->tempip, &xfs_name_dot,
+	if (0) { // sc->tempip->i_df.if_format != XFS_DINODE_FMT_LOCAL) {
+		error = xrep_dir_replace(sc, sc->tempip, &xfs_name_dot,
 				sc->ip->i_ino, rd->tx.req.resblks);
 		if (error)
 			return error;
@@ -1026,9 +1159,8 @@ xrep_directory_swap(
 	 * tempdir into block format.
 	 */
 	if (rd->parent_ino != sc->mp->m_rootip->i_ino) {
-		error = xfs_dir_replace(sc->tp, rd->sc->tempip,
-				&xfs_name_dotdot, rd->parent_ino,
-				rd->tx.req.resblks);
+		error = xrep_dir_replace(sc, rd->sc->tempip, &xfs_name_dotdot,
+				rd->parent_ino, rd->tx.req.resblks);
 		if (error)
 			return error;
 	}
