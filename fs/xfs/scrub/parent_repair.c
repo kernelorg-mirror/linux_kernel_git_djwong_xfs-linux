@@ -364,19 +364,15 @@ xrep_parent_scan(
 	return 0;
 }
 
-static inline struct xrep_orphanage_req *
-xrep_parent_orphanage_req(
-	struct xfs_scrub	*sc)
-{
-	return sc->buf;
-}
+struct xrep_parent {
+	struct xfs_scrub	*sc;
 
-static inline unsigned char *
-xrep_parent_orphanage_namebuf(
-	struct xfs_scrub	*sc)
-{
-	return (unsigned char *)(((struct xrep_orphanage_req *)sc->buf) + 1);
-}
+	/* Orphanage reparinting request. */
+	struct xrep_orphanage_req adoption;
+
+	/* Directory entry name, plus the trailing null. */
+	char			namebuf[MAXNAMELEN];
+};
 
 /* Set up for a parent repair. */
 int
@@ -384,7 +380,7 @@ xrep_setup_parent(
 	struct xfs_scrub	*sc)
 {
 	/* We need a buffer for the orphanage request and a name buffer. */
-	sc->buf = kvmalloc(xrep_orphanage_req_sizeof(), XCHK_GFP_FLAGS);
+	sc->buf = kvzalloc(sizeof(struct xrep_parent), XCHK_GFP_FLAGS);
 	if (!sc->buf)
 		return -ENOMEM;
 
@@ -464,10 +460,9 @@ xrep_parent_reset_dir(
  */
 STATIC int
 xrep_parent_move_to_orphanage(
-	struct xfs_scrub	*sc)
+	struct xrep_parent	*rp)
 {
-	struct xrep_orphanage_req *orph = xrep_parent_orphanage_req(sc);
-	unsigned char		*namebuf = xrep_parent_orphanage_namebuf(sc);
+	struct xfs_scrub	*sc = rp->sc;
 	int			error;
 
 	/* No orphanage?  We can't fix this. */
@@ -505,26 +500,29 @@ xrep_parent_move_to_orphanage(
 	 * Move the directory to the orphanage, and let scrub teardown unlock
 	 * everything for us.
 	 */
-	xrep_orphanage_compute_blkres(sc, orph);
+	xrep_orphanage_compute_blkres(sc, &rp->adoption);
 
-	error = xrep_orphanage_compute_name(orph, namebuf);
+	error = xrep_orphanage_compute_name(&rp->adoption, rp->namebuf);
 	if (error)
 		return error;
 
-	error = xrep_orphanage_adoption_prep(orph);
+	error = xrep_orphanage_adoption_prep(&rp->adoption);
 	if (error)
 		return error;
 
-	return xrep_orphanage_adopt(orph);
+	return xrep_orphanage_adopt(&rp->adoption);
 }
 
 int
 xrep_parent(
 	struct xfs_scrub	*sc)
 {
+	struct xrep_parent	*rp = sc->buf;
 	xfs_ino_t		parent_ino, curr_parent;
 	unsigned int		sick, checked;
 	int			error;
+
+	rp->sc = sc;
 
 	/*
 	 * Avoid sick directories.  The parent pointer scrubber dropped the
@@ -550,7 +548,7 @@ xrep_parent(
 	if (error)
 		return error;
 	if (parent_ino == NULLFSINO)
-		return xrep_parent_move_to_orphanage(sc);
+		return xrep_parent_move_to_orphanage(rp);
 
 reset_parent:
 	/* If the '..' entry is already set to the parent inode, we're done. */
