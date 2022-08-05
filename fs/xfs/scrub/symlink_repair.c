@@ -268,56 +268,6 @@ xrep_symlink_swap_prep(
 	return 0;
 }
 
-/*
- * Change the owner field of every block in the data fork to match the link
- * being repaired.
- */
-STATIC int
-xrep_symlink_swap_owner(
-	struct xfs_scrub		*sc)
-{
-	struct xfs_bmbt_irec		map;
-	struct xfs_mount		*mp = sc->mp;
-	struct xfs_buf			*bp;
-	struct xfs_dsymlink_hdr		*dsl;
-	xfs_fileoff_t			offset = 0;
-	xfs_fileoff_t			end = XFS_MAX_FILEOFF;
-	int				nmap;
-	int				error;
-return 0;
-	if (!xfs_has_crc(mp))
-		return 0;
-
-	for (offset = 0;
-	     offset < end;
-	     offset = map.br_startoff + map.br_blockcount) {
-		nmap = 1;
-		error = xfs_bmapi_read(sc->tempip, offset, end - offset,
-				&map, &nmap, 0);
-		if (error)
-			return error;
-		if (nmap != 1)
-			return -EFSCORRUPTED;
-		if (!xfs_bmap_is_written_extent(&map))
-			continue;
-
-		error = xfs_trans_read_buf(mp, sc->tp, mp->m_ddev_targp,
-				XFS_FSB_TO_DADDR(mp, map.br_startblock),
-				XFS_FSB_TO_BB(mp, map.br_blockcount),
-				0, &bp, &xfs_symlink_buf_ops);
-		if (error)
-			return error;
-
-		dsl = bp->b_addr;
-		dsl->sl_owner = cpu_to_be64(sc->ip->i_ino);
-
-		xfs_trans_ordered_buf(sc->tp, bp);
-		xfs_trans_brelse(sc->tp, bp);
-	}
-
-	return 0;
-}
-
 /* Swap the temporary link's data fork with the one being repaired. */
 STATIC int
 xrep_symlink_swap(
@@ -351,11 +301,6 @@ xrep_symlink_swap(
 
 	/* Otherwise, make sure both data forks are in block-mapping mode. */
 	error = xrep_symlink_swap_prep(sc, temp_local, ip_local);
-	if (error)
-		return error;
-
-	/* Rewrite the owner field of all dir blocks in the temporary file. */
-	error = xrep_symlink_swap_owner(sc);
 	if (error)
 		return error;
 
