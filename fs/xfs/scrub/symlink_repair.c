@@ -193,6 +193,25 @@ xrep_symlink_salvage(
 	return 0;
 }
 
+STATIC void
+xrep_symlink_local_to_remote(
+	struct xfs_trans	*tp,
+	struct xfs_buf		*bp,
+	struct xfs_inode	*ip,
+	struct xfs_ifork	*ifp,
+	void			*priv)
+{
+	struct xfs_scrub	*sc = priv;
+	struct xfs_dsymlink_hdr	*dsl = bp->b_addr;
+
+	xfs_symlink_local_to_remote(tp, bp, ip, ifp, NULL);
+
+	if (!xfs_has_crc(sc->mp))
+		return;
+
+	dsl->sl_owner = cpu_to_be64(sc->ip->i_ino);
+}
+
 /*
  * Prepare both links' data forks for extent swapping.  Promote the tempfile
  * from local format to extents format, and if the file being repaired has a
@@ -215,7 +234,8 @@ xrep_symlink_swap_prep(
 
 		error = xfs_bmap_local_to_extents(sc->tp, sc->tempip, 1,
 				&logflags, XFS_DATA_FORK,
-				xfs_symlink_local_to_remote);
+				xrep_symlink_local_to_remote,
+				sc);
 		if (error)
 			return error;
 
@@ -264,7 +284,7 @@ xrep_symlink_swap_owner(
 	xfs_fileoff_t			end = XFS_MAX_FILEOFF;
 	int				nmap;
 	int				error;
-
+return 0;
 	if (!xfs_has_crc(mp))
 		return 0;
 
@@ -426,8 +446,8 @@ xrep_symlink_rebuild(
 	sc->tempip->i_df.if_format = XFS_DINODE_FMT_EXTENTS;
 
 	/* Write the salvaged target to the temporary link. */
-	error = xfs_symlink_write_target(sc->tp, sc->tempip, target_buf,
-			target_len, fs_blocks, resblks);
+	error = __xfs_symlink_write_target(sc->tp, sc->tempip, sc->ip->i_ino,
+			target_buf, target_len, fs_blocks, resblks);
 	if (error)
 		return error;
 
