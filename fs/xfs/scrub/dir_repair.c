@@ -453,6 +453,8 @@ xrep_directory_recover_dirblock(
 	case cpu_to_be32(XFS_DIR3_BLOCK_MAGIC):
 		if (!xrep_buf_verify_struct(bp, &xfs_dir3_block_buf_ops))
 			goto out;
+		if (xfs_dir3_block_header_check(bp, rd->sc->ip->i_ino) != NULL)
+			goto out;
 		break;
 	case cpu_to_be32(XFS_DIR2_DATA_MAGIC):
 	case cpu_to_be32(XFS_DIR3_DATA_MAGIC):
