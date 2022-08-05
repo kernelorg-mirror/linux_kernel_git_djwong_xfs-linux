@@ -92,38 +92,25 @@ struct xrep_dir {
 
 	/* Should we move this directory to the orphanage? */
 	bool			move_orphanage;
+
+	/* Preallocated args struct for performing dir operations */
+	struct xfs_da_args	args;
+
+	/* Orphanage reparinting request. */
+	struct xrep_orphanage_req adoption;
+
+	/* Directory entry name, plus the trailing null. */
+	char			namebuf[MAXNAMELEN];
 };
 
 /* Absorb up to 8 pages of dirents before we flush them to the temp dir. */
 #define XREP_DIR_SALVAGE_BYTES	(PAGE_SIZE * 8)
-
-static inline struct xfs_da_args *
-xrep_directory_da_args(
-	struct xfs_scrub	*sc)
-{
-	return sc->buf;
-}
-
-static inline unsigned char *
-xrep_directory_namebuf(
-	struct xfs_scrub	*sc)
-{
-	return sc->buf;
-}
-
-static inline struct xrep_orphanage_req *
-xrep_dir_orphanage_req(
-	struct xfs_scrub	*sc)
-{
-	return sc->buf + MAXNAMELEN + 1;
-}
 
 /* Set up for a directory repair. */
 int
 xrep_setup_directory(
 	struct xfs_scrub	*sc)
 {
-	unsigned int		sz;
 	int			error;
 
 	error = xrep_orphanage_try_create(sc);
@@ -134,15 +121,7 @@ xrep_setup_directory(
 	if (error)
 		return error;
 
-	/*
-	 * We need a buffer to hold a directory entry name while we're building
-	 * the new directory, later for the da state when we're freeing the old
-	 * directory blocks, and a request to move the directory to the
-	 * orphanage.  We don't need all three uses at the same time.
-	 */
-	sz = max_t(unsigned int, xrep_orphanage_req_sizeof(),
-			sizeof(struct xfs_da_args));
-	sc->buf = kvmalloc(sz, XCHK_GFP_FLAGS);
+	sc->buf = kvzalloc(sizeof(struct xrep_dir), XCHK_GFP_FLAGS);
 	if (!sc->buf)
 		return -ENOMEM;
 
@@ -476,75 +455,66 @@ out:
 	return error;
 }
 
+static inline void xrep_dir_init_args(struct xrep_dir *rd)
+{
+	memset(&rd->args, 0, sizeof(struct xfs_da_args));
+	rd->args.geo = rd->sc->mp->m_dir_geo;
+	rd->args.whichfork = XFS_DATA_FORK;
+	rd->args.owner = rd->sc->ip->i_ino;
+	rd->args.trans = rd->sc->tp;
+}
+
 /*
  * Enter a name in a directory, or check for available space.
  * If inum is 0, only the available space test is performed.
  */
 STATIC int
 xrep_dir_createname(
-	struct xfs_scrub	*sc,
+	struct xrep_dir		*rd,
+	struct xfs_inode	*dp,
 	const struct xfs_name	*name,
-	xfs_ino_t		inum,		/* new entry inode number */
-	xfs_extlen_t		total)		/* bmap's total block count */
+	xfs_ino_t		inum,
+	xfs_extlen_t		total)
 {
-	struct xfs_trans	*tp = sc->tp;
-	struct xfs_inode	*dp = sc->tempip;
-	struct xfs_da_args	*args;
-	int			rval;
-	int			v;		/* type-checking value */
+	struct xfs_scrub	*sc = rd->sc;
+	int			is_block, is_leaf;
+	int			error;
 
 	ASSERT(S_ISDIR(VFS_I(dp)->i_mode));
 
 	if (inum) {
-		rval = xfs_dir_ino_validate(tp->t_mountp, inum);
-		if (rval)
-			return rval;
-		XFS_STATS_INC(dp->i_mount, xs_dir_create);
+		error = xfs_dir_ino_validate(sc->mp, inum);
+		if (error)
+			return error;
 	}
 
-	args = kmem_zalloc(sizeof(*args), KM_NOFS);
-	if (!args)
-		return -ENOMEM;
-
-	args->geo = dp->i_mount->m_dir_geo;
-	args->name = name->name;
-	args->namelen = name->len;
-	args->filetype = name->type;
-	args->hashval = xfs_dir2_hashname(dp->i_mount, name);
-	args->inumber = inum;
-	args->dp = dp;
-	args->total = total;
-	args->whichfork = XFS_DATA_FORK;
-	args->trans = tp;
-	args->op_flags = XFS_DA_OP_ADDNAME | XFS_DA_OP_OKNOENT;
-	args->owner = sc->ip->i_ino;
+	xrep_dir_init_args(rd);
+	rd->args.name = name->name;
+	rd->args.namelen = name->len;
+	rd->args.filetype = name->type;
+	rd->args.hashval = xfs_dir2_hashname(dp->i_mount, name);
+	rd->args.inumber = inum;
+	rd->args.dp = dp;
+	rd->args.total = total;
+	rd->args.op_flags = XFS_DA_OP_ADDNAME | XFS_DA_OP_OKNOENT;
 	if (!inum)
-		args->op_flags |= XFS_DA_OP_JUSTCHECK;
+		rd->args.op_flags |= XFS_DA_OP_JUSTCHECK;
 
-	if (dp->i_df.if_format == XFS_DINODE_FMT_LOCAL) {
-		rval = xfs_dir2_sf_addname(args);
-		goto out_free;
-	}
+	if (dp->i_df.if_format == XFS_DINODE_FMT_LOCAL)
+		return xfs_dir2_sf_addname(&rd->args);
 
-	rval = xfs_dir2_isblock(args, &v);
-	if (rval)
-		goto out_free;
-	if (v) {
-		rval = xfs_dir2_block_addname(args);
-		goto out_free;
-	}
+	error = xfs_dir2_isblock(&rd->args, &is_block);
+	if (error)
+		return error;
+	if (is_block)
+		return xfs_dir2_block_addname(&rd->args);
 
-	rval = xfs_dir2_isleaf(args, &v);
-	if (rval)
-		goto out_free;
-	if (v)
-		rval = xfs_dir2_leaf_addname(args);
-	else
-		rval = xfs_dir2_node_addname(args);
-
-out_free:
-	kmem_free(args);
-	return rval;
+	error = xfs_dir2_isleaf(&rd->args, &is_leaf);
+	if (error)
+		return error;
+	if (is_leaf)
+		return xfs_dir2_leaf_addname(&rd->args);
+	return xfs_dir2_node_addname(&rd->args);
 }
 
 /* Insert one dir entry without cycling locks or transactions. */
@@ -556,20 +526,20 @@ xrep_directory_insert_rec(
 	struct xfs_name			name = {
 		.len			= entry->namelen,
 		.type			= entry->ftype,
+		.name			= rd->namebuf,
 	};
-	char				*namebuf;
 	struct xfs_mount		*mp = rd->sc->mp;
+	char				*namebuf = rd->namebuf;
 	xfs_ino_t			ino;
 	uint				resblks;
 	int				error;
-
-	name.name = namebuf = xrep_directory_namebuf(rd->sc);
 
 	/* The entry name is stored in the in-core buffer. */
 	error = xfblob_load(rd->dir_names, entry->name_cookie, namebuf,
 			entry->namelen);
 	if (error)
 		return error;
+	namebuf[MAXNAMELEN] = 0;
 
 	trace_xrep_directory_insert_rec(rd->sc->tempip, &name, entry->ino);
 
@@ -593,7 +563,8 @@ xrep_directory_insert_rec(
 	if (error != -ENOENT)
 		goto out_cancel;
 
-	error = xrep_dir_createname(rd->sc, &name, entry->ino, resblks);
+	error = xrep_dir_createname(rd, rd->sc->tempip, &name, entry->ino,
+			resblks);
 	if (error)
 		goto out_cancel;
 
@@ -783,11 +754,11 @@ xrep_directory_find_entries(
  */
 STATIC int
 xrep_directory_reset_fork(
-	struct xfs_scrub	*sc,
+	struct xrep_dir		*rd,
 	xfs_ino_t		parent_ino)
 {
+	struct xfs_scrub	*sc = rd->sc;
 	struct xfs_ifork	*ifp = xfs_ifork_ptr(sc->tempip, XFS_DATA_FORK);
-	struct xfs_da_args	*args = xrep_directory_da_args(sc);
 	int			error;
 
 	/* Unmap all the directory buffers. */
@@ -805,10 +776,9 @@ xrep_directory_reset_fork(
 	sc->tempip->i_disk_size = 0;
 
 	/* Reinitialize the short form directory. */
-	args->geo = sc->mp->m_dir_geo;
-	args->dp = sc->tempip;
-	args->trans = sc->tp;
-	error = xfs_dir2_sf_create(args, parent_ino);
+	xrep_dir_init_args(rd);
+	rd->args.dp = sc->tempip;
+	error = xfs_dir2_sf_create(&rd->args, parent_ino);
 	if (error)
 		return error;
 
@@ -882,62 +852,47 @@ xrep_directory_swap_prep(
  */
 static int
 xrep_dir_replace(
-	struct xfs_scrub	*sc,
+	struct xrep_dir		*rd,
 	struct xfs_inode	*dp,
-	const struct xfs_name	*name,		/* name of entry to replace */
-	xfs_ino_t		inum,		/* new inode number */
-	xfs_extlen_t		total)		/* bmap's total block count */
+	const struct xfs_name	*name,
+	xfs_ino_t		inum,
+	xfs_extlen_t		total)
 {
-	struct xfs_trans	*tp = sc->tp;
-	struct xfs_da_args	*args;
-	int			rval;
-	int			v;		/* type-checking value */
+	struct xfs_scrub	*sc = rd->sc;
+	int			is_block, is_leaf;
+	int			error;
 
 	ASSERT(S_ISDIR(VFS_I(dp)->i_mode));
 
-	rval = xfs_dir_ino_validate(tp->t_mountp, inum);
-	if (rval)
-		return rval;
+	error = xfs_dir_ino_validate(sc->mp, inum);
+	if (error)
+		return error;
 
-	args = kmem_zalloc(sizeof(*args), KM_NOFS);
-	if (!args)
-		return -ENOMEM;
+	xrep_dir_init_args(rd);
+	rd->args.name = name->name;
+	rd->args.namelen = name->len;
+	rd->args.filetype = name->type;
+	rd->args.hashval = xfs_dir2_hashname(sc->mp, name);
+	rd->args.inumber = inum;
+	rd->args.dp = dp;
+	rd->args.total = total;
 
-	args->geo = dp->i_mount->m_dir_geo;
-	args->name = name->name;
-	args->namelen = name->len;
-	args->filetype = name->type;
-	args->hashval = xfs_dir2_hashname(dp->i_mount, name);
-	args->inumber = inum;
-	args->dp = dp;
-	args->total = total;
-	args->whichfork = XFS_DATA_FORK;
-	args->trans = tp;
-	args->owner = sc->ip->i_ino;
+	if (dp->i_df.if_format == XFS_DINODE_FMT_LOCAL)
+		return xfs_dir2_sf_replace(&rd->args);
 
-	if (dp->i_df.if_format == XFS_DINODE_FMT_LOCAL) {
-		rval = xfs_dir2_sf_replace(args);
-		goto out_free;
-	}
+	error = xfs_dir2_isblock(&rd->args, &is_block);
+	if (error)
+		return error;
 
-	rval = xfs_dir2_isblock(args, &v);
-	if (rval)
-		goto out_free;
-	if (v) {
-		rval = xfs_dir2_block_replace(args);
-		goto out_free;
-	}
+	if (is_block)
+		return xfs_dir2_block_replace(&rd->args);
 
-	rval = xfs_dir2_isleaf(args, &v);
-	if (rval)
-		goto out_free;
-	if (v)
-		rval = xfs_dir2_leaf_replace(args);
-	else
-		rval = xfs_dir2_node_replace(args);
-out_free:
-	kmem_free(args);
-	return rval;
+	error = xfs_dir2_isleaf(&rd->args, &is_leaf);
+	if (error)
+		return error;
+	if (is_leaf)
+		return xfs_dir2_leaf_replace(&rd->args);
+	return xfs_dir2_node_replace(&rd->args);
 }
 
 /* Swap the temporary directory's data fork with the one being repaired. */
@@ -971,7 +926,7 @@ xrep_directory_swap(
 	 * into block format.
 	 */
 	if (0) { // sc->tempip->i_df.if_format != XFS_DINODE_FMT_LOCAL) {
-		error = xrep_dir_replace(sc, sc->tempip, &xfs_name_dot,
+		error = xrep_dir_replace(rd, sc->tempip, &xfs_name_dot,
 				sc->ip->i_ino, rd->tx.req.resblks);
 		if (error)
 			return error;
@@ -987,7 +942,7 @@ xrep_directory_swap(
 	 * tempdir into block format.
 	 */
 	if (rd->parent_ino != sc->mp->m_rootip->i_ino) {
-		error = xrep_dir_replace(sc, rd->sc->tempip, &xfs_name_dotdot,
+		error = xrep_dir_replace(rd, rd->sc->tempip, &xfs_name_dotdot,
 				rd->parent_ino, rd->tx.req.resblks);
 		if (error)
 			return error;
@@ -1076,7 +1031,7 @@ xrep_directory_rebuild_tree(
 	 * directory to an empty shortform directory because inactivation does
 	 * nothing for directories.
 	 */
-	return xrep_directory_reset_fork(sc, sc->mp->m_rootip->i_ino);
+	return xrep_directory_reset_fork(rd, sc->mp->m_rootip->i_ino);
 }
 
 /*
@@ -1176,10 +1131,9 @@ xrep_directory_find_parent(
  */
 STATIC int
 xrep_dir_move_to_orphanage(
-	struct xfs_scrub	*sc)
+	struct xrep_dir		*rd)
 {
-	struct xrep_orphanage_req *orph = xrep_dir_orphanage_req(sc);
-	unsigned char		*namebuf = xrep_directory_namebuf(sc);
+	struct xfs_scrub	*sc = rd->sc;
 	int			error;
 
 	/* No orphanage?  We can't fix this. */
@@ -1217,17 +1171,17 @@ xrep_dir_move_to_orphanage(
 	 * Move the directory to the orphanage, and let scrub teardown unlock
 	 * everything for us.
 	 */
-	xrep_orphanage_compute_blkres(sc, orph);
+	xrep_orphanage_compute_blkres(sc, &rd->adoption);
 
-	error = xrep_orphanage_compute_name(orph, namebuf);
+	error = xrep_orphanage_compute_name(&rd->adoption, rd->namebuf);
 	if (error)
 		return error;
 
-	error = xrep_orphanage_adoption_prep(orph);
+	error = xrep_orphanage_adoption_prep(&rd->adoption);
 	if (error)
 		return error;
 
-	return xrep_orphanage_adopt(orph);
+	return xrep_orphanage_adopt(&rd->adoption);
 }
 
 /*
@@ -1245,16 +1199,13 @@ int
 xrep_directory(
 	struct xfs_scrub	*sc)
 {
-	struct xrep_dir		*rd;
+	struct xrep_dir		*rd = sc->buf;
 	int			error;
 
 	/* We require the rmapbt to rebuild anything. */
 	if (!xfs_has_rmapbt(sc->mp))
 		return -EOPNOTSUPP;
 
-	rd = kzalloc(sizeof(struct xrep_dir), XCHK_GFP_FLAGS);
-	if (!rd)
-		return -ENOMEM;
 	rd->sc = sc;
 	rd->parent_ino = NULLFSINO;
 	rd->new_nlink = 2;
@@ -1325,7 +1276,7 @@ xrep_directory(
 	xchk_iunlock(sc, XFS_ILOCK_EXCL);
 	xrep_tempfile_iunlock(sc);
 
-	error = xrep_dir_move_to_orphanage(sc);
+	error = xrep_dir_move_to_orphanage(rd);
 
 out_names:
 	if (rd->dir_names)
@@ -1334,6 +1285,5 @@ out_arr:
 	if (rd->dir_entries)
 		xfarray_destroy(rd->dir_entries);
 out_rd:
-	kfree(rd);
 	return error;
 }
