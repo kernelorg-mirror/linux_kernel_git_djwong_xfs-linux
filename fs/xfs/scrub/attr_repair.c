@@ -252,6 +252,7 @@ xrep_xattr_salvage_remote_attr(
 		.dp			= rx->sc->ip,
 		.index			= ent_idx,
 		.geo			= rx->sc->mp->m_attr_geo,
+		.owner			= rx->sc->ip->i_ino,
 	};
 	struct xchk_xattr_buf		*ab = rx->sc->buf;
 	unsigned int			valuelen;
@@ -542,6 +543,7 @@ xrep_xattr_insert_rec(
 		.namelen		= key->namelen,
 		.valuelen		= key->valuelen,
 		.op_flags		= XFS_DA_OP_NOTIME,
+		.owner			= rx->sc->tempip->i_ino,
 	};
 	struct xchk_xattr_buf		*ab = rx->sc->buf;
 	int				error;
@@ -910,6 +912,7 @@ xrep_xattr_swap_prep(
 			.whichfork	= XFS_ATTR_FORK,
 			.trans		= sc->tp,
 			.total		= 1,
+			.owner		= sc->ip->i_ino,
 		};
 
 		error = xfs_attr_shortform_to_leaf(&args);

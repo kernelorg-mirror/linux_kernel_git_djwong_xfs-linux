@@ -345,6 +345,7 @@ xfs_imeta_dir_lookup(
 		.hashval	= xfs_dir2_hashname(dp->i_mount, xname),
 		.whichfork	= XFS_DATA_FORK,
 		.op_flags	= XFS_DA_OP_OKNOENT,
+		.owner		= dp->i_ino,
 	};
 	unsigned int		lock_mode;
 	int			isblock, isleaf;

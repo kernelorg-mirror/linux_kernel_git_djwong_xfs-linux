@@ -765,6 +765,7 @@ xrep_directory_swap_prep(
 			.whichfork	= XFS_DATA_FORK,
 			.trans		= sc->tp,
 			.total		= 1,
+			.owner		= sc->tempip->i_ino,
 		};
 
 		error = xfs_dir2_sf_to_block(&args);
