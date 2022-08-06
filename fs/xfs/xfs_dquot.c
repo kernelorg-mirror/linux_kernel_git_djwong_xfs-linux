@@ -47,10 +47,11 @@ static struct lock_class_key xfs_dquot_project_class;
 
 /* Record observations of quota corruption with the health tracking system. */
 static void
-xfs_quota_mark_sick(
-	struct xfs_mount	*mp,
+xfs_dquot_mark_sick(
 	struct xfs_dquot	*dqp)
 {
+	struct xfs_mount	*mp = dqp->q_mount;
+
 	switch (dqp->q_type) {
 	case XFS_DQTYPE_USER:
 		xfs_fs_mark_sick(mp, XFS_SICK_FS_UQUOTA);
@@ -475,7 +476,7 @@ xfs_dquot_disk_read(
 			mp->m_quotainfo->qi_dqchunklen, 0, &bp,
 			&xfs_dquot_buf_ops);
 	if (xfs_metadata_is_sick(error))
-		xfs_quota_mark_sick(mp, dqp);
+		xfs_dquot_mark_sick(dqp);
 	if (error) {
 		ASSERT(bp == NULL);
 		return error;
@@ -598,7 +599,7 @@ xfs_dquot_from_disk(
 			  "Metadata corruption detected at %pS, quota %u",
 			  __this_address, dqp->q_id);
 		xfs_alert(bp->b_mount, "Unmount and run xfs_repair");
-		xfs_quota_mark_sick(dqp->q_mount, dqp);
+		xfs_dquot_mark_sick(dqp);
 		return -EFSCORRUPTED;
 	}
 
@@ -1265,7 +1266,7 @@ xfs_qm_dqflush(
 	if (error == -EAGAIN)
 		goto out_unlock;
 	if (xfs_metadata_is_sick(error))
-		xfs_quota_mark_sick(mp, dqp);
+		xfs_dquot_mark_sick(dqp);
 	if (error)
 		goto out_abort;
 
@@ -1274,7 +1275,7 @@ xfs_qm_dqflush(
 		xfs_alert(mp, "corrupt dquot ID 0x%x in memory at %pS",
 				dqp->q_id, fa);
 		xfs_buf_relse(bp);
-		xfs_quota_mark_sick(mp, dqp);
+		xfs_dquot_mark_sick(dqp);
 		error = -EFSCORRUPTED;
 		goto out_abort;
 	}
