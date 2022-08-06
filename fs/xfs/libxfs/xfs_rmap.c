@@ -68,8 +68,10 @@ xfs_rmap_lookup_le(
 	error = xfs_rmap_get_rec(cur, irec, &get_stat);
 	if (error)
 		return error;
-	if (!get_stat)
+	if (!get_stat) {
+		xfs_btree_mark_sick(cur);
 		return -EFSCORRUPTED;
+	}
 
 	return 0;
 }
@@ -2674,6 +2676,7 @@ xfs_rmap_finish_one(
 			if (error)
 				goto out_drop;
 			if (XFS_IS_CORRUPT(tp->t_mountp, !agbp)) {
+				xfs_ag_mark_sick(pag, XFS_SICK_AG_AGFL);
 				error = -EFSCORRUPTED;
 				goto out_drop;
 			}

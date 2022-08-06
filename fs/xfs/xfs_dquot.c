@@ -598,6 +598,7 @@ xfs_dquot_from_disk(
 			  "Metadata corruption detected at %pS, quota %u",
 			  __this_address, dqp->q_id);
 		xfs_alert(bp->b_mount, "Unmount and run xfs_repair");
+		xfs_quota_mark_sick(dqp->q_mount, dqp);
 		return -EFSCORRUPTED;
 	}
 

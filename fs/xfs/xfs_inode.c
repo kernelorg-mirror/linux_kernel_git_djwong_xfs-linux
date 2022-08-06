@@ -38,7 +38,6 @@
 #include "xfs_ag.h"
 #include "xfs_log_priv.h"
 #include "xfs_health.h"
-#include "xfs_health.h"
 #include "xfs_imeta.h"
 
 struct kmem_cache *xfs_inode_cache;
@@ -575,6 +574,7 @@ xfs_lookup(
 	 * metadata file.
 	 */
 	if (XFS_IS_CORRUPT(dp->i_mount, xfs_is_metadata_inode(*ipp))) {
+		xfs_fs_mark_sick(dp->i_mount, XFS_SICK_FS_METADIR);
 		error = -EFSCORRUPTED;
 		goto out_irele;
 	}

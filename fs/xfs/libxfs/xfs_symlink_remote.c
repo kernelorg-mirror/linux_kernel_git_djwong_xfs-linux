@@ -430,6 +430,7 @@ xfs_symlink_remote_truncate(
 		return error;
 	if (!done) {
 		ASSERT(done);
+		xfs_inode_mark_sick(ip, XFS_SICK_INO_SYMLINK);
 		return -EFSCORRUPTED;
 	}
 

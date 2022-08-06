@@ -29,6 +29,7 @@
 #include "xfs_dir2_priv.h"
 #include "xfs_dir2.h"
 #include "xfs_symlink_remote.h"
+#include "xfs_health.h"
 
 struct kmem_cache	*xfs_swapext_intent_cache;
 
@@ -391,8 +392,13 @@ xfs_swapext_find_mappings(
 		 * the next extent if they're both holes or both the same
 		 * physical extent.
 		 */
-		if (irec1->br_state != irec2->br_state)
+		if (irec1->br_state != irec2->br_state) {
+			xfs_bmap_mark_sick(sxi->sxi_ip1,
+					xfs_swapext_whichfork(sxi));
+			xfs_bmap_mark_sick(sxi->sxi_ip2,
+					xfs_swapext_whichfork(sxi));
 			return -EFSCORRUPTED;
+		}
 
 		/*
 		 * Save the mappings if we're estimating work and skipping

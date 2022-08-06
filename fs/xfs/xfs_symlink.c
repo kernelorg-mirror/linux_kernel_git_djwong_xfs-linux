@@ -75,6 +75,8 @@ xfs_readlink(
 
  out:
 	xfs_iunlock(ip, XFS_ILOCK_SHARED);
+	if (error == -EFSCORRUPTED)
+		xfs_inode_mark_sick(ip, XFS_SICK_INO_SYMLINK);
 	return error;
 }
 
