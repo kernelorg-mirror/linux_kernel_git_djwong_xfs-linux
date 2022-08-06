@@ -27,6 +27,7 @@
 #include "xfs_bmap_util.h"
 #include "xfs_swapext.h"
 #include "xfs_xchgrange.h"
+#include "xfs_acl.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
@@ -1144,6 +1145,12 @@ xrep_xattr(
 
 	/* Swap in the good contents. */
 	error = xrep_xattr_rebuild_tree(rx);
+	if (error)
+		goto out_values;
+
+	/* Invalidate ACLs now that we've reloaded all the xattrs. */
+	xfs_forget_acl(VFS_I(sc->ip), SGI_ACL_FILE);
+	xfs_forget_acl(VFS_I(sc->ip), SGI_ACL_DEFAULT);
 
 out_values:
 	if (rx->xattr_blobs)
