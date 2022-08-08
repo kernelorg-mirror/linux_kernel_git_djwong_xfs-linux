@@ -477,6 +477,7 @@ xfs_attrmulti_attr_get(
 		.name		= name,
 		.namelen	= strlen(name),
 		.valuelen	= *len,
+		.owner		= XFS_I(inode)->i_ino,
 	};
 	int			error;
 
@@ -510,6 +511,7 @@ xfs_attrmulti_attr_set(
 		.attr_flags	= xfs_attr_flags(flags),
 		.name		= name,
 		.namelen	= strlen(name),
+		.owner		= XFS_I(inode)->i_ino,
 	};
 	int			error;
 
