@@ -25,6 +25,7 @@
 #include "xfs_da_format.h"
 #include "xfs_imeta.h"
 #include "xfs_rtbitmap.h"
+#include "xfs_rtgroup.h"
 
 /*
  * Realtime metadata files are not quite regular files because userspace can't
@@ -1409,10 +1410,12 @@ out_unlock:
  */
 int					/* error */
 xfs_rtmount_inodes(
-	xfs_mount_t	*mp)		/* file system mount structure */
+	struct xfs_mount	*mp)		/* file system mount structure */
 {
-	int		error;		/* error return value */
-	xfs_sb_t	*sbp;
+	struct xfs_sb		*sbp;
+	struct xfs_rtgroup	*rtg;
+	xfs_rgnumber_t		rgno;
+	int			error;		/* error return value */
 
 	sbp = &mp->m_sb;
 	error = xfs_rt_iget(mp, mp->m_sb.sb_rbmino, &xfs_rbmip_key,
@@ -1438,6 +1441,11 @@ xfs_rtmount_inodes(
 	error = xfs_rtmount_iread_extents(mp->m_rsumip);
 	if (error)
 		goto out_rele_summary;
+
+	for_each_rtgroup(mp, rgno, rtg) {
+		rtg->rtg_blockcount = xfs_rtgroup_block_count(mp,
+							      rtg->rtg_rgno);
+	}
 
 	xfs_alloc_rsum_cache(mp, sbp->sb_rbmblocks);
 	return 0;
