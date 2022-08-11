@@ -184,6 +184,14 @@ typedef struct xfs_sb {
 	 */
 	xfs_ino_t	sb_metadirino;
 
+	/*
+	 * Realtime group geometry information.  On disk this lives in the
+	 * sb_rsumino slot, but we cache them separately in the in-core
+	 * superblock for easy access.
+	 */
+	xfs_rgblock_t	sb_rgblocks;	/* size of a realtime group */
+	xfs_rgnumber_t	sb_rgcount;	/* number of realtime groups */
+
 	/* must be padded to 64 bit alignment */
 } xfs_sb_t;
 
