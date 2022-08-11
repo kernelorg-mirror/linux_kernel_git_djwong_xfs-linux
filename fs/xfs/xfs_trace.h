@@ -205,6 +205,37 @@ DEFINE_PERAG_REF_EVENT(xfs_perag_put);
 DEFINE_PERAG_REF_EVENT(xfs_perag_set_inode_tag);
 DEFINE_PERAG_REF_EVENT(xfs_perag_clear_inode_tag);
 
+DECLARE_EVENT_CLASS(xfs_rtgroup_class,
+	TP_PROTO(struct xfs_mount *mp, xfs_rgnumber_t rgno, int refcount,
+		 unsigned long caller_ip),
+	TP_ARGS(mp, rgno, refcount, caller_ip),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_rgnumber_t, rgno)
+		__field(int, refcount)
+		__field(unsigned long, caller_ip)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->rgno = rgno;
+		__entry->refcount = refcount;
+		__entry->caller_ip = caller_ip;
+	),
+	TP_printk("dev %d:%d rgno 0x%x refcount %d caller %pS",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->rgno,
+		  __entry->refcount,
+		  (char *)__entry->caller_ip)
+);
+
+#define DEFINE_RTGROUP_REF_EVENT(name)	\
+DEFINE_EVENT(xfs_rtgroup_class, name,	\
+	TP_PROTO(struct xfs_mount *mp, xfs_rgnumber_t rgno, int refcount,	\
+		 unsigned long caller_ip),					\
+	TP_ARGS(mp, rgno, refcount, caller_ip))
+DEFINE_RTGROUP_REF_EVENT(xfs_rtgroup_get);
+DEFINE_RTGROUP_REF_EVENT(xfs_rtgroup_put);
+
 TRACE_EVENT(xfs_inodegc_worker,
 	TP_PROTO(struct xfs_mount *mp, unsigned int shrinker_hits),
 	TP_ARGS(mp, shrinker_hits),
