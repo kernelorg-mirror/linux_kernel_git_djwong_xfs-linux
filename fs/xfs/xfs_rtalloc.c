@@ -1552,8 +1552,8 @@ xfs_rtfile_convert_unwritten(
 	if (mp->m_sb.sb_rextsize == 1)
 		return 0;
 
-	off = rounddown_64(XFS_B_TO_FSBT(mp, pos), mp->m_sb.sb_rextsize);
-	endoff = roundup_64(XFS_B_TO_FSB(mp, pos + len), mp->m_sb.sb_rextsize);
+	off = xfs_rtb_rounddown_rtx(mp, XFS_B_TO_FSBT(mp, pos));
+	endoff = xfs_rtb_roundup_rtx(mp, XFS_B_TO_FSB(mp, pos + len));
 
 	trace_xfs_rtfile_convert_unwritten(ip, pos, len);
 
