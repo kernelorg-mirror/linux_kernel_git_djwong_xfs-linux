@@ -522,6 +522,7 @@ xfs_getfsmap_rtdev_rtbitmap_query(
 	struct xfs_rtalloc_rec		alow = { 0 };
 	struct xfs_rtalloc_rec		ahigh = { 0 };
 	struct xfs_mount		*mp = tp->t_mountp;
+	unsigned int			mod;
 	int				error;
 
 	xfs_ilock(mp->m_rbmip, XFS_ILOCK_SHARED | XFS_ILOCK_RTBITMAP);
@@ -530,10 +531,9 @@ xfs_getfsmap_rtdev_rtbitmap_query(
 	 * Set up query parameters to return free rtextents covering the range
 	 * we want.
 	 */
-	alow.ar_startext = info->low.rm_startblock;
-	ahigh.ar_startext = info->high.rm_startblock;
-	do_div(alow.ar_startext, mp->m_sb.sb_rextsize);
-	if (do_div(ahigh.ar_startext, mp->m_sb.sb_rextsize))
+	alow.ar_startext = xfs_rtb_to_rtxt(mp, info->low.rm_startblock);
+	ahigh.ar_startext = xfs_rtb_to_rtx(mp, info->high.rm_startblock, &mod);
+	if (mod)
 		ahigh.ar_startext++;
 	error = xfs_rtalloc_query_range(mp, tp, &alow, &ahigh,
 			xfs_getfsmap_rtdev_rtbitmap_helper, info);
