@@ -123,7 +123,7 @@ xchk_rtsum_record_free(
 {
 	struct xfs_scrub		*sc = priv;
 	xfs_fileoff_t			rbmoff;
-	xfs_rtblock_t			rtbno;
+	xfs_rtxnum_t			rtbno;
 	xfs_filblks_t			rtlen;
 	xchk_rtsumoff_t			offs;
 	unsigned int			lenlog;
