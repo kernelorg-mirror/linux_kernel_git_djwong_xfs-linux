@@ -77,7 +77,7 @@ xchk_rtbitmap_check_extents(
 {
 	struct xfs_mount	*mp = sc->mp;
 	struct xfs_bmbt_irec	map;
-	xfs_rtblock_t		off;
+	xfs_fileoff_t		off;
 	int			nmap;
 	int			error = 0;
 
