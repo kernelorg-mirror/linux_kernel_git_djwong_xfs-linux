@@ -136,25 +136,21 @@ out:
 void
 xchk_xref_is_used_rt_space(
 	struct xfs_scrub	*sc,
-	xfs_rtblock_t		fsbno,
+	xfs_rtblock_t		rtbno,
 	xfs_extlen_t		len)
 {
 	xfs_rtxnum_t		startext;
 	xfs_rtxnum_t		endext;
-	xfs_rtxlen_t		extcount;
 	bool			is_free;
 	int			error;
 
 	if (xchk_skip_xref(sc->sm))
 		return;
 
-	startext = fsbno;
-	endext = fsbno + len - 1;
-	do_div(startext, sc->mp->m_sb.sb_rextsize);
-	do_div(endext, sc->mp->m_sb.sb_rextsize);
-	extcount = endext - startext + 1;
-	error = xfs_rtalloc_extent_is_free(sc->mp, sc->tp, startext, extcount,
-			&is_free);
+	startext = xfs_rtb_to_rtxt(sc->mp, rtbno);
+	endext = xfs_rtb_to_rtxt(sc->mp, rtbno + len - 1);
+	error = xfs_rtalloc_extent_is_free(sc->mp, sc->tp, startext,
+			endext - startext + 1, &is_free);
 	if (!xchk_should_check_xref(sc, &error, NULL))
 		return;
 	if (is_free)
