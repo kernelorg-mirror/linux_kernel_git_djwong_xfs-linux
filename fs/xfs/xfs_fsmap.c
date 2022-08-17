@@ -459,9 +459,9 @@ xfs_getfsmap_rtdev_rtbitmap_helper(
 	struct xfs_rmap_irec		irec;
 	xfs_daddr_t			rec_daddr;
 
-	irec.rm_startblock = rec->ar_startext * mp->m_sb.sb_rextsize;
+	irec.rm_startblock = xfs_rtx_to_rtb(mp, rec->ar_startext);
 	rec_daddr = XFS_FSB_TO_BB(mp, irec.rm_startblock);
-	irec.rm_blockcount = rec->ar_extcount * mp->m_sb.sb_rextsize;
+	irec.rm_blockcount = xfs_rtx_to_rtb(mp, rec->ar_extcount);
 	irec.rm_owner = XFS_RMAP_OWN_NULL;	/* "free" */
 	irec.rm_offset = 0;
 	irec.rm_flags = 0;
