@@ -54,7 +54,7 @@ xchk_rtbitmap_rec(
 	void			*priv)
 {
 	struct xfs_scrub	*sc = priv;
-	xfs_rtblock_t		startblock;
+	xfs_rtxnum_t		startblock;
 	xfs_filblks_t		blockcount;
 
 	startblock = rec->ar_startext * mp->m_sb.sb_rextsize;
@@ -138,8 +138,8 @@ xchk_xref_is_used_rt_space(
 	xfs_rtblock_t		fsbno,
 	xfs_extlen_t		len)
 {
-	xfs_rtblock_t		startext;
-	xfs_rtblock_t		endext;
+	xfs_rtxnum_t		startext;
+	xfs_rtxnum_t		endext;
 	xfs_rtxlen_t		extcount;
 	bool			is_free;
 	int			error;
