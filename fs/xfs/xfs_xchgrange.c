@@ -29,6 +29,7 @@
 #include "xfs_icache.h"
 #include "xfs_log.h"
 #include "xfs_rtalloc.h"
+#include "xfs_rtbitmap.h"
 
 /* Lock (and optionally join) two inodes for a file range exchange. */
 void
@@ -802,8 +803,7 @@ xfs_xchg_range(
 	 * offsets and length in @fxr are safe to round up.
 	 */
 	if (XFS_IS_REALTIME_INODE(ip2))
-		req.blockcount = roundup_64(req.blockcount,
-					    mp->m_sb.sb_rextsize);
+		req.blockcount = xfs_rtb_roundup_rtx(mp, req.blockcount);
 
 	error = xfs_xchg_range_estimate(&req);
 	if (error)
