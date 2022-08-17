@@ -5334,7 +5334,6 @@ __xfs_bunmapi(
 	int			tmp_logflags;	/* partial logging flags */
 	int			wasdel;		/* was a delayed alloc extent */
 	int			whichfork;	/* data or attribute fork */
-	xfs_fsblock_t		sum;
 	xfs_filblks_t		len = *rlen;	/* length to unmap in file */
 	xfs_fileoff_t		end;
 	struct xfs_iext_cursor	icur;
@@ -5431,8 +5430,7 @@ __xfs_bunmapi(
 		if (!isrt || (flags & XFS_BMAPI_REMAP))
 			goto delete;
 
-		sum = del.br_startblock + del.br_blockcount;
-		div_u64_rem(sum, mp->m_sb.sb_rextsize, &mod);
+		xfs_rtb_to_rtx(mp, del.br_startblock + del.br_blockcount, &mod);
 		if (mod) {
 			/*
 			 * Realtime extent not lined up at the end.
@@ -5479,7 +5477,8 @@ __xfs_bunmapi(
 				goto error0;
 			goto nodelete;
 		}
-		div_u64_rem(del.br_startblock, mp->m_sb.sb_rextsize, &mod);
+
+		xfs_rtb_to_rtx(mp, del.br_startblock, &mod);
 		if (mod) {
 			xfs_extlen_t off = mp->m_sb.sb_rextsize - mod;
 
