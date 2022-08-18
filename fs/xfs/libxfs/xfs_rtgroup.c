@@ -485,3 +485,37 @@ xfs_rtgroup_update_secondary_sbs(
 
 	return saved_error ? saved_error : error;
 }
+
+/* Lock metadata inodes associated with this rt group. */
+void
+xfs_rtgroup_lock(
+	struct xfs_trans	*tp,
+	struct xfs_rtgroup	*rtg)
+{
+	xfs_rtbitmap_lock(tp, rtg->rtg_mount);
+}
+
+/* Unlock metadata inodes associated with this rt group. */
+void
+xfs_rtgroup_unlock(
+	struct xfs_rtgroup	*rtg)
+{
+	xfs_rtbitmap_unlock(rtg->rtg_mount);
+}
+
+/* Retrieve rt group geometry. */
+int
+xfs_rtgroup_get_geometry(
+	struct xfs_rtgroup	*rtg,
+	struct xfs_rtgroup_geometry *rgeo)
+{
+	xfs_rtgroup_lock(NULL, rtg);
+
+	/* Fill out form. */
+	memset(rgeo, 0, sizeof(*rgeo));
+	rgeo->rg_number = rtg->rtg_rgno;
+	rgeo->rg_length = rtg->rtg_blockcount;
+	xfs_rtgroup_geom_health(rtg, rgeo);
+	xfs_rtgroup_unlock(rtg);
+	return 0;
+}
