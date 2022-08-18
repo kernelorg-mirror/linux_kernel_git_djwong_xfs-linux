@@ -121,6 +121,17 @@ xchk_process_error(
 }
 
 bool
+xchk_process_rt_error(
+	struct xfs_scrub	*sc,
+	xfs_rgnumber_t		rgno,
+	xfs_rgblock_t		rgbno,
+	int			*error)
+{
+	return __xchk_process_error(sc, rgno, rgbno, error,
+			XFS_SCRUB_OFLAG_CORRUPT, __return_address);
+}
+
+bool
 xchk_xref_process_error(
 	struct xfs_scrub	*sc,
 	xfs_agnumber_t		agno,
@@ -128,6 +139,17 @@ xchk_xref_process_error(
 	int			*error)
 {
 	return __xchk_process_error(sc, agno, bno, error,
+			XFS_SCRUB_OFLAG_XFAIL, __return_address);
+}
+
+bool
+xchk_xref_process_rt_error(
+	struct xfs_scrub	*sc,
+	xfs_rgnumber_t		rgno,
+	xfs_rgblock_t		rgbno,
+	int			*error)
+{
+	return __xchk_process_error(sc, rgno, rgbno, error,
 			XFS_SCRUB_OFLAG_XFAIL, __return_address);
 }
 
