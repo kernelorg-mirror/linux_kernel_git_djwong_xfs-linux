@@ -103,10 +103,12 @@ int xchk_setup_parent(struct xfs_scrub *sc);
 int xchk_setup_rtbitmap(struct xfs_scrub *sc);
 int xchk_setup_rtsummary(struct xfs_scrub *sc);
 int xchk_setup_rgsuperblock(struct xfs_scrub *sc);
+int xchk_setup_rgbitmap(struct xfs_scrub *sc);
 #else
 # define xchk_setup_rtbitmap		xchk_setup_nothing
 # define xchk_setup_rtsummary		xchk_setup_nothing
 # define xchk_setup_rgsuperblock	xchk_setup_nothing
+# define xchk_setup_rgbitmap		xchk_setup_nothing
 #endif
 
 #ifdef CONFIG_XFS_QUOTA
@@ -148,6 +150,10 @@ xchk_ag_init_existing(
 
 int xchk_rt_init(struct xfs_scrub *sc, struct xchk_rt *sr);
 void xchk_rt_unlock(struct xfs_scrub *sc, struct xchk_rt *sr);
+int xchk_rtgroup_init(struct xfs_scrub *sc, xfs_rgnumber_t rgno,
+		struct xchk_rt *sr);
+void xchk_rtgroup_unlock(struct xfs_scrub *sc, struct xchk_rt *sr);
+void xchk_rtgroup_free(struct xfs_scrub *sc, struct xchk_rt *sr);
 int xchk_ag_read_headers(struct xfs_scrub *sc, xfs_agnumber_t agno,
 		struct xchk_ag *sa);
 void xchk_ag_btcur_free(struct xchk_ag *sa);

@@ -14,9 +14,28 @@
 #include "xfs_rtbitmap.h"
 #include "xfs_inode.h"
 #include "xfs_bmap.h"
+#include "xfs_rtgroup.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/repair.h"
+
+/* Set us up with the realtime group metadata locked. */
+int
+xchk_setup_rgbitmap(
+	struct xfs_scrub	*sc)
+{
+	int			error;
+
+	error = xchk_trans_alloc(sc, 0);
+	if (error)
+		return error;
+
+	error = xchk_install_live_inode(sc, sc->mp->m_rbmip);
+	if (error)
+		return error;
+
+	return xchk_rtgroup_init(sc, sc->sm->sm_agno, &sc->sr);
+}
 
 /* Set us up with the realtime metadata locked. */
 int
@@ -100,6 +119,43 @@ xchk_rtbitmap_check_extents(
 	return error;
 }
 
+/* Scrub this group's realtime bitmap. */
+int
+xchk_rgbitmap(
+	struct xfs_scrub	*sc)
+{
+	struct xfs_rtalloc_rec	keys[2];
+	struct xfs_rtgroup	*rtg = sc->sr.rtg;
+	xfs_rtblock_t		rtbno;
+	xfs_rgblock_t		last_rgbno = rtg->rtg_blockcount - 1;
+	int			error;
+
+	/* Sanity check the realtime bitmap size. */
+	if (sc->mp->m_rbmip->i_disk_size !=
+	    XFS_FSB_TO_B(sc->mp, sc->mp->m_sb.sb_rbmblocks)) {
+		xchk_ino_set_corrupt(sc, sc->mp->m_rbmip->i_ino);
+		return 0;
+	}
+
+	/*
+	 * Check only the portion of the rtbitmap that corresponds to this
+	 * realtime group.
+	 */
+	rtbno = xfs_rgbno_to_rtb(sc->mp, rtg->rtg_rgno, 0);
+	keys[0].ar_startext = xfs_rtb_to_rtxt(sc->mp, rtbno);
+
+	rtbno = xfs_rgbno_to_rtb(sc->mp, rtg->rtg_rgno, last_rgbno);
+	keys[1].ar_startext = xfs_rtb_to_rtxt(sc->mp, rtbno);
+	keys[0].ar_extcount = keys[1].ar_extcount = 0;
+
+	error = xfs_rtalloc_query_range(sc->mp, sc->tp, &keys[0], &keys[1],
+			xchk_rtbitmap_rec, sc);
+	if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, 0, &error))
+		return error;
+
+	return 0;
+}
+
 /* Scrub the realtime bitmap. */
 int
 xchk_rtbitmap(
@@ -123,12 +179,18 @@ xchk_rtbitmap(
 	if (error || (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT))
 		return error;
 
+	/*
+	 * Each rtgroup checks its portion of the rt bitmap, so if we don't
+	 * have that feature, we have to check the bitmap contents now.
+	 */
+	if (xfs_has_rtgroups(sc->mp))
+		return 0;
+
 	error = xfs_rtalloc_query_all(sc->mp, sc->tp, xchk_rtbitmap_rec, sc);
 	if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, 0, &error))
-		goto out;
+		return error;
 
-out:
-	return error;
+	return 0;
 }
 
 /* xref check that the extent is not free in the rtbitmap */

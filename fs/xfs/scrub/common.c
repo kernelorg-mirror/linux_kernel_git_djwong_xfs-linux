@@ -33,6 +33,7 @@
 #include "xfs_error.h"
 #include "xfs_swapext.h"
 #include "xfs_rtbitmap.h"
+#include "xfs_rtgroup.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -702,6 +703,8 @@ xchk_rt_init(
 	struct xfs_scrub	*sc,
 	struct xchk_rt		*sr)
 {
+	ASSERT(sr->rtg == NULL);
+
 	xfs_rtbitmap_lock(NULL, sc->mp);
 	sr->locked = true;
 	return 0;
@@ -716,11 +719,70 @@ xchk_rt_unlock(
 	struct xfs_scrub	*sc,
 	struct xchk_rt		*sr)
 {
+	ASSERT(sr->rtg == NULL);
+
 	if (!sr->locked)
 		return;
 
 	xfs_rtbitmap_unlock(sc->mp);
 	sr->locked = false;
+}
+
+/*
+ * For scrubbing a realtime group, grab all the in-core resources we'll need to
+ * check the metadata, which means taking the ILOCK of the realtime group's
+ * metadata inodes.  Callers must not join these inodes to the transaction with
+ * non-zero lockflags or concurrency problems will result.
+ */
+int
+xchk_rtgroup_init(
+	struct xfs_scrub	*sc,
+	xfs_rgnumber_t		rgno,
+	struct xchk_rt		*sr)
+{
+	ASSERT(sr->rtg == NULL);
+
+	sr->rtg = xfs_rtgroup_get(sc->mp, rgno);
+	if (!sr->rtg)
+		return -ENOENT;
+
+	xfs_rtbitmap_lock(NULL, sc->mp);
+	sr->locked = true;
+	return 0;
+}
+
+/*
+ * Unlock the realtime group.  This must be done /after/ committing (or
+ * cancelling) the scrub transaction.
+ */
+void
+xchk_rtgroup_unlock(
+	struct xfs_scrub	*sc,
+	struct xchk_rt		*sr)
+{
+	ASSERT(sr->rtg != NULL);
+
+	if (sr->locked) {
+		xfs_rtbitmap_unlock(sc->mp);
+		sr->locked = false;
+	}
+}
+
+/*
+ * Unlock the realtime group and release its resources.  This must be done
+ * /after/ committing (or cancelling) the scrub transaction.
+ */
+void
+xchk_rtgroup_free(
+	struct xfs_scrub	*sc,
+	struct xchk_rt		*sr)
+{
+	ASSERT(sr->rtg != NULL);
+
+	xchk_rtgroup_unlock(sc, sr);
+
+	xfs_rtgroup_put(sr->rtg);
+	sr->rtg = NULL;
 }
 
 /* Per-scrubber setup functions */
