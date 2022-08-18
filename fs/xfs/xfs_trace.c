@@ -40,6 +40,7 @@
 #include "xfs_bmap.h"
 #include "xfs_swapext.h"
 #include "xfs_xchgrange.h"
+#include "xfs_rtgroup.h"
 
 /*
  * We include this last to have the helpers above available for the trace

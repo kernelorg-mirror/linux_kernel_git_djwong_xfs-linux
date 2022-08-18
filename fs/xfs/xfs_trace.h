@@ -82,6 +82,7 @@ struct xfs_icwalk;
 struct xfs_bmap_intent;
 struct xfs_swapext_intent;
 struct xfs_swapext_req;
+struct xfs_rtgroup;
 
 #define XFS_ATTR_FILTER_FLAGS \
 	{ XFS_ATTR_ROOT,	"ROOT" }, \
@@ -4120,6 +4121,31 @@ DEFINE_EVENT(xfs_ag_corrupt_class, name,	\
 DEFINE_AG_CORRUPT_EVENT(xfs_ag_mark_sick);
 DEFINE_AG_CORRUPT_EVENT(xfs_ag_mark_healthy);
 DEFINE_AG_CORRUPT_EVENT(xfs_ag_unfixed_corruption);
+
+DECLARE_EVENT_CLASS(xfs_rtgroup_corrupt_class,
+	TP_PROTO(struct xfs_rtgroup *rtg, unsigned int flags),
+	TP_ARGS(rtg, flags),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_rgnumber_t, rgno)
+		__field(unsigned int, flags)
+	),
+	TP_fast_assign(
+		__entry->dev = rtg->rtg_mount->m_super->s_dev;
+		__entry->rgno = rtg->rtg_rgno;
+		__entry->flags = flags;
+	),
+	TP_printk("dev %d:%d rgno 0x%x flags 0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->rgno, __entry->flags)
+);
+#define DEFINE_RTGROUP_CORRUPT_EVENT(name)	\
+DEFINE_EVENT(xfs_rtgroup_corrupt_class, name,	\
+	TP_PROTO(struct xfs_rtgroup *rtg, unsigned int flags), \
+	TP_ARGS(rtg, flags))
+DEFINE_RTGROUP_CORRUPT_EVENT(xfs_rtgroup_mark_sick);
+DEFINE_RTGROUP_CORRUPT_EVENT(xfs_rtgroup_mark_healthy);
+DEFINE_RTGROUP_CORRUPT_EVENT(xfs_rtgroup_unfixed_corruption);
 
 DECLARE_EVENT_CLASS(xfs_inode_corrupt_class,
 	TP_PROTO(struct xfs_inode *ip, unsigned int flags),
