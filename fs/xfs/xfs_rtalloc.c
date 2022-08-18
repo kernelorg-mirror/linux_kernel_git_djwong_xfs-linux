@@ -24,6 +24,7 @@
 #include "xfs_trace.h"
 #include "xfs_da_format.h"
 #include "xfs_imeta.h"
+#include "xfs_rtbitmap.h"
 
 /*
  * Read and return the summary information for a given extent size,
