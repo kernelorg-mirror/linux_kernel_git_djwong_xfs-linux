@@ -15,6 +15,7 @@ const struct xfs_imeta_path name = { \
 	.im_path = (path), \
 	.im_ftype = XFS_DIR3_FT_REG_FILE, \
 	.im_depth = ARRAY_SIZE(path), \
+	.im_dynamicmask = 0, \
 }
 
 /* Key for looking up metadata inodes. */
@@ -27,6 +28,9 @@ struct xfs_imeta_path {
 
 	/* Expected file type. */
 	unsigned int	im_ftype;
+
+	/* Each bit corresponds to an element of im_path needing to be freed */
+	unsigned long long im_dynamicmask;
 };
 
 /* Cleanup widget for metadata inode creation and deletion. */
@@ -51,6 +55,10 @@ int xfs_imeta_lookup(struct xfs_mount *mp, const struct xfs_imeta_path *path,
 int xfs_imeta_lookup_update(struct xfs_mount *mp,
 			    const struct xfs_imeta_path *path,
 			    struct xfs_imeta_update *upd, xfs_ino_t *inop);
+
+int xfs_imeta_create_file_path(struct xfs_mount *mp,
+		unsigned int nr_components, struct xfs_imeta_path **pathp);
+void xfs_imeta_free_path(struct xfs_imeta_path *path);
 
 void xfs_imeta_set_metaflag(struct xfs_trans *tp, struct xfs_inode *ip);
 
