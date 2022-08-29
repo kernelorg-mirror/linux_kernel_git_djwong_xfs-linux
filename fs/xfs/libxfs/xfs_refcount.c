@@ -119,7 +119,7 @@ xfs_refcount_get_rec(
 		return error;
 
 	xfs_refcount_btrec_to_irec(rec, irec);
-	if (irec->rc_blockcount == 0 || irec->rc_blockcount > MAXREFCEXTLEN)
+	if (irec->rc_blockcount == 0 || irec->rc_blockcount > XFS_REFC_LEN_MAX)
 		goto out_bad_rec;
 
 	/* handle special COW-staging state */
@@ -140,7 +140,7 @@ xfs_refcount_get_rec(
 	if (!xfs_verify_agbno(pag, realstart + irec->rc_blockcount - 1))
 		goto out_bad_rec;
 
-	if (irec->rc_refcount == 0 || irec->rc_refcount > MAXREFCOUNT)
+	if (irec->rc_refcount == 0 || irec->rc_refcount > XFS_REFC_REFCOUNT_MAX)
 		goto out_bad_rec;
 
 	trace_xfs_refcount_get(cur, irec);
@@ -839,7 +839,7 @@ xfs_refcount_merge_extents(
 	    xfs_refc_valid(&cleft) && xfs_refc_valid(&cright) && cequal &&
 	    left.rc_refcount == cleft.rc_refcount + adjust &&
 	    right.rc_refcount == cleft.rc_refcount + adjust &&
-	    ulen < MAXREFCEXTLEN) {
+	    ulen < XFS_REFC_LEN_MAX) {
 		*shape_changed = true;
 		return xfs_refcount_merge_center_extents(cur, &left, &cleft,
 				&right, ulen, aglen);
@@ -849,7 +849,7 @@ xfs_refcount_merge_extents(
 	ulen = (unsigned long long)left.rc_blockcount + cleft.rc_blockcount;
 	if (xfs_refc_valid(&left) && xfs_refc_valid(&cleft) &&
 	    left.rc_refcount == cleft.rc_refcount + adjust &&
-	    ulen < MAXREFCEXTLEN) {
+	    ulen < XFS_REFC_LEN_MAX) {
 		*shape_changed = true;
 		error = xfs_refcount_merge_left_extent(cur, &left, &cleft,
 				agbno, aglen);
@@ -868,7 +868,7 @@ xfs_refcount_merge_extents(
 	ulen = (unsigned long long)right.rc_blockcount + cright.rc_blockcount;
 	if (xfs_refc_valid(&right) && xfs_refc_valid(&cright) &&
 	    right.rc_refcount == cright.rc_refcount + adjust &&
-	    ulen < MAXREFCEXTLEN) {
+	    ulen < XFS_REFC_LEN_MAX) {
 		*shape_changed = true;
 		return xfs_refcount_merge_right_extent(cur, &right, &cright,
 				aglen);
@@ -1004,7 +1004,7 @@ xfs_refcount_adjust_extents(
 		 * Adjust the reference count and either update the tree
 		 * (incr) or free the blocks (decr).
 		 */
-		if (ext.rc_refcount == MAXREFCOUNT)
+		if (ext.rc_refcount == XFS_REFC_REFCOUNT_MAX)
 			goto skip;
 		ext.rc_refcount += adj;
 		trace_xfs_refcount_modify_extent(cur, &ext);
