@@ -404,7 +404,7 @@ xrep_refc_find_refcounts(
 	 * Set up enough storage to handle the maximum extent sharing factor's
 	 * worth of rmapbt records.
 	 */
-	error = xfarray_create(sc->mp, "rmap bag", MAXREFCOUNT,
+	error = xfarray_create(sc->mp, "rmap bag", XFS_REFC_REFCOUNT_MAX,
 			sizeof(struct xrep_refc_rmap), &rmap_bag);
 	if (error)
 		goto out_cur;
