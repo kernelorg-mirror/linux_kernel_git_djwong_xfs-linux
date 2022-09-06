@@ -330,7 +330,7 @@ xchk_bmap_rt_iextent_xref(
 	int			error;
 
 	if (!xfs_has_rtrmapbt(mp)) {
-		xchk_rt_init(info->sc, &info->sc->sr);
+		xchk_rt_init(info->sc, &info->sc->sr, XFS_RTLOCK_ALLOC_SHARED);
 		xchk_xref_is_used_rt_space(info->sc, irec->br_startblock,
 				irec->br_blockcount);
 		xchk_rt_unlock(info->sc, &info->sc->sr);
@@ -338,7 +338,8 @@ xchk_bmap_rt_iextent_xref(
 	}
 
 	rgbno = xfs_rtb_to_rgbno(mp, irec->br_startblock, &rgno);
-	error = xchk_rtgroup_init(info->sc, rgno, &info->sc->sr);
+	error = xchk_rtgroup_init(info->sc, rgno, &info->sc->sr,
+			XFS_RTLOCK_ALL_SHARED);
 	if (!xchk_fblock_process_error(info->sc, info->whichfork,
 			irec->br_startoff, &error))
 		goto out_free;

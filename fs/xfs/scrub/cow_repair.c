@@ -361,7 +361,8 @@ xrep_cow_find_bad_rt(
 			goto out_rtg;
 	}
 
-	error = xrep_rtgroup_init(sc, rtg, &sc->sr);
+	error = xrep_rtgroup_init(sc, rtg, &sc->sr,
+			XFS_RTLOCK_RMAP | XFS_RTLOCK_REFCOUNT);
 	if (error)
 		goto out_rtg;
 

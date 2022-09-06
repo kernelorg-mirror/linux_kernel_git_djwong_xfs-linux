@@ -503,7 +503,10 @@ xfs_rtgroup_lock(
 	struct xfs_rtgroup	*rtg,
 	unsigned int		rtlock_flags)
 {
-	if (rtlock_flags & XFS_RTLOCK_ALLOC)
+	if (rtlock_flags & XFS_RTLOCK_ALLOC_SHARED) {
+		ASSERT(tp == NULL);
+		xfs_rtbitmap_lock_shared(rtg->rtg_mount);
+	} else if (rtlock_flags & XFS_RTLOCK_ALLOC)
 		xfs_rtbitmap_lock(tp, rtg->rtg_mount);
 
 	if ((rtlock_flags & XFS_RTLOCK_RMAP) && rtg->rtg_rmapip) {
@@ -531,7 +534,9 @@ xfs_rtgroup_unlock(
 	if ((rtlock_flags & XFS_RTLOCK_RMAP) && rtg->rtg_rmapip)
 		xfs_iunlock(rtg->rtg_rmapip, XFS_ILOCK_EXCL);
 
-	if (rtlock_flags & XFS_RTLOCK_ALLOC)
+	if (rtlock_flags & XFS_RTLOCK_ALLOC_SHARED)
+		xfs_rtbitmap_unlock_shared(rtg->rtg_mount);
+	else if (rtlock_flags & XFS_RTLOCK_ALLOC)
 		xfs_rtbitmap_unlock(rtg->rtg_mount);
 }
 

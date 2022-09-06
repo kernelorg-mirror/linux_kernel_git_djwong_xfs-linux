@@ -358,7 +358,8 @@ xrep_bmap_scan_rtgroup(
 	if (xrep_is_rtmeta_ino(sc, rtg, sc->ip->i_ino))
 		return 0;
 
-	error = xrep_rtgroup_init(sc, rtg, &sc->sr);
+	error = xrep_rtgroup_init(sc, rtg, &sc->sr,
+			XFS_RTLOCK_RMAP | XFS_RTLOCK_ALLOC_SHARED);
 	if (error)
 		return error;
 

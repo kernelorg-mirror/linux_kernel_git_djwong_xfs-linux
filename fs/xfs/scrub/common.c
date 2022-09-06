@@ -772,12 +772,18 @@ xchk_ag_init(
 int
 xchk_rt_init(
 	struct xfs_scrub	*sc,
-	struct xchk_rt		*sr)
+	struct xchk_rt		*sr,
+	unsigned int		rtlock_flags)
 {
 	ASSERT(sr->rtg == NULL);
+	ASSERT(!(rtlock_flags & ~(XFS_RTLOCK_ALLOC | XFS_RTLOCK_ALLOC_SHARED)));
+	ASSERT(hweight32(rtlock_flags & (XFS_RTLOCK_ALLOC | XFS_RTLOCK_ALLOC_SHARED)) == 1);
 
-	xfs_rtbitmap_lock(NULL, sc->mp);
-	sr->locked = true;
+	if (rtlock_flags & XFS_RTLOCK_ALLOC_SHARED)
+		xfs_rtbitmap_lock_shared(sc->mp);
+	else
+		xfs_rtbitmap_lock(NULL, sc->mp);
+	sr->rtlock_flags = rtlock_flags;
 	return 0;
 }
 
@@ -792,11 +798,14 @@ xchk_rt_unlock(
 {
 	ASSERT(sr->rtg == NULL);
 
-	if (!sr->locked)
+	if (!sr->rtlock_flags)
 		return;
 
-	xfs_rtbitmap_unlock(sc->mp);
-	sr->locked = false;
+	if (sr->rtlock_flags & XFS_RTLOCK_ALLOC_SHARED)
+		xfs_rtbitmap_unlock_shared(sc->mp);
+	else
+		xfs_rtbitmap_unlock(sc->mp);
+	sr->rtlock_flags = 0;
 }
 
 #ifdef CONFIG_XFS_RT
@@ -804,17 +813,19 @@ xchk_rt_unlock(
 int
 xchk_rtgroup_lock(
 	struct xfs_scrub	*sc,
-	struct xchk_rt		*sr)
+	struct xchk_rt		*sr,
+	unsigned int		rtlock_flags)
 {
 	int			error = 0;
 
 	ASSERT(sr->rtg != NULL);
+	ASSERT(hweight32(rtlock_flags & (XFS_RTLOCK_ALLOC | XFS_RTLOCK_ALLOC_SHARED)) == 1);
 
 	do {
 		if (xchk_should_terminate(sc, &error))
 			return error;
 
-		xfs_rtgroup_lock(NULL, sr->rtg, XFS_RTLOCK_ALL);
+		xfs_rtgroup_lock(NULL, sr->rtg, rtlock_flags);
 
 		/*
 		 * Decide if the rt group is quiet enough for all metadata to
@@ -836,11 +847,11 @@ xchk_rtgroup_lock(
 		 * of runtime threads.
 		 */
 		if (!xfs_rtgroup_intents_busy(sr->rtg)) {
-			sr->locked = true;
+			sr->rtlock_flags = rtlock_flags;
 			return 0;
 		}
 
-		xfs_rtgroup_unlock(sr->rtg, XFS_RTLOCK_ALL);
+		xfs_rtgroup_unlock(sr->rtg, rtlock_flags);
 
 		if (!(sc->flags & XCHK_FSHOOKS_DRAIN))
 			return -ECHRNG;
@@ -856,7 +867,8 @@ xchk_rtgroup_lock(
 int
 xchk_rtgroup_lock(
 	struct xfs_scrub	*sc,
-	struct xchk_rt		*sr)
+	struct xchk_rt		*sr,
+	unsigned int		rtlock_flags)
 {
 	ASSERT(0);
 	return -EOPNOTSUPP;
@@ -874,7 +886,8 @@ int
 xchk_rtgroup_init(
 	struct xfs_scrub	*sc,
 	xfs_rgnumber_t		rgno,
-	struct xchk_rt		*sr)
+	struct xchk_rt		*sr,
+	unsigned int		rtlock_flags)
 {
 	int			error;
 
@@ -884,11 +897,9 @@ xchk_rtgroup_init(
 	if (!sr->rtg)
 		return -ENOENT;
 
-	error = xchk_rtgroup_lock(sc, sr);
+	error = xchk_rtgroup_lock(sc, sr, rtlock_flags);
 	if (error)
 		return error;
-
-	sr->locked = true;
 
 	if (xfs_has_rtrmapbt(sc->mp))
 		sr->rmap_cur = xfs_rtrmapbt_init_cursor(sc->mp, sc->tp,
@@ -930,9 +941,9 @@ xchk_rtgroup_unlock(
 {
 	ASSERT(sr->rtg != NULL);
 
-	if (sr->locked) {
-		xfs_rtgroup_unlock(sr->rtg, XFS_RTLOCK_ALL);
-		sr->locked = false;
+	if (sr->rtlock_flags) {
+		xfs_rtgroup_unlock(sr->rtg, sr->rtlock_flags);
+		sr->rtlock_flags = 0;
 	}
 }
 
