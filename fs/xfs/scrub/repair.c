@@ -1186,6 +1186,9 @@ struct xrep_reap_state {
 
 	/* Number of invalidated buffers logged to the current transaction. */
 	unsigned int			invalidated;
+
+	/* Number of EFIs queued during the whole reap sequence. */
+	unsigned long long		total_deferred;
 };
 
 #define XREP_REAP_MAX_EFIS	(128)
@@ -1210,6 +1213,28 @@ static inline bool xrep_want_reap_roll(const struct xrep_reap_state *rs)
 
 static inline void xrep_reap_reset(struct xrep_reap_state *rs)
 {
+	rs->total_deferred += rs->deferred;
+	rs->deferred = 0;
+	rs->invalidated = 0;
+	rs->force_roll = false;
+}
+
+#define XREP_REAP_MAX_DEFER_EFIS	(2048)
+
+/*
+ * Decide if we want to roll the transaction after reaping an extent.  We don't
+ * want to overrun the transaction reservation, so we prohibit more than
+ * 128 EFIs per transaction.  For the same reason, we limit the number
+ * of buffer invalidations to 2048.
+ */
+static inline bool xrep_want_reap_defer_roll(const struct xrep_reap_state *rs)
+{
+	return xrep_want_reap_roll(rs) || rs->total_deferred > XREP_REAP_MAX_EFIS;
+}
+
+static inline void xrep_reap_defer_reset(struct xrep_reap_state *rs)
+{
+	rs->total_deferred = 0;
 	rs->deferred = 0;
 	rs->invalidated = 0;
 	rs->force_roll = false;
@@ -1528,7 +1553,12 @@ xrep_agmeta_extent_reap(
 		if (error)
 			return error;
 
-		if (xrep_want_reap_roll(rs)) {
+		if (xrep_want_reap_defer_roll(rs)) {
+			error = xrep_defer_finish(sc);
+			if (error)
+				return error;
+			xrep_reap_defer_reset(rs);
+		} else if (xrep_want_reap_roll(rs)) {
 			error = xrep_roll_ag_trans(sc);
 			if (error)
 				return error;
@@ -1588,7 +1618,16 @@ xrep_imeta_extent_reap(
 		if (error)
 			goto out_agf;
 
-		if (xrep_want_reap_roll(rs)) {
+		if (xrep_want_reap_defer_roll(rs)) {
+			/*
+			 * Holds the AGF buffer across the deferred chain
+			 * processing.
+			 */
+			error = xrep_defer_finish(sc);
+			if (error)
+				goto out_agf;
+			xrep_reap_defer_reset(rs);
+		} else if (xrep_want_reap_roll(rs)) {
 			/*
 			 * Hold the AGF buffer across the transaction roll so
 			 * that we don't have to reattach it to the scrub
@@ -1782,7 +1821,12 @@ xrep_imeta_extent_reap_rt(
 		if (error)
 			goto out_unlock;
 
-		if (xrep_want_reap_roll(rs)) {
+		if (xrep_want_reap_defer_roll(rs)) {
+			error = xfs_defer_finish(&sc->tp);
+			if (error)
+				goto out_unlock;
+			xrep_reap_defer_reset(rs);
+		} else if (xrep_want_reap_roll(rs)) {
 			error = xfs_trans_roll_inode(&sc->tp, sc->ip);
 			if (error)
 				goto out_unlock;
@@ -1827,17 +1871,17 @@ xrep_reap_extents(
 		else
 			error = xbitmap_walk(bitmap, xrep_imeta_extent_reap,
 					&rs);
-		if (error || rs.deferred == 0)
+		if (error || (rs.deferred == 0 && rs.total_deferred == 0 && rs.invalidated == 0))
 			return error;
 
-		return xfs_trans_roll_inode(&sc->tp, sc->ip);
+		return xfs_defer_finish(&sc->tp);
 	}
 
 	error = xbitmap_walk(bitmap, xrep_agmeta_extent_reap, &rs);
-	if (error || rs.deferred == 0)
+	if (error || (rs.deferred == 0 && rs.total_deferred == 0 && rs.invalidated == 0))
 		return error;
 
-	return xrep_roll_ag_trans(sc);
+	return xrep_defer_finish(sc);
 }
 
 /*
