@@ -99,6 +99,9 @@ struct xreap_state {
 
 	/* Number of invalidated buffers logged to the current transaction. */
 	unsigned int			invalidated;
+
+	/* Number of deferred reaps queued during the whole reap sequence. */
+	unsigned long long		total_deferred;
 };
 
 /* Put a block back on the AGFL. */
@@ -140,6 +143,19 @@ xreap_put_freelist(
 	return 0;
 }
 
+static inline bool xreap_dirty(const struct xreap_state *rs)
+{
+	if (rs->force_roll)
+		return true;
+	if (rs->deferred)
+		return true;
+	if (rs->invalidated)
+		return true;
+	if (rs->total_deferred)
+		return true;
+	return false;
+}
+
 #define XREAP_MAX_DEFERRED	(128)
 #define XREAP_MAX_BINVAL	(2048)
 
@@ -162,6 +178,34 @@ static inline bool xreap_want_roll(const struct xreap_state *rs)
 
 static inline void xreap_reset(struct xreap_state *rs)
 {
+	rs->total_deferred += rs->deferred;
+	rs->deferred = 0;
+	rs->invalidated = 0;
+	rs->force_roll = false;
+}
+
+#define XREAP_MAX_DEFER_CHAIN		(2048)
+
+/*
+ * Decide if we want to finish the deferred ops that are attached to the scrub
+ * transaction.  We don't want to queue huge chains of deferred ops because
+ * that can consume a lot of log space and kernel memory.  Hence we trigger a
+ * xfs_defer_finish if there are more than 2048 deferred reap operations or the
+ * caller did some real work.
+ */
+static inline bool
+xreap_want_defer_finish(const struct xreap_state *rs)
+{
+	if (rs->force_roll)
+		return true;
+	if (rs->total_deferred > XREAP_MAX_DEFER_CHAIN)
+		return true;
+	return false;
+}
+
+static inline void xreap_defer_finish_reset(struct xreap_state *rs)
+{
+	rs->total_deferred = 0;
 	rs->deferred = 0;
 	rs->invalidated = 0;
 	rs->force_roll = false;
@@ -480,7 +524,12 @@ xreap_agmeta_extent(
 		if (error)
 			return error;
 
-		if (xreap_want_roll(rs)) {
+		if (xreap_want_defer_finish(rs)) {
+			error = xrep_defer_finish(sc);
+			if (error)
+				return error;
+			xreap_defer_finish_reset(rs);
+		} else if (xreap_want_roll(rs)) {
 			error = xrep_roll_ag_trans(sc);
 			if (error)
 				return error;
@@ -512,10 +561,10 @@ xrep_reap_ag_metadata(
 	ASSERT(sc->ip == NULL);
 
 	error = xbitmap_walk(bitmap, xreap_agmeta_extent, &rs);
-	if (error || rs.deferred == 0)
+	if (error || !xreap_dirty(&rs))
 		return error;
 
-	return xrep_roll_ag_trans(sc);
+	return xrep_defer_finish(sc);
 }
 
 /*
@@ -565,7 +614,16 @@ xreap_imeta_extent(
 		if (error)
 			goto out_agf;
 
-		if (xreap_want_roll(rs)) {
+		if (xreap_want_defer_finish(rs)) {
+			/*
+			 * Holds the AGF buffer across the deferred chain
+			 * processing.
+			 */
+			error = xrep_defer_finish(sc);
+			if (error)
+				goto out_agf;
+			xreap_defer_finish_reset(rs);
+		} else if (xreap_want_roll(rs)) {
 			/*
 			 * Hold the AGF buffer across the transaction roll so
 			 * that we don't have to reattach it to the scrub
@@ -750,7 +808,12 @@ xreap_imeta_rtextent(
 		if (error)
 			goto out_unlock;
 
-		if (xreap_want_roll(rs)) {
+		if (xreap_want_defer_finish(rs)) {
+			error = xfs_defer_finish(&sc->tp);
+			if (error)
+				goto out_unlock;
+			xreap_defer_finish_reset(rs);
+		} else if (xreap_want_roll(rs)) {
 			error = xfs_trans_roll_inode(&sc->tp, sc->ip);
 			if (error)
 				goto out_unlock;
@@ -793,10 +856,10 @@ xrep_reap_inode_metadata(
 		error = xbitmap_walk(bitmap, xreap_imeta_rtextent, &rs);
 	else
 		error = xbitmap_walk(bitmap, xreap_imeta_extent, &rs);
-	if (error || rs.deferred == 0)
+	if (error || !xreap_dirty(&rs))
 		return error;
 
-	return xfs_trans_roll_inode(&sc->tp, sc->ip);
+	return xfs_defer_finish(&sc->tp);
 }
 
 /*
