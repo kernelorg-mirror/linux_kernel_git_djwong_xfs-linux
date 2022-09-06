@@ -637,7 +637,7 @@ xrep_rtrmap_find_rmaps(
 	error = xchk_setup_rt(sc);
 	if (error)
 		return error;
-	error = xchk_rtgroup_lock(sc, &sc->sr);
+	error = xchk_rtgroup_lock(sc, &sc->sr, XFS_RTLOCK_ALL_SHARED);
 	if (error)
 		return error;
 

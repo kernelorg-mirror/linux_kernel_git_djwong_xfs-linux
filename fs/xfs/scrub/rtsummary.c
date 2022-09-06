@@ -16,6 +16,7 @@
 #include "xfs_rtbitmap.h"
 #include "xfs_bit.h"
 #include "xfs_bmap.h"
+#include "xfs_rtgroup.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -70,7 +71,7 @@ xchk_setup_rtsummary(
 	if (error)
 		return error;
 
-	return xchk_rt_init(sc, &sc->sr);
+	return xchk_rt_init(sc, &sc->sr, XFS_RTLOCK_ALLOC);
 }
 
 /* Update the summary file to reflect the free extent that we've accumulated. */

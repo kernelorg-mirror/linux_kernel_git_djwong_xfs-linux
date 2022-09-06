@@ -1169,3 +1169,24 @@ xfs_rtbitmap_unlock(
 	xfs_iunlock(mp->m_rsumip, XFS_ILOCK_EXCL);
 	xfs_iunlock(mp->m_rbmip, XFS_ILOCK_EXCL);
 }
+
+/*
+ * Lock the realtime free space metadata inodes in shared mode for scanning.
+ * Callers MUST walk the bitmap blocks in file offset order.
+ */
+void
+xfs_rtbitmap_lock_shared(
+	struct xfs_mount	*mp)
+{
+	xfs_ilock(mp->m_rbmip, XFS_ILOCK_SHARED);
+	xfs_ilock(mp->m_rsumip, XFS_ILOCK_SHARED);
+}
+
+/* Unlock the realtime free space metadata inodes. */
+void
+xfs_rtbitmap_unlock_shared(
+	struct xfs_mount	*mp)
+{
+	xfs_iunlock(mp->m_rsumip, XFS_ILOCK_SHARED);
+	xfs_iunlock(mp->m_rbmip, XFS_ILOCK_SHARED);
+}

@@ -30,6 +30,7 @@ xchk_setup_rgbitmap(
 	struct xfs_scrub	*sc)
 {
 	unsigned int		resblks = 0;
+	unsigned int		rtlock_flags = XFS_RTLOCK_ALL_SHARED;
 	int			error;
 
 	if (xchk_need_fshook_drain(sc))
@@ -39,6 +40,7 @@ xchk_setup_rgbitmap(
 		error = xrep_setup_rgbitmap(sc, &resblks);
 		if (error)
 			return error;
+		rtlock_flags = XFS_RTLOCK_ALL;
 	}
 
 	error = xchk_trans_alloc(sc, resblks);
@@ -49,7 +51,7 @@ xchk_setup_rgbitmap(
 	if (error)
 		return error;
 
-	return xchk_rtgroup_init(sc, sc->sm->sm_agno, &sc->sr);
+	return xchk_rtgroup_init(sc, sc->sm->sm_agno, &sc->sr, rtlock_flags);
 }
 
 /* Set us up with the realtime metadata locked. */
@@ -74,7 +76,7 @@ xchk_setup_rtbitmap(
 	if (error)
 		return error;
 
-	return xchk_rt_init(sc, &sc->sr);
+	return xchk_rt_init(sc, &sc->sr, XFS_RTLOCK_ALLOC);
 }
 
 /* Realtime bitmap. */

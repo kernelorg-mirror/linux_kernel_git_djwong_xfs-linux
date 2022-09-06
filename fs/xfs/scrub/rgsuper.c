@@ -34,7 +34,7 @@ xchk_rgsuperblock_xref(
 	if (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
 		return;
 
-	error = xchk_rt_init(sc, &sc->sr);
+	error = xchk_rt_init(sc, &sc->sr, XFS_RTLOCK_ALLOC_SHARED);
 	if (!xchk_xref_process_rt_error(sc, rgno, 0, &error))
 		return;
 

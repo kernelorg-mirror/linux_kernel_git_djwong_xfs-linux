@@ -649,7 +649,7 @@ xrep_dinode_count_rtgroup_rmaps(
 	    xrep_is_rtmeta_ino(sc, rtg, sc->sm->sm_ino))
 		return 0;
 
-	error = xrep_rtgroup_init(sc, rtg, &sc->sr);
+	error = xrep_rtgroup_init(sc, rtg, &sc->sr, XFS_RTLOCK_RMAP);
 	if (error)
 		return error;
 

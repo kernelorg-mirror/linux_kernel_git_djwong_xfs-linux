@@ -59,7 +59,8 @@ xchk_setup_rtrmapbt(
 	if (error)
 		goto out_rtg;
 
-	error = xchk_rtgroup_init(sc, sc->sm->sm_agno, &sc->sr);
+	error = xchk_rtgroup_init(sc, sc->sm->sm_agno, &sc->sr,
+			XFS_RTLOCK_ALL_SHARED);
 out_rtg:
 	xfs_rtgroup_put(rtg);
 	return error;

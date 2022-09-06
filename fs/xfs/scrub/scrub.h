@@ -71,7 +71,7 @@ struct xchk_ag {
 /* Btree cursors for the RT volume. */
 struct xchk_rt {
 	struct xfs_rtgroup	*rtg;
-	bool			locked;
+	unsigned int		rtlock_flags;
 
 	struct xfs_btree_cur	*rmap_cur;
 	struct xfs_btree_cur	*refc_cur;

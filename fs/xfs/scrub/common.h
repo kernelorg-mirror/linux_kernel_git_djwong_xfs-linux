@@ -153,12 +153,14 @@ xchk_ag_init_existing(
 	return error == -ENOENT ? -EFSCORRUPTED : error;
 }
 
-int xchk_rt_init(struct xfs_scrub *sc, struct xchk_rt *sr);
+int xchk_rt_init(struct xfs_scrub *sc, struct xchk_rt *sr,
+		unsigned int rtlock_flags);
 void xchk_rtgroup_btcur_free(struct xchk_rt *sr);
-int xchk_rtgroup_lock(struct xfs_scrub *sc, struct xchk_rt *sr);
+int xchk_rtgroup_lock(struct xfs_scrub *sc, struct xchk_rt *sr,
+		unsigned int rtlock_flags);
 void xchk_rt_unlock(struct xfs_scrub *sc, struct xchk_rt *sr);
 int xchk_rtgroup_init(struct xfs_scrub *sc, xfs_rgnumber_t rgno,
-		struct xchk_rt *sr);
+		struct xchk_rt *sr, unsigned int rtlock_flags);
 void xchk_rtgroup_unlock(struct xfs_scrub *sc, struct xchk_rt *sr);
 void xchk_rtgroup_free(struct xfs_scrub *sc, struct xchk_rt *sr);
 int xchk_ag_read_headers(struct xfs_scrub *sc, xfs_agnumber_t agno,

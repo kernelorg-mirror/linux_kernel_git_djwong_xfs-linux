@@ -987,12 +987,13 @@ int
 xrep_rtgroup_init(
 	struct xfs_scrub	*sc,
 	struct xfs_rtgroup	*rtg,
-	struct xchk_rt		*sr)
+	struct xchk_rt		*sr,
+	unsigned int		rtlock_flags)
 {
 	ASSERT(!sr->rtg);
 
-	xfs_rtgroup_lock(NULL, rtg, XFS_RTLOCK_ALL);
-	sr->locked = true;
+	xfs_rtgroup_lock(NULL, rtg, rtlock_flags);
+	sr->rtlock_flags = rtlock_flags;
 
 	/* Grab our own reference to the rtgroup structure. */
 	atomic_inc(&rtg->rtg_ref);
