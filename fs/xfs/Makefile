@@ -191,6 +191,7 @@ ifeq ($(CONFIG_XFS_ONLINE_REPAIR),y)
 xfs-y				+= $(addprefix scrub/, \
 				   agheader_repair.o \
 				   bitmap.o \
+				   reap.o \
 				   repair.o \
 				   )
 endif
