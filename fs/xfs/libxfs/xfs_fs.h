@@ -300,6 +300,21 @@ struct xfs_ag_geometry {
 #define XFS_AG_GEOM_SICK_INODES	(1 << 10) /* bad inodes were seen */
 
 /*
+ * Output for XFS_IOC_RTGROUP_GEOMETRY
+ */
+struct xfs_rtgroup_geometry {
+	uint32_t	rg_number;	/* i/o: rtgroup number */
+	uint32_t	rg_length;	/* o: length in blocks */
+	uint32_t	rg_sick;	/* o: sick things in ag */
+	uint32_t	rg_checked;	/* o: checked metadata in ag */
+	uint32_t	rg_flags;	/* i/o: flags for this ag */
+	uint32_t	rg_pad;		/* o: zero */
+	uint64_t	rg_reserved[13];/* o: zero */
+};
+#define XFS_RTGROUP_GEOM_SICK_SUPER	(1 << 0)  /* superblock */
+#define XFS_RTGROUP_GEOM_SICK_BITMAP	(1 << 1)  /* rtbitmap for this group */
+
+/*
  * Structures for XFS_IOC_FSGROWFSDATA, XFS_IOC_FSGROWFSLOG & XFS_IOC_FSGROWFSRT
  */
 typedef struct xfs_growfs_data {
@@ -819,6 +834,7 @@ struct xfs_scrub_metadata {
 /*	XFS_IOC_GETFSMAP ------ hoisted 59         */
 #define XFS_IOC_SCRUB_METADATA	_IOWR('X', 60, struct xfs_scrub_metadata)
 #define XFS_IOC_AG_GEOMETRY	_IOWR('X', 61, struct xfs_ag_geometry)
+#define XFS_IOC_RTGROUP_GEOMETRY _IOWR('X', 62, struct xfs_rtgroup_geometry)
 
 /*
  * ioctl commands that replace IRIX syssgi()'s
