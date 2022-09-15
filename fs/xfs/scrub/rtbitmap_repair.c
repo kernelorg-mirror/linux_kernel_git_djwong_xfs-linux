@@ -360,7 +360,10 @@ xrep_rgbitmap_load_before(
 	wordoff = (rbmoff_rtx >> XFS_NBWORDLOG);
 	wordcnt = xfs_rtx_to_rbmword(mp, group_rtx - rbmoff_rtx);
 	if (wordcnt > 0) {
-		error = xfile_obj_store(sc->xfile, bp->b_addr,
+		xfs_rtword_t	*p;
+
+		p = xfs_rtbitmap_word(bp, 0);
+		error = xfile_obj_store(sc->xfile, p,
 				wordcnt * sizeof(xfs_rtword_t),
 				wordoff * sizeof(xfs_rtword_t));
 		if (error)
@@ -391,7 +394,7 @@ xrep_rgbitmap_load_before(
 			wordoff * sizeof(xfs_rtword_t));
 	if (error)
 		goto out_rele;
-	ondisk_word = *((xfs_rtword_t *)bp->b_addr + wordcnt);
+	ondisk_word = *xfs_rtbitmap_word(bp, wordcnt);
 
 	trace_xrep_rgbitmap_load_word(mp, wordoff, bit, ondisk_word,
 			xfile_word, mask);
@@ -429,6 +432,7 @@ xrep_rgbitmap_load_after(
 	xfs_rtword_t		xfile_word;
 	xfs_rtword_t		mask;
 	unsigned int		wordcnt;
+	unsigned int		last_group_word;
 	int			bit;
 	int			error;
 
@@ -481,8 +485,8 @@ xrep_rgbitmap_load_after(
 			wordoff * sizeof(xfs_rtword_t));
 	if (error)
 		goto out_rele;
-	ondisk_word = *((xfs_rtword_t *)bp->b_addr +
-					xfs_rtx_to_rbmword(mp, last_group_rtx));
+	last_group_word = xfs_rtx_to_rbmword(mp, last_group_rtx);
+	ondisk_word = *xfs_rtbitmap_word(bp, last_group_word);
 
 	trace_xrep_rgbitmap_load_word(mp, wordoff, bit, ondisk_word,
 			xfile_word, mask);
@@ -500,9 +504,9 @@ copy_words:
 	wordoff++;
 	wordcnt = xfs_rtx_to_rbmword(mp, last_rbmblock_rtx - last_group_rtx + 1);
 	if (wordcnt > 0) {
-		xfs_rtword_t	*p = bp->b_addr;
+		xfs_rtword_t	*p;
 
-		p += mp->m_blockwsize - wordcnt;
+		p = xfs_rtbitmap_word(bp, mp->m_blockwsize - wordcnt);
 		error = xfile_obj_store(sc->xfile, p,
 				wordcnt * sizeof(xfs_rtword_t),
 				wordoff * sizeof(xfs_rtword_t));
