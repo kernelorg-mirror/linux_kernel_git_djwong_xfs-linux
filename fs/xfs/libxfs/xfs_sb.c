@@ -1034,8 +1034,13 @@ xfs_sb_mount_common(
 	mp->m_sectbb_log = sbp->sb_sectlog - BBSHIFT;
 	mp->m_agno_log = xfs_highbit32(sbp->sb_agcount - 1) + 1;
 	mp->m_blockmask = sbp->sb_blocksize - 1;
-	mp->m_blockwsize = sbp->sb_blocksize >> XFS_WORDLOG;
-	mp->m_blockwmask = mp->m_blockwsize - 1;
+	if (xfs_has_rtgroups(mp))
+		mp->m_blockwsize = (sbp->sb_blocksize -
+					sizeof(struct xfs_rtbuf_blkinfo)) >>
+					XFS_WORDLOG;
+	else
+		mp->m_blockwsize = sbp->sb_blocksize >> XFS_WORDLOG;
+	mp->m_rtx_per_rbmblock = mp->m_blockwsize << XFS_NBWORDLOG;
 	mp->m_rtxblklog = log2_if_power2(sbp->sb_rextsize);
 	mp->m_rtxblkmask = mask64_if_power2(sbp->sb_rextsize);
 	mp->m_rgblklog = log2_if_power2(sbp->sb_rgblocks);
