@@ -113,6 +113,10 @@ xrep_rtsummary(
 	if (!xfs_has_rmapbt(sc->mp))
 		return -EOPNOTSUPP;
 
+	/* XXX disabled while we add rtsummary headers */
+	if (xfs_has_rtgroups(sc->mp))
+		return 0;
+
 	/* Make sure any problems with the fork are fixed. */
 	error = xrep_metadata_inode_forks(sc);
 	if (error)

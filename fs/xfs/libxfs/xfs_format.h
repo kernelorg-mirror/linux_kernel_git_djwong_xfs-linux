@@ -1274,6 +1274,7 @@ static inline bool xfs_dinode_has_large_extent_counts(
  * RT bit manipulation macros.
  */
 #define XFS_RTBITMAP_MAGIC	0x424D505A	/* BMPZ */
+#define XFS_RTSUMMARY_MAGIC	0x53554D59	/* SUMY */
 
 /*
  * Realtime bitmap words start immediately after this structure and are encoded

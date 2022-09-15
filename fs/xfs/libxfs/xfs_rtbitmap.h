@@ -181,6 +181,9 @@ xfs_rtsumoffs_to_block(
 	struct xfs_mount	*mp,
 	xfs_rtsumoff_t		rsumoff)
 {
+	if (xfs_has_rtgroups(mp))
+		return rsumoff / mp->m_blockwsize;
+
 	return XFS_B_TO_FSBT(mp, rsumoff * sizeof(xfs_suminfo_t));
 }
 
@@ -195,16 +198,24 @@ xfs_rtsumoffs_to_infoword(
 {
 	unsigned int		mask = mp->m_blockmask >> XFS_SUMINFOLOG;
 
+	if (xfs_has_rtgroups(mp))
+		return rsumoff % mp->m_blockwsize;
+
 	return rsumoff & mask;
 }
 
 /* Return a pointer to a summary info word within a rt summary block buffer. */
 static inline xfs_suminfo_raw_t *
 xfs_rsumbuf_infoptr(
+	struct xfs_mount	*mp,
 	void			*buf,
 	unsigned int		infoword)
 {
 	xfs_suminfo_raw_t	*infop = buf;
+	struct xfs_rtbuf_blkinfo *hdr = buf;
+
+	if (xfs_has_rtgroups(mp))
+		infop = (xfs_suminfo_raw_t *)(hdr + 1);
 
 	return &infop[infoword];
 }
@@ -215,7 +226,7 @@ xfs_rsumblock_infoptr(
 	struct xfs_buf		*bp,
 	unsigned int		infoword)
 {
-	return xfs_rsumbuf_infoptr(bp->b_addr, infoword);
+	return xfs_rsumbuf_infoptr(bp->b_mount, bp->b_addr, infoword);
 }
 
 static inline const struct xfs_buf_ops *
@@ -223,8 +234,11 @@ xfs_rtblock_ops(
 	struct xfs_mount	*mp,
 	bool			issum)
 {
-	if (xfs_has_rtgroups(mp) && !issum)
+	if (xfs_has_rtgroups(mp)) {
+		if (issum)
+			return &xfs_rtsummary_buf_ops;
 		return &xfs_rtbitmap_buf_ops;
+	}
 	return &xfs_rtbuf_ops;
 }
 

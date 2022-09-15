@@ -78,6 +78,37 @@ xchk_setup_rtsummary(
 	return 0;
 }
 
+static inline int
+rtsum_load(
+	struct xfs_scrub	*sc,
+	xfs_rtsumoff_t		sumoff,
+	xfs_suminfo_raw_t	*rawinfo)
+{
+	return xfile_obj_load(sc->xfile, rawinfo, sizeof(xfs_suminfo_raw_t),
+			sumoff << XFS_WORDLOG);
+}
+
+static inline int
+rtsum_store(
+	struct xfs_scrub	*sc,
+	xfs_rtsumoff_t		sumoff,
+	const xfs_suminfo_raw_t	rawinfo)
+{
+	return xfile_obj_store(sc->xfile, &rawinfo, sizeof(xfs_suminfo_raw_t),
+			sumoff << XFS_WORDLOG);
+}
+
+static inline int
+rtsum_copyout(
+	struct xfs_scrub	*sc,
+	xfs_rtsumoff_t		sumoff,
+	xfs_suminfo_raw_t	*rawinfo,
+	unsigned int		nr_words)
+{
+	return xfile_obj_load(sc->xfile, rawinfo, nr_words << XFS_WORDLOG,
+			sumoff << XFS_WORDLOG);
+}
+
 /* Update the summary file to reflect the free extent that we've accumulated. */
 STATIC int
 xchk_rtsum_record_free(
@@ -90,7 +121,7 @@ xchk_rtsum_record_free(
 	xfs_fileoff_t			rbmoff;
 	xfs_rtxnum_t			rtbno;
 	xfs_filblks_t			rtlen;
-	unsigned int			offs;
+	xfs_rtsumoff_t			offs;
 	unsigned int			lenlog;
 	xfs_suminfo_raw_t		v;
 	int				error = 0;
@@ -112,8 +143,7 @@ xchk_rtsum_record_free(
 	}
 
 	/* Read current rtsummary contents. */
-	error = xfile_obj_load(sc->xfile, &v, sizeof(xfs_suminfo_t),
-			offs << XFS_WORDLOG);
+	error = rtsum_load(sc, offs, &v);
 	if (error)
 		return error;
 
@@ -123,8 +153,7 @@ xchk_rtsum_record_free(
 			lenlog, offs, v);
 
 	/* ...and write it back. */
-	error = xfile_obj_store(sc->xfile, &v, sizeof(xfs_suminfo_t),
-			offs << XFS_WORDLOG);
+	error = rtsum_store(sc, offs, v);
 	if (error)
 		return error;
 
@@ -157,13 +186,11 @@ xchk_rtsum_compare(
 	struct xfs_buf		*bp;
 	struct xfs_bmbt_irec	map;
 	xfs_fileoff_t		off;
-	loff_t			pos;
+	xfs_rtsumoff_t		sumoff = 0;
 	int			nmap;
 
-	for (off = 0, pos = 0;
-	     pos < mp->m_rsumsize;
-	     pos += mp->m_sb.sb_blocksize, off++) {
-		size_t		count;
+	for (off = 0; off < XFS_B_TO_FSB(mp, mp->m_rsumsize); off++) {
+		xfs_suminfo_raw_t *ondisk_info;
 		int		error = 0;
 
 		if (xchk_should_terminate(sc, &error))
@@ -189,18 +216,20 @@ xchk_rtsum_compare(
 			return error;
 
 		/* Read a block's worth of computed rtsummary file. */
-		count = min_t(loff_t, mp->m_rsumsize - pos,
-				mp->m_sb.sb_blocksize);
-		error = xfile_obj_load(sc->xfile, sc->buf, count, pos);
+		error = rtsum_copyout(sc, sumoff, sc->buf, mp->m_blockwsize);
 		if (error) {
 			xfs_trans_brelse(sc->tp, bp);
 			return error;
 		}
 
-		if (memcmp(bp->b_addr, sc->buf, count) != 0)
+		ondisk_info = xfs_rsumblock_infoptr(bp, 0);
+
+		if (memcmp(ondisk_info, sc->buf,
+					mp->m_blockwsize << XFS_WORDLOG) != 0)
 			xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, off);
 
 		xfs_trans_brelse(sc->tp, bp);
+		sumoff += mp->m_blockwsize;
 	}
 
 	return 0;
