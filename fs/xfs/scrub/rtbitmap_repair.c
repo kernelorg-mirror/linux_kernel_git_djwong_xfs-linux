@@ -120,9 +120,23 @@ typedef unsigned int xrep_wordcnt_t;
 
 static inline xrep_wordoff_t
 rtx_to_wordoff(
-	xfs_rtxnum_t	rtx)
+	struct xfs_mount	*mp,
+	xfs_rtxnum_t		rtx)
 {
-	return rtx >> XFS_NBWORDLOG;
+	xfs_fileoff_t		fileoff;
+	unsigned int		wordoff;
+	loff_t			pos;
+
+	if (!xfs_has_rtgroups(mp))
+		return rtx >> XFS_NBWORDLOG;
+
+	fileoff = xfs_rtx_to_rbmblock(mp, rtx);
+	wordoff = xfs_rtx_to_rbmword(mp, rtx);
+
+	pos = XFS_FSB_TO_B(mp, fileoff);
+	pos += sizeof(struct xfs_rtbuf_blkinfo);
+	pos += wordoff << XFS_WORDLOG;
+	return pos >> XFS_WORDLOG;
 }
 
 static inline xrep_wordcnt_t
@@ -231,7 +245,7 @@ xrep_rgbitmap_load_before(
 	 * ondisk block until we get to the word that corresponds to the start
 	 * of this group.
 	 */
-	wordoff = rtx_to_wordoff(rbmoff_rtx);
+	wordoff = rtx_to_wordoff(mp, rbmoff_rtx);
 	wordcnt = rtxlen_to_wordcnt(group_rtx - rbmoff_rtx);
 	if (wordcnt > 0) {
 		xfs_rtword_raw_t	*p;
@@ -340,7 +354,7 @@ xrep_rgbitmap_load_after(
 	 * If the bit position is zero, we don't have to RMW a partial word
 	 * and move to the next step.
 	 */
-	wordoff = rtx_to_wordoff(last_group_rtx);
+	wordoff = rtx_to_wordoff(mp, last_group_rtx);
 	bit = (last_group_rtx + 1) & XREP_RTBMP_WORDMASK;
 	if (bit == 0)
 		goto copy_words;
@@ -479,7 +493,7 @@ xrep_rgbitmap_mark_free(
 		lastbit = XFS_RTMIN(bit + len, XFS_NBWORD);
 		mask = (((xfs_rtword_t)1 << (lastbit - bit)) - 1) << bit;
 
-		error = xrep_rgbitmap_or(rb, rtx_to_wordoff(startrtx), mask);
+		error = xrep_rgbitmap_or(rb, rtx_to_wordoff(mp, startrtx), mask);
 		if (error || lastbit - bit == len)
 			return error;
 		startrtx += XFS_NBWORD - bit;
@@ -490,7 +504,7 @@ xrep_rgbitmap_mark_free(
 	if (bit) {
 		mask = ((xfs_rtword_t)1 << bit) - 1;
 
-		error = xrep_rgbitmap_or(rb, rtx_to_wordoff(nextrtx), mask);
+		error = xrep_rgbitmap_or(rb, rtx_to_wordoff(mp, nextrtx), mask);
 		if (error || startrtx + bit == nextrtx)
 			return error;
 		nextrtx -= bit;
@@ -503,8 +517,8 @@ xrep_rgbitmap_mark_free(
 	 * is a little sketchy since we also write ones into the rtbitmap block
 	 * headers, but we rewrite the headers as we persist the new blocks.
 	 */
-	wordoff = rtx_to_wordoff(startrtx);
-	endwordoff = rtx_to_wordoff(nextrtx);
+	wordoff = rtx_to_wordoff(mp, startrtx);
+	endwordoff = rtx_to_wordoff(mp, nextrtx);
 	blockwsize = mp->m_sb.sb_blocksize >> XFS_WORDLOG;
 
 	while (wordoff < endwordoff) {
@@ -594,7 +608,17 @@ xrep_rgbitmap_prep_buf(
 	struct xfs_scrub	*sc,
 	struct xfs_buf		*bp)
 {
-	bp->b_ops = &xfs_rtbuf_ops;
+	if (xfs_has_rtgroups(sc->mp)) {
+		struct xfs_rtbuf_blkinfo	*hdr = bp->b_addr;
+
+		hdr->rt_magic = cpu_to_be32(XFS_RTBITMAP_MAGIC);
+		hdr->rt_owner = cpu_to_be64(sc->ip->i_ino);
+		hdr->rt_blkno = cpu_to_be64(xfs_buf_daddr(bp));
+		uuid_copy(&hdr->rt_uuid, &sc->mp->m_sb.sb_meta_uuid);
+		bp->b_ops = &xfs_rtbitmap_buf_ops;
+	} else {
+		bp->b_ops = &xfs_rtbuf_ops;
+	}
 	xfs_trans_buf_set_type(sc->tp, bp, XFS_BLFT_RTBITMAP_BUF);
 	return 0;
 }
@@ -617,10 +641,6 @@ xrep_rgbitmap(
 	 */
 	if (!xfs_has_rtrmapbt(sc->mp))
 		return -EOPNOTSUPP;
-
-	/* XXX disabled while we add rtbitmap headers */
-	if (xfs_has_rtgroups(sc->mp))
-		return 0;
 
 	/*
 	 * If the start or end of this rt group happens to be in the middle of
