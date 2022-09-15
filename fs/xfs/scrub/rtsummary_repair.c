@@ -73,9 +73,20 @@ xrep_setup_rtsummary(
 }
 
 struct xrep_rtsummary {
-	/* Position of xfile as we write buffers to disk. */
-	loff_t			prep_pos;
+	/* suminfo position of xfile as we write buffers to disk. */
+	xfs_rtsumoff_t		prep_wordoff;
 };
+
+static inline int
+rtsum_copyout(
+	struct xfs_scrub	*sc,
+	xfs_rtsumoff_t		sumoff,
+	xfs_suminfo_raw_t	*rawinfo,
+	unsigned int		nr_words)
+{
+	return xfile_obj_load(sc->xfile, rawinfo, nr_words << XFS_WORDLOG,
+			sumoff << XFS_WORDLOG);
+}
 
 static int
 xrep_rtsummary_prep_buf(
@@ -87,14 +98,25 @@ xrep_rtsummary_prep_buf(
 	struct xfs_mount	*mp = sc->mp;
 	int			error;
 
-	bp->b_ops = &xfs_rtbuf_ops;
-
-	error = xfile_obj_load(sc->xfile, bp->b_addr, mp->m_sb.sb_blocksize,
-			rs->prep_pos);
+	error = rtsum_copyout(sc, rs->prep_wordoff,
+			xfs_rbmblock_wordptr(bp, 0), mp->m_blockwsize);
 	if (error)
 		return error;
 
-	rs->prep_pos += mp->m_sb.sb_blocksize;
+	if (xfs_has_rtgroups(sc->mp)) {
+		struct xfs_rtbuf_blkinfo	*hdr = bp->b_addr;
+
+		hdr->rt_magic = cpu_to_be32(XFS_RTSUMMARY_MAGIC);
+		hdr->rt_owner = cpu_to_be64(sc->ip->i_ino);
+		hdr->rt_blkno = cpu_to_be64(xfs_buf_daddr(bp));
+		hdr->rt_lsn = 0;
+		uuid_copy(&hdr->rt_uuid, &sc->mp->m_sb.sb_meta_uuid);
+		bp->b_ops = &xfs_rtsummary_buf_ops;
+	} else {
+		bp->b_ops = &xfs_rtbuf_ops;
+	}
+
+	rs->prep_wordoff += mp->m_blockwsize;
 	xfs_trans_buf_set_type(sc->tp, bp, XFS_BLFT_RTSUMMARY_BUF);
 	return 0;
 }
@@ -104,7 +126,7 @@ int
 xrep_rtsummary(
 	struct xfs_scrub	*sc)
 {
-	struct xrep_rtsummary	rs = { .prep_pos = 0, };
+	struct xrep_rtsummary	rs = { .prep_wordoff = 0, };
 	struct xrep_tempswap	*ti = NULL;
 	xfs_filblks_t		rsumblocks;
 	int			error;
@@ -112,10 +134,6 @@ xrep_rtsummary(
 	/* We require the rmapbt to rebuild anything. */
 	if (!xfs_has_rmapbt(sc->mp))
 		return -EOPNOTSUPP;
-
-	/* XXX disabled while we add rtsummary headers */
-	if (xfs_has_rtgroups(sc->mp))
-		return 0;
 
 	/* Make sure any problems with the fork are fixed. */
 	error = xrep_metadata_inode_forks(sc);
