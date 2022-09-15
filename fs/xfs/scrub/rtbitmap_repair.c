@@ -425,6 +425,7 @@ xrep_rgbitmap_mark_free(
 	xfs_rtxnum_t		nextrtx;
 	xrep_wordoff_t		wordoff, nextwordoff;
 	unsigned int		bit;
+	unsigned int		blockwsize;
 	xfs_extlen_t		mod;
 	xfs_rtword_t		mask;
 	enum xfs_btree_keyfill	keyfill;
@@ -500,19 +501,20 @@ xrep_rgbitmap_mark_free(
 	/* Set all the words in between, up to a whole fs block at once. */
 	wordoff = rtx_to_wordoff(startrtx);
 	nextwordoff = rtx_to_wordoff(nextrtx);
+	blockwsize = mp->m_sb.sb_blocksize >> XFS_WORDLOG;
 
 	while (wordoff < nextwordoff) {
 		xrep_wordoff_t	rem;
 		xrep_wordcnt_t	wordcnt;
 
 		wordcnt = min_t(xrep_wordcnt_t, nextwordoff - wordoff,
-				mp->m_blockwsize);
+				blockwsize);
 
 		/* Try to get us aligned to an even blocksize. */
-		rem = wordoff & mp->m_blockwmask;
+		rem = wordoff & (blockwsize - 1);
 		if (rem)
 			wordcnt = min_t(xrep_wordcnt_t, wordcnt,
-					mp->m_blockwsize - rem);
+					blockwsize - rem);
 
 		error = xfbmp_copyin(rb, wordoff, rb->sc->buf, wordcnt);
 		if (error)
@@ -613,6 +615,10 @@ xrep_rgbitmap(
 	 */
 	if (!xfs_has_rtrmapbt(sc->mp))
 		return -EOPNOTSUPP;
+
+	/* XXX disabled while we add rtbitmap headers */
+	if (xfs_has_rtgroups(sc->mp))
+		return 0;
 
 	/*
 	 * If the start or end of this rt group happens to be in the middle of
