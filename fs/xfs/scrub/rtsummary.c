@@ -98,7 +98,7 @@ xchk_rtsum_record_free(
 	/* Compute the relevant location in the rtsum file. */
 	rbmoff = xfs_rtx_to_rbmblock(mp, rec->ar_startext);
 	lenlog = XFS_RTBLOCKLOG(rec->ar_extcount);
-	offs = XFS_SUMOFFS(mp, lenlog, rbmoff);
+	offs = xfs_rtsumoffs(mp, lenlog, rbmoff);
 
 	rtbno = xfs_rtx_to_rtb(mp, rec->ar_startext);
 	rtlen = xfs_rtx_to_rtb(mp, rec->ar_extcount);

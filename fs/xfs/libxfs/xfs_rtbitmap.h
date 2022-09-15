@@ -133,6 +133,44 @@ xfs_rtbitmap_word(
 }
 
 /*
+ * Convert a rt extent length and rt bitmap block number to a xfs_suminfo_t
+ * offset within the rt summary file.
+ */
+static inline unsigned int
+xfs_rtsumoffs(
+	struct xfs_mount	*mp,
+	int			log2_len,
+	xfs_fileoff_t		rbmoff)
+{
+	return log2_len * mp->m_sb.sb_rbmblocks + rbmoff;
+}
+
+/*
+ * Convert an xfs_suminfo_t offset to a file block offset within the rt summary
+ * file.
+ */
+static inline xfs_fileoff_t
+xfs_rtsumoffs_to_block(
+	struct xfs_mount	*mp,
+	unsigned int		rsumoff)
+{
+	return XFS_B_TO_FSBT(mp, rsumoff * sizeof(xfs_suminfo_t));
+}
+
+/* Return a pointer to a summary info word within a rt summary file block. */
+static inline xfs_suminfo_t *
+xfs_rtsummary_info(
+	struct xfs_buf		*bp,
+	unsigned int		rsumoff)
+{
+	xfs_suminfo_t		*rtsum = bp->b_addr;
+	unsigned int		mask;
+
+	mask = bp->b_mount->m_blockmask >> XFS_SUMINFOLOG;
+	return &rtsum[rsumoff & mask];
+}
+
+/*
  * Functions for walking free space rtextents in the realtime bitmap.
  */
 struct xfs_rtalloc_rec {
