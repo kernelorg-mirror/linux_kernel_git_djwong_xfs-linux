@@ -100,6 +100,9 @@ xfs_rtx_to_rbmblock(
 	struct xfs_mount	*mp,
 	xfs_rtxnum_t		rtx)
 {
+	if (xfs_has_rtgroups(mp))
+		return div_u64(rtx, mp->m_rtx_per_rbmblock);
+
 	return rtx >> mp->m_blkbit_log;
 }
 
@@ -109,6 +112,13 @@ xfs_rtx_to_rbmword(
 	struct xfs_mount	*mp,
 	xfs_rtxnum_t		rtx)
 {
+	if (xfs_has_rtgroups(mp)) {
+		unsigned int	mod;
+
+		div_u64_rem(rtx >> XFS_NBWORDLOG, mp->m_blockwsize, &mod);
+		return mod;
+	}
+
 	return (rtx >> XFS_NBWORDLOG) & (mp->m_blockwsize - 1);
 }
 
@@ -118,16 +128,24 @@ xfs_rbmblock_to_rtx(
 	struct xfs_mount	*mp,
 	xfs_fileoff_t		rbmoff)
 {
+	if (xfs_has_rtgroups(mp))
+		return rbmoff * mp->m_rtx_per_rbmblock;
+
 	return rbmoff << mp->m_blkbit_log;
 }
 
 /* Return a pointer to a bitmap word within a rt bitmap block buffer. */
 static inline xfs_rtword_t *
 xfs_rbmbuf_wordptr(
+	struct xfs_mount	*mp,
 	void			*buf,
 	unsigned int		rbmword)
 {
 	xfs_rtword_t		*wordp = buf;
+	struct xfs_rtbuf_blkinfo *hdr = buf;
+
+	if (xfs_has_rtgroups(mp))
+		wordp = (xfs_rtword_t *)(hdr + 1);
 
 	return &wordp[rbmword];
 }
@@ -138,7 +156,7 @@ xfs_rbmblock_wordptr(
 	struct xfs_buf		*bp,
 	unsigned int		rbmword)
 {
-	return xfs_rbmbuf_wordptr(bp->b_addr, rbmword);
+	return xfs_rbmbuf_wordptr(bp->b_mount, bp->b_addr, rbmword);
 }
 
 /*
@@ -198,6 +216,16 @@ xfs_rsumblock_infoptr(
 	unsigned int		infoword)
 {
 	return xfs_rsumbuf_infoptr(bp->b_addr, infoword);
+}
+
+static inline const struct xfs_buf_ops *
+xfs_rtblock_ops(
+	struct xfs_mount	*mp,
+	bool			issum)
+{
+	if (xfs_has_rtgroups(mp) && !issum)
+		return &xfs_rtbitmap_buf_ops;
+	return &xfs_rtbuf_ops;
 }
 
 /*

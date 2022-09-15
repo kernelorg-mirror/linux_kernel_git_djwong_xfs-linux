@@ -18,6 +18,7 @@
 #include "xfs_bmap.h"
 #include "xfs_bmap_btree.h"
 #include "xfs_swapext.h"
+#include "xfs_rtbitmap.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
