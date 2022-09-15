@@ -183,8 +183,8 @@ xrep_rgbitmap_load_before(
 	group_rtbno = xfs_rgbno_to_rtb(mp, rtg->rtg_rgno, 0);
 	group_rtx = xfs_rtb_to_rtxt(mp, group_rtbno);
 
-	rb->group_rbmoff = XFS_BITTOBLOCK(mp, group_rtx);
-	rbmoff_rtx = XFS_BLOCKTOBIT(mp, rb->group_rbmoff);
+	rb->group_rbmoff = xfs_rtx_to_rbmblock(mp, group_rtx);
+	rbmoff_rtx = xfs_rbmblock_to_rtx(mp, rb->group_rbmoff);
 
 	trace_xrep_rgbitmap_load(rtg, rb->group_rbmoff, rbmoff_rtx,
 			group_rtx - 1);
@@ -285,9 +285,9 @@ xrep_rgbitmap_load_after(
 					rtg->rtg_blockcount - 1);
 	last_group_rtx = xfs_rtb_to_rtxt(mp, last_rtbno);
 
-	last_group_rbmoff = XFS_BITTOBLOCK(mp, last_group_rtx);
+	last_group_rbmoff = xfs_rtx_to_rbmblock(mp, last_group_rtx);
 	rb->group_rbmlen = last_group_rbmoff - rb->group_rbmoff + 1;
-	last_rbmblock_rtx = XFS_BLOCKTOBIT(mp, last_group_rbmoff + 1) - 1;
+	last_rbmblock_rtx = xfs_rbmblock_to_rtx(mp, last_group_rbmoff + 1) - 1;
 
 	trace_xrep_rgbitmap_load(rtg, last_group_rbmoff, last_group_rtx + 1,
 			last_rbmblock_rtx);
@@ -330,7 +330,7 @@ xrep_rgbitmap_load_after(
 	if (error)
 		goto out_rele;
 	ondisk_word = *((xfs_rtword_t *)bp->b_addr +
-					XFS_BITTOWORD(mp, last_group_rtx));
+					xfs_rtx_to_rbmword(mp, last_group_rtx));
 
 	trace_xrep_rgbitmap_load_word(mp, wordoff, bit, ondisk_word,
 			xfile_word, mask);
