@@ -2807,30 +2807,27 @@ DEFINE_REPAIR_RGBITMAP_EVENT(xrep_rgbitmap_record_free);
 DEFINE_REPAIR_RGBITMAP_EVENT(xrep_rgbitmap_record_free_bulk);
 
 TRACE_EVENT(xrep_rgbitmap_or,
-	TP_PROTO(struct xfs_mount *mp, xfs_rtxnum_t rtx, loff_t pos,
+	TP_PROTO(struct xfs_mount *mp, unsigned long long wordoff,
 		 xfs_rtword_t mask, xfs_rtword_t word),
-	TP_ARGS(mp, rtx, pos, mask, word),
+	TP_ARGS(mp, wordoff, mask, word),
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(dev_t, rtdev)
-		__field(xfs_rtxnum_t, rtx)
-		__field(loff_t, pos)
+		__field(unsigned long long, wordoff)
 		__field(unsigned int, mask)
 		__field(unsigned int, word)
 	),
 	TP_fast_assign(
 		__entry->dev = mp->m_super->s_dev;
 		__entry->rtdev = mp->m_rtdev_targp->bt_dev;
-		__entry->rtx = rtx;
-		__entry->pos = pos;
+		__entry->wordoff = wordoff;
 		__entry->mask = mask;
 		__entry->word = word;
 	),
-	TP_printk("dev %d:%d rtdev %d:%d rtx 0x%llx rbmpos 0x%llx mask 0x%x word 0x%x",
+	TP_printk("dev %d:%d rtdev %d:%d wordoff 0x%llx mask 0x%x word 0x%x",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  MAJOR(__entry->rtdev), MINOR(__entry->rtdev),
-		  __entry->rtx,
-		  __entry->pos,
+		  __entry->wordoff,
 		  __entry->mask,
 		  __entry->word)
 )
