@@ -54,8 +54,8 @@ struct xrep_rgbmp {
 	/* The next rtgroup block we expect to see during our rtrmapbt walk. */
 	xfs_rgblock_t		next_rgbno;
 
-	/* Position of xfile as we write buffers to disk. */
-	loff_t			prep_pos;
+	/* rtword position of xfile as we write buffers to disk. */
+	xrep_wordoff_t		prep_wordoff;
 };
 
 /* Mask to round an rtx down to the nearest bitmap word. */
@@ -126,20 +126,7 @@ rtx_to_wordoff(
 	struct xfs_mount	*mp,
 	xfs_rtxnum_t		rtx)
 {
-	xfs_fileoff_t		fileoff;
-	unsigned int		wordoff;
-	loff_t			pos;
-
-	if (!xfs_has_rtgroups(mp))
-		return rtx >> XFS_NBWORDLOG;
-
-	fileoff = xfs_rtx_to_rbmblock(mp, rtx);
-	wordoff = xfs_rtx_to_rbmword(mp, rtx);
-
-	pos = XFS_FSB_TO_B(mp, fileoff);
-	pos += sizeof(struct xfs_rtbuf_blkinfo);
-	pos += wordoff << XFS_WORDLOG;
-	return pos >> XFS_WORDLOG;
+	return rtx >> XFS_NBWORDLOG;
 }
 
 static inline xrep_wordcnt_t
@@ -191,6 +178,17 @@ bitmap_copyin(
 			wordoff << XFS_WORDLOG);
 }
 
+static inline int
+bitmap_copyout(
+	struct xrep_rgbmp	*rb,
+	xrep_wordoff_t		wordoff,
+	xfs_rtword_raw_t	*word,
+	xrep_wordcnt_t		nr_words)
+{
+	return xfile_obj_load(rb->sc->xfile, word, nr_words << XFS_WORDLOG,
+			wordoff << XFS_WORDLOG);
+}
+
 /*
  * Preserve the portions of the rtbitmap block for the start of this rtgroup
  * that map to the previous rtgroup.
@@ -223,6 +221,7 @@ xrep_rgbitmap_load_before(
 
 	rb->group_rbmoff = xfs_rtx_to_rbmblock(mp, group_rtx);
 	rbmoff_rtx = xfs_rbmblock_to_rtx(mp, rb->group_rbmoff);
+	rb->prep_wordoff = rtx_to_wordoff(mp, rbmoff_rtx);
 
 	trace_xrep_rgbitmap_load(rtg, rb->group_rbmoff, rbmoff_rtx,
 			group_rtx - 1);
@@ -616,8 +615,8 @@ xrep_rgbitmap_prep_buf(
 	struct xfs_mount	*mp = sc->mp;
 	int			error;
 
-	error = xfile_obj_load(sc->xfile, bp->b_addr, mp->m_sb.sb_blocksize,
-			rb->prep_pos);
+	error = bitmap_copyout(rb, rb->prep_wordoff,
+			xfs_rbmblock_wordptr(bp, 0), mp->m_blockwsize);
 	if (error)
 		return error;
 
@@ -627,13 +626,14 @@ xrep_rgbitmap_prep_buf(
 		hdr->rt_magic = cpu_to_be32(XFS_RTBITMAP_MAGIC);
 		hdr->rt_owner = cpu_to_be64(sc->ip->i_ino);
 		hdr->rt_blkno = cpu_to_be64(xfs_buf_daddr(bp));
+		hdr->rt_lsn = 0;
 		uuid_copy(&hdr->rt_uuid, &sc->mp->m_sb.sb_meta_uuid);
 		bp->b_ops = &xfs_rtbitmap_buf_ops;
 	} else {
 		bp->b_ops = &xfs_rtbuf_ops;
 	}
 
-	rb->prep_pos += mp->m_sb.sb_blocksize;
+	rb->prep_wordoff += mp->m_blockwsize;
 	xfs_trans_buf_set_type(sc->tp, bp, XFS_BLFT_RTBITMAP_BUF);
 	return 0;
 }
@@ -646,7 +646,6 @@ xrep_rgbitmap(
 	struct xrep_rgbmp	rb = {
 		.sc		= sc,
 		.next_rgbno	= 0,
-		.prep_pos	= 0,
 	};
 	struct xrep_tempswap	*ti = NULL;
 	int			error;
@@ -704,7 +703,6 @@ xrep_rgbitmap(
 		return error;
 
 	/* Copy the bitmap file that we generated. */
-	rb.prep_pos = XFS_FSB_TO_B(sc->mp, rb.group_rbmoff);
 	error = xrep_tempfile_copyin(sc, rb.group_rbmoff, rb.group_rbmlen,
 			xrep_rgbitmap_prep_buf, &rb);
 	if (error)
