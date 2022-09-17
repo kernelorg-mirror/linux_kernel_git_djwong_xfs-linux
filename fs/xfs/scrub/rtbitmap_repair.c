@@ -136,18 +136,38 @@ static inline int
 bitmap_load(
 	struct xrep_rgbmp	*rb,
 	xrep_wordoff_t		wordoff,
-	xfs_rtword_t		*word,
-	xrep_wordcnt_t		nr_words)
+	xfs_rtword_t		*word)
 {
-	return xfile_obj_load(rb->sc->xfile, word, nr_words << XFS_WORDLOG,
+	xfs_rtword_raw_t	urk;
+	int			error;
+
+	error = xfile_obj_load(rb->sc->xfile, &urk, sizeof(xfs_rtword_t),
 			wordoff << XFS_WORDLOG);
+	if (error)
+		return error;
+
+	*word = xfs_rtbitmap_getword(rb->sc->mp, &urk);
+	return 0;
 }
 
 static inline int
 bitmap_store(
 	struct xrep_rgbmp	*rb,
 	xrep_wordoff_t		wordoff,
-	const xfs_rtword_t	*word,
+	const xfs_rtword_t	word)
+{
+	xfs_rtword_raw_t	urk;
+
+	xfs_rtbitmap_setword(rb->sc->mp, &urk, word);
+	return xfile_obj_store(rb->sc->xfile, &urk, sizeof(xfs_rtword_t),
+			wordoff << XFS_WORDLOG);
+}
+
+static inline int
+bitmap_copyin(
+	struct xrep_rgbmp	*rb,
+	xrep_wordoff_t		wordoff,
+	const xfs_rtword_raw_t	*word,
 	xrep_wordcnt_t		nr_words)
 {
 	return xfile_obj_store(rb->sc->xfile, word, nr_words << XFS_WORDLOG,
@@ -169,7 +189,7 @@ xrep_rgbitmap_load_before(
 	xrep_wordoff_t		wordoff;
 	xfs_rtblock_t		group_rtbno;
 	xfs_rtxnum_t		group_rtx, rbmoff_rtx;
-	xfs_rtword_t		ondisk_word;
+	xfs_rtword_raw_t	ondisk_word;
 	xfs_rtword_t		xfile_word;
 	xfs_rtword_t		mask;
 	xrep_wordcnt_t		wordcnt;
@@ -214,10 +234,10 @@ xrep_rgbitmap_load_before(
 	wordoff = rtx_to_wordoff(rbmoff_rtx);
 	wordcnt = rtxlen_to_wordcnt(group_rtx - rbmoff_rtx);
 	if (wordcnt > 0) {
-		xfs_rtword_t	*p;
+		xfs_rtword_raw_t	*p;
 
 		p = xfs_rbmblock_wordptr(bp, 0);
-		error = bitmap_store(rb, wordoff, p, wordcnt);
+		error = bitmap_copyin(rb, wordoff, p, wordcnt);
 		if (error)
 			goto out_rele;
 
@@ -242,7 +262,7 @@ xrep_rgbitmap_load_before(
 	 */
 	mask = ~((((xfs_rtword_t)1 << (XFS_NBWORD - bit)) - 1) << bit);
 
-	error = bitmap_load(rb, wordoff, &xfile_word, 1);
+	error = bitmap_load(rb, wordoff, &xfile_word);
 	if (error)
 		goto out_rele;
 	ondisk_word = *xfs_rbmblock_wordptr(bp, wordcnt);
@@ -253,7 +273,7 @@ xrep_rgbitmap_load_before(
 	xfile_word &= ~mask;
 	xfile_word |= (ondisk_word & mask);
 
-	error = bitmap_store(rb, wordoff, &xfile_word, 1);
+	error = bitmap_store(rb, wordoff, xfile_word);
 	if (error)
 		goto out_rele;
 
@@ -278,7 +298,7 @@ xrep_rgbitmap_load_after(
 	xfs_rtblock_t		last_rtbno;
 	xfs_rtxnum_t		last_group_rtx, last_rbmblock_rtx;
 	xfs_fileoff_t		last_group_rbmoff;
-	xfs_rtword_t		ondisk_word;
+	xfs_rtword_raw_t	ondisk_word;
 	xfs_rtword_t		xfile_word;
 	xfs_rtword_t		mask;
 	xrep_wordcnt_t		wordcnt;
@@ -331,7 +351,7 @@ xrep_rgbitmap_load_after(
 	 */
 	mask = (((xfs_rtword_t)1 << (XFS_NBWORD - bit)) - 1) << bit;
 
-	error = bitmap_load(rb, wordoff, &xfile_word, 1);
+	error = bitmap_load(rb, wordoff, &xfile_word);
 	if (error)
 		goto out_rele;
 	last_group_word = xfs_rtx_to_rbmword(mp, last_group_rtx);
@@ -343,7 +363,7 @@ xrep_rgbitmap_load_after(
 	xfile_word &= ~mask;
 	xfile_word |= (ondisk_word & mask);
 
-	error = bitmap_store(rb, wordoff, &xfile_word, 1);
+	error = bitmap_store(rb, wordoff, xfile_word);
 	if (error)
 		goto out_rele;
 
@@ -352,10 +372,10 @@ copy_words:
 	wordoff++;
 	wordcnt = rtxlen_to_wordcnt(last_rbmblock_rtx - last_group_rtx + 1);
 	if (wordcnt > 0) {
-		xfs_rtword_t	*p;
+		xfs_rtword_raw_t	*p;
 
 		p = xfs_rbmblock_wordptr(bp, mp->m_blockwsize - wordcnt);
-		error = bitmap_store(rb, wordoff, p, wordcnt);
+		error = bitmap_copyin(rb, wordoff, p, wordcnt);
 		if (error)
 			goto out_rele;
 
@@ -378,14 +398,13 @@ xrep_rgbitmap_or(
 	xfs_rtword_t		word;
 	int			error;
 
-	error = bitmap_load(rb, wordoff, &word, 1);
+	error = bitmap_load(rb, wordoff, &word);
 	if (error)
 		return error;
 
 	trace_xrep_rgbitmap_or(rb->sc->mp, wordoff, mask, word);
 
-	word |= mask;
-	return bitmap_store(rb, wordoff, &word, 1);
+	return bitmap_store(rb, wordoff, word | mask);
 }
 
 /*
@@ -493,7 +512,7 @@ xrep_rgbitmap_mark_free(
 			wordcnt = min_t(xrep_wordcnt_t, wordcnt,
 					mp->m_blockwsize - rem);
 
-		error = bitmap_store(rb, wordoff, rb->sc->buf, wordcnt);
+		error = bitmap_copyin(rb, wordoff, rb->sc->buf, wordcnt);
 		if (error)
 			return error;
 
