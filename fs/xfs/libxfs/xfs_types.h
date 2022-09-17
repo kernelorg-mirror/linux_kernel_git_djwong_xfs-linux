@@ -23,6 +23,7 @@ typedef uint64_t	xfs_ufsize_t;	/* unsigned bytes in a file */
 typedef int32_t		xfs_suminfo_t;	/* type of bitmap summary info */
 typedef uint32_t	xfs_rtsumoff_t;	/* offset of an rtsummary info word */
 typedef uint32_t	xfs_rtword_t;	/* word type for bitmap manipulations */
+typedef uint32_t	xfs_rtword_raw_t; /* ondisk rtbitmap word */
 
 typedef int64_t		xfs_lsn_t;	/* log sequence number */
 typedef int64_t		xfs_csn_t;	/* CIL sequence number */
