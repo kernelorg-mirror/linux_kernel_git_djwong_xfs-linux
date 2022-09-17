@@ -32,6 +32,16 @@
 #include "scrub/tempswap.h"
 #include "scrub/reap.h"
 
+/*
+ * We use an xfile to construct new bitmap blocks for the portion of the
+ * rtbitmap file that we're replacing.  Whereas the ondisk bitmap must be
+ * accessed through the buffer cache, the xfile bitmap supports direct
+ * word-level accesses.  Therefore, we create a small abstraction for linear
+ * access.
+ */
+typedef unsigned long long xrep_wordoff_t;
+typedef unsigned int xrep_wordcnt_t;
+
 struct xrep_rgbmp {
 	struct xfs_scrub	*sc;
 
@@ -43,6 +53,9 @@ struct xrep_rgbmp {
 
 	/* The next rtgroup block we expect to see during our rtrmapbt walk. */
 	xfs_rgblock_t		next_rgbno;
+
+	/* Position of xfile as we write buffers to disk. */
+	loff_t			prep_pos;
 };
 
 /* Mask to round an rtx down to the nearest bitmap word. */
@@ -107,16 +120,6 @@ xrep_setup_rgbitmap(
 	 */
 	return xrep_tempswap_grab_log_assist(sc);
 }
-
-/*
- * We use an xfile to construct new bitmap blocks for the portion of the
- * rtbitmap file that we're replacing.  Whereas the ondisk bitmap must be
- * accessed through the buffer cache, the xfile bitmap supports direct
- * word-level accesses.  Therefore, we create a small abstraction for linear
- * access.
- */
-typedef unsigned long long xrep_wordoff_t;
-typedef unsigned int xrep_wordcnt_t;
 
 static inline xrep_wordoff_t
 rtx_to_wordoff(
@@ -606,8 +609,18 @@ out:
 static int
 xrep_rgbitmap_prep_buf(
 	struct xfs_scrub	*sc,
-	struct xfs_buf		*bp)
+	struct xfs_buf		*bp,
+	void			*data)
 {
+	struct xrep_rgbmp	*rb = data;
+	struct xfs_mount	*mp = sc->mp;
+	int			error;
+
+	error = xfile_obj_load(sc->xfile, bp->b_addr, mp->m_sb.sb_blocksize,
+			rb->prep_pos);
+	if (error)
+		return error;
+
 	if (xfs_has_rtgroups(sc->mp)) {
 		struct xfs_rtbuf_blkinfo	*hdr = bp->b_addr;
 
@@ -619,6 +632,8 @@ xrep_rgbitmap_prep_buf(
 	} else {
 		bp->b_ops = &xfs_rtbuf_ops;
 	}
+
+	rb->prep_pos += mp->m_sb.sb_blocksize;
 	xfs_trans_buf_set_type(sc->tp, bp, XFS_BLFT_RTBITMAP_BUF);
 	return 0;
 }
@@ -631,6 +646,7 @@ xrep_rgbitmap(
 	struct xrep_rgbmp	rb = {
 		.sc		= sc,
 		.next_rgbno	= 0,
+		.prep_pos	= 0,
 	};
 	struct xrep_tempswap	*ti = NULL;
 	int			error;
@@ -688,8 +704,9 @@ xrep_rgbitmap(
 		return error;
 
 	/* Copy the bitmap file that we generated. */
-	error = xrep_tempfile_copyin_xfile(sc, rb.group_rbmoff,
-			rb.group_rbmlen, xrep_rgbitmap_prep_buf);
+	rb.prep_pos = XFS_FSB_TO_B(sc->mp, rb.group_rbmoff);
+	error = xrep_tempfile_copyin(sc, rb.group_rbmoff, rb.group_rbmlen,
+			xrep_rgbitmap_prep_buf, &rb);
 	if (error)
 		return error;
 	error = xrep_tempfile_set_isize(sc,
