@@ -2366,7 +2366,7 @@ DEFINE_EVENT(xrep_tempfile_class, name, \
 		 struct xfs_bmbt_irec *irec), \
 	TP_ARGS(sc, whichfork, irec))
 DEFINE_XREP_TEMPFILE_EVENT(xrep_tempfile_prealloc);
-DEFINE_XREP_TEMPFILE_EVENT(xrep_tempfile_copyin_xfile);
+DEFINE_XREP_TEMPFILE_EVENT(xrep_tempfile_copyin);
 
 TRACE_EVENT(xreap_ifork_extent,
 	TP_PROTO(struct xfs_scrub *sc, struct xfs_inode *ip, int whichfork,

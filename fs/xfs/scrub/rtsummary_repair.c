@@ -26,6 +26,7 @@
 #include "scrub/tempfile.h"
 #include "scrub/tempswap.h"
 #include "scrub/reap.h"
+#include "scrub/xfile.h"
 
 /* Set us up to repair the rtsummary file. */
 int
@@ -71,12 +72,29 @@ xrep_setup_rtsummary(
 	return xrep_tempswap_grab_log_assist(sc);
 }
 
+struct xrep_rtsummary {
+	/* Position of xfile as we write buffers to disk. */
+	loff_t			prep_pos;
+};
+
 static int
 xrep_rtsummary_prep_buf(
 	struct xfs_scrub	*sc,
-	struct xfs_buf		*bp)
+	struct xfs_buf		*bp,
+	void			*data)
 {
+	struct xrep_rtsummary	*rs = data;
+	struct xfs_mount	*mp = sc->mp;
+	int			error;
+
 	bp->b_ops = &xfs_rtbuf_ops;
+
+	error = xfile_obj_load(sc->xfile, bp->b_addr, mp->m_sb.sb_blocksize,
+			rs->prep_pos);
+	if (error)
+		return error;
+
+	rs->prep_pos += mp->m_sb.sb_blocksize;
 	xfs_trans_buf_set_type(sc->tp, bp, XFS_BLFT_RTSUMMARY_BUF);
 	return 0;
 }
@@ -86,6 +104,7 @@ int
 xrep_rtsummary(
 	struct xfs_scrub	*sc)
 {
+	struct xrep_rtsummary	rs = { .prep_pos = 0, };
 	struct xrep_tempswap	*ti = NULL;
 	xfs_filblks_t		rsumblocks;
 	int			error;
@@ -123,8 +142,8 @@ xrep_rtsummary(
 		return error;
 
 	/* Copy the rtsummary file that we generated. */
-	error = xrep_tempfile_copyin_xfile(sc, 0, rsumblocks,
-			xrep_rtsummary_prep_buf);
+	error = xrep_tempfile_copyin(sc, 0, rsumblocks,
+			xrep_rtsummary_prep_buf, &rs);
 	if (error)
 		return error;
 	error = xrep_tempfile_set_isize(sc, sc->mp->m_rsumsize);
