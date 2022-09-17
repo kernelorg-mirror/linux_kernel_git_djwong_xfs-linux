@@ -321,16 +321,16 @@ xrep_tempfile_prealloc(
 }
 
 /*
- * Copy the given file block range from the xfile into the temp file, one block
- * at a time.  The range of the tempfile must already be populated with written
- * extents.
+ * Write each block of a file.  The range of the tempfile must already be
+ * populated with written extents.
  */
 int
-xrep_tempfile_copyin_xfile(
+xrep_tempfile_copyin(
 	struct xfs_scrub		*sc,
 	xfs_fileoff_t			off,
 	xfs_filblks_t			len,
-	xrep_tempfile_prep_buf_fn	prep_fn)
+	xrep_tempfile_prep_buf_fn	prep_fn,
+	void				*data)
 {
 	LIST_HEAD(buffers_list);
 	struct xfs_mount		*mp = sc->mp;
@@ -365,21 +365,14 @@ xrep_tempfile_copyin_xfile(
 		if (error)
 			goto out_err;
 
+		trace_xrep_tempfile_copyin(sc, XFS_DATA_FORK, &map);
+
 		/* Read in a block's worth of data from the xfile. */
-		error = xfile_obj_load(sc->xfile, bp->b_addr,
-				mp->m_sb.sb_blocksize, pos);
+		error = prep_fn(sc, bp, data);
 		if (error) {
 			xfs_trans_brelse(sc->tp, bp);
 			goto out_err;
 		}
-
-		error = prep_fn(sc, bp);
-		if (error) {
-			xfs_trans_brelse(sc->tp, bp);
-			goto out_err;
-		}
-
-		trace_xrep_tempfile_copyin_xfile(sc, XFS_DATA_FORK, &map);
 
 		/* Queue buffer, and flush if we have too much dirty data. */
 		xfs_buf_delwri_queue_here(bp, &buffers_list);

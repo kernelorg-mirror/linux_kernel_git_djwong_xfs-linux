@@ -24,10 +24,10 @@ int xrep_tempfile_prealloc(struct xfs_scrub *sc, xfs_fileoff_t off,
 enum xfs_blft;
 
 typedef int (*xrep_tempfile_prep_buf_fn)(struct xfs_scrub *sc,
-		struct xfs_buf *bp);
+		struct xfs_buf *bp, void *data);
 
-int xrep_tempfile_copyin_xfile(struct xfs_scrub *sc, xfs_fileoff_t off,
-		xfs_filblks_t len, xrep_tempfile_prep_buf_fn fn);
+int xrep_tempfile_copyin(struct xfs_scrub *sc, xfs_fileoff_t off,
+		xfs_filblks_t len, xrep_tempfile_prep_buf_fn fn, void *data);
 
 int xrep_tempfile_set_isize(struct xfs_scrub *sc, unsigned long long isize);
 
