@@ -229,11 +229,13 @@ xfs_rtalloc_block_count(
 	unsigned int		num_ops)
 {
 	unsigned int		blksz = XFS_FSB_TO_B(mp, 1);
-	unsigned int		rtbmp_bytes;
+	unsigned int		rtbmp_words;
 	unsigned int		t1, t2 = 0;
+	xfs_rtxlen_t		rtxlen;
 
-	rtbmp_bytes = xfs_extlen_to_rtxlen(mp, XFS_MAX_BMBT_EXTLEN) / NBBY;
-	t1 = (howmany(rtbmp_bytes, blksz) + 1) * num_ops;
+	rtxlen = xfs_extlen_to_rtxlen(mp, XFS_MAX_BMBT_EXTLEN);
+	rtbmp_words = xfs_rtbitmap_wordcount(&mp->m_sb, rtxlen);
+	t1 = (howmany(rtbmp_words << XFS_WORDLOG, blksz) + 1) * num_ops;
 
 	if (xfs_has_rmapbt(mp))
 		t2 = num_ops * (2 * mp->m_rtrmap_maxlevels - 1);

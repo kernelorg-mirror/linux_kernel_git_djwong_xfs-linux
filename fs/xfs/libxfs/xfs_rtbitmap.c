@@ -1203,3 +1203,21 @@ xfs_rtbitmap_unlock_shared(
 	if (rbmlock_flags & XFS_RBMLOCK_BITMAP)
 		xfs_iunlock(mp->m_rbmip, XFS_ILOCK_SHARED);
 }
+
+/* Compute the number of blocks needed to store the rt bitmap. */
+unsigned long long
+xfs_rtbitmap_blockcount(
+	const struct xfs_sb	*sbp,
+	xfs_rtbxlen_t		rtextents)
+{
+	return howmany_64(rtextents, NBBY * sbp->sb_blocksize);
+}
+
+/* Compute the number of words needed to store the rt bitmap. */
+unsigned long long
+xfs_rtbitmap_wordcount(
+	const struct xfs_sb	*sbp,
+	xfs_rtbxlen_t		rtextents)
+{
+	return howmany_64(rtextents, XFS_NBWORD);
+}

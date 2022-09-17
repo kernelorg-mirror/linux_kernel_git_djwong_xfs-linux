@@ -275,6 +275,11 @@ void xfs_rtbitmap_lock_shared(struct xfs_mount *mp,
 void xfs_rtbitmap_unlock_shared(struct xfs_mount *mp,
 		unsigned int rbmlock_flags);
 
+unsigned long long xfs_rtbitmap_blockcount(const struct xfs_sb *sb,
+		xfs_rtbxlen_t rtextents);
+unsigned long long xfs_rtbitmap_wordcount(const struct xfs_sb *sb,
+		xfs_rtbxlen_t rtextents);
+
 #else /* CONFIG_XFS_RT */
 # define xfs_rtfree_extent(t,b,l)			(-ENOSYS)
 # define xfs_rtfree_blocks(t,rb,rl)			(-ENOSYS)
@@ -286,6 +291,8 @@ void xfs_rtbitmap_unlock_shared(struct xfs_mount *mp,
 # define xfs_rtbitmap_unlock(mp)		do { } while (0)
 # define xfs_rtbitmap_lock_shared(mp, lf)	do { } while (0)
 # define xfs_rtbitmap_unlock_shared(mp, lf)	do { } while (0)
+# define xfs_rtbitmap_blockcount(sb, r)			(0)
+# define xfs_rtbitmap_wordcount(sb, r)			(0)
 #endif /* CONFIG_XFS_RT */
 
 #endif /* __XFS_RTBITMAP_H__ */

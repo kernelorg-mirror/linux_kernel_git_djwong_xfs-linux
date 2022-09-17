@@ -29,6 +29,7 @@
 #include "xfs_rtgroup.h"
 #include "xfs_rtrmap_btree.h"
 #include "xfs_rtrefcount_btree.h"
+#include "xfs_rtbitmap.h"
 
 /*
  * Physical superblock buffer manipulations. Shared with libxfs in userspace.
@@ -522,8 +523,7 @@ xfs_validate_sb_common(
 		uint64_t	rbmblocks;
 
 		rexts = div_u64(sbp->sb_rblocks, sbp->sb_rextsize);
-		rbmblocks = howmany_64(sbp->sb_rextents,
-				       NBBY * sbp->sb_blocksize);
+		rbmblocks = xfs_rtbitmap_blockcount(sbp, sbp->sb_rextents);
 
 		if (sbp->sb_rextents != rexts ||
 		    sbp->sb_rextslog != xfs_highbit32(sbp->sb_rextents) ||

@@ -56,7 +56,7 @@ xrep_setup_rgbitmap(
 {
 	struct xfs_mount	*mp = sc->mp;
 	unsigned long long	blocks = 0;
-	loff_t			bmp_bytes;
+	unsigned long long	rtbmp_words;
 	size_t			bufsize = mp->m_sb.sb_blocksize;
 	int			error;
 
@@ -65,8 +65,9 @@ xrep_setup_rgbitmap(
 		return error;
 
 	/* Create an xfile to hold our reconstructed bitmap. */
-	bmp_bytes = XFS_FSB_TO_B(mp, mp->m_sb.sb_rbmblocks);
-	error = xfile_create(sc->mp, "rtbitmap", bmp_bytes, &sc->xfile);
+	rtbmp_words = xfs_rtbitmap_wordcount(&mp->m_sb, mp->m_sb.sb_rextents);
+	error = xfile_create(sc->mp, "rtbitmap", rtbmp_words << XFS_WORDLOG,
+			&sc->xfile);
 	if (error)
 		return error;
 
