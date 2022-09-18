@@ -1275,6 +1275,11 @@ static inline bool xfs_dinode_has_large_extent_counts(
  */
 #define XFS_RTBITMAP_MAGIC	0x424D505A	/* BMPZ */
 
+/*
+ * Realtime bitmap words start immediately after this structure and are encoded
+ * in little endian format.  Prior to rtgroups, there were no block headers and
+ * the words were written in host endian order.
+ */
 struct xfs_rtbuf_blkinfo {
 	__be32		rt_magic;	/* validity check on block */
 	__be32		rt_crc;		/* CRC of block */
