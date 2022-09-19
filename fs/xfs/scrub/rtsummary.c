@@ -92,7 +92,7 @@ xchk_rtsum_record_free(
 	xfs_filblks_t			rtlen;
 	unsigned int			offs;
 	unsigned int			lenlog;
-	xfs_suminfo_t			v = 0;
+	xfs_suminfo_raw_t		v;
 	int				error = 0;
 
 	if (xchk_should_terminate(sc, &error))
@@ -113,18 +113,18 @@ xchk_rtsum_record_free(
 
 	/* Read current rtsummary contents. */
 	error = xfile_obj_load(sc->xfile, &v, sizeof(xfs_suminfo_t),
-			sizeof(xfs_suminfo_t) * offs);
+			offs << XFS_WORDLOG);
 	if (error)
 		return error;
 
 	/* Bump the summary count... */
-	v++;
+	xfs_suminfo_add(mp, &v, 1);
 	trace_xchk_rtsum_record_free(mp, rec->ar_startext, rec->ar_extcount,
 			lenlog, offs, v);
 
 	/* ...and write it back. */
 	error = xfile_obj_store(sc->xfile, &v, sizeof(xfs_suminfo_t),
-			sizeof(xfs_suminfo_t) * offs);
+			offs << XFS_WORDLOG);
 	if (error)
 		return error;
 

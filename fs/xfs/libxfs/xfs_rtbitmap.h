@@ -199,18 +199,18 @@ xfs_rtsumoffs_to_infoword(
 }
 
 /* Return a pointer to a summary info word within a rt summary block buffer. */
-static inline xfs_suminfo_t *
+static inline xfs_suminfo_raw_t *
 xfs_rsumbuf_infoptr(
 	void			*buf,
 	unsigned int		infoword)
 {
-	xfs_suminfo_t		*infop = buf;
+	xfs_suminfo_raw_t	*infop = buf;
 
 	return &infop[infoword];
 }
 
 /* Return a pointer to a summary info word within a rt summary block. */
-static inline xfs_suminfo_t *
+static inline xfs_suminfo_raw_t *
 xfs_rsumblock_infoptr(
 	struct xfs_buf		*bp,
 	unsigned int		infoword)
@@ -312,6 +312,9 @@ xfs_rtword_t xfs_rtbitmap_getword(struct xfs_mount *mp,
 		xfs_rtword_raw_t *wordptr);
 void xfs_rtbitmap_setword(struct xfs_mount *mp, xfs_rtword_raw_t *wordptr,
 		xfs_rtword_t incore);
+xfs_suminfo_t xfs_suminfo_get(struct xfs_mount *mp, xfs_suminfo_raw_t *infoptr);
+void xfs_suminfo_add(struct xfs_mount *mp, xfs_suminfo_raw_t *infoptr,
+		int delta);
 
 xfs_filblks_t xfs_rtsummary_blockcount(struct xfs_mount *mp,
 		unsigned int rsumlevels, xfs_extlen_t rbmblocks);
