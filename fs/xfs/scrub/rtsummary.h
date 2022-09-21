@@ -9,6 +9,6 @@
 typedef unsigned int xfs_rtsumoff_t;
 
 int xfsum_copyout(struct xfs_scrub *sc, xfs_rtsumoff_t sumoff,
-		xfs_suminfo_t *info, unsigned int nr_words);
+		union xfs_suminfo_ondisk *info, unsigned int nr_words);
 
 #endif /* __XFS_SCRUB_RTSUMMARY_H__ */
