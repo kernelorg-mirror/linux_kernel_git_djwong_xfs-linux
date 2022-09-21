@@ -122,18 +122,18 @@ xfs_rbmblock_to_rtx(
 }
 
 /* Return a pointer to a bitmap word within a rt bitmap block buffer. */
-static inline xfs_rtword_t *
+static inline union xfs_rtword_ondisk *
 xfs_rbmbuf_wordptr(
 	void			*buf,
 	unsigned int		rbmword)
 {
-	xfs_rtword_t		*wordp = buf;
+	union xfs_rtword_ondisk	*wordp = buf;
 
 	return &wordp[rbmword];
 }
 
 /* Return a pointer to a bitmap word within a rt bitmap block. */
-static inline xfs_rtword_t *
+static inline union xfs_rtword_ondisk *
 xfs_rbmblock_wordptr(
 	struct xfs_buf		*bp,
 	unsigned int		rbmword)
@@ -266,6 +266,10 @@ xfs_filblks_t xfs_rtbitmap_blockcount(struct xfs_mount *mp, xfs_rtbxlen_t
 		rtextents);
 unsigned long long xfs_rtbitmap_wordcount(struct xfs_mount *mp,
 		xfs_rtbxlen_t rtextents);
+xfs_rtword_t xfs_rtbitmap_getword(struct xfs_mount *mp,
+		union xfs_rtword_ondisk *wordptr);
+void xfs_rtbitmap_setword(struct xfs_mount *mp,
+		union xfs_rtword_ondisk *wordptr, xfs_rtword_t incore);
 #else /* CONFIG_XFS_RT */
 # define xfs_rtfree_extent(t,b,l)			(-ENOSYS)
 # define xfs_rtfree_blocks(t,rb,rl)			(-ENOSYS)
