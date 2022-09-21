@@ -726,6 +726,14 @@ union xfs_rtword_ondisk {
 };
 
 /*
+ * Realtime summary counts are accessed by the word, which is currently
+ * stored in host-endian format.
+ */
+union xfs_suminfo_ondisk {
+	__u32		raw;
+};
+
+/*
  * XFS Timestamps
  * ==============
  *
