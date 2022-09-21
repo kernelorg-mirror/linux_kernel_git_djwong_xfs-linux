@@ -562,6 +562,9 @@ xfs_suminfo_get(
 	struct xfs_mount	*mp,
 	union xfs_suminfo_ondisk *infoptr)
 {
+	if (xfs_has_rtgroups(mp))
+		return be32_to_cpu(infoptr->rtg);
+
 	return infoptr->raw;
 }
 
@@ -571,7 +574,10 @@ xfs_suminfo_add(
 	union xfs_suminfo_ondisk *infoptr,
 	int			delta)
 {
-	infoptr->raw += delta;
+	if (xfs_has_rtgroups(mp))
+		be32_add_cpu(&infoptr->rtg, delta);
+	else
+		infoptr->raw += delta;
 }
 
 /*
