@@ -1340,6 +1340,7 @@ iomap_writepage_map(struct iomap_writepage_ctx *wpc,
 {
 	struct iomap_page *iop = iomap_page_create(inode, folio, 0);
 	struct iomap_ioend *ioend, *next;
+	struct address_space *mapping = folio->mapping;
 	unsigned len = i_blocksize(inode);
 	unsigned nblocks = i_blocks_per_folio(inode, folio);
 	u64 pos = folio_pos(folio);
@@ -1392,6 +1393,7 @@ iomap_writepage_map(struct iomap_writepage_ctx *wpc,
 		if (wpc->ops->discard_folio)
 			wpc->ops->discard_folio(folio, pos);
 		if (!count) {
+			folio_redirty_for_writepage(wbc, folio);
 			folio_unlock(folio);
 			goto done;
 		}
@@ -1421,7 +1423,9 @@ iomap_writepage_map(struct iomap_writepage_ctx *wpc,
 	if (!count)
 		folio_end_writeback(folio);
 done:
-	mapping_set_error(folio->mapping, error);
+	WARN_ON(mapping && !folio->mapping);
+	WARN_ON(folio->mapping != mapping);
+	mapping_set_error(mapping, error);
 	return error;
 }
 
