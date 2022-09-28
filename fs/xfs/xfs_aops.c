@@ -17,6 +17,7 @@
 #include "xfs_bmap.h"
 #include "xfs_bmap_util.h"
 #include "xfs_reflink.h"
+#include "xfs_errortag.h"
 
 struct xfs_writepage_ctx {
 	struct iomap_writepage_ctx ctx;
@@ -311,6 +312,15 @@ xfs_map_blocks(
 	 * landed in a hole and we skip the block.
 	 */
 retry:
+#ifdef DEBUG
+	if (mp->m_errortag[XFS_ERRTAG_WB_DELAY_MS]) {
+		xfs_err(mp, "delaying wb of ino 0x%llx for %ums off 0x%llx",
+				ip->i_ino,
+				mp->m_errortag[XFS_ERRTAG_WB_DELAY_MS],
+				offset);
+		mdelay(mp->m_errortag[XFS_ERRTAG_WB_DELAY_MS]);
+	}
+#endif
 	cow_fsb = NULLFILEOFF;
 	whichfork = XFS_DATA_FORK;
 	xfs_ilock(ip, XFS_ILOCK_SHARED);
