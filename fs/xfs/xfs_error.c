@@ -62,6 +62,7 @@ static unsigned int xfs_errortag_random_default[] = {
 	XFS_RANDOM_ATTR_LEAF_TO_NODE,
 	XFS_RANDOM_SWAPEXT_FINISH_ONE,
 	XFS_RANDOM_IMETA_RESV_CRITICAL,
+	XFS_RANDOM_WB_DELAY_MS,
 };
 
 struct xfs_errortag_attr {
@@ -180,6 +181,7 @@ XFS_ERRORTAG_ATTR_RW(da_leaf_split,	XFS_ERRTAG_DA_LEAF_SPLIT);
 XFS_ERRORTAG_ATTR_RW(attr_leaf_to_node,	XFS_ERRTAG_ATTR_LEAF_TO_NODE);
 XFS_ERRORTAG_ATTR_RW(swapext_finish_one, XFS_ERRTAG_SWAPEXT_FINISH_ONE);
 XFS_ERRORTAG_ATTR_RW(imeta_resv_critical, XFS_ERRTAG_IMETA_RESV_CRITICAL);
+XFS_ERRORTAG_ATTR_RW(wb_delay_ms,	XFS_ERRTAG_WB_DELAY_MS);
 
 static struct attribute *xfs_errortag_attrs[] = {
 	XFS_ERRORTAG_ATTR_LIST(noerror),
@@ -226,6 +228,7 @@ static struct attribute *xfs_errortag_attrs[] = {
 	XFS_ERRORTAG_ATTR_LIST(attr_leaf_to_node),
 	XFS_ERRORTAG_ATTR_LIST(swapext_finish_one),
 	XFS_ERRORTAG_ATTR_LIST(imeta_resv_critical),
+	XFS_ERRORTAG_ATTR_LIST(wb_delay_ms),
 	NULL,
 };
 ATTRIBUTE_GROUPS(xfs_errortag);
@@ -260,6 +263,14 @@ xfs_errortag_del(
 {
 	xfs_sysfs_del(&mp->m_errortag_kobj);
 	kmem_free(mp->m_errortag);
+}
+
+bool
+xfs_errortag_enabled(
+	struct xfs_mount	*mp,
+	unsigned int		tag)
+{
+	return mp->m_errortag && mp->m_errortag[tag] != 0;
 }
 
 bool
