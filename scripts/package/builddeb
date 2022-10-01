@@ -165,16 +165,21 @@ if is_enabled CONFIG_MODULES; then
 		rmdir "$tmpdir/lib/modules/$version"
 	fi
 	if [ -n "$BUILD_DEBUG" ] ; then
-		for module in $(find $tmpdir/lib/modules/ -name *.ko -printf '%P\n'); do
-			module=lib/modules/$module
-			mkdir -p $(dirname $dbg_dir/usr/lib/debug/$module)
+		# If we've invoked make with -j, then parallelize; otherwise
+		# just use a single process.
+		procs=1
+		test "${MAKEFLAGS#*-j}" != "${MAKEFLAGS}" && procs=`getconf _NPROCESSORS_ONLN`
+		find $tmpdir/lib/modules/ -name *.ko -printf '%P\n' | xargs -n1 -P${procs} -I {} sh -c '
+			mkdir -p $(dirname '"$dbg_dir"'/usr/lib/debug/lib/modules/$1);'"
 			# only keep debug symbols in the debug file
-			$OBJCOPY --only-keep-debug $tmpdir/$module $dbg_dir/usr/lib/debug/$module
+			$OBJCOPY --only-keep-debug $tmpdir/lib/modules/{} \
+				$dbg_dir/usr/lib/debug/lib/modules/{};
 			# strip original module from debug symbols
-			$OBJCOPY --strip-debug $tmpdir/$module
+			$OBJCOPY --strip-debug $tmpdir/lib/modules/{};
 			# then add a link to those
-			$OBJCOPY --add-gnu-debuglink=$dbg_dir/usr/lib/debug/$module $tmpdir/$module
-		done
+			$OBJCOPY --add-gnu-debuglink=$dbg_dir/usr/lib/debug/lib/modules/{} \
+				$tmpdir/lib/modules/{};
+		" -- {}
 
 		# resign stripped modules
 		if is_enabled CONFIG_MODULE_SIG_ALL; then
