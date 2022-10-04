@@ -327,6 +327,11 @@ xfs_inode_to_disk(
 	to->di_gen = cpu_to_be32(inode->i_generation);
 	to->di_mode = cpu_to_be16(inode->i_mode);
 
+	if (S_ISDIR(inode->i_mode) && inode->i_nlink == 1) {
+		xfs_err(ip->i_mount, "%s ino 0x%llx nlink 1?", __func__, ip->i_ino);
+		ASSERT(inode->i_nlink != 1);
+	}
+
 	to->di_size = cpu_to_be64(ip->i_disk_size);
 	to->di_nblocks = cpu_to_be64(ip->i_nblocks);
 	to->di_extsize = cpu_to_be32(ip->i_extsize);
