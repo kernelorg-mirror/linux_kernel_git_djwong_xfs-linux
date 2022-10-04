@@ -107,6 +107,13 @@ xfs_trans_log_inode(
 
 	tp->t_flags |= XFS_TRANS_DIRTY;
 
+#if 0
+	if (S_ISDIR(inode->i_mode) && inode->i_nlink == 1) {
+		xfs_err(ip->i_mount, "%s ino 0x%llx nlink 1?", __func__, ip->i_ino);
+		ASSERT(inode->i_nlink != 1);
+	}
+#endif
+
 	/*
 	 * Don't bother with i_lock for the I_DIRTY_TIME check here, as races
 	 * don't matter - we either will need an extra transaction in 24 hours

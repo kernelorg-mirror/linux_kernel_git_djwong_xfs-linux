@@ -390,6 +390,11 @@ xfs_inode_to_log_dinode(
 	to->di_gen = inode->i_generation;
 	to->di_mode = inode->i_mode;
 
+	if (S_ISDIR(inode->i_mode) && inode->i_nlink == 1) {
+		xfs_err(ip->i_mount, "%s ino 0x%llx nlink 1?", __func__, ip->i_ino);
+		ASSERT(inode->i_nlink != 1);
+	}
+
 	to->di_size = ip->i_disk_size;
 	to->di_nblocks = ip->i_nblocks;
 	to->di_extsize = ip->i_extsize;
