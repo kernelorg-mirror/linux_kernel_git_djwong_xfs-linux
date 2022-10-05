@@ -68,6 +68,50 @@ static int xfs_icwalk_ag(struct xfs_perag *pag,
 					 XFS_ICWALK_FLAG_RECLAIM_SICK | \
 					 XFS_ICWALK_FLAG_UNION)
 
+#ifdef CONFIG_XFS_RT
+static inline bool xfs_inode_can_have_large_folios(struct xfs_mount *mp)
+{
+	/*
+	 * Copy on write relies on page cache writeback to perform a RMW on a
+	 * shared file allocation unit.  iomap does not track sub-folio dirty
+	 * state, which means that a write to a single shared byte amplifies
+	 * into a CoW of all shared file allocation units cached by that folio.
+	 * Any shared file allocation units crossing either edge of the folio
+	 * must also be dirtied, which amplifies that single byte write into
+	 * a CoW of the adjoining folios.
+	 *
+	 * To avoid this runaway CoW amplification, file allocation units must
+	 * be congruent with all possible folio sizes.  This is trivially
+	 * satisfiable for regular data files because the file allocation unit
+	 * is 1FSB, and FSBs and folios always have sizes that are powers of
+	 * two.
+	 *
+	 * Unfortunately, things are more complicated for realtime files
+	 * because the rt extent size can be any multiple of the FSB or memory
+	 * page size and is not limited to powers of two.  A power of two size
+	 * is trivially satisfiable just like data section files, but in the
+	 * non-power case, we disable large folios to avoid runaway CoW
+	 * amplification.
+	 *
+	 * The policy must be applied to all inodes on any filesystem mounted
+	 * with a realtime device because files with cached clean folios can
+	 * become realtime files, and growfs can change the extent size on any
+	 * mount with rtdev specified if it is also adding a rt section.
+	 *
+	 * This predicate can go away if iomap learns to track sub-folio dirty
+	 * state or the page cache supports custom size granularities.
+	 */
+	if (!XFS_IS_REALTIME_MOUNT(mp))
+		return true;
+	if (!xfs_has_reflink(mp))
+		return true;
+
+	return is_power_of_2(mp->m_sb.sb_rextsize);
+}
+#else
+# define xfs_inode_can_have_large_folios(mp)	(true)
+#endif
+
 /*
  * Allocate and initialise an xfs_inode.
  */
@@ -92,7 +136,8 @@ xfs_inode_alloc(
 	/* VFS doesn't initialise i_mode or i_state! */
 	VFS_I(ip)->i_mode = 0;
 	VFS_I(ip)->i_state = 0;
-	mapping_set_large_folios(VFS_I(ip)->i_mapping);
+	if (xfs_inode_can_have_large_folios(mp))
+		mapping_set_large_folios(VFS_I(ip)->i_mapping);
 
 	XFS_STATS_INC(mp, vn_active);
 	ASSERT(atomic_read(&ip->i_pincount) == 0);
@@ -327,7 +372,8 @@ xfs_reinit_inode(
 	inode->i_rdev = dev;
 	inode->i_uid = uid;
 	inode->i_gid = gid;
-	mapping_set_large_folios(inode->i_mapping);
+	if (xfs_inode_can_have_large_folios(mp))
+		mapping_set_large_folios(inode->i_mapping);
 	return error;
 }
 
