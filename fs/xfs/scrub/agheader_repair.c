@@ -22,12 +22,16 @@
 #include "xfs_rmap_btree.h"
 #include "xfs_refcount_btree.h"
 #include "xfs_ag.h"
+#include "xfs_inode.h"
+#include "xfs_iunlink_item.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
 #include "scrub/repair.h"
 #include "scrub/bitmap.h"
 #include "scrub/reap.h"
+#include "scrub/xfile.h"
+#include "scrub/xfarray.h"
 
 /* Superblock */
 
@@ -803,6 +807,8 @@ enum {
 	XREP_AGI_MAX
 };
 
+#define XREP_AGI_LOOKUP_BATCH		32
+
 struct xrep_agi {
 	struct xfs_scrub		*sc;
 
@@ -814,7 +820,33 @@ struct xrep_agi {
 
 	/* old AGI contents in case we have to revert */
 	struct xfs_agi			old_agi;
+
+	/* bitmap of which inodes are unlinked */
+	struct xbitmap			iunlink_bmp;
+
+	/* heads of the unlinked inode bucket lists */
+	xfs_agino_t			iunlink_heads[XFS_AGI_UNLINKED_BUCKETS];
+
+	/* scratchpad for batched lookups of the radix tree */
+	struct xfs_inode		*lookup_batch[XREP_AGI_LOOKUP_BATCH];
+
+	/* Map of ino -> next_ino for unlinked inode processing. */
+	struct xfarray			*iunlink_next;
+
+	/* Map of ino -> prev_ino for unlinked inode processing. */
+	struct xfarray			*iunlink_prev;
 };
+
+static void
+xrep_agi_buf_cleanup(
+	void		*buf)
+{
+	struct xrep_agi	*ragi = buf;
+
+	xfarray_destroy(ragi->iunlink_prev);
+	xfarray_destroy(ragi->iunlink_next);
+	xbitmap_destroy(&ragi->iunlink_bmp);
+}
 
 /*
  * Given the inode btree roots described by *fab, find the roots, check them
@@ -876,10 +908,6 @@ xrep_agi_init_header(
 	agi->agi_dirino = cpu_to_be32(NULLAGINO);
 	if (xfs_has_crc(mp))
 		uuid_copy(&agi->agi_uuid, &mp->m_sb.sb_meta_uuid);
-
-	/* We don't know how to fix the unlinked list yet. */
-	memcpy(&agi->agi_unlinked, &old_agi->agi_unlinked,
-			sizeof(agi->agi_unlinked));
 
 	/* Mark the incore AGF data stale until we're done fixing things. */
 	ASSERT(sc->sa.pag->pagi_init);
@@ -954,6 +982,417 @@ err:
 	return error;
 }
 
+/* Stage @ip->i_next_unlinked = next_agino */
+static inline int
+xrep_iunlink_store_next(
+	struct xrep_agi		*ragi,
+	struct xfs_inode	*ip,
+	xfs_agino_t		next_agino)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	xfs_agino_t		agino = XFS_INO_TO_AGINO(mp, ip->i_ino);
+
+	return xfarray_store(ragi->iunlink_next, agino, &next_agino);
+}
+
+/* Stage @xfs_iget(agino)->i_prev_unlinked = prev_agino */
+static inline int
+xrep_iunlink_store_prev(
+	struct xrep_agi		*ragi,
+	xfs_agino_t		agino,
+	xfs_agino_t		prev_agino)
+{
+	ASSERT(prev_agino != 0);
+
+	return xfarray_store(ragi->iunlink_prev, agino, &prev_agino);
+}
+
+/* Decide if this is an unlinked inode in this AG. */
+STATIC bool
+xrep_iunlink_igrab(
+	struct xfs_perag	*pag,
+	struct xfs_inode	*ip)
+{
+	struct xfs_mount	*mp = pag->pag_mount;
+
+	if (XFS_INO_TO_AGNO(mp, ip->i_ino) != pag->pag_agno)
+		return false;
+
+	/* Not on the unlinked list yet. */
+	if (ip->i_prev_unlinked == 0)
+		return false;
+
+	return true;
+}
+
+/*
+ * Mark the given inode in the lookup batch in our unlinked inode bitmap, and
+ * remember if this inode is the start of the unlinked chain.
+ */
+STATIC int
+xrep_iunlink_visit(
+	struct xrep_agi		*ragi,
+	unsigned int		batch_idx)
+{
+	struct xfs_mount	*mp = ragi->sc->mp;
+	struct xfs_inode	*ip = ragi->lookup_batch[batch_idx];
+	xfs_agino_t		agino;
+	unsigned int		bucket;
+	int			error;
+
+	ASSERT(XFS_INO_TO_AGNO(mp, ip->i_ino) == ragi->sc->sa.pag->pag_agno);
+	ASSERT(ip->i_prev_unlinked != 0);
+
+	agino = XFS_INO_TO_AGINO(mp, ip->i_ino);
+	bucket = agino % XFS_AGI_UNLINKED_BUCKETS;
+
+	trace_xrep_iunlink_visit(ragi->sc->sa.pag, ragi->iunlink_heads[bucket],
+			ip);
+
+	error = xbitmap_set(&ragi->iunlink_bmp, agino, 1);
+	if (error)
+		return error;
+
+	if (ip->i_prev_unlinked == NULLAGINO) {
+		if (ragi->iunlink_heads[bucket] == NULLAGINO)
+			ragi->iunlink_heads[bucket] = agino;
+	}
+
+	return 0;
+}
+
+/*
+ * Find all incore unlinked inodes so that we can rebuild the unlinked buckets.
+ * We hold the AGI so there should not be any modifications to the unlinked
+ * list.
+ */
+STATIC int
+xrep_iunlink_find(
+	struct xrep_agi		*ragi)
+{
+	struct xfs_perag	*pag = ragi->sc->sa.pag;
+	struct xfs_mount	*mp = pag->pag_mount;
+	uint32_t		first_index = 0;
+	bool			done = false;
+	unsigned int		nr_found = 0;
+
+	do {
+		unsigned int	i;
+		int		error = 0;
+
+		if (xchk_should_terminate(ragi->sc, &error))
+			return error;
+
+		rcu_read_lock();
+
+		nr_found = radix_tree_gang_lookup(&pag->pag_ici_root,
+				(void **)&ragi->lookup_batch, first_index,
+				XREP_AGI_LOOKUP_BATCH);
+		if (!nr_found) {
+			rcu_read_unlock();
+			return 0;
+		}
+
+		for (i = 0; i < nr_found; i++) {
+			struct xfs_inode *ip = ragi->lookup_batch[i];
+
+			if (done || !xrep_iunlink_igrab(pag, ip))
+				ragi->lookup_batch[i] = NULL;
+
+			/*
+			 * Update the index for the next lookup. Catch
+			 * overflows into the next AG range which can occur if
+			 * we have inodes in the last block of the AG and we
+			 * are currently pointing to the last inode.
+			 *
+			 * Because we may see inodes that are from the wrong AG
+			 * due to RCU freeing and reallocation, only update the
+			 * index if it lies in this AG. It was a race that lead
+			 * us to see this inode, so another lookup from the
+			 * same index will not find it again.
+			 */
+			if (XFS_INO_TO_AGNO(mp, ip->i_ino) != pag->pag_agno)
+				continue;
+			first_index = XFS_INO_TO_AGINO(mp, ip->i_ino + 1);
+			if (first_index < XFS_INO_TO_AGINO(mp, ip->i_ino))
+				done = true;
+		}
+
+		/* unlock now we've grabbed the inodes. */
+		rcu_read_unlock();
+
+		for (i = 0; i < nr_found; i++) {
+			if (!ragi->lookup_batch[i])
+				continue;
+			error = xrep_iunlink_visit(ragi, i);
+			if (error)
+				return error;
+		}
+	} while (!done);
+
+	return 0;
+}
+
+/* Walk an iunlink bucket's list, remembering all the good inodes. */
+STATIC int
+xrep_iunlink_walk_bucket(
+	struct xrep_agi		*ragi,
+	unsigned int		bucket)
+{
+	struct xfs_scrub	*sc = ragi->sc;
+	struct xfs_inode	*prev_ip = NULL;
+	struct xfs_inode	*ip;
+	xfs_agino_t		prev_agino = NULLAGINO;
+	xfs_agino_t		next_agino = ragi->iunlink_heads[bucket];
+	int			error = 0;
+
+	while (next_agino != NULLAGINO) {
+		if (xchk_should_terminate(ragi->sc, &error))
+			return error;
+
+		trace_xrep_iunlink_walk_bucket(sc->sa.pag, bucket, prev_agino,
+				next_agino);
+
+		/* Find the next inode in the chain. */
+		ip = xfs_iunlink_lookup(sc->sa.pag, next_agino);
+		if (!ip) {
+			/* Inode not incore?  Terminate the chain. */
+			next_agino = NULLAGINO;
+			break;
+		}
+
+		if (next_agino % XFS_AGI_UNLINKED_BUCKETS != bucket ||
+		    ip->i_prev_unlinked == 0) {
+			/*
+			 * Inode is in the wrong bucket or isn't unlinked.
+			 * Advance the list, but pretend we didn't see this
+			 * inode.
+			 */
+			next_agino = ip->i_next_unlinked;
+			continue;
+		}
+
+		/*
+		 * Otherwise, this inode's unlinked pointers are ok.  Clear it
+		 * from the unlinked bitmap since we're done with it, and make
+		 * sure the chain is still correct.
+		 */
+		error = xbitmap_clear(&ragi->iunlink_bmp, next_agino, 1);
+		if (error)
+			return error;
+
+		/* Remember the previous inode's next pointer. */
+		if (prev_ip) {
+			error = xrep_iunlink_store_next(ragi, prev_ip,
+					next_agino);
+			if (error)
+				return error;
+		}
+
+		/* Remember this inode's previous pointer. */
+		error = xrep_iunlink_store_prev(ragi, next_agino, prev_agino);
+		if (error)
+			return error;
+
+		/* Advance the list and remember this inode. */
+		prev_agino = next_agino;
+		next_agino = ip->i_next_unlinked;
+		prev_ip = ip;
+	}
+
+	/* Update the previous inode's next pointer. */
+	if (prev_ip) {
+		error = xrep_iunlink_store_next(ragi, prev_ip, next_agino);
+		if (error)
+			return error;
+	}
+
+	return 0;
+}
+
+/* Reinsert this unlinked inode into the head of the staged bucket list. */
+STATIC int
+xrep_iunlink_add_to_bucket(
+	struct xrep_agi		*ragi,
+	xfs_agino_t		agino)
+{
+	struct xfs_inode	*ip;
+	xfs_agino_t		current_head;
+	unsigned int		bucket;
+	int			error;
+
+	bucket = agino % XFS_AGI_UNLINKED_BUCKETS;
+
+	ip = xfs_iunlink_lookup(ragi->sc->sa.pag, agino);
+	if (!ip)
+		return -EFSCORRUPTED;
+
+	/* Point this inode at the current head of the bucket list. */
+	current_head = ragi->iunlink_heads[bucket];
+	error = xrep_iunlink_store_next(ragi, ip, current_head);
+	if (error)
+		return error;
+
+	/* Remember the head inode's previous pointer. */
+	if (current_head != NULLAGINO) {
+		error = xrep_iunlink_store_prev(ragi, current_head, agino);
+		if (error)
+			return error;
+	}
+
+	ragi->iunlink_heads[bucket] = agino;
+	return 0;
+}
+
+/* Reinsert unlinked inodes into the staged iunlink buckets. */
+STATIC int
+xrep_iunlink_add_lost_inodes(
+	uint64_t		start,
+	uint64_t		len,
+	void			*priv)
+{
+	struct xrep_agi		*ragi = priv;
+	int			error;
+
+	while (len > 0) {
+		error = xrep_iunlink_add_to_bucket(ragi, start);
+		if (error)
+			return error;
+
+		start++;
+		len--;
+	}
+
+	return 0;
+}
+
+/*
+ * Figure out the iunlink bucket values and find inodes that need to be
+ * reinserted into the list.
+ */
+STATIC int
+xrep_iunlink_find_all(
+	struct xrep_agi		*ragi)
+{
+	unsigned int		i;
+	int			error;
+
+	/* Record all the incore unlinked inodes. */
+	error = xrep_iunlink_find(ragi);
+	if (error)
+		return error;
+
+	/*
+	 * Clear all the unlinked inodes that are correctly linked into their
+	 * incore inode bucket lists.  After this call, iunlink_bmp will
+	 * contain unlinked inodes that are not in the correct list.
+	 */
+	for (i = 0; i < XFS_AGI_UNLINKED_BUCKETS; i++) {
+		error = xrep_iunlink_walk_bucket(ragi, i);
+		if (error)
+			return error;
+	}
+
+	/*
+	 * Any unlinked inodes that we didn't find through the bucket list
+	 * walk (or was ignored by the walk) must be inserted into the bucket
+	 * list.  Stage this in memory for now.
+	 */
+	return xbitmap_walk(&ragi->iunlink_bmp,
+			xrep_iunlink_add_lost_inodes, ragi);
+}
+
+/* Update i_next_iunlinked for the inode @agino. */
+STATIC int
+xrep_iunlink_relink_next(
+	struct xrep_agi		*ragi,
+	xfarray_idx_t		idx,
+	xfs_agino_t		next_agino)
+{
+	struct xfs_inode	*ip;
+	xfarray_idx_t		agino = idx - 1;
+	int			error;
+
+	ip = xfs_iunlink_lookup(ragi->sc->sa.pag, agino);
+	if (!ip)
+		return -EFSCORRUPTED;
+
+	if (ip->i_next_unlinked == next_agino)
+		return 0;
+
+	trace_xrep_iunlink_relink_next(ip, next_agino);
+
+	error = xfs_iunlink_log_inode(ragi->sc->tp, ip, ragi->sc->sa.pag,
+			next_agino);
+	if (error)
+		return error;
+
+	ip->i_next_unlinked = next_agino;
+	return 0;
+}
+
+/* Update i_prev_iunlinked for the inode @agino. */
+STATIC int
+xrep_iunlink_relink_prev(
+	struct xrep_agi		*ragi,
+	xfarray_idx_t		idx,
+	xfs_agino_t		prev_agino)
+{
+	struct xfs_inode	*ip;
+	xfarray_idx_t		agino = idx - 1;
+
+	ASSERT(prev_agino != 0);
+
+	ip = xfs_iunlink_lookup(ragi->sc->sa.pag, agino);
+	if (!ip)
+		return -EFSCORRUPTED;
+
+	if (ip->i_prev_unlinked == prev_agino)
+		return 0;
+
+	trace_xrep_iunlink_relink_prev(ip, prev_agino);
+
+	ip->i_prev_unlinked = prev_agino;
+	return 0;
+}
+
+/* Log all the iunlink updates we need to finish regenerating the AGI. */
+STATIC int
+xrep_iunlink_commit(
+	struct xrep_agi		*ragi)
+{
+	struct xfs_agi		*agi = ragi->agi_bp->b_addr;
+	xfarray_idx_t		idx = XFARRAY_CURSOR_INIT;
+	xfs_agino_t		agino;
+	unsigned int		i;
+	int			error;
+
+	/* Fix all the forward links */
+	while ((error = xfarray_iter(ragi->iunlink_next, &idx, &agino)) == 1) {
+		error = xrep_iunlink_relink_next(ragi, idx, agino);
+		if (error)
+			break;
+	}
+
+	/* Fix all the back links */
+	idx = XFARRAY_CURSOR_INIT;
+	while ((error = xfarray_iter(ragi->iunlink_prev, &idx, &agino)) == 1) {
+		error = xrep_iunlink_relink_prev(ragi, idx, agino);
+		if (error)
+			break;
+	}
+
+	/* Copy the staged iunlink buckets to the new AGI. */
+	for (i = 0; i < XFS_AGI_UNLINKED_BUCKETS; i++) {
+		trace_xrep_iunlink_commit_bucket(ragi->sc->sa.pag, i,
+				ragi->iunlink_heads[i]);
+
+		agi->agi_unlinked[i] = cpu_to_be32(ragi->iunlink_heads[i]);
+	}
+
+	return 0;
+}
+
 /* Trigger reinitialization of the in-core data. */
 STATIC int
 xrep_agi_commit_new(
@@ -987,6 +1426,7 @@ xrep_agi(
 {
 	struct xrep_agi		*ragi;
 	struct xfs_mount	*mp = sc->mp;
+	unsigned int		i;
 	int			error;
 
 	/* We require the rmapbt to rebuild anything. */
@@ -1013,6 +1453,22 @@ xrep_agi(
 		.buf_ops	= NULL,
 	};
 
+	for (i = 0; i < XFS_AGI_UNLINKED_BUCKETS; i++)
+		ragi->iunlink_heads[i] = NULLAGINO;
+
+	xbitmap_init(&ragi->iunlink_bmp);
+	sc->buf_cleanup = xrep_agi_buf_cleanup;
+
+	error = xfarray_create(sc->mp, "iunlinked next", 0,
+			sizeof(xfs_agino_t), &ragi->iunlink_next);
+	if (error)
+		return error;
+
+	error = xfarray_create(sc->mp, "iunlinked prev", 0,
+			sizeof(xfs_agino_t), &ragi->iunlink_prev);
+	if (error)
+		return error;
+
 	/*
 	 * Make sure we have the AGI buffer, as scrub might have decided it
 	 * was corrupt after xfs_ialloc_read_agi failed with -EFSCORRUPTED.
@@ -1030,6 +1486,10 @@ xrep_agi(
 	if (error)
 		return error;
 
+	error = xrep_iunlink_find_all(ragi);
+	if (error)
+		return error;
+
 	/* Last chance to abort before we start committing fixes. */
 	if (xchk_should_terminate(sc, &error))
 		return error;
@@ -1038,6 +1498,9 @@ xrep_agi(
 	xrep_agi_init_header(ragi);
 	xrep_agi_set_roots(ragi);
 	error = xrep_agi_calc_from_btrees(ragi);
+	if (error)
+		goto out_revert;
+	error = xrep_iunlink_commit(ragi);
 	if (error)
 		goto out_revert;
 
