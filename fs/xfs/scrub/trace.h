@@ -2641,6 +2641,134 @@ DEFINE_EVENT(xrep_symlink_class, name, \
 DEFINE_XREP_SYMLINK_EVENT(xrep_symlink_rebuild);
 DEFINE_XREP_SYMLINK_EVENT(xrep_symlink_reset_fork);
 
+TRACE_EVENT(xrep_iunlink_visit,
+	TP_PROTO(struct xfs_perag *pag, xfs_agino_t bucket_agino,
+		 struct xfs_inode *ip),
+	TP_ARGS(pag, bucket_agino, ip),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_agnumber_t, agno)
+		__field(xfs_agino_t, agino)
+		__field(xfs_agino_t, bucket_agino)
+		__field(xfs_agino_t, prev_agino)
+		__field(xfs_agino_t, next_agino)
+	),
+	TP_fast_assign(
+		__entry->dev = pag->pag_mount->m_super->s_dev;
+		__entry->agno = pag->pag_agno;
+		__entry->agino = XFS_INO_TO_AGINO(pag->pag_mount, ip->i_ino);
+		__entry->bucket_agino = bucket_agino;
+		__entry->prev_agino = ip->i_prev_unlinked;
+		__entry->next_agino = ip->i_next_unlinked;
+	),
+	TP_printk("dev %d:%d agno 0x%x agino 0x%x bucket_agino %u prev_agino 0x%x next_agino 0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->agno,
+		  __entry->agino,
+		  __entry->bucket_agino,
+		  __entry->prev_agino,
+		  __entry->next_agino)
+);
+
+TRACE_EVENT(xrep_iunlink_walk_bucket,
+	TP_PROTO(struct xfs_perag *pag, unsigned int bucket,
+		 xfs_agino_t prev_agino, xfs_agino_t next_agino),
+	TP_ARGS(pag, bucket, prev_agino, next_agino),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_agnumber_t, agno)
+		__field(unsigned int, bucket)
+		__field(xfs_agino_t, prev_agino)
+		__field(xfs_agino_t, next_agino)
+	),
+	TP_fast_assign(
+		__entry->dev = pag->pag_mount->m_super->s_dev;
+		__entry->agno = pag->pag_agno;
+		__entry->bucket = bucket;
+		__entry->prev_agino = prev_agino;
+		__entry->next_agino = next_agino;
+	),
+	TP_printk("dev %d:%d agno 0x%x bucket %u prev_agino 0x%x next_agino 0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->agno,
+		  __entry->bucket,
+		  __entry->prev_agino,
+		  __entry->next_agino)
+);
+
+TRACE_EVENT(xrep_iunlink_relink_next,
+	TP_PROTO(struct xfs_inode *ip, xfs_agino_t next_agino),
+	TP_ARGS(ip, next_agino),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_agnumber_t, agno)
+		__field(xfs_agino_t, agino)
+		__field(xfs_agino_t, next_agino)
+		__field(xfs_agino_t, new_next_agino)
+	),
+	TP_fast_assign(
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->agno = XFS_INO_TO_AGNO(ip->i_mount, ip->i_ino);
+		__entry->agino = XFS_INO_TO_AGNO(ip->i_mount, ip->i_ino);
+		__entry->next_agino = ip->i_next_unlinked;
+		__entry->new_next_agino = next_agino;
+	),
+	TP_printk("dev %d:%d agno 0x%x agino 0x%x next_agino 0x%x -> 0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->agno,
+		  __entry->agino,
+		  __entry->next_agino,
+		  __entry->new_next_agino)
+);
+
+TRACE_EVENT(xrep_iunlink_relink_prev,
+	TP_PROTO(struct xfs_inode *ip, xfs_agino_t prev_agino),
+	TP_ARGS(ip, prev_agino),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_agnumber_t, agno)
+		__field(xfs_agino_t, agino)
+		__field(xfs_agino_t, prev_agino)
+		__field(xfs_agino_t, new_prev_agino)
+	),
+	TP_fast_assign(
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->agno = XFS_INO_TO_AGNO(ip->i_mount, ip->i_ino);
+		__entry->agino = XFS_INO_TO_AGNO(ip->i_mount, ip->i_ino);
+		__entry->prev_agino = ip->i_prev_unlinked;
+		__entry->new_prev_agino = prev_agino;
+	),
+	TP_printk("dev %d:%d agno 0x%x agino 0x%x prev_agino 0x%x -> 0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->agno,
+		  __entry->agino,
+		  __entry->prev_agino,
+		  __entry->new_prev_agino)
+);
+
+TRACE_EVENT(xrep_iunlink_commit_bucket,
+	TP_PROTO(struct xfs_perag *pag, unsigned int bucket,
+		 xfs_agino_t agino),
+	TP_ARGS(pag, bucket, agino),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_agnumber_t, agno)
+		__field(unsigned int, bucket)
+		__field(xfs_agino_t, agino)
+	),
+	TP_fast_assign(
+		__entry->dev = pag->pag_mount->m_super->s_dev;
+		__entry->agno = pag->pag_agno;
+		__entry->bucket = bucket;
+		__entry->agino = agino;
+	),
+	TP_printk("dev %d:%d agno 0x%x bucket %u agino 0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->agno,
+		  __entry->bucket,
+		  __entry->agino)
+);
+
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
 
 
