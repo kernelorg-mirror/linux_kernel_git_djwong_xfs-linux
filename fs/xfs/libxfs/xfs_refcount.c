@@ -1265,6 +1265,72 @@ xfs_refcount_is_wrong_cursor(
 }
 
 /*
+ * Set up a continuation a deferred refcount operation by updating the intent.
+ * Checks to make sure we're not going to run off the end of the AG.
+ */
+static inline int
+xfs_refcount_continue_op(
+	struct xfs_btree_cur		*cur,
+	struct xfs_refcount_intent	*ri,
+	xfs_agblock_t			new_agbno,
+	xfs_extlen_t			new_len)
+{
+	struct xfs_mount		*mp = cur->bc_mp;
+	xfs_fsblock_t			new_fsbno;
+
+	if (ri->ri_realtime) {
+		struct xfs_rtgroup	*rtg = cur->bc_ino.rtg;
+		xfs_rgnumber_t		old_rgno;
+
+		old_rgno = xfs_rtb_to_rgno(mp, ri->ri_startblock);
+		new_fsbno = xfs_rgbno_to_rtb(mp, rtg->rtg_rgno, new_agbno);
+
+		if (!new_len)
+			goto done;
+
+		if (XFS_IS_CORRUPT(mp,
+				!xfs_verify_rtbext(mp, new_fsbno, new_len))) {
+			xfs_btree_mark_sick(cur);
+			return -EFSCORRUPTED;
+		}
+		if (XFS_IS_CORRUPT(mp,
+				old_rgno != xfs_rtb_to_rgno(mp, new_fsbno))) {
+			xfs_btree_mark_sick(cur);
+			return -EFSCORRUPTED;
+		}
+	} else {
+		struct xfs_perag	*pag = cur->bc_ag.pag;
+		xfs_agnumber_t		old_agno;
+
+		old_agno = XFS_FSB_TO_AGNO(mp, ri->ri_startblock);
+		new_fsbno = XFS_AGB_TO_FSB(mp, pag->pag_agno, new_agbno);
+
+		/*
+		 * If we don't have any work left to do, then there's no need
+		 * to perform the validation of the new parameters.
+		 */
+		if (!new_len)
+			goto done;
+
+		if (XFS_IS_CORRUPT(mp,
+				!xfs_verify_fsbext(mp, new_fsbno, new_len))) {
+			xfs_btree_mark_sick(cur);
+			return -EFSCORRUPTED;
+		}
+		if (XFS_IS_CORRUPT(mp,
+				old_agno != XFS_FSB_TO_AGNO(mp, new_fsbno))) {
+			xfs_btree_mark_sick(cur);
+			return -EFSCORRUPTED;
+		}
+	}
+
+done:
+	ri->ri_startblock = new_fsbno;
+	ri->ri_blockcount = new_len;
+	return 0;
+}
+
+/*
  * Process one of the deferred refcount operations.  We pass back the
  * btree cursor to maintain our lock on the btree between calls.
  * This saves time and eliminates a buffer deadlock between the
@@ -1343,25 +1409,21 @@ xfs_refcount_finish_one(
 		error = xfs_refcount_adjust(rcur, bno, ri->ri_blockcount,
 				&new_agbno, &new_len,
 				XFS_REFCOUNT_ADJUST_INCREASE);
-		if (ri->ri_realtime)
-			ri->ri_startblock = xfs_rgbno_to_rtb(mp, rtg->rtg_rgno,
-							new_agbno);
-		else
-			ri->ri_startblock = XFS_AGB_TO_FSB(mp, pag->pag_agno,
-							new_agbno);
-		ri->ri_blockcount = new_len;
+		if (error)
+			goto out_drop;
+		error = xfs_refcount_continue_op(rcur, ri, new_agbno, new_len);
+		if (error)
+			goto out_drop;
 		break;
 	case XFS_REFCOUNT_DECREASE:
 		error = xfs_refcount_adjust(rcur, bno, ri->ri_blockcount,
 				&new_agbno, &new_len,
 				XFS_REFCOUNT_ADJUST_DECREASE);
-		if (ri->ri_realtime)
-			ri->ri_startblock = xfs_rgbno_to_rtb(mp, rtg->rtg_rgno,
-							new_agbno);
-		else
-			ri->ri_startblock = XFS_AGB_TO_FSB(mp, pag->pag_agno,
-							new_agbno);
-		ri->ri_blockcount = new_len;
+		if (error)
+			goto out_drop;
+		error = xfs_refcount_continue_op(rcur, ri, new_agbno, new_len);
+		if (error)
+			goto out_drop;
 		break;
 	case XFS_REFCOUNT_ALLOC_COW:
 		error = __xfs_refcount_cow_alloc(rcur, bno, ri->ri_blockcount);
