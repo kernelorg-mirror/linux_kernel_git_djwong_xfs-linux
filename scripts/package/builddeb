@@ -107,9 +107,9 @@ deploy_libc_headers () {
 }
 
 version=$KERNELRELEASE
-tmpdir=debian/linux-image
-dbg_dir=debian/linux-image-dbg
-packagename=linux-image-$version
+tmpdir=debian/linux-image-mtr$LOCALVERSION
+dbg_dir=debian/linux-image-mtr$LOCALVERSION-dbg
+packagename=linux-image-mtr$LOCALVERSION
 dbg_packagename=$packagename-dbg
 
 if [ "$ARCH" = "um" ] ; then
@@ -186,6 +186,9 @@ if is_enabled CONFIG_MODULES; then
 			INSTALL_MOD_PATH="$tmpdir" $MAKE -f $srctree/Makefile modules_sign
 		fi
 	fi
+
+	rm -rf "$tmpdir/lib/modules/$version/build" "$tmpdir/lib/modules/$version/source"
+	ln -sf "/usr/src/linux-headers-$version" "$tmpdir/lib/modules/$version/source"
 fi
 
 # Install the maintainer scripts
@@ -216,11 +219,11 @@ done
 if [ "$ARCH" != "um" ]; then
 	if is_enabled CONFIG_MODULES; then
 		deploy_kernel_headers debian/linux-headers
-		create_package linux-headers-$version debian/linux-headers
+		create_package linux-headers-mtr$LOCALVERSION debian/linux-headers
 	fi
 
 	deploy_libc_headers debian/linux-libc-dev
-	create_package linux-libc-dev debian/linux-libc-dev
+	create_package linux-libc-dev-mtr$LOCALVERSION debian/linux-libc-dev
 fi
 
 create_package "$packagename" "$tmpdir"
