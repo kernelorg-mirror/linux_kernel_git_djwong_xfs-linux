@@ -11,6 +11,13 @@ menu "Library routines"
 config RAID6_PQ
 	tristate
 
+config DISABLE_DMESG_POINTER_HASHING
+	bool "Disable dmesg pointer hashing"
+	default n
+	help
+	  Turn off this silly dmesg pointer hashing because it makes debugging
+	  much more difficult.
+
 config RAID6_PQ_BENCHMARK
 	bool "Automatically choose fastest RAID6 PQ functions"
 	depends on RAID6_PQ
