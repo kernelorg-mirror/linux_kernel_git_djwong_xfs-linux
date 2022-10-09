@@ -810,7 +810,7 @@ static void print_slab_info(const struct slab *slab)
 {
 	struct folio *folio = (struct folio *)slab_folio(slab);
 
-	pr_err("Slab 0x%p objects=%u used=%u fp=0x%p flags=%pGp\n",
+	pr_err("Slab 0x%px objects=%u used=%u fp=0x%px flags=%pGp\n",
 	       slab, slab->objects, slab->inuse, slab->freelist,
 	       folio_flags(folio, 0));
 }
@@ -887,7 +887,7 @@ static void print_trailer(struct kmem_cache *s, struct slab *slab, u8 *p)
 
 	print_slab_info(slab);
 
-	pr_err("Object 0x%p @offset=%tu fp=0x%p\n\n",
+	pr_err("Object 0x%px @offset=%tu fp=0x%px\n\n",
 	       p, p - addr, get_freepointer(s, p));
 
 	if (s->flags & SLAB_RED_ZONE)
