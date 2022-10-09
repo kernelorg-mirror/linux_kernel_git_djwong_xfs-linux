@@ -2701,7 +2701,13 @@ enum cpu_mitigations {
 };
 
 static enum cpu_mitigations cpu_mitigations __ro_after_init =
+#ifdef CONFIG_CPU_MITIGATIONS_OFF
+	CPU_MITIGATIONS_OFF;
+#elif defined CONFIG_CPU_MITIGATIONS_AUTO
 	CPU_MITIGATIONS_AUTO;
+#elif defined CONFIG_CPU_MITIGATIONS_AUTO_NOSMT
+	CPU_MITIGATIONS_AUTO_NOSMT;
+#endif
 
 static int __init mitigations_parse_cmdline(char *arg)
 {

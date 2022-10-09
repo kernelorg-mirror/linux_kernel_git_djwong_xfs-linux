@@ -12,6 +12,34 @@ config PREEMPT_BUILD
 	select UNINLINE_SPIN_UNLOCK if !ARCH_INLINE_SPIN_UNLOCK
 
 choice
+	prompt "CPU Vulnerability Mitigation Defaults"
+	default CPU_MITIGATIONS_AUTO
+	help
+	  Set the level of CPU security vulnerability mitigations that are
+	  applied by default.  These can still be overridden by command line
+	  options at boot time.
+
+config CPU_MITIGATIONS_OFF
+	bool "No CPU mitigations"
+	help
+	  Disable all CPU mitigations.  This restores performance to pre-2018
+	  levels on old hardware but leaves your system at risk.
+
+config CPU_MITIGATIONS_AUTO
+	bool "Automatic CPU mitigations"
+	help
+	  Turn on whatever CPU mitigations are necessary for the booted CPUs.
+	  Leave SMT enabled.
+
+config CPU_MITIGATIONS_AUTO_NOSMT
+	bool "Automatic CPU mitigations, disable SMT"
+	help
+	  Turn on whatever CPU mitigations are necessary for the booted CPUs.
+	  Disable SMT unconditionally.
+
+endchoice
+
+choice
 	prompt "Preemption Model"
 	default PREEMPT_NONE
 
