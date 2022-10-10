@@ -345,8 +345,8 @@ xchk_refcountbt_rec(
 	len = be32_to_cpu(rec->refc.rc_blockcount);
 	refcount = be32_to_cpu(rec->refc.rc_refcount);
 
-	if (bno & XFS_REFC_COW_START) {
-		bno &= ~XFS_REFC_COW_START;
+	if (bno & XFS_REFC_COWFLAG) {
+		bno &= ~XFS_REFC_COWFLAG;
 		domain = XFS_RCDOM_COW;
 	} else {
 		domain = XFS_RCDOM_SHARED;
