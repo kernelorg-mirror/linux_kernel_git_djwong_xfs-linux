@@ -1181,6 +1181,44 @@ xfs_refcount_finish_one_cleanup(
 }
 
 /*
+ * Set up a continuation a deferred refcount operation by updating the intent.
+ * Checks to make sure we're not going to run off the end of the AG.
+ */
+static inline int
+xfs_refcount_continue_op(
+	struct xfs_btree_cur		*cur,
+	xfs_fsblock_t			startblock,
+	xfs_agblock_t			new_agbno,
+	xfs_extlen_t			new_len,
+	xfs_fsblock_t			*fsbp)
+{
+	struct xfs_mount		*mp = cur->bc_mp;
+	struct xfs_perag		*pag = cur->bc_ag.pag;
+	xfs_fsblock_t			new_fsbno;
+	xfs_agnumber_t			old_agno;
+
+	old_agno = XFS_FSB_TO_AGNO(mp, startblock);
+	new_fsbno = XFS_AGB_TO_FSB(mp, pag->pag_agno, new_agbno);
+
+	/*
+	 * If we don't have any work left to do, then there's no need
+	 * to perform the validation of the new parameters.
+	 */
+	if (!new_len)
+		goto done;
+
+	if (XFS_IS_CORRUPT(mp, !xfs_verify_fsbext(mp, new_fsbno, new_len)))
+		return -EFSCORRUPTED;
+
+	if (XFS_IS_CORRUPT(mp, old_agno != XFS_FSB_TO_AGNO(mp, new_fsbno)))
+		return -EFSCORRUPTED;
+
+done:
+	*fsbp = new_fsbno;
+	return 0;
+}
+
+/*
  * Process one of the deferred refcount operations.  We pass back the
  * btree cursor to maintain our lock on the btree between calls.
  * This saves time and eliminates a buffer deadlock between the
@@ -1247,12 +1285,18 @@ xfs_refcount_finish_one(
 	case XFS_REFCOUNT_INCREASE:
 		error = xfs_refcount_adjust(rcur, bno, blockcount, &new_agbno,
 				new_len, XFS_REFCOUNT_ADJUST_INCREASE);
-		*new_fsb = XFS_AGB_TO_FSB(mp, pag->pag_agno, new_agbno);
+		if (error)
+			goto out_drop;
+		error = xfs_refcount_continue_op(rcur, startblock, new_agbno,
+				*new_len, new_fsb);
 		break;
 	case XFS_REFCOUNT_DECREASE:
 		error = xfs_refcount_adjust(rcur, bno, blockcount, &new_agbno,
 				new_len, XFS_REFCOUNT_ADJUST_DECREASE);
-		*new_fsb = XFS_AGB_TO_FSB(mp, pag->pag_agno, new_agbno);
+		if (error)
+			goto out_drop;
+		error = xfs_refcount_continue_op(rcur, startblock, new_agbno,
+				*new_len, new_fsb);
 		break;
 	case XFS_REFCOUNT_ALLOC_COW:
 		*new_fsb = startblock + blockcount;
