@@ -166,10 +166,20 @@ typedef struct xfs_bmbt_irec
 	xfs_exntst_t	br_state;	/* extent state */
 } xfs_bmbt_irec_t;
 
+enum xfs_rcext_domain {
+	XFS_RCDOM_SHARED = 0,
+	XFS_RCDOM_COW,
+};
+
+#define XFS_RCEXT_DOM_STRINGS \
+	{ XFS_RCDOM_SHARED, 	"shared" }, \
+	{ XFS_RCDOM_COW,	"cow" }
+
 struct xfs_refcount_irec {
 	xfs_agblock_t	rc_startblock;	/* starting block number */
 	xfs_extlen_t	rc_blockcount;	/* count of free blocks */
 	xfs_nlink_t	rc_refcount;	/* number of inodes linked here */
+	enum xfs_rcext_domain	rc_domain; /* shared or cow staging extent? */
 };
 
 #define XFS_RMAP_ATTR_FORK		(1 << 0)

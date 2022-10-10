@@ -336,24 +336,32 @@ xchk_refcountbt_rec(
 {
 	xfs_agblock_t		*cow_blocks = bs->private;
 	struct xfs_perag	*pag = bs->cur->bc_ag.pag;
+	enum xfs_rcext_domain	domain;
 	xfs_agblock_t		bno;
 	xfs_extlen_t		len;
 	xfs_nlink_t		refcount;
-	bool			has_cowflag;
 
 	bno = be32_to_cpu(rec->refc.rc_startblock);
 	len = be32_to_cpu(rec->refc.rc_blockcount);
 	refcount = be32_to_cpu(rec->refc.rc_refcount);
 
+	if (bno & XFS_REFC_COW_START) {
+		bno &= ~XFS_REFC_COW_START;
+		domain = XFS_RCDOM_COW;
+	} else {
+		domain = XFS_RCDOM_SHARED;
+	}
+
 	/* Only CoW records can have refcount == 1. */
-	has_cowflag = (bno & XFS_REFC_COW_START);
-	if ((refcount == 1 && !has_cowflag) || (refcount != 1 && has_cowflag))
+	if (domain == XFS_RCDOM_SHARED && refcount == 1)
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
-	if (has_cowflag)
+	if (domain == XFS_RCDOM_COW) {
+		if (refcount != 1)
+			xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 		(*cow_blocks) += len;
+	}
 
 	/* Check the extent. */
-	bno &= ~XFS_REFC_COW_START;
 	if (bno + len <= bno ||
 	    !xfs_verify_agbno(pag, bno) ||
 	    !xfs_verify_agbno(pag, bno + len - 1))
@@ -426,7 +434,6 @@ xchk_xref_is_cow_staging(
 	xfs_extlen_t			len)
 {
 	struct xfs_refcount_irec	rc;
-	bool				has_cowflag;
 	int				has_refcount;
 	int				error;
 
@@ -434,8 +441,8 @@ xchk_xref_is_cow_staging(
 		return;
 
 	/* Find the CoW staging extent. */
-	error = xfs_refcount_lookup_le(sc->sa.refc_cur,
-			agbno + XFS_REFC_COW_START, &has_refcount);
+	error = xfs_refcount_lookup_le(sc->sa.refc_cur, XFS_RCDOM_COW, agbno,
+			&has_refcount);
 	if (!xchk_should_check_xref(sc, &error, &sc->sa.refc_cur))
 		return;
 	if (!has_refcount) {
@@ -452,8 +459,7 @@ xchk_xref_is_cow_staging(
 	}
 
 	/* CoW flag must be set, refcount must be 1. */
-	has_cowflag = (rc.rc_startblock & XFS_REFC_COW_START);
-	if (!has_cowflag || rc.rc_refcount != 1)
+	if (rc.rc_domain != XFS_RCDOM_COW || rc.rc_refcount != 1)
 		xchk_btree_xref_set_corrupt(sc, sc->sa.refc_cur, 0);
 
 	/* Must be at least as long as what was passed in */
@@ -477,7 +483,8 @@ xchk_xref_is_not_shared(
 	if (!sc->sa.refc_cur || xchk_skip_xref(sc->sm))
 		return;
 
-	error = xfs_refcount_has_record(sc->sa.refc_cur, agbno, len, &shared);
+	error = xfs_refcount_has_record(sc->sa.refc_cur, XFS_RCDOM_SHARED,
+			agbno, len, &shared);
 	if (!xchk_should_check_xref(sc, &error, &sc->sa.refc_cur))
 		return;
 	if (shared)
