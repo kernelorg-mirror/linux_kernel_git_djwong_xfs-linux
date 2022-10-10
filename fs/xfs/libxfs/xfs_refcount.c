@@ -51,7 +51,7 @@ xfs_refcount_lookup_le(
 	int			*stat)
 {
 	trace_xfs_refcount_lookup(cur->bc_mp, cur->bc_ag.pag->pag_agno,
-			bno | (domain == XFS_RCDOM_COW ? XFS_REFC_COW_START : 0),
+			bno | (domain == XFS_RCDOM_COW ? XFS_REFC_COWFLAG : 0),
 			XFS_LOOKUP_LE);
 	cur->bc_rec.rc.rc_startblock = bno;
 	cur->bc_rec.rc.rc_blockcount = 0;
@@ -71,7 +71,7 @@ xfs_refcount_lookup_ge(
 	int			*stat)
 {
 	trace_xfs_refcount_lookup(cur->bc_mp, cur->bc_ag.pag->pag_agno,
-			bno | (domain == XFS_RCDOM_COW ? XFS_REFC_COW_START : 0),
+			bno | (domain == XFS_RCDOM_COW ? XFS_REFC_COWFLAG : 0),
 			XFS_LOOKUP_GE);
 	cur->bc_rec.rc.rc_startblock = bno;
 	cur->bc_rec.rc.rc_blockcount = 0;
@@ -91,7 +91,7 @@ xfs_refcount_lookup_eq(
 	int			*stat)
 {
 	trace_xfs_refcount_lookup(cur->bc_mp, cur->bc_ag.pag->pag_agno,
-			bno | (domain == XFS_RCDOM_COW ? XFS_REFC_COW_START : 0),
+			bno | (domain == XFS_RCDOM_COW ? XFS_REFC_COWFLAG : 0),
 			XFS_LOOKUP_LE);
 	cur->bc_rec.rc.rc_startblock = bno;
 	cur->bc_rec.rc.rc_blockcount = 0;
@@ -108,8 +108,8 @@ xfs_refcount_btrec_to_irec(
 	__u32				start;
 
 	start = be32_to_cpu(rec->refc.rc_startblock);
-	if (start & XFS_REFC_COW_START) {
-		start &= ~XFS_REFC_COW_START;
+	if (start & XFS_REFC_COWFLAG) {
+		start &= ~XFS_REFC_COWFLAG;
 		irec->rc_domain = XFS_RCDOM_COW;
 	} else {
 		irec->rc_domain = XFS_RCDOM_SHARED;
@@ -188,9 +188,9 @@ xfs_refcount_update(
 
 	trace_xfs_refcount_update(cur->bc_mp, cur->bc_ag.pag->pag_agno, irec);
 
-	start = irec->rc_startblock & ~XFS_REFC_COW_START;
+	start = irec->rc_startblock & ~XFS_REFC_COWFLAG;
 	if (irec->rc_domain == XFS_RCDOM_COW)
-		start |= XFS_REFC_COW_START;
+		start |= XFS_REFC_COWFLAG;
 
 	rec.refc.rc_startblock = cpu_to_be32(start);
 	rec.refc.rc_blockcount = cpu_to_be32(irec->rc_blockcount);
@@ -1735,7 +1735,7 @@ xfs_refcount_recover_extent(
 		return -EFSCORRUPTED;
 
 	if (XFS_IS_CORRUPT(cur->bc_mp, !(rec->refc.rc_startblock &
-					 cpu_to_be32(XFS_REFC_COW_START))))
+					 cpu_to_be32(XFS_REFC_COWFLAG))))
 		return -EFSCORRUPTED;
 
 	rr = kmem_alloc(sizeof(struct xfs_refcount_recovery), 0);
@@ -1762,7 +1762,7 @@ xfs_refcount_recover_cow_leftovers(
 	int				error;
 
 	/* reflink filesystems mustn't have AGs larger than 2^31-1 blocks */
-	BUILD_BUG_ON(XFS_MAX_CRC_AG_BLOCKS >= XFS_REFC_COW_START);
+	BUILD_BUG_ON(XFS_MAX_CRC_AG_BLOCKS >= XFS_REFC_COWFLAG);
 	if (mp->m_sb.sb_agblocks > XFS_MAX_CRC_AG_BLOCKS)
 		return -EOPNOTSUPP;
 
