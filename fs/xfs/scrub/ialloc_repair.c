@@ -102,7 +102,7 @@ struct xrep_ibt {
 	struct xrep_newbt	new_finobt;
 
 	/* Old inode btree blocks we found in the rmap. */
-	struct xbitmap		old_iallocbt_blocks;
+	struct xagb_bitmap	old_iallocbt_blocks;
 
 	/* Reconstructed inode records. */
 	struct xfarray		*inode_records;
@@ -392,16 +392,11 @@ xrep_ibt_record_old_btree_blocks(
 	struct xrep_ibt			*ri,
 	const struct xfs_rmap_irec	*rec)
 {
-	struct xfs_mount		*mp = ri->sc->mp;
-	xfs_fsblock_t			fsbno;
-
 	if (!xfs_verify_agbext(ri->sc->sa.pag, rec->rm_startblock,
 				rec->rm_blockcount))
 		return -EFSCORRUPTED;
 
-	fsbno = XFS_AGB_TO_FSB(mp, ri->sc->sa.pag->pag_agno,
-			rec->rm_startblock);
-	return xbitmap_set(&ri->old_iallocbt_blocks, fsbno,
+	return xagb_bitmap_set(&ri->old_iallocbt_blocks, rec->rm_startblock,
 			rec->rm_blockcount);
 }
 
@@ -742,7 +737,7 @@ xrep_ibt_remove_old_trees(
 	int			error;
 
 	/* Free the old inode btree blocks if they're not in use. */
-	error = xrep_reap_ag_metadata(sc, &ri->old_iallocbt_blocks,
+	error = xrep_reap_agmeta(sc, &ri->old_iallocbt_blocks,
 			&XFS_RMAP_OINFO_INOBT, XFS_AG_RESV_NONE);
 	if (error)
 		return error;
@@ -789,7 +784,7 @@ xrep_iallocbt(
 		goto out_ri;
 
 	/* Collect the inode data and find the old btree blocks. */
-	xbitmap_init(&ri->old_iallocbt_blocks);
+	xagb_bitmap_init(&ri->old_iallocbt_blocks);
 	error = xrep_ibt_find_inodes(ri);
 	if (error)
 		goto out_bitmap;
@@ -803,7 +798,7 @@ xrep_iallocbt(
 	error = xrep_ibt_remove_old_trees(ri);
 
 out_bitmap:
-	xbitmap_destroy(&ri->old_iallocbt_blocks);
+	xagb_bitmap_destroy(&ri->old_iallocbt_blocks);
 	xfarray_destroy(ri->inode_records);
 out_ri:
 	kfree(ri);
