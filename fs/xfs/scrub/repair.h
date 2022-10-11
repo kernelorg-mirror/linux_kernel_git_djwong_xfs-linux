@@ -26,6 +26,7 @@ bool xrep_ag_has_space(struct xfs_perag *pag, xfs_extlen_t nr_blocks,
 xfs_extlen_t xrep_calc_ag_resblks(struct xfs_scrub *sc);
 
 struct xbitmap;
+struct xagb_bitmap;
 
 int xrep_fix_freelist(struct xfs_scrub *sc, bool can_shrink);
 

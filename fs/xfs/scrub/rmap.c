@@ -55,11 +55,11 @@ struct xchk_rmap {
 	struct xfs_rmap_irec	prev_rec;
 
 	/* Bitmaps containing all blocks for each type of AG metadata. */
-	struct xbitmap		fs_owned;
-	struct xbitmap		log_owned;
-	struct xbitmap		ag_owned;
-	struct xbitmap		inobt_owned;
-	struct xbitmap		refcbt_owned;
+	struct xagb_bitmap	fs_owned;
+	struct xagb_bitmap	log_owned;
+	struct xagb_bitmap	ag_owned;
+	struct xagb_bitmap	inobt_owned;
+	struct xagb_bitmap	refcbt_owned;
 
 	/* Did we complete the AG space metadata bitmaps? */
 	bool			bitmaps_complete;
@@ -223,8 +223,8 @@ xchk_rmapbt_mark_bitmap(
 	const struct xfs_rmap_irec	*irec)
 {
 	struct xfs_scrub		*sc = bs->sc;
-	struct xbitmap			*bmp = NULL;
-	uint64_t			fsbcount = irec->rm_blockcount;
+	struct xagb_bitmap		*bmp = NULL;
+	xfs_extlen_t			fsbcount = irec->rm_blockcount;
 
 	/*
 	 * Skip corrupt records.  It is essential that we detect records in the
@@ -262,7 +262,7 @@ xchk_rmapbt_mark_bitmap(
 	if (!bmp)
 		return 0;
 
-	if (xbitmap_test(bmp, irec->rm_startblock, &fsbcount)) {
+	if (xagb_bitmap_test(bmp, irec->rm_startblock, &fsbcount)) {
 		/*
 		 * The start of this reverse mapping corresponds to a set
 		 * region in the bitmap.  If the mapping covers more area than
@@ -283,7 +283,7 @@ xchk_rmapbt_mark_bitmap(
 	}
 
 	/* Unset the region so that we can detect missing rmap records. */
-	return xbitmap_clear(bmp, irec->rm_startblock, irec->rm_blockcount);
+	return xagb_bitmap_clear(bmp, irec->rm_startblock, irec->rm_blockcount);
 }
 
 /* Scrub an rmapbt record. */
@@ -374,7 +374,7 @@ xchk_rmapbt_visit_btblock(
 	int			level,
 	void			*priv)
 {
-	struct xbitmap		*bitmap = priv;
+	struct xagb_bitmap	*bitmap = priv;
 	struct xfs_buf		*bp;
 	xfs_fsblock_t		fsbno;
 	xfs_agblock_t		agbno;
@@ -385,7 +385,7 @@ xchk_rmapbt_visit_btblock(
 
 	fsbno = XFS_DADDR_TO_FSB(cur->bc_mp, xfs_buf_daddr(bp));
 	agbno = XFS_FSB_TO_AGBNO(cur->bc_mp, fsbno);
-	return xbitmap_set(bitmap, agbno, 1);
+	return xagb_bitmap_set(bitmap, agbno, 1);
 }
 
 /* Add an AGFL block to the rmap list. */
@@ -395,9 +395,9 @@ xchk_rmapbt_walk_agfl(
 	xfs_agblock_t		bno,
 	void			*priv)
 {
-	struct xbitmap		*bitmap = priv;
+	struct xagb_bitmap	*bitmap = priv;
 
-	return xbitmap_set(bitmap, bno, 1);
+	return xagb_bitmap_set(bitmap, bno, 1);
 }
 
 /*
@@ -421,14 +421,14 @@ xchk_rmapbt_walk_ag_metadata(
 	int			error;
 
 	/* OWN_FS: AG headers */
-	error = xbitmap_set(&cr->fs_owned, XFS_SB_BLOCK(mp),
+	error = xagb_bitmap_set(&cr->fs_owned, XFS_SB_BLOCK(mp),
 			XFS_AGFL_BLOCK(mp) - XFS_SB_BLOCK(mp) + 1);
 	if (error)
 		goto out;
 
 	/* OWN_LOG: Internal log */
 	if (xfs_ag_contains_log(mp, sc->sa.pag->pag_agno)) {
-		error = xbitmap_set(&cr->log_owned,
+		error = xagb_bitmap_set(&cr->log_owned,
 				XFS_FSB_TO_AGBNO(mp, mp->m_sb.sb_logstart),
 				mp->m_sb.sb_logblocks);
 		if (error)
@@ -550,19 +550,19 @@ xchk_rmapbt_check_bitmaps(
 	 * Any bitmap with bits still set indicates that the reverse mapping
 	 * doesn't cover the entire primary structure.
 	 */
-	if (xbitmap_hweight(&cr->fs_owned) != 0)
+	if (xagb_bitmap_hweight(&cr->fs_owned) != 0)
 		xchk_btree_xref_set_corrupt(sc, cur, level);
 
-	if (xbitmap_hweight(&cr->log_owned) != 0)
+	if (xagb_bitmap_hweight(&cr->log_owned) != 0)
 		xchk_btree_xref_set_corrupt(sc, cur, level);
 
-	if (xbitmap_hweight(&cr->ag_owned) != 0)
+	if (xagb_bitmap_hweight(&cr->ag_owned) != 0)
 		xchk_btree_xref_set_corrupt(sc, cur, level);
 
-	if (xbitmap_hweight(&cr->inobt_owned) != 0)
+	if (xagb_bitmap_hweight(&cr->inobt_owned) != 0)
 		xchk_btree_xref_set_corrupt(sc, cur, level);
 
-	if (xbitmap_hweight(&cr->refcbt_owned) != 0)
+	if (xagb_bitmap_hweight(&cr->refcbt_owned) != 0)
 		xchk_btree_xref_set_corrupt(sc, cur, level);
 }
 
@@ -578,11 +578,11 @@ xchk_rmapbt(
 	if (!cr)
 		return -ENOMEM;
 
-	xbitmap_init(&cr->fs_owned);
-	xbitmap_init(&cr->log_owned);
-	xbitmap_init(&cr->ag_owned);
-	xbitmap_init(&cr->inobt_owned);
-	xbitmap_init(&cr->refcbt_owned);
+	xagb_bitmap_init(&cr->fs_owned);
+	xagb_bitmap_init(&cr->log_owned);
+	xagb_bitmap_init(&cr->ag_owned);
+	xagb_bitmap_init(&cr->inobt_owned);
+	xagb_bitmap_init(&cr->refcbt_owned);
 
 	error = xchk_rmapbt_walk_ag_metadata(sc, cr);
 	if (error)
@@ -596,11 +596,11 @@ xchk_rmapbt(
 	xchk_rmapbt_check_bitmaps(sc, cr);
 
 out:
-	xbitmap_destroy(&cr->refcbt_owned);
-	xbitmap_destroy(&cr->inobt_owned);
-	xbitmap_destroy(&cr->ag_owned);
-	xbitmap_destroy(&cr->log_owned);
-	xbitmap_destroy(&cr->fs_owned);
+	xagb_bitmap_destroy(&cr->refcbt_owned);
+	xagb_bitmap_destroy(&cr->inobt_owned);
+	xagb_bitmap_destroy(&cr->ag_owned);
+	xagb_bitmap_destroy(&cr->log_owned);
+	xagb_bitmap_destroy(&cr->fs_owned);
 	kfree(cr);
 	return error;
 }
