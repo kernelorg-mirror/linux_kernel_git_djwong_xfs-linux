@@ -341,20 +341,19 @@ xchk_refcountbt_rec(
 	struct xfs_refcount_irec irec;
 	xfs_agblock_t		*cow_blocks = bs->private;
 	struct xfs_perag	*pag = bs->cur->bc_ag.pag;
-	bool			has_cowflag;
 
 	xfs_refcount_btrec_to_irec(rec, &irec);
 
 	/* Only CoW records can have refcount == 1. */
-	has_cowflag = (irec.rc_startblock & XFS_REFC_COW_START);
-	if ((irec.rc_refcount == 1 && !has_cowflag) ||
-	    (irec.rc_refcount != 1 && has_cowflag))
+	if (irec.rc_domain == XFS_RCDOM_SHARED && irec.rc_refcount == 1)
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
-	if (has_cowflag)
+	if (irec.rc_domain == XFS_RCDOM_COW) {
+		if (irec.rc_refcount != 1)
+			xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 		(*cow_blocks) += irec.rc_blockcount;
+	}
 
 	/* Check the extent. */
-	irec.rc_startblock &= ~XFS_REFC_COW_START;
 	if (irec.rc_startblock + irec.rc_blockcount <= irec.rc_startblock ||
 	    !xfs_verify_agbno(pag, irec.rc_startblock) ||
 	    !xfs_verify_agbno(pag, irec.rc_startblock + irec.rc_blockcount - 1))
@@ -427,7 +426,6 @@ xchk_xref_is_cow_staging(
 	xfs_extlen_t			len)
 {
 	struct xfs_refcount_irec	rc;
-	bool				has_cowflag;
 	int				has_refcount;
 	int				error;
 
@@ -435,8 +433,8 @@ xchk_xref_is_cow_staging(
 		return;
 
 	/* Find the CoW staging extent. */
-	error = xfs_refcount_lookup_le(sc->sa.refc_cur,
-			agbno + XFS_REFC_COW_START, &has_refcount);
+	error = xfs_refcount_lookup_le(sc->sa.refc_cur, XFS_RCDOM_COW, agbno,
+			&has_refcount);
 	if (!xchk_should_check_xref(sc, &error, &sc->sa.refc_cur))
 		return;
 	if (!has_refcount) {
@@ -453,8 +451,7 @@ xchk_xref_is_cow_staging(
 	}
 
 	/* CoW flag must be set, refcount must be 1. */
-	has_cowflag = (rc.rc_startblock & XFS_REFC_COW_START);
-	if (!has_cowflag || rc.rc_refcount != 1)
+	if (rc.rc_domain != XFS_RCDOM_COW || rc.rc_refcount != 1)
 		xchk_btree_xref_set_corrupt(sc, sc->sa.refc_cur, 0);
 
 	/* Must be at least as long as what was passed in */
@@ -478,7 +475,8 @@ xchk_xref_is_not_shared(
 	if (!sc->sa.refc_cur || xchk_skip_xref(sc->sm))
 		return;
 
-	error = xfs_refcount_has_record(sc->sa.refc_cur, agbno, len, &shared);
+	error = xfs_refcount_has_record(sc->sa.refc_cur, XFS_RCDOM_SHARED,
+			agbno, len, &shared);
 	if (!xchk_should_check_xref(sc, &error, &sc->sa.refc_cur))
 		return;
 	if (shared)
