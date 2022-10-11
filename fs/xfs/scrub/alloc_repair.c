@@ -68,10 +68,10 @@
 
 struct xrep_abt {
 	/* Blocks owned by the rmapbt or the agfl. */
-	struct xbitmap		not_allocbt_blocks;
+	struct xagb_bitmap	not_allocbt_blocks;
 
 	/* All OWN_AG blocks. */
-	struct xbitmap		old_allocbt_blocks;
+	struct xagb_bitmap	old_allocbt_blocks;
 
 	/*
 	 * New bnobt information.  All btree block reservations are added to
@@ -95,9 +95,9 @@ struct xrep_abt {
 
 	/*
 	 * Next block we anticipate seeing in the rmap records.  If the next
-	 * rmap record is greater than next_bno, we have found unused space.
+	 * rmap record is greater than next_agbno, we have found unused space.
 	 */
-	xfs_agblock_t		next_bno;
+	xfs_agblock_t		next_agbno;
 
 	/* Number of free blocks in this AG. */
 	xfs_agblock_t		nr_blocks;
@@ -178,8 +178,8 @@ xrep_abt_stash(
 	xfs_agblock_t		end)
 {
 	struct xfs_alloc_rec_incore arec = {
-		.ar_startblock	= ra->next_bno,
-		.ar_blockcount	= end - ra->next_bno,
+		.ar_startblock	= ra->next_agbno,
+		.ar_blockcount	= end - ra->next_agbno,
 	};
 	struct xfs_scrub	*sc = ra->sc;
 	int			error = 0;
@@ -209,36 +209,33 @@ xrep_abt_walk_rmap(
 	void				*priv)
 {
 	struct xrep_abt			*ra = priv;
-	xfs_fsblock_t			fsb;
 	int				error;
 
 	/* Record all the OWN_AG blocks... */
 	if (rec->rm_owner == XFS_RMAP_OWN_AG) {
-		fsb = XFS_AGB_TO_FSB(cur->bc_mp, cur->bc_ag.pag->pag_agno,
-				rec->rm_startblock);
-		error = xbitmap_set(&ra->old_allocbt_blocks, fsb,
-				rec->rm_blockcount);
+		error = xagb_bitmap_set(&ra->old_allocbt_blocks,
+				rec->rm_startblock, rec->rm_blockcount);
 		if (error)
 			return error;
 	}
 
 	/* ...and all the rmapbt blocks... */
-	error = xbitmap_set_btcur_path(&ra->not_allocbt_blocks, cur);
+	error = xagb_bitmap_set_btcur_path(&ra->not_allocbt_blocks, cur);
 	if (error)
 		return error;
 
 	/* ...and all the free space. */
-	if (rec->rm_startblock > ra->next_bno) {
+	if (rec->rm_startblock > ra->next_agbno) {
 		error = xrep_abt_stash(ra, rec->rm_startblock);
 		if (error)
 			return error;
 	}
 
 	/*
-	 * rmap records can overlap on reflink filesystems, so project next_bno
-	 * as far out into the AG space as we currently know about.
+	 * rmap records can overlap on reflink filesystems, so project
+	 * next_agbno as far out into the AG space as we currently know about.
 	 */
-	ra->next_bno = max_t(xfs_agblock_t, ra->next_bno,
+	ra->next_agbno = max_t(xfs_agblock_t, ra->next_agbno,
 			rec->rm_startblock + rec->rm_blockcount);
 	return 0;
 }
@@ -247,14 +244,12 @@ xrep_abt_walk_rmap(
 static int
 xrep_abt_walk_agfl(
 	struct xfs_mount	*mp,
-	xfs_agblock_t		bno,
+	xfs_agblock_t		agbno,
 	void			*priv)
 {
 	struct xrep_abt		*ra = priv;
-	xfs_fsblock_t		fsb;
 
-	fsb = XFS_AGB_TO_FSB(mp, ra->sc->sa.pag->pag_agno, bno);
-	return xbitmap_set(&ra->not_allocbt_blocks, fsb, 1);
+	return xagb_bitmap_set(&ra->not_allocbt_blocks, agbno, 1);
 }
 
 /*
@@ -313,7 +308,7 @@ xrep_abt_find_freespace(
 	xfs_agblock_t		agend;
 	int			error;
 
-	xbitmap_init(&ra->not_allocbt_blocks);
+	xagb_bitmap_init(&ra->not_allocbt_blocks);
 
 	xrep_ag_btcur_init(sc, &sc->sa);
 
@@ -327,7 +322,7 @@ xrep_abt_find_freespace(
 
 	/* Insert a record for space between the last rmap and EOAG. */
 	agend = be32_to_cpu(agf->agf_length);
-	if (ra->next_bno < agend) {
+	if (ra->next_agbno < agend) {
 		error = xrep_abt_stash(ra, agend);
 		if (error)
 			goto err;
@@ -343,7 +338,7 @@ xrep_abt_find_freespace(
 		goto err_agfl;
 
 	/* Compute the old bnobt/cntbt blocks. */
-	error = xbitmap_disunion(&ra->old_allocbt_blocks,
+	error = xagb_bitmap_disunion(&ra->old_allocbt_blocks,
 			&ra->not_allocbt_blocks);
 	if (error)
 		goto err_agfl;
@@ -353,7 +348,7 @@ err_agfl:
 	xfs_trans_brelse(sc->tp, agfl_bp);
 err:
 	xchk_ag_btcur_free(&sc->sa);
-	xbitmap_destroy(&ra->not_allocbt_blocks);
+	xagb_bitmap_destroy(&ra->not_allocbt_blocks);
 	return error;
 }
 
@@ -747,7 +742,7 @@ xrep_abt_remove_old_trees(
 	int			error;
 
 	/* Free the old btree blocks if they're not in use. */
-	error = xrep_reap_ag_metadata(ra->sc, &ra->old_allocbt_blocks,
+	error = xrep_reap_agmeta(ra->sc, &ra->old_allocbt_blocks,
 			&XFS_RMAP_OINFO_AG, XFS_AG_RESV_IGNORE);
 	if (error)
 		return error;
@@ -801,7 +796,7 @@ xrep_allocbt(
 		goto out_ra;
 
 	/* Collect the free space data and find the old btree blocks. */
-	xbitmap_init(&ra->old_allocbt_blocks);
+	xagb_bitmap_init(&ra->old_allocbt_blocks);
 	error = xrep_abt_find_freespace(ra);
 	if (error)
 		goto out_bitmap;
@@ -815,7 +810,7 @@ xrep_allocbt(
 	error = xrep_abt_remove_old_trees(ra);
 
 out_bitmap:
-	xbitmap_destroy(&ra->old_allocbt_blocks);
+	xagb_bitmap_destroy(&ra->old_allocbt_blocks);
 	xfarray_destroy(ra->free_records);
 out_ra:
 	kfree(ra);
