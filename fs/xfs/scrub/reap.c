@@ -98,6 +98,9 @@ struct xreap_state {
 
 	/* Number of deferred reaps queued during the whole reap sequence. */
 	unsigned long long		total_deferred;
+
+	/* using experimental new code */
+	bool newcode;
 };
 
 /* Put a block back on the AGFL. */
@@ -422,7 +425,6 @@ xreap_agmeta_extent(
 {
 	struct xreap_state	*rs = priv;
 	struct xfs_scrub	*sc = rs->sc;
-	xfs_agnumber_t		agno = XFS_FSB_TO_AGNO(sc->mp, fsbno);
 	xfs_agblock_t		agbno = XFS_FSB_TO_AGBNO(sc->mp, fsbno);
 	xfs_agblock_t		agbno_next = agbno + len;
 	int			error = 0;
@@ -430,9 +432,16 @@ xreap_agmeta_extent(
 	ASSERT(len <= XFS_MAX_BMBT_EXTLEN);
 	ASSERT(sc->ip == NULL);
 
-	if (agno != sc->sa.pag->pag_agno) {
-		ASSERT(sc->sa.pag->pag_agno == agno);
-		return -EFSCORRUPTED;
+	if (rs->newcode) {
+		agbno = fsbno;
+		agbno_next = agbno + len;
+	} else {
+		xfs_agnumber_t	agno = XFS_FSB_TO_AGNO(sc->mp, fsbno);
+
+		if (agno != sc->sa.pag->pag_agno) {
+			ASSERT(sc->sa.pag->pag_agno == agno);
+			return -EFSCORRUPTED;
+		}
 	}
 
 	while (agbno < agbno_next) {
@@ -478,6 +487,7 @@ xrep_reap_ag_metadata(
 		.sc			= sc,
 		.oinfo			= oinfo,
 		.resv			= type,
+		.newcode		= false,
 	};
 	int				error;
 
@@ -485,6 +495,35 @@ xrep_reap_ag_metadata(
 	ASSERT(sc->ip == NULL);
 
 	error = xbitmap_walk(bitmap, xreap_agmeta_extent, &rs);
+	if (error)
+		return error;
+
+	if (xreap_dirty(&rs))
+		return xrep_defer_finish(sc);
+
+	return 0;
+}
+
+/* Dispose of every block of every AG metadata extent in the bitmap. */
+int
+xrep_reap_agmeta(
+	struct xfs_scrub		*sc,
+	struct xagb_bitmap		*bitmap,
+	const struct xfs_owner_info	*oinfo,
+	enum xfs_ag_resv_type		type)
+{
+	struct xreap_state		rs = {
+		.sc			= sc,
+		.oinfo			= oinfo,
+		.resv			= type,
+		.newcode		= true,
+	};
+	int				error;
+
+	ASSERT(xfs_has_rmapbt(sc->mp));
+	ASSERT(sc->ip == NULL);
+
+	error = xagb_bitmap_walk(bitmap, xreap_agmeta_extent, &rs);
 	if (error)
 		return error;
 

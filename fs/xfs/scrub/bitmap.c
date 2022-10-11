@@ -6,6 +6,7 @@
 #include "xfs.h"
 #include "xfs_fs.h"
 #include "xfs_shared.h"
+#include "xfs_bit.h"
 #include "xfs_format.h"
 #include "xfs_trans_resv.h"
 #include "xfs_mount.h"
@@ -261,6 +262,60 @@ xbitmap_disunion(
  *
  * For the 300th record we just exit, with the list being [1, 4, 2, 3].
  */
+
+/* Collect a btree's block in the agbitmap. */
+STATIC int
+xagb_bitmap_collect_btblock(
+	struct xfs_btree_cur	*cur,
+	int			level,
+	void			*priv)
+{
+	struct xagb_bitmap	*bitmap = priv;
+	struct xfs_buf		*bp;
+	xfs_fsblock_t		fsbno;
+	xfs_agblock_t		agbno;
+
+	xfs_btree_get_block(cur, level, &bp);
+	if (!bp)
+		return 0;
+
+	fsbno = XFS_DADDR_TO_FSB(cur->bc_mp, xfs_buf_daddr(bp));
+	agbno = XFS_FSB_TO_AGBNO(cur->bc_mp, fsbno);
+
+	return xagb_bitmap_set(bitmap, agbno, 1);
+}
+
+/*
+ * Record all the buffers pointed to by the btree cursor.  Callers already
+ * engaged in a btree walk should call this function to capture the list of
+ * blocks going from the leaf towards the root.
+ */
+int
+xagb_bitmap_set_btcur_path(
+	struct xagb_bitmap	*bitmap,
+	struct xfs_btree_cur	*cur)
+{
+	int			i;
+	int			error;
+
+	for (i = 0; i < cur->bc_nlevels && cur->bc_levels[i].ptr == 1; i++) {
+		error = xagb_bitmap_collect_btblock(cur, i, bitmap);
+		if (error)
+			return error;
+	}
+
+	return 0;
+}
+
+/* Walk the btree and mark the bitmap wherever a btree block is found. */
+int
+xagb_bitmap_set_btblocks(
+	struct xagb_bitmap	*bitmap,
+	struct xfs_btree_cur	*cur)
+{
+	return xfs_btree_visit_blocks(cur, xagb_bitmap_collect_btblock,
+			XFS_BTREE_VISIT_ALL, bitmap);
+}
 
 /*
  * Record all the buffers pointed to by the btree cursor.  Callers already
