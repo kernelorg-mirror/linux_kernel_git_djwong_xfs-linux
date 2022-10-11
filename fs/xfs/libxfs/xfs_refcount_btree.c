@@ -166,9 +166,9 @@ xfs_refcountbt_encode_startblock(
 	 * query functions (which set rc_domain == -1U), so we check that the
 	 * domain is /not/ shared.
 	 */
-	start = cur->bc_rec.rc.rc_startblock & ~XFS_REFC_COW_START;
+	start = cur->bc_rec.rc.rc_startblock & ~XFS_REFC_COWFLAG;
 	if (cur->bc_rec.rc.rc_domain != XFS_RCDOM_SHARED)
-		start |= XFS_REFC_COW_START;
+		start |= XFS_REFC_COWFLAG;
 	return start;
 }
 
