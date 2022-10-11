@@ -110,7 +110,7 @@ struct xrep_refc {
 	struct xrep_newbt	new_btree;
 
 	/* old refcountbt blocks */
-	struct xbitmap		old_refcountbt_blocks;
+	struct xagb_bitmap	old_refcountbt_blocks;
 
 	struct xfs_scrub	*sc;
 
@@ -229,7 +229,6 @@ xrep_refc_walk_rmaps(
 	struct xfs_rmap_irec	rmap;
 	struct xfs_btree_cur	*cur = rr->sc->sa.rmap_cur;
 	struct xfs_mount	*mp = cur->bc_mp;
-	xfs_fsblock_t		fsbno;
 	int			have_gt;
 	int			error = 0;
 
@@ -267,11 +266,8 @@ xrep_refc_walk_rmaps(
 		} else if (rmap.rm_owner == XFS_RMAP_OWN_REFC) {
 			/* refcountbt block, dump it when we're done. */
 			rr->btblocks += rmap.rm_blockcount;
-			fsbno = XFS_AGB_TO_FSB(cur->bc_mp,
-					cur->bc_ag.pag->pag_agno,
-					rmap.rm_startblock);
-			error = xbitmap_set(&rr->old_refcountbt_blocks,
-					fsbno, rmap.rm_blockcount);
+			error = xagb_bitmap_set(&rr->old_refcountbt_blocks,
+					rmap.rm_startblock, rmap.rm_blockcount);
 			if (error)
 				return error;
 		}
@@ -696,7 +692,7 @@ xrep_refc_remove_old_tree(
 	int			error;
 
 	/* Free the old refcountbt blocks if they're not in use. */
-	error = xrep_reap_ag_metadata(sc, &rr->old_refcountbt_blocks,
+	error = xrep_reap_agmeta(sc, &rr->old_refcountbt_blocks,
 			&XFS_RMAP_OINFO_REFC, XFS_AG_RESV_METADATA);
 	if (error)
 		return error;
@@ -738,7 +734,7 @@ xrep_refcountbt(
 		goto out_rr;
 
 	/* Collect all reference counts. */
-	xbitmap_init(&rr->old_refcountbt_blocks);
+	xagb_bitmap_init(&rr->old_refcountbt_blocks);
 	error = xrep_refc_find_refcounts(rr);
 	if (error)
 		goto out_bitmap;
@@ -752,7 +748,7 @@ xrep_refcountbt(
 	error = xrep_refc_remove_old_tree(rr);
 
 out_bitmap:
-	xbitmap_destroy(&rr->old_refcountbt_blocks);
+	xagb_bitmap_destroy(&rr->old_refcountbt_blocks);
 	xfarray_destroy(rr->refcount_records);
 out_rr:
 	kfree(rr);
