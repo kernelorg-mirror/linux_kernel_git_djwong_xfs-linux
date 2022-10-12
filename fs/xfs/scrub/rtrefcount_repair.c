@@ -114,7 +114,7 @@ struct xrep_rtrefc {
 	struct xrep_newbt	new_btree;
 
 	/* old refcountbt blocks */
-	struct xbitmap		old_rtrefcountbt_blocks;
+	struct xfsb_bitmap	old_rtrefcountbt_blocks;
 
 	struct xfs_scrub	*sc;
 
@@ -358,7 +358,7 @@ xrep_rtrefc_walk_rmap(
 	fsbno = XFS_AGB_TO_FSB(mp, cur->bc_ag.pag->pag_agno,
 			rec->rm_startblock);
 
-	return xbitmap_set(&rr->old_rtrefcountbt_blocks, fsbno,
+	return xfsb_bitmap_set(&rr->old_rtrefcountbt_blocks, fsbno,
 			rec->rm_blockcount);
 }
 
@@ -726,7 +726,7 @@ xrep_rtrefc_remove_old_tree(
 	 * reservation for the rtrmap inode is insufficient, this will refill
 	 * it.
 	 */
-	error = xrep_reap_inode_metadata(rr->sc, &rr->old_rtrefcountbt_blocks,
+	error = xrep_reap_fsmeta(rr->sc, &rr->old_rtrefcountbt_blocks,
 			&oinfo, XFS_AG_RESV_IMETA);
 	if (error)
 		return error;
@@ -770,7 +770,7 @@ xrep_rtrefcountbt(
 		goto out_rr;
 
 	/* Collect all reference counts. */
-	xbitmap_init(&rr->old_rtrefcountbt_blocks);
+	xfsb_bitmap_init(&rr->old_rtrefcountbt_blocks);
 	error = xrep_rtrefc_find_refcounts(rr);
 	if (error)
 		goto out_bitmap;
@@ -789,7 +789,7 @@ xrep_rtrefcountbt(
 	error = xrep_rtrefc_remove_old_tree(rr);
 
 out_bitmap:
-	xbitmap_destroy(&rr->old_rtrefcountbt_blocks);
+	xfsb_bitmap_destroy(&rr->old_rtrefcountbt_blocks);
 	xfarray_destroy(rr->refcount_records);
 out_rr:
 	kfree(rr);
