@@ -84,6 +84,10 @@ static inline int xagb_bitmap_disunion(struct xagb_bitmap *bitmap,
 	return xbitmap_disunion(&bitmap->agbitmap, &sub->agbitmap);
 }
 
+static inline uint32_t xagb_bitmap_count_set_regions(struct xagb_bitmap *bitmap)
+{
+	return xbitmap_count_set_regions(&bitmap->agbitmap);
+}
 static inline uint32_t xagb_bitmap_hweight(struct xagb_bitmap *bitmap)
 {
 	return xbitmap_hweight(&bitmap->agbitmap);
@@ -99,6 +103,8 @@ static inline int xagb_bitmap_walk(struct xagb_bitmap *bitmap,
 	return xbitmap_walk(&bitmap->agbitmap, fn, priv);
 }
 
+int xagb_bitmap_collect_btblock(struct xfs_btree_cur *cur, int level,
+		void *priv);
 int xagb_bitmap_set_btcur_path(struct xagb_bitmap *bitmap,
 		struct xfs_btree_cur *cur);
 int xagb_bitmap_set_btblocks(struct xagb_bitmap *bitmap,

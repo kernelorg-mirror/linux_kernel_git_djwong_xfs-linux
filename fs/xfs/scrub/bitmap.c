@@ -264,7 +264,7 @@ xbitmap_disunion(
  */
 
 /* Collect a btree's block in the agbitmap. */
-STATIC int
+int
 xagb_bitmap_collect_btblock(
 	struct xfs_btree_cur	*cur,
 	int			level,

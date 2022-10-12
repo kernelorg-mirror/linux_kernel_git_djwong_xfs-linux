@@ -284,8 +284,7 @@ xrep_rmap_stash_run(
 	struct xrep_rmap_stash_run	*rsr = priv;
 	struct xrep_rmap		*rr = rsr->rr;
 
-	return xrep_rmap_stash(rr, XFS_FSB_TO_AGBNO(rr->sc->mp, start), len,
-			rsr->owner, 0, rsr->rmap_flags);
+	return xrep_rmap_stash(rr, start, len, rsr->owner, 0, rsr->rmap_flags);
 }
 
 /*
@@ -295,7 +294,7 @@ xrep_rmap_stash_run(
 STATIC int
 xrep_rmap_stash_bitmap(
 	struct xrep_rmap		*rr,
-	struct xbitmap			*bitmap,
+	struct xagb_bitmap		*bitmap,
 	const struct xfs_owner_info	*oinfo)
 {
 	struct xrep_rmap_stash_run	rsr = {
@@ -309,7 +308,7 @@ xrep_rmap_stash_bitmap(
 	if (oinfo->oi_flags & XFS_OWNER_INFO_BMBT_BLOCK)
 		rsr.rmap_flags |= XFS_RMAP_BMBT_BLOCK;
 
-	return xbitmap_walk(bitmap, xrep_rmap_stash_run, &rsr);
+	return xagb_bitmap_walk(bitmap, xrep_rmap_stash_run, &rsr);
 }
 
 /* Section (I): Finding all file and bmbt extents. */
@@ -322,8 +321,8 @@ struct xrep_rmap_ifork {
 	 */
 	struct xfs_rmap_irec	accum;
 
-	/* Bitmap of bmbt blocks. */
-	struct xbitmap		bmbt_blocks;
+	/* Bitmap of bmbt blocks in this AG. */
+	struct xagb_bitmap	bmbt_blocks;
 
 	struct xrep_rmap	*rr;
 
@@ -398,17 +397,19 @@ xrep_rmap_visit_iroot_btree_block(
 {
 	struct xrep_rmap_ifork	*rf = priv;
 	struct xfs_buf		*bp;
-	xfs_fsblock_t		fsb;
+	xfs_fsblock_t		fsbno;
+	xfs_agblock_t		agbno;
 
 	xfs_btree_get_block(cur, level, &bp);
 	if (!bp)
 		return 0;
 
-	fsb = XFS_DADDR_TO_FSB(cur->bc_mp, xfs_buf_daddr(bp));
-	if (XFS_FSB_TO_AGNO(cur->bc_mp, fsb) != rf->rr->sc->sa.pag->pag_agno)
+	fsbno = XFS_DADDR_TO_FSB(cur->bc_mp, xfs_buf_daddr(bp));
+	if (XFS_FSB_TO_AGNO(cur->bc_mp, fsbno) != rf->rr->sc->sa.pag->pag_agno)
 		return 0;
 
-	return xbitmap_set(&rf->bmbt_blocks, fsb, 1);
+	agbno = XFS_FSB_TO_AGBNO(cur->bc_mp, fsbno);
+	return xagb_bitmap_set(&rf->bmbt_blocks, agbno, 1);
 }
 
 /*
@@ -424,7 +425,7 @@ xrep_rmap_scan_iroot_btree(
 	struct xrep_rmap	*rr = rf->rr;
 	int			error;
 
-	xbitmap_init(&rf->bmbt_blocks);
+	xagb_bitmap_init(&rf->bmbt_blocks);
 
 	/* Record all the blocks in the btree itself. */
 	error = xfs_btree_visit_blocks(cur, xrep_rmap_visit_iroot_btree_block,
@@ -441,7 +442,7 @@ xrep_rmap_scan_iroot_btree(
 	/* Stash any remaining accumulated rmaps. */
 	error = xrep_rmap_stash_accumulated(rf);
 out:
-	xbitmap_destroy(&rf->bmbt_blocks);
+	xagb_bitmap_destroy(&rf->bmbt_blocks);
 	return error;
 }
 
@@ -661,29 +662,10 @@ out_unlock:
 
 /* Section (I): Find all AG metadata extents except for free space metadata. */
 
-/* Add a btree block to the rmap list. */
-STATIC int
-xrep_rmap_visit_btblock(
-	struct xfs_btree_cur	*cur,
-	int			level,
-	void			*priv)
-{
-	struct xbitmap		*bitmap = priv;
-	struct xfs_buf		*bp;
-	xfs_fsblock_t		fsb;
-
-	xfs_btree_get_block(cur, level, &bp);
-	if (!bp)
-		return 0;
-
-	fsb = XFS_DADDR_TO_FSB(cur->bc_mp, xfs_buf_daddr(bp));
-	return xbitmap_set(bitmap, fsb, 1);
-}
-
 struct xrep_rmap_inodes {
 	struct xrep_rmap	*rr;
-	struct xbitmap		inobt_blocks;	/* INOBIT */
-	struct xbitmap		ichunk_blocks;	/* ICHUNKBIT */
+	struct xagb_bitmap	inobt_blocks;	/* INOBIT */
+	struct xagb_bitmap	ichunk_blocks;	/* ICHUNKBIT */
 };
 
 /* Record inode btree rmaps. */
@@ -696,14 +678,14 @@ xrep_rmap_walk_inobt(
 	struct xfs_inobt_rec_incore	irec;
 	struct xrep_rmap_inodes		*ri = priv;
 	struct xfs_mount		*mp = cur->bc_mp;
-	xfs_fsblock_t			fsbno;
+	xfs_agblock_t			agbno;
 	xfs_agino_t			agino;
 	xfs_agino_t			iperhole;
 	unsigned int			i;
 	int				error;
 
 	/* Record the inobt blocks. */
-	error = xbitmap_set_btcur_path(&ri->inobt_blocks, cur);
+	error = xagb_bitmap_set_btcur_path(&ri->inobt_blocks, cur);
 	if (error)
 		return error;
 
@@ -712,10 +694,9 @@ xrep_rmap_walk_inobt(
 
 	/* Record a non-sparse inode chunk. */
 	if (!xfs_inobt_issparse(irec.ir_holemask)) {
-		fsbno = XFS_AGB_TO_FSB(mp, cur->bc_ag.pag->pag_agno,
-				XFS_AGINO_TO_AGBNO(mp, agino));
+		agbno = XFS_AGINO_TO_AGBNO(mp, agino);
 
-		return xbitmap_set(&ri->ichunk_blocks, fsbno,
+		return xagb_bitmap_set(&ri->ichunk_blocks, agbno,
 				XFS_INODES_PER_CHUNK / mp->m_sb.sb_inopblock);
 	}
 
@@ -730,9 +711,8 @@ xrep_rmap_walk_inobt(
 			continue;
 
 		/* Record the inode chunk otherwise. */
-		fsbno = XFS_AGB_TO_FSB(mp, cur->bc_ag.pag->pag_agno,
-				XFS_AGINO_TO_AGBNO(mp, agino));
-		error = xbitmap_set(&ri->ichunk_blocks, fsbno,
+		agbno = XFS_AGINO_TO_AGBNO(mp, agino);
+		error = xagb_bitmap_set(&ri->ichunk_blocks, agbno,
 				iperhole / mp->m_sb.sb_inopblock);
 		if (error)
 			return error;
@@ -752,8 +732,8 @@ xrep_rmap_find_inode_rmaps(
 	struct xfs_scrub	*sc = rr->sc;
 	int			error;
 
-	xbitmap_init(&ri.inobt_blocks);
-	xbitmap_init(&ri.ichunk_blocks);
+	xagb_bitmap_init(&ri.inobt_blocks);
+	xagb_bitmap_init(&ri.ichunk_blocks);
 
 	/*
 	 * Iterate every record in the inobt so we can capture all the inode
@@ -767,13 +747,11 @@ xrep_rmap_find_inode_rmaps(
 	 * Note that if there are zero records in the inobt then query_all does
 	 * nothing and we have to account the empty inobt root manually.
 	 */
-	if (xbitmap_empty(&ri.ichunk_blocks)) {
+	if (xagb_bitmap_empty(&ri.ichunk_blocks)) {
 		struct xfs_agi	*agi = sc->sa.agi_bp->b_addr;
-		xfs_fsblock_t	agi_root;
 
-		agi_root = XFS_AGB_TO_FSB(sc->mp, sc->sa.pag->pag_agno,
-				be32_to_cpu(agi->agi_root));
-		error = xbitmap_set(&ri.inobt_blocks, agi_root, 1);
+		error = xagb_bitmap_set(&ri.inobt_blocks,
+				be32_to_cpu(agi->agi_root), 1);
 		if (error)
 			goto out_bitmap;
 	}
@@ -781,7 +759,7 @@ xrep_rmap_find_inode_rmaps(
 	/* Scan the finobt too. */
 	if (xfs_has_finobt(sc->mp)) {
 		error = xfs_btree_visit_blocks(sc->sa.fino_cur,
-				xrep_rmap_visit_btblock, XFS_BTREE_VISIT_ALL,
+				xagb_bitmap_collect_btblock, XFS_BTREE_VISIT_ALL,
 				&ri.inobt_blocks);
 		if (error)
 			goto out_bitmap;
@@ -796,8 +774,8 @@ xrep_rmap_find_inode_rmaps(
 			&XFS_RMAP_OINFO_INODES);
 
 out_bitmap:
-	xbitmap_destroy(&ri.inobt_blocks);
-	xbitmap_destroy(&ri.ichunk_blocks);
+	xagb_bitmap_destroy(&ri.inobt_blocks);
+	xagb_bitmap_destroy(&ri.ichunk_blocks);
 	return error;
 }
 
@@ -808,15 +786,12 @@ xrep_rmap_walk_cowblocks(
 	const struct xfs_refcount_irec	*irec,
 	void				*priv)
 {
-	struct xbitmap			*bitmap = priv;
-	xfs_fsblock_t			fsbno;
+	struct xagb_bitmap		*bitmap = priv;
 
 	if (irec->rc_domain != XFS_RCDOM_COW || irec->rc_refcount != 1)
 		return -EFSCORRUPTED;
 
-	fsbno = XFS_AGB_TO_FSB(cur->bc_mp, cur->bc_ag.pag->pag_agno,
-			irec->rc_startblock);
-	return xbitmap_set(bitmap, fsbno, irec->rc_blockcount);
+	return xagb_bitmap_set(bitmap, irec->rc_startblock, irec->rc_blockcount);
 }
 
 /*
@@ -827,8 +802,8 @@ STATIC int
 xrep_rmap_find_refcount_rmaps(
 	struct xrep_rmap	*rr)
 {
-	struct xbitmap		refcountbt_blocks;	/* REFCBIT */
-	struct xbitmap		cow_blocks;		/* COWBIT */
+	struct xagb_bitmap	refcountbt_blocks;	/* REFCBIT */
+	struct xagb_bitmap	cow_blocks;		/* COWBIT */
 	struct xfs_refcount_irec low = {
 		.rc_startblock	= 0,
 		.rc_domain	= XFS_RCDOM_COW,
@@ -843,12 +818,13 @@ xrep_rmap_find_refcount_rmaps(
 	if (!xfs_has_reflink(sc->mp))
 		return 0;
 
-	xbitmap_init(&refcountbt_blocks);
-	xbitmap_init(&cow_blocks);
+	xagb_bitmap_init(&refcountbt_blocks);
+	xagb_bitmap_init(&cow_blocks);
 
 	/* refcountbt */
-	error = xfs_btree_visit_blocks(sc->sa.refc_cur, xrep_rmap_visit_btblock,
-			XFS_BTREE_VISIT_ALL, &refcountbt_blocks);
+	error = xfs_btree_visit_blocks(sc->sa.refc_cur,
+			xagb_bitmap_collect_btblock, XFS_BTREE_VISIT_ALL,
+			&refcountbt_blocks);
 	if (error)
 		goto out_bitmap;
 
@@ -866,8 +842,8 @@ xrep_rmap_find_refcount_rmaps(
 			&XFS_RMAP_OINFO_REFC);
 
 out_bitmap:
-	xbitmap_destroy(&cow_blocks);
-	xbitmap_destroy(&refcountbt_blocks);
+	xagb_bitmap_destroy(&cow_blocks);
+	xagb_bitmap_destroy(&refcountbt_blocks);
 	return error;
 }
 
@@ -1039,7 +1015,7 @@ end_agscan:
 /* Section (II): Reserving space for new rmapbt and setting free space bitmap */
 
 struct xrep_rmap_agfl {
-	struct xbitmap		*bitmap;
+	struct xagb_bitmap	*bitmap;
 	xfs_agnumber_t		agno;
 };
 
@@ -1047,12 +1023,12 @@ struct xrep_rmap_agfl {
 STATIC int
 xrep_rmap_walk_agfl(
 	struct xfs_mount	*mp,
-	xfs_agblock_t		bno,
+	xfs_agblock_t		agbno,
 	void			*priv)
 {
 	struct xrep_rmap_agfl	*ra = priv;
 
-	return xbitmap_set(ra->bitmap, XFS_AGB_TO_FSB(mp, ra->agno, bno), 1);
+	return xagb_bitmap_set(ra->bitmap, agbno, 1);
 }
 
 /*
@@ -1066,7 +1042,7 @@ STATIC int
 xrep_rmap_try_reserve(
 	struct xrep_rmap	*rr,
 	struct xfs_btree_cur	*rmap_cur,
-	struct xbitmap		*freesp_blocks,
+	struct xagb_bitmap	*freesp_blocks,
 	uint64_t		*blocks_reserved,
 	bool			*done)
 {
@@ -1105,13 +1081,14 @@ xrep_rmap_try_reserve(
 	*blocks_reserved = rr->new_btree.bload.nr_blocks;
 
 	/* Clear everything in the bitmap. */
-	xbitmap_destroy(freesp_blocks);
+	xagb_bitmap_destroy(freesp_blocks);
 
 	/* Set all the bnobt blocks in the bitmap. */
 	sc->sa.bno_cur = xfs_allocbt_init_cursor(sc->mp, sc->tp, sc->sa.agf_bp,
 			sc->sa.pag, XFS_BTNUM_BNO);
-	error = xfs_btree_visit_blocks(sc->sa.bno_cur, xrep_rmap_visit_btblock,
-			XFS_BTREE_VISIT_ALL, freesp_blocks);
+	error = xfs_btree_visit_blocks(sc->sa.bno_cur,
+			xagb_bitmap_collect_btblock, XFS_BTREE_VISIT_ALL,
+			freesp_blocks);
 	xfs_btree_del_cursor(sc->sa.bno_cur, error);
 	sc->sa.bno_cur = NULL;
 	if (error)
@@ -1120,19 +1097,23 @@ xrep_rmap_try_reserve(
 	/* Set all the cntbt blocks in the bitmap. */
 	sc->sa.cnt_cur = xfs_allocbt_init_cursor(sc->mp, sc->tp, sc->sa.agf_bp,
 			sc->sa.pag, XFS_BTNUM_CNT);
-	error = xfs_btree_visit_blocks(sc->sa.cnt_cur, xrep_rmap_visit_btblock,
-			XFS_BTREE_VISIT_ALL, freesp_blocks);
+	error = xfs_btree_visit_blocks(sc->sa.cnt_cur,
+			xagb_bitmap_collect_btblock, XFS_BTREE_VISIT_ALL,
+			freesp_blocks);
 	xfs_btree_del_cursor(sc->sa.cnt_cur, error);
 	sc->sa.cnt_cur = NULL;
 	if (error)
 		return error;
 
 	/* Record our new btreeblks value. */
-	rr->freesp_btblocks = xbitmap_hweight(freesp_blocks) - 2;
+	rr->freesp_btblocks = xagb_bitmap_hweight(freesp_blocks) - 2;
 
 	/* Set all the new rmapbt blocks in the bitmap. */
 	for_each_xrep_newbt_reservation(&rr->new_btree, resv, n) {
-		error = xbitmap_set(freesp_blocks, resv->fsbno, resv->len);
+		xfs_agblock_t	agbno;
+
+		agbno = XFS_FSB_TO_AGBNO(sc->mp, resv->fsbno);
+		error = xagb_bitmap_set(freesp_blocks, agbno, resv->len);
 		if (error)
 			return error;
 	}
@@ -1147,7 +1128,7 @@ xrep_rmap_try_reserve(
 		return error;
 
 	/* Count the extents in the bitmap. */
-	freesp_records = xbitmap_count_set_regions(freesp_blocks);
+	freesp_records = xagb_bitmap_count_set_regions(freesp_blocks);
 
 	/* Compute how many blocks we'll need for all the rmaps. */
 	error = xfs_btree_bload_compute_geometry(rmap_cur,
@@ -1169,7 +1150,7 @@ xrep_rmap_reserve_space(
 	struct xrep_rmap	*rr,
 	struct xfs_btree_cur	*rmap_cur)
 {
-	struct xbitmap		freesp_blocks;	/* AGBIT */
+	struct xagb_bitmap	freesp_blocks;	/* AGBIT */
 	uint64_t		blocks_reserved = 0;
 	bool			done = false;
 	int			error;
@@ -1184,7 +1165,7 @@ xrep_rmap_reserve_space(
 	if (xchk_should_terminate(rr->sc, &error))
 		return error;
 
-	xbitmap_init(&freesp_blocks);
+	xagb_bitmap_init(&freesp_blocks);
 
 	/*
 	 * Iteratively reserve space for the new rmapbt and recompute the
@@ -1205,7 +1186,7 @@ xrep_rmap_reserve_space(
 	xchk_ag_btcur_free(&rr->sc->sa);
 
 out_bitmap:
-	xbitmap_destroy(&freesp_blocks);
+	xagb_bitmap_destroy(&freesp_blocks);
 	return error;
 }
 
@@ -1489,6 +1470,11 @@ err_newbt:
 
 /* Section (IV): Reaping the old btree. */
 
+struct xrep_rmap_find_gaps {
+	struct xagb_bitmap	rmap_gaps;
+	xfs_agblock_t		next_agbno;
+};
+
 /* Subtract each free extent in the bnobt from the rmap gaps. */
 STATIC int
 xrep_rmap_find_freesp(
@@ -1496,19 +1482,11 @@ xrep_rmap_find_freesp(
 	const struct xfs_alloc_rec_incore *rec,
 	void				*priv)
 {
-	struct xbitmap			*bitmap = priv;
-	xfs_fsblock_t			fsb;
+	struct xrep_rmap_find_gaps	*rfg = priv;
 
-	fsb = XFS_AGB_TO_FSB(cur->bc_mp, cur->bc_ag.pag->pag_agno,
-			rec->ar_startblock);
-	return xbitmap_clear(bitmap, fsb, rec->ar_blockcount);
+	return xagb_bitmap_clear(&rfg->rmap_gaps, rec->ar_startblock,
+			rec->ar_blockcount);
 }
-
-struct xrep_rmap_find_gaps {
-	struct xbitmap		rmap_gaps;
-	xfs_fsblock_t		next_fsb;
-	xfs_agnumber_t		agno;
-};
 
 /* Record the free space we find, as part of cleaning out the btree. */
 STATIC int
@@ -1518,19 +1496,17 @@ xrep_rmap_find_gaps(
 	void				*priv)
 {
 	struct xrep_rmap_find_gaps	*rfg = priv;
-	xfs_fsblock_t			fsbno;
 	int				error;
 
-	fsbno = XFS_AGB_TO_FSB(cur->bc_mp, rfg->agno, rec->rm_startblock);
-	if (fsbno > rfg->next_fsb) {
-		error = xbitmap_set(&rfg->rmap_gaps, rfg->next_fsb,
-				fsbno - rfg->next_fsb);
+	if (rec->rm_startblock > rfg->next_agbno) {
+		error = xagb_bitmap_set(&rfg->rmap_gaps, rfg->next_agbno,
+				rec->rm_startblock - rfg->next_agbno);
 		if (error)
 			return error;
 	}
 
-	rfg->next_fsb = max_t(xfs_fsblock_t, rfg->next_fsb,
-			fsbno + rec->rm_blockcount);
+	rfg->next_agbno = max_t(xfs_agblock_t, rfg->next_agbno,
+			rec->rm_startblock + rec->rm_blockcount);
 	return 0;
 }
 
@@ -1544,19 +1520,18 @@ STATIC int
 xrep_rmap_remove_old_tree(
 	struct xrep_rmap	*rr)
 {
-	struct xrep_rmap_find_gaps rfg;
+	struct xrep_rmap_find_gaps rfg = {
+		.next_agbno	= 0,
+	};
 	struct xfs_scrub	*sc = rr->sc;
-	struct xfs_mount	*mp = sc->mp;
 	struct xfs_agf		*agf = sc->sa.agf_bp->b_addr;
 	struct xfs_perag	*pag = sc->sa.pag;
 	struct xfs_btree_cur	*mcur;
 	struct xfs_buf		*mhead_bp;
-	xfs_fsblock_t		agend_fsb;
+	xfs_agblock_t		agend;
 	int			error;
 
-	xbitmap_init(&rfg.rmap_gaps);
-	rfg.agno = sc->sa.pag->pag_agno;
-	rfg.next_fsb = XFS_AGB_TO_FSB(mp, sc->sa.pag->pag_agno, 0);
+	xagb_bitmap_init(&rfg.rmap_gaps);
 
 	/* Compute free space from the new rmapbt. */
 	error = xfbtree_head_read_buf(rr->rmap_btree, NULL, &mhead_bp);
@@ -1570,11 +1545,10 @@ xrep_rmap_remove_old_tree(
 		goto out_bitmap;
 
 	/* Insert a record for space between the last rmap and EOAG. */
-	agend_fsb = XFS_AGB_TO_FSB(mp, sc->sa.pag->pag_agno,
-			be32_to_cpu(agf->agf_length));
-	if (rfg.next_fsb < agend_fsb) {
-		error = xbitmap_set(&rfg.rmap_gaps, rfg.next_fsb,
-				agend_fsb - rfg.next_fsb);
+	agend = be32_to_cpu(agf->agf_length);
+	if (rfg.next_agbno < agend) {
+		error = xagb_bitmap_set(&rfg.rmap_gaps, rfg.next_agbno,
+				agend - rfg.next_agbno);
 		if (error)
 			goto out_bitmap;
 	}
@@ -1583,7 +1557,7 @@ xrep_rmap_remove_old_tree(
 	sc->sa.bno_cur = xfs_allocbt_init_cursor(sc->mp, sc->tp, sc->sa.agf_bp,
 			sc->sa.pag, XFS_BTNUM_BNO);
 	error = xfs_alloc_query_all(sc->sa.bno_cur, xrep_rmap_find_freesp,
-			&rfg.rmap_gaps);
+			&rfg);
 	xfs_btree_del_cursor(sc->sa.bno_cur, error);
 	sc->sa.bno_cur = NULL;
 	if (error)
@@ -1596,8 +1570,8 @@ xrep_rmap_remove_old_tree(
 	 * fdblocks, since the rmap btree lives in free space) to keep the
 	 * reservation and free space accounting correct.
 	 */
-	error = xrep_reap_ag_metadata(sc, &rfg.rmap_gaps,
-			&XFS_RMAP_OINFO_ANY_OWNER, XFS_AG_RESV_IGNORE);
+	error = xrep_reap_agmeta(sc, &rfg.rmap_gaps, &XFS_RMAP_OINFO_ANY_OWNER,
+			XFS_AG_RESV_IGNORE);
 	if (error)
 		goto out_bitmap;
 	sc->sa.pag->pag_rmapbt_resv.ar_reserved += rr->old_rmapbt_fsbcount;
@@ -1610,7 +1584,7 @@ xrep_rmap_remove_old_tree(
 	pag->pagf_alt_levels[XFS_BTNUM_RMAPi] = 0;
 	sc->flags |= XREP_RESET_PERAG_RESV;
 out_bitmap:
-	xbitmap_destroy(&rfg.rmap_gaps);
+	xagb_bitmap_destroy(&rfg.rmap_gaps);
 	return error;
 }
 
