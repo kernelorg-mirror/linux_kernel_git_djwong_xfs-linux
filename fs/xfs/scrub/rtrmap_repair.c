@@ -99,7 +99,7 @@ struct xrep_rtrmap {
 	struct xfs_scrub	*sc;
 
 	/* bitmap of old rtrmapbt blocks */
-	struct xbitmap		old_rtrmapbt_blocks;
+	struct xfsb_bitmap	old_rtrmapbt_blocks;
 
 	/* Hooks into rtrmap update code. */
 	struct xfs_rmap_hook	hooks;
@@ -429,7 +429,8 @@ xrep_rtrmap_walk_rmap(
 	fsbno = XFS_AGB_TO_FSB(mp, cur->bc_ag.pag->pag_agno,
 			rec->rm_startblock);
 
-	return xbitmap_set(&rr->old_rtrmapbt_blocks, fsbno, rec->rm_blockcount);
+	return xfsb_bitmap_set(&rr->old_rtrmapbt_blocks, fsbno,
+			rec->rm_blockcount);
 }
 
 /* Scan one AG for reverse mappings for the realtime rmap btree. */
@@ -474,7 +475,7 @@ xrep_rtrmap_stash_run(
 STATIC int
 xrep_rtrmap_stash_bitmap(
 	struct xrep_rtrmap		*rr,
-	struct xbitmap			*bitmap,
+	struct xfsb_bitmap		*bitmap,
 	const struct xfs_owner_info	*oinfo)
 {
 	struct xrep_rtrmap_stash_run	rsr = {
@@ -482,7 +483,7 @@ xrep_rtrmap_stash_bitmap(
 		.owner			= oinfo->oi_owner,
 	};
 
-	return xbitmap_walk(bitmap, xrep_rtrmap_stash_run, &rsr);
+	return xfsb_bitmap_walk(bitmap, xrep_rtrmap_stash_run, &rsr);
 }
 
 /* Record a CoW staging extent. */
@@ -492,12 +493,12 @@ xrep_rtrmap_walk_cowblocks(
 	const struct xfs_refcount_irec	*irec,
 	void				*priv)
 {
-	struct xbitmap			*bitmap = priv;
+	struct xfsb_bitmap		*bitmap = priv;
 
 	if (irec->rc_domain != XFS_RCDOM_COW || irec->rc_refcount != 1)
 		return -EFSCORRUPTED;
 
-	return xbitmap_set(bitmap, irec->rc_startblock, irec->rc_blockcount);
+	return xfsb_bitmap_set(bitmap, irec->rc_startblock, irec->rc_blockcount);
 }
 
 /*
@@ -508,7 +509,7 @@ STATIC int
 xrep_rtrmap_find_refcount_rmaps(
 	struct xrep_rtrmap	*rr)
 {
-	struct xbitmap		cow_blocks;		/* COWBIT */
+	struct xfsb_bitmap	cow_blocks;		/* COWBIT */
 	struct xfs_refcount_irec low = {
 		.rc_startblock	= 0,
 		.rc_domain	= XFS_RCDOM_COW,
@@ -523,7 +524,7 @@ xrep_rtrmap_find_refcount_rmaps(
 	if (!xfs_has_rtreflink(sc->mp))
 		return 0;
 
-	xbitmap_init(&cow_blocks);
+	xfsb_bitmap_init(&cow_blocks);
 
 	/* Collect rmaps for CoW staging extents. */
 	error = xfs_refcount_query_range(sc->sr.refc_cur, &low, &high,
@@ -537,7 +538,7 @@ xrep_rtrmap_find_refcount_rmaps(
 		goto out_bitmap;
 
 out_bitmap:
-	xbitmap_destroy(&cow_blocks);
+	xfsb_bitmap_destroy(&cow_blocks);
 	return error;
 }
 
@@ -870,8 +871,8 @@ xrep_rtrmap_remove_old_tree(
 	 * aren't cross-linked with something else.
 	 */
 	xfs_rmap_ino_bmbt_owner(&oinfo, rr->sc->ip->i_ino, XFS_DATA_FORK);
-	error = xrep_reap_inode_metadata(rr->sc, &rr->old_rtrmapbt_blocks,
-			&oinfo, XFS_AG_RESV_IMETA);
+	error = xrep_reap_fsmeta(rr->sc, &rr->old_rtrmapbt_blocks, &oinfo,
+			XFS_AG_RESV_IMETA);
 	if (error)
 		return error;
 
@@ -983,7 +984,7 @@ xrep_rtrmapbt(
 	rr->sc = sc;
 
 	mutex_init(&rr->lock);
-	xbitmap_init(&rr->old_rtrmapbt_blocks);
+	xfsb_bitmap_init(&rr->old_rtrmapbt_blocks);
 
 	/* Set up some storage */
 	error = xfs_rtrmapbt_mem_create(sc->mp, sc->sr.rtg->rtg_rgno,
@@ -1031,7 +1032,7 @@ out_records:
 	xchk_iscan_finish(&rr->iscan);
 	xfbtree_destroy(rr->rtrmap_btree);
 out_bitmap:
-	xbitmap_destroy(&rr->old_rtrmapbt_blocks);
+	xfsb_bitmap_destroy(&rr->old_rtrmapbt_blocks);
 	mutex_destroy(&rr->lock);
 	kfree(rr);
 	return error;
