@@ -51,7 +51,7 @@
  */
 struct xrep_bmap {
 	/* Old bmbt blocks */
-	struct xbitmap		old_bmbt_blocks;
+	struct xfsb_bitmap	old_bmbt_blocks;
 
 	/* New fork. */
 	struct xrep_newbt	new_bmapbt;
@@ -219,7 +219,7 @@ xrep_bmap_walk_rmap(
 
 	if (rec->rm_flags & XFS_RMAP_BMBT_BLOCK) {
 		rb->old_bmbt_block_count += rec->rm_blockcount;
-		return xbitmap_set(&rb->old_bmbt_blocks, fsbno,
+		return xfsb_bitmap_set(&rb->old_bmbt_blocks, fsbno,
 				rec->rm_blockcount);
 	}
 
@@ -766,7 +766,7 @@ xrep_bmap_remove_old_tree(
 
 	/* Free the old bmbt blocks if they're not in use. */
 	xfs_rmap_ino_bmbt_owner(&oinfo, sc->ip->i_ino, rb->whichfork);
-	return xrep_reap_inode_metadata(sc, &rb->old_bmbt_blocks, &oinfo,
+	return xrep_reap_fsmeta(sc, &rb->old_bmbt_blocks, &oinfo,
 			XFS_AG_RESV_NONE);
 }
 
@@ -858,7 +858,7 @@ xrep_bmap(
 		goto out_rb;
 
 	/* Collect all reverse mappings for this fork's extents. */
-	xbitmap_init(&rb->old_bmbt_blocks);
+	xfsb_bitmap_init(&rb->old_bmbt_blocks);
 	error = xrep_bmap_find_mappings(rb);
 	if (error)
 		goto out_bitmap;
@@ -878,7 +878,7 @@ xrep_bmap(
 	error = xrep_bmap_remove_old_tree(rb);
 
 out_bitmap:
-	xbitmap_destroy(&rb->old_bmbt_blocks);
+	xfsb_bitmap_destroy(&rb->old_bmbt_blocks);
 	xfarray_destroy(rb->bmap_records);
 out_rb:
 	kfree(rb);
