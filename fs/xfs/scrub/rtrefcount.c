@@ -358,6 +358,9 @@ struct xchk_rtrefcbt_records {
 
 	/* Number of CoW blocks we expect. */
 	xfs_extlen_t			cow_blocks;
+
+	/* Was the last record a shared or CoW staging extent? */
+	enum xfs_rcext_domain		prev_domain;
 };
 
 static inline bool
@@ -485,6 +488,12 @@ xchk_rtrefcountbt_rec(
 	if (irec.rc_refcount == 0)
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 
+	/* Shared records always come before CoW records. */
+	if (irec.rc_domain == XFS_RCDOM_SHARED &&
+	    rrc->prev_domain == XFS_RCDOM_COW)
+		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
+	rrc->prev_domain = irec.rc_domain;
+
 	xchk_rtrefcountbt_check_mergeable(bs, rrc, &irec);
 	xchk_rtrefcountbt_xref(bs->sc, &irec);
 
@@ -545,6 +554,7 @@ xchk_rtrefcountbt(
 	struct xchk_rtrefcbt_records rrc = {
 		.cow_blocks		= 0,
 		.next_unshared_rgbno	= 0,
+		.prev_domain		= XFS_RCDOM_SHARED,
 	};
 	int			error;
 
