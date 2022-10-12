@@ -948,6 +948,36 @@ xrep_reap_fsmeta(
 }
 
 /*
+ * Dispose of every block of every rt metadata extent in the bitmap.
+ * Do not use this for file data/attr fork mappings.
+ */
+int
+xrep_reap_rtmeta(
+	struct xfs_scrub		*sc,
+	struct xrtb_bitmap		*bitmap,
+	const struct xfs_owner_info	*oinfo)
+{
+	struct xreap_state		rs = {
+		.sc			= sc,
+		.oinfo			= oinfo,
+		.resv			= XFS_AG_RESV_NONE,
+	};
+	int				error;
+
+	ASSERT(xfs_has_rmapbt(sc->mp));
+	ASSERT(sc->ip != NULL);
+
+	error = xrtb_bitmap_walk(bitmap, xreap_imeta_rtextent, &rs);
+	if (error)
+		return error;
+
+	if (xreap_dirty(&rs))
+		return xrep_defer_finish(sc);
+
+	return 0;
+}
+
+/*
  * Metadata files are not supposed to share blocks with anything else.
  * If blocks are shared, we remove the reverse mapping (thus reducing the
  * crosslink factor); if blocks are not shared, we also need to free them.

@@ -40,6 +40,7 @@ xrep_trans_commit(
 struct xbitmap;
 struct xagb_bitmap;
 struct xfsb_bitmap;
+struct xrtb_bitmap;
 
 int xrep_fix_freelist(struct xfs_scrub *sc, int alloc_flags);
 

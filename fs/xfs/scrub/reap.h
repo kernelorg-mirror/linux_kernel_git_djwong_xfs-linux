@@ -19,6 +19,8 @@ int xrep_reap_agmeta(struct xfs_scrub *sc, struct xagb_bitmap *bitmap,
 int xrep_reap_fsmeta(struct xfs_scrub *sc, struct xfsb_bitmap *bitmap,
 		const struct xfs_owner_info *oinfo,
 		enum xfs_ag_resv_type type);
+int xrep_reap_rtmeta(struct xfs_scrub *sc, struct xrtb_bitmap *bitmap,
+		const struct xfs_owner_info *oinfo);
 
 /* Buffer cache scan context. */
 struct xrep_bufscan {

@@ -62,7 +62,8 @@ struct xrep_cow {
 	struct xbitmap		bad_fileoffs;
 
 	/* Bitmap of fsblocks that were removed from the CoW fork. */
-	struct xbitmap		old_cowfork_fsblocks;
+	struct xfsb_bitmap	old_cowfork_fsblocks;
+	struct xrtb_bitmap	old_cowfork_rtblocks;
 
 	/* CoW fork mappings used to scan for bad CoW staging extents. */
 	struct xfs_bmbt_irec	irec;
@@ -681,8 +682,12 @@ xrep_cow_replace_one(
 		return error;
 
 	/* Note the old CoW staging extents; we'll reap them all later. */
-	error = xbitmap_set(&xc->old_cowfork_fsblocks, old_startblock,
-			rep.br_blockcount);
+	if (XFS_IS_REALTIME_INODE(sc->ip))
+		error = xrtb_bitmap_set(&xc->old_cowfork_rtblocks,
+				old_startblock, rep.br_blockcount);
+	else
+		error = xfsb_bitmap_set(&xc->old_cowfork_fsblocks,
+				old_startblock, rep.br_blockcount);
 	if (error)
 		return error;
 
@@ -768,7 +773,8 @@ xrep_bmap_cow(
 
 	xc->sc = sc;
 	xbitmap_init(&xc->bad_fileoffs);
-	xbitmap_init(&xc->old_cowfork_fsblocks);
+	xfsb_bitmap_init(&xc->old_cowfork_fsblocks);
+	xrtb_bitmap_init(&xc->old_cowfork_rtblocks);
 
 	for_each_xfs_iext(ifp, &icur, &xc->irec) {
 		if (xchk_should_terminate(sc, &error))
@@ -809,13 +815,18 @@ xrep_bmap_cow(
 	 * by the refcount btree, not the inode, so it is correct to treat them
 	 * like inode metadata.
 	 */
-	error = xrep_reap_inode_metadata(sc, &xc->old_cowfork_fsblocks,
+	error = xrep_reap_fsmeta(sc, &xc->old_cowfork_fsblocks,
 			&XFS_RMAP_OINFO_COW, XFS_AG_RESV_NONE);
+	if (error)
+		goto out_bitmap;
+	error = xrep_reap_rtmeta(sc, &xc->old_cowfork_rtblocks,
+			&XFS_RMAP_OINFO_COW);
 	if (error)
 		goto out_bitmap;
 
 out_bitmap:
-	xbitmap_destroy(&xc->old_cowfork_fsblocks);
+	xrtb_bitmap_destroy(&xc->old_cowfork_rtblocks);
+	xfsb_bitmap_destroy(&xc->old_cowfork_fsblocks);
 	xbitmap_destroy(&xc->bad_fileoffs);
 	kmem_free(xc);
 	return error;
