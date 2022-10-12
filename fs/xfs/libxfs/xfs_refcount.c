@@ -1181,6 +1181,43 @@ xfs_refcount_finish_one_cleanup(
 }
 
 /*
+ * Set up a continuation a deferred refcount operation by updating the intent.
+ * Checks to make sure we're not going to run off the end of the AG.
+ */
+static inline int
+xfs_refcount_continue_op(
+	struct xfs_btree_cur		*cur,
+	struct xfs_refcount_intent	*ri,
+	xfs_agblock_t			new_agbno,
+	xfs_extlen_t			new_len)
+{
+	struct xfs_mount		*mp = cur->bc_mp;
+	struct xfs_perag		*pag = ri->ri_pag;
+	xfs_fsblock_t			new_fsbno;
+
+	new_fsbno = XFS_AGB_TO_FSB(mp, pag->pag_agno, new_agbno);
+
+	/*
+	 * If we don't have any work left to do, then there's no need to
+	 * perform the validation of the new parameters since we're about to
+	 * tear down all the operation context.
+	 */
+	if (!new_len)
+		goto done;
+
+	if (XFS_IS_CORRUPT(mp, !xfs_verify_fsbext(mp, new_fsbno, new_len)))
+		return -EFSCORRUPTED;
+
+	if (XFS_IS_CORRUPT(mp, pag->pag_agno != XFS_FSB_TO_AGNO(mp, new_fsbno)))
+		return -EFSCORRUPTED;
+
+done:
+	ri->ri_startblock = new_fsbno;
+	ri->ri_blockcount = new_len;
+	return 0;
+}
+
+/*
  * Process one of the deferred refcount operations.  We pass back the
  * btree cursor to maintain our lock on the btree between calls.
  * This saves time and eliminates a buffer deadlock between the
@@ -1243,9 +1280,9 @@ xfs_refcount_finish_one(
 				XFS_REFCOUNT_ADJUST_INCREASE);
 		if (error)
 			return error;
-		ri->ri_startblock = XFS_AGB_TO_FSB(mp, ri->ri_pag->pag_agno,
-				new_agbno);
-		ri->ri_blockcount = new_len;
+		error = xfs_refcount_continue_op(rcur, ri, new_agbno, new_len);
+		if (error)
+			return error;
 		break;
 	case XFS_REFCOUNT_DECREASE:
 		error = xfs_refcount_adjust(rcur, bno, ri->ri_blockcount,
@@ -1253,9 +1290,9 @@ xfs_refcount_finish_one(
 				XFS_REFCOUNT_ADJUST_DECREASE);
 		if (error)
 			return error;
-		ri->ri_startblock = XFS_AGB_TO_FSB(mp, ri->ri_pag->pag_agno,
-				new_agbno);
-		ri->ri_blockcount = new_len;
+		error = xfs_refcount_continue_op(rcur, ri, new_agbno, new_len);
+		if (error)
+			return error;
 		break;
 	case XFS_REFCOUNT_ALLOC_COW:
 		error = __xfs_refcount_cow_alloc(rcur, bno, ri->ri_blockcount);
