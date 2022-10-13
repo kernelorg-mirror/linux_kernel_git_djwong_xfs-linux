@@ -377,7 +377,8 @@ static void dax_associate_entry(void *entry, struct address_space *mapping,
 		if (cow) {
 			dax_mapping_set_cow(page);
 		} else {
-			WARN_ON_ONCE(page->mapping);
+			// shut up WARN_ON_ONCE(page->mapping);
+			if (page->mapping) printk(KERN_INFO "%s:%d ino 0x%lx index 0x%lx page 0x%llx mapping 0x%llx <- 0x%llx\n", __func__, __LINE__, mapping->host->i_ino, index + i, (unsigned long long)page, (unsigned long long)page->mapping, (unsigned long long)mapping);
 			page->mapping = mapping;
 			page->index = index + i++;
 		}
@@ -842,6 +843,12 @@ static bool dax_fault_is_synchronous(const struct iomap_iter *iter,
 
 static bool dax_fault_is_cow(const struct iomap_iter *iter)
 {
+	return true;
+	if (iter->srcmap.type != IOMAP_HOLE)
+		return true;
+	if (iter->iomap.flags & IOMAP_F_SHARED)
+		return true;
+	return false;
 	return (iter->flags & IOMAP_WRITE) &&
 		(iter->iomap.flags & IOMAP_F_SHARED);
 }
