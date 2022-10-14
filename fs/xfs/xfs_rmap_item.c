@@ -20,6 +20,7 @@
 #include "xfs_error.h"
 #include "xfs_log_priv.h"
 #include "xfs_log_recover.h"
+#include "xfs_ag.h"
 
 struct kmem_cache	*xfs_rui_cache;
 struct kmem_cache	*xfs_rud_cache;
@@ -415,6 +416,24 @@ xfs_rmap_update_create_done(
 	return &xfs_trans_get_rud(tp, RUI_ITEM(intent))->rud_item;
 }
 
+void
+xfs_rmap_update_get_group(
+	struct xfs_mount	*mp,
+	struct xfs_rmap_intent	*ri)
+{
+	xfs_agnumber_t		agno;
+
+	agno = XFS_FSB_TO_AGNO(mp, ri->ri_bmap.br_startblock);
+	ri->ri_pag = xfs_perag_get(mp, agno);
+}
+
+static inline void
+xfs_rmap_update_put_group(
+	struct xfs_rmap_intent	*ri)
+{
+	xfs_perag_put(ri->ri_pag);
+}
+
 /* Process a deferred rmap update. */
 STATIC int
 xfs_rmap_update_finish_item(
@@ -430,6 +449,8 @@ xfs_rmap_update_finish_item(
 
 	error = xfs_trans_log_finish_rmap_update(tp, RUD_ITEM(done), ri,
 			state);
+
+	xfs_rmap_update_put_group(ri);
 	kmem_cache_free(xfs_rmap_intent_cache, ri);
 	return error;
 }
@@ -450,6 +471,8 @@ xfs_rmap_update_cancel_item(
 	struct xfs_rmap_intent		*ri;
 
 	ri = container_of(item, struct xfs_rmap_intent, ri_list);
+
+	xfs_rmap_update_put_group(ri);
 	kmem_cache_free(xfs_rmap_intent_cache, ri);
 }
 
@@ -582,11 +605,13 @@ xfs_rui_item_recover(
 		fake.ri_bmap.br_state = (map->me_flags & XFS_RMAP_EXTENT_UNWRITTEN) ?
 				XFS_EXT_UNWRITTEN : XFS_EXT_NORM;
 
+		xfs_rmap_update_get_group(mp, &fake);
 		error = xfs_trans_log_finish_rmap_update(tp, rudp, &fake,
 				&rcur);
 		if (error == -EFSCORRUPTED)
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 					map, sizeof(*map));
+		xfs_rmap_update_put_group(&fake);
 		if (error)
 			goto abort_error;
 
