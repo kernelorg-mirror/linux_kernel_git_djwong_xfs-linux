@@ -657,6 +657,36 @@ TRACE_EVENT(xchk_fscounters_within_range,
 		  __entry->old_value)
 )
 
+TRACE_EVENT(xchk_refcount_incorrect,
+	TP_PROTO(struct xfs_perag *pag, xfs_agblock_t startblock,
+		 xfs_extlen_t blockcount, xfs_nlink_t refcount,
+		 xfs_nlink_t seen),
+	TP_ARGS(pag, startblock, blockcount, refcount, seen),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_agnumber_t, agno)
+		__field(xfs_agblock_t, startblock)
+		__field(xfs_extlen_t, blockcount)
+		__field(xfs_nlink_t, refcount)
+		__field(xfs_nlink_t, seen)
+	),
+	TP_fast_assign(
+		__entry->dev = pag->pag_mount->m_super->s_dev;
+		__entry->agno = pag->pag_agno;
+		__entry->startblock = startblock;
+		__entry->blockcount = blockcount;
+		__entry->refcount = refcount;
+		__entry->seen = seen;
+	),
+	TP_printk("dev %d:%d agno 0x%x agbno 0x%x fsbcount 0x%x refcount %u seen %u",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->agno,
+		  __entry->startblock,
+		  __entry->blockcount,
+		  __entry->refcount,
+		  __entry->seen)
+)
+
 /* repair tracepoints */
 #if IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR)
 
