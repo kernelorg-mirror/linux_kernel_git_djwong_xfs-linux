@@ -20,6 +20,7 @@
 #include "xfs_error.h"
 #include "xfs_log_priv.h"
 #include "xfs_log_recover.h"
+#include "xfs_ag.h"
 
 struct kmem_cache	*xfs_cui_cache;
 struct kmem_cache	*xfs_cud_cache;
@@ -365,6 +366,24 @@ xfs_refcount_update_create_done(
 	return &xfs_trans_get_cud(tp, CUI_ITEM(intent))->cud_item;
 }
 
+void
+xfs_refcount_update_get_group(
+	struct xfs_mount		*mp,
+	struct xfs_refcount_intent	*ri)
+{
+	xfs_agnumber_t			agno;
+
+	agno = XFS_FSB_TO_AGNO(mp, ri->ri_startblock);
+	ri->ri_pag = xfs_perag_get(mp, agno);
+}
+
+static inline void
+xfs_refcount_update_put_group(
+	struct xfs_refcount_intent	*ri)
+{
+	xfs_perag_put(ri->ri_pag);
+}
+
 /* Process a deferred refcount update. */
 STATIC int
 xfs_refcount_update_finish_item(
@@ -386,6 +405,8 @@ xfs_refcount_update_finish_item(
 		       ri->ri_type == XFS_REFCOUNT_DECREASE);
 		return -EAGAIN;
 	}
+
+	xfs_refcount_update_put_group(ri);
 	kmem_cache_free(xfs_refcount_intent_cache, ri);
 	return error;
 }
@@ -406,6 +427,8 @@ xfs_refcount_update_cancel_item(
 	struct xfs_refcount_intent	*ri;
 
 	ri = container_of(item, struct xfs_refcount_intent, ri_list);
+
+	xfs_refcount_update_put_group(ri);
 	kmem_cache_free(xfs_refcount_intent_cache, ri);
 }
 
@@ -518,9 +541,13 @@ xfs_cui_item_recover(
 
 		fake.ri_startblock = pmap->pe_startblock;
 		fake.ri_blockcount = pmap->pe_len;
-		if (!requeue_only)
+
+		if (!requeue_only) {
+			xfs_refcount_update_get_group(mp, &fake);
 			error = xfs_trans_log_finish_refcount_update(tp, cudp,
 					&fake, &rcur);
+			xfs_refcount_update_put_group(&fake);
+		}
 		if (error == -EFSCORRUPTED)
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 					pmap, sizeof(*pmap));
