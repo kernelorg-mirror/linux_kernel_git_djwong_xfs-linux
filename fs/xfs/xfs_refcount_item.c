@@ -639,7 +639,8 @@ xfs_cui_copy_format(
 	len = xfs_cui_log_format_sizeof(src_cui_fmt->cui_nextents);
 
 	if (buf->i_len == len) {
-		memcpy(dst_cui_fmt, src_cui_fmt, len);
+		unsafe_memcpy(dst_cui_fmt, src_cui_fmt, len,
+				/* bounds checked in previous line */);
 		return 0;
 	}
 	XFS_ERROR_REPORT(__func__, XFS_ERRLEVEL_LOW, NULL);

@@ -176,7 +176,8 @@ xfs_rui_copy_format(
 		return -EFSCORRUPTED;
 	}
 
-	memcpy(dst_rui_fmt, src_rui_fmt, len);
+	unsafe_memcpy(dst_rui_fmt, src_rui_fmt, len,
+			/* bounds checked in previous line */);
 	return 0;
 }
 

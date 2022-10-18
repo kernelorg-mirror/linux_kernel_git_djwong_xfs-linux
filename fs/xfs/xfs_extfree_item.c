@@ -196,7 +196,8 @@ xfs_efi_copy_format(xfs_log_iovec_t *buf, xfs_efi_log_format_t *dst_efi_fmt)
 		(src_efi_fmt->efi_nextents - 1) * sizeof(xfs_extent_64_t);
 
 	if (buf->i_len == len) {
-		memcpy((char *)dst_efi_fmt, (char*)src_efi_fmt, len);
+		unsafe_memcpy((char *)dst_efi_fmt, (char*)src_efi_fmt, len,
+				/* bounds checked in previous line */);
 		return 0;
 	} else if (buf->i_len == len32) {
 		xfs_efi_log_format_32_t *src_efi_fmt_32 = buf->i_addr;
@@ -690,11 +691,13 @@ xfs_efi_item_relog(
 	tp->t_flags |= XFS_TRANS_DIRTY;
 	efdp = xfs_trans_get_efd(tp, EFI_ITEM(intent), count);
 	efdp->efd_next_extent = count;
-	memcpy(efdp->efd_format.efd_extents, extp, count * sizeof(*extp));
+	unsafe_memcpy(efdp->efd_format.efd_extents, extp, count * sizeof(*extp),
+			/* whatever gcc */);
 	set_bit(XFS_LI_DIRTY, &efdp->efd_item.li_flags);
 
 	efip = xfs_efi_init(tp->t_mountp, count);
-	memcpy(efip->efi_format.efi_extents, extp, count * sizeof(*extp));
+	unsafe_memcpy(efip->efi_format.efi_extents, extp, count * sizeof(*extp),
+			/* whatever gcc */);
 	atomic_set(&efip->efi_next_extent, count);
 	xfs_trans_add_item(tp, &efip->efi_item);
 	set_bit(XFS_LI_DIRTY, &efip->efi_item.li_flags);
