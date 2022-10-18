@@ -229,8 +229,10 @@ xchk_parent_validate(
 	 * Ensure that the parent has as many links to the child as the child
 	 * thinks it has to the parent.
 	 */
-	if (spc.nlink != expected_nlink)
+	if (spc.nlink != expected_nlink) {
+		xfs_err(sc->mp, "ino 0x%llx nlink 0x%x parent 0x%llx dirlink 0x%x != 0x%x", sc->ip->i_ino, VFS_I(sc->ip)->i_nlink, dp->i_ino, spc.nlink, expected_nlink);
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, 0);
+	}
 
 out_unlock:
 	xfs_iunlock(dp, XFS_IOLOCK_SHARED);
