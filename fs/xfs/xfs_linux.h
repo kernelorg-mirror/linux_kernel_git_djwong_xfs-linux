@@ -254,4 +254,23 @@ int xfs_rw_bdev(struct block_device *bdev, sector_t sector, unsigned int count,
 # define PTR_FMT "%p"
 #endif
 
+/*
+ * Copy an array from @src into the @dst buffer, allowing for @dst to be a
+ * structure with a VLAs at the end.  gcc11 is smart enough for
+ * __builtin_object_size to see through void * arguments to static inline
+ * function but not to detect VLAs, which leads to kernel warnings.
+ */
+static inline int memcpy_array(void *dst, void *src, size_t nmemb, size_t size)
+{
+	size_t		bytes;
+
+	if (unlikely(check_mul_overflow(nmemb, size, &bytes))) {
+		ASSERT(0);
+		return -ENOMEM;
+	}
+
+	unsafe_memcpy(dst, src, bytes, VLA size detection broken on gcc11 );
+	return 0;
+}
+
 #endif /* __XFS_LINUX__ */

@@ -99,6 +99,25 @@ struct xlog_recover_item {
 	const struct xlog_recover_item_ops *ri_ops;
 };
 
+/*
+ * Copy recovered log item data into the @dst buffer, allowing for @dst to be a
+ * log intent item with a VLAs at the end.  gcc11 is smart enough for
+ * __builtin_object_size to see through void * arguments to static inline
+ * function but not to detect VLAs, which leads to kernel warnings.
+ */
+static inline void
+xlog_recover_item_copybuf(
+	void				*dst,
+	const struct xlog_recover_item	*ri,
+	unsigned int			buf_idx)
+{
+	ASSERT(buf_idx < ri->ri_cnt);
+
+	unsafe_memcpy(dst, ri->ri_buf[buf_idx].i_addr,
+			   ri->ri_buf[buf_idx].i_len,
+			   VLA size detection broken on gcc11);
+}
+
 struct xlog_recover {
 	struct hlist_node	r_list;
 	xlog_tid_t		r_log_tid;	/* log's transaction id */
