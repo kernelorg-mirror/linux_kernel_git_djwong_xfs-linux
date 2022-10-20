@@ -1467,6 +1467,109 @@ dax_iomap_rw(struct kiocb *iocb, struct iov_iter *iter,
 }
 EXPORT_SYMBOL_GPL(dax_iomap_rw);
 
+static loff_t dax_iomap_unshare_iter(const struct iomap_iter *iomi)
+{
+	const struct iomap *iomap = &iomi->iomap;
+	const struct iomap *srcmap = &iomi->srcmap;
+	loff_t length = iomap_length(iomi);
+	loff_t pos = iomi->pos;
+	struct dax_device *dax_dev = iomap->dax_dev;
+	loff_t end = pos + length, done = 0;
+	ssize_t ret = 0;
+	size_t xfer;
+	int id;
+
+	/* don't bother with blocks that are not shared to start with */
+	if (!(iomap->flags & IOMAP_F_SHARED))
+		return length;
+	/* don't bother with holes or unwritten extents */
+	if (srcmap->type == IOMAP_HOLE || srcmap->type == IOMAP_UNWRITTEN)
+		return length;
+
+	/*
+	 * Write can allocate block for an area which has a hole page mapped
+	 * into page tables. We have to tear down these mappings so that data
+	 * written by write(2) is visible in mmap.
+	 */
+	if (iomap->flags & IOMAP_F_NEW) {
+		invalidate_inode_pages2_range(iomi->inode->i_mapping,
+					      pos >> PAGE_SHIFT,
+					      (end - 1) >> PAGE_SHIFT);
+	}
+
+	id = dax_read_lock();
+	while (pos < end) {
+		unsigned offset = pos & (PAGE_SIZE - 1);
+		const size_t size = ALIGN(length + offset, PAGE_SIZE);
+		pgoff_t pgoff = dax_iomap_pgoff(iomap, pos);
+		ssize_t map_len;
+		void *kaddr;
+
+		if (fatal_signal_pending(current)) {
+			ret = -EINTR;
+			break;
+		}
+
+		map_len = dax_direct_access(dax_dev, pgoff, PHYS_PFN(size),
+				DAX_ACCESS, &kaddr, NULL);
+		if (map_len < 0) {
+			ret = map_len;
+			break;
+		}
+
+		if (srcmap->type != IOMAP_HOLE && srcmap->addr != iomap->addr) {
+			ret = dax_iomap_cow_copy(pgoff << PAGE_SHIFT,
+					PFN_PHYS(map_len), PAGE_SIZE, srcmap,
+					kaddr);
+			if (ret)
+				break;
+		}
+
+		map_len = PFN_PHYS(map_len);
+		kaddr += offset;
+		map_len -= offset;
+		if (map_len > end - pos)
+			map_len = end - pos;
+
+		xfer = map_len;
+
+		pos += xfer;
+		length -= xfer;
+		done += xfer;
+
+		if (xfer == 0)
+			ret = -EFAULT;
+		if (xfer < map_len)
+			break;
+	}
+	dax_read_unlock(id);
+
+	return done ? done : ret;
+}
+
+ssize_t
+dax_iomap_unshare(struct inode *inode, loff_t pos, u64 len,
+		  const struct iomap_ops *ops)
+{
+	struct iomap_iter iomi = {
+		.inode		= inode,
+		.pos		= pos,
+		.len		= len,
+		.flags		= IOMAP_DAX | IOMAP_WRITE | IOMAP_UNSHARE,
+	};
+	int ret;
+
+	if (!iomi.len)
+		return 0;
+
+	lockdep_assert_held_write(&iomi.inode->i_rwsem);
+
+	while ((ret = iomap_iter(&iomi, ops)) > 0)
+		iomi.processed = dax_iomap_unshare_iter(&iomi);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(dax_iomap_unshare);
+
 static vm_fault_t dax_fault_return(int error)
 {
 	if (error == 0)

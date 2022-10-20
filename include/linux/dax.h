@@ -237,6 +237,8 @@ int dax_holder_notify_failure(struct dax_device *dax_dev, u64 off, u64 len,
 		int mf_flags);
 void dax_flush(struct dax_device *dax_dev, void *addr, size_t size);
 
+ssize_t dax_iomap_unshare(struct inode *inode, loff_t pos, u64 len,
+		const struct iomap_ops *ops);
 ssize_t dax_iomap_rw(struct kiocb *iocb, struct iov_iter *iter,
 		const struct iomap_ops *ops);
 vm_fault_t dax_iomap_fault(struct vm_fault *vmf, enum page_entry_size pe_size,
