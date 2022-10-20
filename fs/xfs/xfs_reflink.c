@@ -2044,8 +2044,12 @@ xfs_reflink_unshare(
 
 	inode_dio_wait(inode);
 
-	error = iomap_file_unshare(VFS_I(ip), offset, len,
-			&xfs_buffered_write_iomap_ops);
+	if (IS_DAX(VFS_I(ip)))
+		error = dax_iomap_unshare(VFS_I(ip), offset, len,
+				&xfs_dax_write_iomap_ops);
+	else
+		error = iomap_file_unshare(VFS_I(ip), offset, len,
+				&xfs_buffered_write_iomap_ops);
 	if (error)
 		goto out;
 
