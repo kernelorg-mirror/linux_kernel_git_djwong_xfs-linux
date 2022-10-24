@@ -135,6 +135,30 @@ xrep_probe(
 	return 0;
 }
 
+#include "xfs_buf_item.h"
+static void
+xrep_check_buf_type(
+	struct xfs_trans	*tp,
+	struct xfs_buf		*bp,
+	enum xfs_blft		type)
+{
+	struct xfs_buf_log_item	*bip;
+
+	if (!bp)
+		return;
+
+	bip = bp->b_log_item;
+
+	ASSERT(tp);
+	ASSERT(bp->b_transp == tp);
+	ASSERT(bip != NULL);
+	ASSERT(atomic_read(&bip->bli_refcount) > 0);
+	ASSERT(type == xfs_blft_from_flags(&bip->__bli_format));
+	if (type != xfs_blft_from_flags(&bip->__bli_format)) {
+		xfs_err(tp->t_mountp, "buf daddr 0x%llx bliflags 0x%x type 0x%x != blitype 0x%x", xfs_buf_daddr(bp), bip->__bli_format.blf_flags, type, xfs_blft_from_flags(&bip->__bli_format));
+	}
+}
+
 /*
  * Roll a transaction, keeping the AG headers locked and reinitializing
  * the btree cursors.
@@ -179,6 +203,9 @@ xrep_roll_ag_trans(
 		xfs_trans_bjoin(sc->tp, sc->sa.agi_bp);
 	if (sc->sa.agf_bp)
 		xfs_trans_bjoin(sc->tp, sc->sa.agf_bp);
+
+	xrep_check_buf_type(sc->tp, sc->sa.agi_bp, XFS_BLFT_AGI_BUF);
+	xrep_check_buf_type(sc->tp, sc->sa.agf_bp, XFS_BLFT_AGF_BUF);
 
 	return 0;
 }
@@ -239,6 +266,9 @@ xrep_defer_finish(
 		xfs_trans_bhold_release(sc->tp, sc->sa.agi_bp);
 	if (sc->sa.agf_bp)
 		xfs_trans_bhold_release(sc->tp, sc->sa.agf_bp);
+
+	xrep_check_buf_type(sc->tp, sc->sa.agi_bp, XFS_BLFT_AGI_BUF);
+	xrep_check_buf_type(sc->tp, sc->sa.agf_bp, XFS_BLFT_AGF_BUF);
 
 	return 0;
 }
