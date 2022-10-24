@@ -145,11 +145,24 @@ xrep_roll_ag_trans(
 {
 	int			error;
 
-	/* Keep the AG header buffers locked so we can keep going. */
-	if (sc->sa.agi_bp)
+	/*
+	 * Keep the AG header buffers locked so we can keep going.  Ensure that
+	 * each buffer is dirty and held when we roll the transaction so that
+	 * we keep the buffer moving forward in the log and avoid losing the
+	 * bli (and hence the bli type) when the transaction commits.
+	 *
+	 * Normal code would never hold a clean buffer across a roll, but scrub
+	 * needs both buffers to maintain a total lock on the AG.
+	 */
+	if (sc->sa.agi_bp) {
+		xfs_ialloc_log_agi(sc->tp, sc->sa.agi_bp, XFS_AGI_MAGICNUM);
 		xfs_trans_bhold(sc->tp, sc->sa.agi_bp);
-	if (sc->sa.agf_bp)
+	}
+
+	if (sc->sa.agf_bp) {
+		xfs_alloc_log_agf(sc->tp, sc->sa.agf_bp, XFS_AGF_MAGICNUM);
 		xfs_trans_bhold(sc->tp, sc->sa.agf_bp);
+	}
 
 	/*
 	 * Roll the transaction.  We still own the buffer and the buffer lock
@@ -162,23 +175,11 @@ xrep_roll_ag_trans(
 	if (error)
 		return error;
 
-	/*
-	 * Join AG headers to the new transaction.  The buffer log item can
-	 * detach from the buffer across the transaction roll if the bli is
-	 * clean, so ensure the buffer type is still set on the AG header
-	 * buffers' blis before we return.
-	 *
-	 * Normal code would never hold a clean buffer across a roll, but scrub
-	 * needs both buffers to maintain a total lock on the AG.
-	 */
-	if (sc->sa.agi_bp) {
+	/* Join the AG headers to the new transaction. */
+	if (sc->sa.agi_bp)
 		xfs_trans_bjoin(sc->tp, sc->sa.agi_bp);
-		xfs_trans_buf_set_type(sc->tp, sc->sa.agi_bp, XFS_BLFT_AGI_BUF);
-	}
-	if (sc->sa.agf_bp) {
+	if (sc->sa.agf_bp)
 		xfs_trans_bjoin(sc->tp, sc->sa.agf_bp);
-		xfs_trans_buf_set_type(sc->tp, sc->sa.agf_bp, XFS_BLFT_AGF_BUF);
-	}
 
 	return 0;
 }
@@ -200,7 +201,15 @@ xrep_defer_finish(
 {
 	int			error;
 
-	/* Keep the AG header buffers locked so we can keep going. */
+	/*
+	 * Keep the AG header buffers locked so we can keep going.  Ensure that
+	 * each buffer is dirty and held when we roll the transaction so that
+	 * we keep the buffer moving forward in the log and avoid losing the
+	 * bli (and hence the bli type) when the transaction commits.
+	 *
+	 * Normal code would never hold a clean buffer across a roll, but scrub
+	 * needs both buffers to maintain a total lock on the AG.
+	 */
 	if (sc->sa.agi_bp) {
 		xfs_ialloc_log_agi(sc->tp, sc->sa.agi_bp, XFS_AGI_MAGICNUM);
 		xfs_trans_bhold(sc->tp, sc->sa.agi_bp);
@@ -216,19 +225,15 @@ xrep_defer_finish(
 		return error;
 
 	/*
-	 * The buffer log item (and hence the blf type) can detach from
-	 * the buffer across the transaction rolls, so ensure that the
-	 * types are still set on the AG header buffers.  Release the hold
-	 * that we set above because defer_finish won't do that for us.
+	 * Release the hold that we set above because defer_finish won't do
+	 * that for us.  The defer roll code redirties held buffers after each
+	 * roll, so we don't need to set the bli type.
 	 */
-	if (sc->sa.agi_bp) {
+	if (sc->sa.agi_bp)
 		xfs_trans_bhold_release(sc->tp, sc->sa.agi_bp);
-		xfs_trans_buf_set_type(sc->tp, sc->sa.agi_bp, XFS_BLFT_AGI_BUF);
-	}
-	if (sc->sa.agf_bp) {
+	if (sc->sa.agf_bp)
 		xfs_trans_bhold_release(sc->tp, sc->sa.agf_bp);
-		xfs_trans_buf_set_type(sc->tp, sc->sa.agf_bp, XFS_BLFT_AGF_BUF);
-	}
+
 	return 0;
 }
 
