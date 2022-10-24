@@ -1498,7 +1498,7 @@ xfs_file_llseek(
 }
 
 #ifdef CONFIG_FS_DAX
-static int
+static inline vm_fault_t
 xfs_dax_fault(
 	struct vm_fault		*vmf,
 	enum page_entry_size	pe_size,
@@ -1511,14 +1511,14 @@ xfs_dax_fault(
 				&xfs_read_iomap_ops);
 }
 #else
-static int
+static inline vm_fault_t
 xfs_dax_fault(
 	struct vm_fault		*vmf,
 	enum page_entry_size	pe_size,
 	bool			write_fault,
 	pfn_t			*pfn)
 {
-	return 0;
+	return VM_FAULT_SIGBUS;
 }
 #endif
 
