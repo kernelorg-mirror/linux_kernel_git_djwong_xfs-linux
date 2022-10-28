@@ -596,10 +596,10 @@ xchk_iallocbt_rec(
 	uint16_t			holemask;
 
 	xfs_inobt_btrec_to_irec(mp, rec, &irec);
-
-	if (irec.ir_count > XFS_INODES_PER_CHUNK ||
-	    irec.ir_freecount > XFS_INODES_PER_CHUNK)
+	if (xfs_inobt_check_irec(bs->cur, &irec) != NULL) {
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
+		return 0;
+	}
 
 	real_freecount = irec.ir_freecount +
 			(XFS_INODES_PER_CHUNK - irec.ir_count);
@@ -608,8 +608,7 @@ xchk_iallocbt_rec(
 
 	agino = irec.ir_startino;
 	/* Record has to be properly aligned within the AG. */
-	if (!xfs_verify_agino(pag, agino) ||
-	    !xfs_verify_agino(pag, agino + XFS_INODES_PER_CHUNK - 1)) {
+	if (!xfs_verify_agino(pag, agino + XFS_INODES_PER_CHUNK - 1)) {
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 		goto out;
 	}
