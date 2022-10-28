@@ -236,11 +236,11 @@ xchk_rtrmapbt_rec(
 	bool				is_attr;
 	bool				is_unwritten;
 	bool				is_cow;
-	int				error;
 
-	error = xfs_rmap_btrec_to_irec(bs->cur, rec, &irec);
-	if (!xchk_btree_process_error(bs->sc, bs->cur, 0, &error))
-		goto out;
+	if (xfs_rmap_btrec_to_irec(bs->cur, rec, &irec) != NULL) {
+		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
+		return 0;
+	}
 
 	if (irec.rm_startblock + irec.rm_blockcount <= irec.rm_startblock)
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
@@ -290,8 +290,8 @@ xchk_rtrmapbt_rec(
 	xchk_rtrmapbt_check_mergeable(bs, cr, &irec);
 	xchk_rtrmapbt_check_overlapping(bs, cr, &irec);
 	xchk_rtrmapbt_xref(bs->sc, &irec);
-out:
-	return error;
+
+	return 0;
 }
 
 /* Scrub the realtime rmap btree. */
