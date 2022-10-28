@@ -453,9 +453,7 @@ xchk_refcountbt_rec(
 		rrc->cow_blocks += irec.rc_blockcount;
 
 	/* Check the extent. */
-	if (irec.rc_startblock + irec.rc_blockcount <= irec.rc_startblock ||
-	    !xfs_verify_agbno(pag, irec.rc_startblock) ||
-	    !xfs_verify_agbno(pag, irec.rc_startblock + irec.rc_blockcount - 1))
+	if (!xfs_verify_agbext(pag, irec.rc_startblock, irec.rc_blockcount))
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 
 	if (irec.rc_refcount == 0)

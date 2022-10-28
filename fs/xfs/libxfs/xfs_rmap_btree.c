@@ -710,12 +710,7 @@ xfs_rmapbt_mem_verify_rec(
 
 	/* check for valid extent range, including overflow */
 	pag = xfs_perag_get(mp, agno);
-	if (!xfs_verify_agbno(pag, irec->rm_startblock))
-		goto out;
-	if (irec->rm_startblock > irec->rm_startblock + irec->rm_blockcount)
-		goto out;
-	if (!xfs_verify_agbno(pag,
-			irec->rm_startblock + irec->rm_blockcount - 1))
+	if (!xfs_verify_agbext(pag, irec->rm_startblock, irec->rm_blockcount))
 		goto out;
 	ret = true;
 out:

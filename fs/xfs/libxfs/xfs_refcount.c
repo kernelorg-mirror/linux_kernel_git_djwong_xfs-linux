@@ -179,13 +179,8 @@ xfs_refcount_get_rec(
 	} else {
 		struct xfs_perag	*pag = cur->bc_ag.pag;
 
-		if (!xfs_verify_agbno(pag, irec->rc_startblock))
-			goto out_bad_rec;
-		if (irec->rc_startblock >
-				irec->rc_startblock + irec->rc_blockcount)
-			goto out_bad_rec;
-		if (!xfs_verify_agbno(pag,
-				irec->rc_startblock + irec->rc_blockcount - 1))
+		if (!xfs_verify_agbext(pag, irec->rc_startblock,
+					    irec->rc_blockcount))
 			goto out_bad_rec;
 	}
 
