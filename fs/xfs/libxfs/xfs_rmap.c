@@ -231,6 +231,67 @@ xfs_rmap_btrec_to_irec(
 	return fa;
 }
 
+/* Simple checks for rmap records. */
+xfs_failaddr_t
+xfs_rmap_check_irec(
+	struct xfs_btree_cur		*cur,
+	const struct xfs_rmap_irec	*irec)
+{
+	struct xfs_mount		*mp = cur->bc_mp;
+
+	if (irec->rm_blockcount == 0)
+		return __this_address;
+	if (cur->bc_flags & XFS_BTREE_IN_MEMORY) {
+		if (cur->bc_btnum == XFS_BTNUM_RMAP &&
+		    !xfs_rmapbt_mem_verify_rec(cur, irec))
+			return __this_address;
+		if (cur->bc_btnum == XFS_BTNUM_RTRMAP &&
+		    !xfs_rtrmapbt_mem_verify_rec(cur, irec))
+			return __this_address;
+	} else if (cur->bc_btnum == XFS_BTNUM_RTRMAP) {
+		struct xfs_rtgroup	*rtg = cur->bc_ino.rtg;
+
+		if (irec->rm_owner == XFS_RMAP_OWN_FS) {
+			if (irec->rm_startblock != 0)
+				return __this_address;
+			if (irec->rm_blockcount != mp->m_sb.sb_rextsize)
+				return __this_address;
+			if (irec->rm_offset != 0)
+				return __this_address;
+		} else if (irec->rm_owner == XFS_RMAP_OWN_COW) {
+			if (!xfs_has_rtreflink(mp))
+				return __this_address;
+			if (!xfs_verify_rgbext(rtg, irec->rm_startblock,
+						    irec->rm_blockcount))
+				return __this_address;
+		} else {
+			if (!xfs_verify_rgbext(rtg, irec->rm_startblock,
+						    irec->rm_blockcount))
+				return __this_address;
+			if (XFS_RMAP_NON_INODE_OWNER(irec->rm_owner))
+				return __this_address;
+		}
+	} else if (irec->rm_startblock <= XFS_AGFL_BLOCK(mp)) {
+		if (irec->rm_owner != XFS_RMAP_OWN_FS)
+			return __this_address;
+		if (irec->rm_blockcount != XFS_AGFL_BLOCK(mp) + 1)
+			return __this_address;
+	} else {
+		struct xfs_perag	*pag = cur->bc_ag.pag;
+
+		if (!xfs_verify_agbext(pag, irec->rm_startblock,
+					    irec->rm_blockcount))
+			return __this_address;
+	}
+
+	if (!(xfs_verify_ino(mp, irec->rm_owner) ||
+	      (irec->rm_owner <= XFS_RMAP_OWN_FS &&
+	       irec->rm_owner >= XFS_RMAP_OWN_MIN)))
+		return __this_address;
+
+	return NULL;
+}
+
 /*
  * Get the data from the pointed-to record.
  */
@@ -242,78 +303,33 @@ xfs_rmap_get_rec(
 {
 	struct xfs_mount	*mp = cur->bc_mp;
 	union xfs_btree_rec	*rec;
+	xfs_failaddr_t		fa;
 	int			error;
 
 	error = xfs_btree_get_rec(cur, &rec, stat);
 	if (error || !*stat)
 		return error;
 
-	if (xfs_rmap_btrec_to_irec(cur, rec, irec))
+	fa = xfs_rmap_btrec_to_irec(cur, rec, irec);
+	if (fa)
 		goto out_bad_rec;
-
-	if (irec->rm_blockcount == 0)
-		goto out_bad_rec;
-	if (cur->bc_flags & XFS_BTREE_IN_MEMORY) {
-		if (cur->bc_btnum == XFS_BTNUM_RMAP &&
-		    !xfs_rmapbt_mem_verify_rec(cur, irec))
-			goto out_bad_rec;
-		if (cur->bc_btnum == XFS_BTNUM_RTRMAP &&
-		    !xfs_rtrmapbt_mem_verify_rec(cur, irec))
-			goto out_bad_rec;
-	} else if (cur->bc_btnum == XFS_BTNUM_RTRMAP) {
-		struct xfs_rtgroup	*rtg = cur->bc_ino.rtg;
-
-		if (irec->rm_owner == XFS_RMAP_OWN_FS) {
-			if (irec->rm_startblock != 0)
-				goto out_bad_rec;
-			if (irec->rm_blockcount != mp->m_sb.sb_rextsize)
-				goto out_bad_rec;
-			if (irec->rm_offset != 0)
-				goto out_bad_rec;
-		} else if (irec->rm_owner == XFS_RMAP_OWN_COW) {
-			if (!xfs_has_rtreflink(mp))
-				goto out_bad_rec;
-			if (!xfs_verify_rgbext(rtg, irec->rm_startblock,
-						    irec->rm_blockcount))
-				goto out_bad_rec;
-		} else {
-			if (!xfs_verify_rgbext(rtg, irec->rm_startblock,
-						    irec->rm_blockcount))
-				goto out_bad_rec;
-			if (XFS_RMAP_NON_INODE_OWNER(irec->rm_owner))
-				goto out_bad_rec;
-		}
-	} else if (irec->rm_startblock <= XFS_AGFL_BLOCK(mp)) {
-		if (irec->rm_owner != XFS_RMAP_OWN_FS)
-			goto out_bad_rec;
-		if (irec->rm_blockcount != XFS_AGFL_BLOCK(mp) + 1)
-			goto out_bad_rec;
-	} else {
-		struct xfs_perag	*pag = cur->bc_ag.pag;
-
-		if (!xfs_verify_agbext(pag, irec->rm_startblock,
-					    irec->rm_blockcount))
-			goto out_bad_rec;
-	}
-
-	if (!(xfs_verify_ino(mp, irec->rm_owner) ||
-	      (irec->rm_owner <= XFS_RMAP_OWN_FS &&
-	       irec->rm_owner >= XFS_RMAP_OWN_MIN)))
+	fa = xfs_rmap_check_irec(cur, irec);
+	if (fa)
 		goto out_bad_rec;
 
 	return 0;
 out_bad_rec:
 	if (cur->bc_flags & XFS_BTREE_IN_MEMORY)
 		xfs_warn(mp,
- "In-Memory Reverse Mapping BTree record corruption detected!");
+ "In-Memory Reverse Mapping BTree record corruption detected at %pS!", fa);
 	else if (cur->bc_btnum == XFS_BTNUM_RTRMAP)
 		xfs_warn(mp,
- "RT Reverse Mapping BTree record corruption in rtgroup %u detected!",
-				cur->bc_ino.rtg->rtg_rgno);
+ "RT Reverse Mapping BTree record corruption in rtgroup %u detected at %pS!",
+				cur->bc_ino.rtg->rtg_rgno, fa);
 	else
 		xfs_warn(mp,
- "Reverse Mapping BTree record corruption in AG %d detected!",
-				cur->bc_ag.pag->pag_agno);
+ "Reverse Mapping BTree record corruption in AG %d detected at %pS!",
+				cur->bc_ag.pag->pag_agno, fa);
 	xfs_warn(mp,
 		"Owner 0x%llx, flags 0x%x, start block 0x%x block count 0x%x",
 		irec->rm_owner, irec->rm_flags, irec->rm_startblock,
@@ -2498,7 +2514,8 @@ xfs_rmap_query_range_helper(
 	struct xfs_rmap_query_range_info	*query = priv;
 	struct xfs_rmap_irec			irec;
 
-	if (xfs_rmap_btrec_to_irec(cur, rec, &irec) != NULL) {
+	if (xfs_rmap_btrec_to_irec(cur, rec, &irec) != NULL ||
+	    xfs_rmap_check_irec(cur, &irec) != NULL) {
 		xfs_btree_mark_sick(cur);
 		return -EFSCORRUPTED;
 	}
