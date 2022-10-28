@@ -132,22 +132,20 @@ xchk_allocbt_mergeable(
 /* Scrub a bnobt/cntbt record. */
 STATIC int
 xchk_allocbt_rec(
-	struct xchk_btree	*bs,
-	const union xfs_btree_rec *rec)
+	struct xchk_btree		*bs,
+	const union xfs_btree_rec	*rec)
 {
-	struct xfs_perag	*pag = bs->cur->bc_ag.pag;
-	struct xchk_alloc	*ca = bs->private;
-	xfs_agblock_t		bno;
-	xfs_extlen_t		len;
+	struct xchk_alloc		*ca = bs->private;
+	struct xfs_alloc_rec_incore	irec;
 
-	bno = be32_to_cpu(rec->alloc.ar_startblock);
-	len = be32_to_cpu(rec->alloc.ar_blockcount);
-
-	if (!xfs_verify_agbext(pag, bno, len))
+	xfs_alloc_btrec_to_irec(rec, &irec);
+	if (xfs_alloc_check_irec(bs->cur, &irec) != NULL) {
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
+		return 0;
+	}
 
-	xchk_allocbt_mergeable(bs, ca, bno, len);
-	xchk_allocbt_xref(bs->sc, bno, len);
+	xchk_allocbt_mergeable(bs, ca, irec.ar_startblock, irec.ar_blockcount);
+	xchk_allocbt_xref(bs->sc, irec.ar_startblock, irec.ar_blockcount);
 
 	return 0;
 }

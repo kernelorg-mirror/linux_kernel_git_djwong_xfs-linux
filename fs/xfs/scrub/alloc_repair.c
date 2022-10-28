@@ -134,7 +134,8 @@ xrep_abt_check_free_ext(
 	int			error;
 
 	/* Must be within the AG and not static data. */
-	if (!xfs_verify_agbext(sc->sa.pag, rec->ar_startblock,
+	if (rec->ar_blockcount == 0 ||
+	    !xfs_verify_agbext(sc->sa.pag, rec->ar_startblock,
 				rec->ar_blockcount))
 		return -EFSCORRUPTED;
 
