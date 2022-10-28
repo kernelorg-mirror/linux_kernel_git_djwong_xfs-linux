@@ -147,7 +147,8 @@ xfs_iformat_extents(
 						"xfs_iformat_extents(2)",
 						dp, sizeof(*dp), fa);
 				xfs_inode_mark_sick(ip, XFS_SICK_INO_CORE);
-				return -EFSCORRUPTED;
+				return xfs_bmap_complain_bad_rec(ip, whichfork,
+						fa, &new);
 			}
 
 			xfs_iext_insert(ip, &icur, &new, state);
