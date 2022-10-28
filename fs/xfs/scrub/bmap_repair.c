@@ -98,8 +98,15 @@ xrep_bmap_from_rmap(
 	irec.br_state = unwritten ? XFS_EXT_UNWRITTEN : XFS_EXT_NORM;
 
 	do {
+		xfs_failaddr_t	fa;
+
 		irec.br_blockcount = min_t(xfs_filblks_t, blockcount,
 				XFS_MAX_BMBT_EXTLEN);
+
+		fa = xfs_bmap_validate_extent(rb->sc->ip, rb->whichfork, &irec);
+		if (fa)
+			return -EFSCORRUPTED;
+
 		xfs_bmbt_disk_set_all(&rbe, &irec);
 
 		trace_xrep_bmap_found(rb->sc->ip, rb->whichfork, &irec);

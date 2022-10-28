@@ -6364,6 +6364,12 @@ xfs_bmap_query_range_helper(
 	struct xfs_bmbt_irec		irec;
 
 	xfs_bmbt_disk_get_all(&rec->bmbt, &irec);
+	if (xfs_bmap_validate_extent(cur->bc_ino.ip, cur->bc_ino.whichfork,
+				&irec) != NULL) {
+		xfs_btree_mark_sick(cur);
+		return -EFSCORRUPTED;
+	}
+
 	return query->fn(cur, &irec, query->priv);
 }
 
