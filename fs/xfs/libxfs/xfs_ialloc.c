@@ -130,6 +130,26 @@ xfs_inobt_rec_freecount(
 	return hweight64(realfree);
 }
 
+static inline int
+xfs_inobt_complain_bad_rec(
+	struct xfs_btree_cur		*cur,
+	xfs_failaddr_t			fa,
+	const struct xfs_inobt_rec_incore *irec)
+{
+	struct xfs_mount		*mp = cur->bc_mp;
+
+	xfs_warn(mp,
+		"%s Inode BTree record corruption in AG %d detected at %pS!",
+		cur->bc_btnum == XFS_BTNUM_INO ? "Used" : "Free",
+		cur->bc_ag.pag->pag_agno, fa);
+	xfs_warn(mp,
+"start inode 0x%x, count 0x%x, free 0x%x freemask 0x%llx, holemask 0x%x",
+		irec->ir_startino, irec->ir_count, irec->ir_freecount,
+		irec->ir_free, irec->ir_holemask);
+	xfs_btree_mark_sick(cur);
+	return -EFSCORRUPTED;
+}
+
 /*
  * Get the data from the pointed-to record.
  */
@@ -151,21 +171,9 @@ xfs_inobt_get_rec(
 	xfs_inobt_btrec_to_irec(mp, rec, irec);
 	fa = xfs_inobt_check_irec(cur, irec);
 	if (fa)
-		goto out_bad_rec;
+		return xfs_inobt_complain_bad_rec(cur, fa, irec);
 
 	return 0;
-
-out_bad_rec:
-	xfs_warn(mp,
-		"%s Inode BTree record corruption in AG %d detected at %pS!",
-		cur->bc_btnum == XFS_BTNUM_INO ? "Used" : "Free",
-		cur->bc_ag.pag->pag_agno, fa);
-	xfs_warn(mp,
-"start inode 0x%x, count 0x%x, free 0x%x freemask 0x%llx, holemask 0x%x",
-		irec->ir_startino, irec->ir_count, irec->ir_freecount,
-		irec->ir_free, irec->ir_holemask);
-	xfs_btree_mark_sick(cur);
-	return -EFSCORRUPTED;
 }
 
 /*
@@ -2799,11 +2807,12 @@ xfs_ialloc_count_inodes_rec(
 {
 	struct xfs_inobt_rec_incore	irec;
 	struct xfs_ialloc_count_inodes	*ci = priv;
+	xfs_failaddr_t			fa;
 
 	xfs_inobt_btrec_to_irec(cur->bc_mp, rec, &irec);
-	if (xfs_inobt_check_irec(cur, &irec) != NULL) {
+	if ((fa = xfs_inobt_check_irec(cur, &irec)) != NULL) {
 		xfs_btree_mark_sick(cur);
-		return -EFSCORRUPTED;
+		return xfs_inobt_complain_bad_rec(cur, fa, &irec);
 	}
 
 	ci->count += irec.ir_count;
