@@ -204,31 +204,31 @@ done:
 }
 
 /* Convert an internal btree record to an rmap record. */
-int
+xfs_failaddr_t
 xfs_rmap_btrec_to_irec(
 	struct xfs_btree_cur		*cur,
 	const union xfs_btree_rec	*rec,
 	struct xfs_rmap_irec		*irec)
 {
-	int			error;
+	xfs_failaddr_t			fa;
 
 	if (cur->bc_btnum == XFS_BTNUM_RTRMAP) {
 		irec->rm_startblock = be32_to_cpu(rec->rtrmap.rm_startblock);
 		irec->rm_blockcount = be32_to_cpu(rec->rtrmap.rm_blockcount);
 		irec->rm_owner = be64_to_cpu(rec->rtrmap.rm_owner);
-		error = xfs_rmap_irec_offset_unpack(
+		fa = xfs_rmap_irec_offset_unpack(
 				be64_to_cpu(rec->rtrmap.rm_offset), irec);
 	} else {
 		irec->rm_startblock = be32_to_cpu(rec->rmap.rm_startblock);
 		irec->rm_blockcount = be32_to_cpu(rec->rmap.rm_blockcount);
 		irec->rm_owner = be64_to_cpu(rec->rmap.rm_owner);
-		error = xfs_rmap_irec_offset_unpack(
+		fa = xfs_rmap_irec_offset_unpack(
 				be64_to_cpu(rec->rmap.rm_offset), irec);
 	}
 
-	if (xfs_metadata_is_sick(error))
+	if (fa)
 		xfs_btree_mark_sick(cur);
-	return error;
+	return fa;
 }
 
 /*
@@ -2497,11 +2497,12 @@ xfs_rmap_query_range_helper(
 {
 	struct xfs_rmap_query_range_info	*query = priv;
 	struct xfs_rmap_irec			irec;
-	int					error;
 
-	error = xfs_rmap_btrec_to_irec(cur, rec, &irec);
-	if (error)
-		return error;
+	if (xfs_rmap_btrec_to_irec(cur, rec, &irec) != NULL) {
+		xfs_btree_mark_sick(cur);
+		return -EFSCORRUPTED;
+	}
+
 	return query->fn(cur, &irec, query->priv);
 }
 

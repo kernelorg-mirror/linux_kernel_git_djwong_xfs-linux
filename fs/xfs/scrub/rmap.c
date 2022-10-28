@@ -309,11 +309,11 @@ xchk_rmapbt_rec(
 	bool			is_unwritten;
 	bool			is_bmbt;
 	bool			is_attr;
-	int			error;
 
-	error = xfs_rmap_btrec_to_irec(bs->cur, rec, &irec);
-	if (!xchk_btree_process_error(bs->sc, bs->cur, 0, &error))
-		goto out;
+	if (xfs_rmap_btrec_to_irec(bs->cur, rec, &irec) != NULL) {
+		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
+		return 0;
+	}
 
 	/* Check extent. */
 	if (irec.rm_startblock + irec.rm_blockcount <= irec.rm_startblock)
@@ -371,9 +371,7 @@ xchk_rmapbt_rec(
 	xchk_rmapbt_check_overlapping(bs, cr, &irec);
 	xchk_rmapbt_xref(bs->sc, &irec);
 
-	error = xchk_rmapbt_mark_bitmap(bs, cr, &irec);
-out:
-	return error;
+	return xchk_rmapbt_mark_bitmap(bs, cr, &irec);
 }
 
 /* Add an AGFL block to the rmap list. */
