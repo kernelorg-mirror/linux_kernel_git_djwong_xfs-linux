@@ -180,31 +180,42 @@ struct xrep_rmap {
 STATIC int
 xrep_rmap_check_mapping(
 	struct xfs_scrub	*sc,
-	const struct xfs_rmap_irec *rec)
+	const struct xfs_rmap_irec *irec)
 {
+	struct xfs_mount	*mp = sc->mp;
+	struct xfs_perag	*pag = sc->sa.pag;
 	enum xfs_btree_keyfill	keyfill;
 	int			error;
 
-	if (rec->rm_owner == XFS_RMAP_OWN_FS) {
-		/* Static metadata only exists at the start of the AG. */
-		if (rec->rm_startblock != 0)
+	if (irec->rm_blockcount == 0)
+		return -EFSCORRUPTED;
+	 if (irec->rm_startblock <= XFS_AGFL_BLOCK(mp)) {
+		if (irec->rm_owner != XFS_RMAP_OWN_FS)
+			return -EFSCORRUPTED;
+		if (irec->rm_startblock != 0)
+			return -EFSCORRUPTED;
+		if (irec->rm_blockcount != XFS_AGFL_BLOCK(mp) + 1)
 			return -EFSCORRUPTED;
 	} else {
-		/* Check that this is within an AG and not static metadata. */
-		if (!xfs_verify_agbext(sc->sa.pag, rec->rm_startblock,
-					rec->rm_blockcount))
+		if (!xfs_verify_agbext(pag, irec->rm_startblock,
+					    irec->rm_blockcount))
 			return -EFSCORRUPTED;
 	}
 
+	if (!(xfs_verify_ino(mp, irec->rm_owner) ||
+	      (irec->rm_owner <= XFS_RMAP_OWN_FS &&
+	       irec->rm_owner >= XFS_RMAP_OWN_MIN)))
+		return -EFSCORRUPTED;
+
 	/* Check for a valid fork offset, if applicable. */
-	if (!XFS_RMAP_NON_INODE_OWNER(rec->rm_owner) &&
-	    !(rec->rm_flags & XFS_RMAP_BMBT_BLOCK) &&
-	    !xfs_verify_fileext(sc->mp, rec->rm_offset, rec->rm_blockcount))
+	if (!XFS_RMAP_NON_INODE_OWNER(irec->rm_owner) &&
+	    !(irec->rm_flags & XFS_RMAP_BMBT_BLOCK) &&
+	    !xfs_verify_fileext(sc->mp, irec->rm_offset, irec->rm_blockcount))
 		return -EFSCORRUPTED;
 
 	/* Make sure this isn't free space. */
-	error = xfs_alloc_scan_keyfill(sc->sa.bno_cur, rec->rm_startblock,
-			rec->rm_blockcount, &keyfill);
+	error = xfs_alloc_scan_keyfill(sc->sa.bno_cur, irec->rm_startblock,
+			irec->rm_blockcount, &keyfill);
 	if (error)
 		return error;
 	if (keyfill != XFS_BTREE_KEYFILL_EMPTY)

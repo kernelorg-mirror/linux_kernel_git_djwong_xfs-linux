@@ -237,31 +237,10 @@ xchk_rtrmapbt_rec(
 	bool				is_unwritten;
 	bool				is_cow;
 
-	if (xfs_rmap_btrec_to_irec(bs->cur, rec, &irec) != NULL) {
+	if (xfs_rmap_btrec_to_irec(bs->cur, rec, &irec) != NULL ||
+	    xfs_rmap_check_irec(bs->cur, &irec) != NULL) {
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 		return 0;
-	}
-
-	if (irec.rm_startblock + irec.rm_blockcount <= irec.rm_startblock)
-		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
-
-	if (irec.rm_owner == XFS_RMAP_OWN_FS) {
-		/*
-		 * xfs_verify_rgbno returns false for static fs metadata.
-		 * Since that only exists at the start of the rtgroup, validate
-		 * that by hand.
-		 */
-		if (irec.rm_startblock != 0 ||
-		    irec.rm_blockcount != mp->m_sb.sb_rextsize)
-			xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
-	} else {
-		/*
-		 * Otherwise we must point somewhere past the static metadata
-		 * but before the end of the FS.  Run the regular check.
-		 */
-		if (!xfs_verify_rgbext(bs->sc->sr.rtg, irec.rm_startblock,
-					irec.rm_blockcount))
-			xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 	}
 
 	/* Check flags. */
@@ -279,9 +258,6 @@ xchk_rtrmapbt_rec(
 	if (is_cow && irec.rm_offset != 0)
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 	if (is_unwritten && is_cow)
-		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
-
-	if (!non_inode && !xfs_verify_ino(mp, irec.rm_owner))
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 
 	if (bs->sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)

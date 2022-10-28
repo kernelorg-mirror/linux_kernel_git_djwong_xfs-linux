@@ -118,38 +118,49 @@ struct xrep_rtrmap {
 STATIC int
 xrep_rtrmap_check_mapping(
 	struct xfs_scrub	*sc,
-	const struct xfs_rmap_irec *rec)
+	const struct xfs_rmap_irec *irec)
 {
+	struct xfs_rtgroup	*rtg = sc->sr.rtg;
+	struct xfs_mount	*mp = sc->mp;
 	xfs_rtblock_t		rtbno;
 
-	if (rec->rm_owner == XFS_RMAP_OWN_FS) {
-		/* This must describe the rt superblock */
-		if (rec->rm_startblock != 0)
+	if (irec->rm_blockcount == 0)
+		return -EFSCORRUPTED;
+
+	if (irec->rm_owner == XFS_RMAP_OWN_FS) {
+		if (irec->rm_startblock != 0)
 			return -EFSCORRUPTED;
-		if (rec->rm_offset != 0)
+		if (irec->rm_blockcount != mp->m_sb.sb_rextsize)
 			return -EFSCORRUPTED;
-		if (rec->rm_blockcount != sc->mp->m_sb.sb_rextsize)
+		if (irec->rm_offset != 0)
 			return -EFSCORRUPTED;
-		if (rec->rm_flags)
+	} else if (irec->rm_owner == XFS_RMAP_OWN_COW) {
+		if (!xfs_has_rtreflink(mp))
+			return -EFSCORRUPTED;
+		if (!xfs_verify_rgbext(rtg, irec->rm_startblock,
+					    irec->rm_blockcount))
 			return -EFSCORRUPTED;
 	} else {
-		/* Check that this is within the rt volume. */
-		if (!xfs_verify_rgbext(sc->sr.rtg, rec->rm_startblock,
-					rec->rm_blockcount))
+		if (!xfs_verify_rgbext(rtg, irec->rm_startblock,
+					    irec->rm_blockcount))
 			return -EFSCORRUPTED;
+		if (XFS_RMAP_NON_INODE_OWNER(irec->rm_owner))
+			return -EFSCORRUPTED;
+	}
 
+	if (irec->rm_owner != XFS_RMAP_OWN_FS) {
 		/* Check for a valid fork offset, if applicable. */
-		if (!xfs_verify_fileext(sc->mp, rec->rm_offset,
-					rec->rm_blockcount))
+		if (!xfs_verify_fileext(sc->mp, irec->rm_offset,
+					irec->rm_blockcount))
 			return -EFSCORRUPTED;
-		if (rec->rm_flags & ~XFS_RMAP_UNWRITTEN)
+		if (irec->rm_flags & ~XFS_RMAP_UNWRITTEN)
 			return -EFSCORRUPTED;
 	}
 
 	/* Make sure this isn't free space. */
 	rtbno = xfs_rgbno_to_rtb(sc->mp, sc->sr.rtg->rtg_rgno,
-			rec->rm_startblock);
-	return xrep_require_rtext_inuse(sc, rtbno, rec->rm_blockcount, false);
+			irec->rm_startblock);
+	return xrep_require_rtext_inuse(sc, rtbno, irec->rm_blockcount, false);
 }
 
 /* Store a reverse-mapping record. */
