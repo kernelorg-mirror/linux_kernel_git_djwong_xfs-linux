@@ -178,22 +178,32 @@ STATIC int
 xrep_ibt_stash(
 	struct xrep_ibt		*ri)
 {
+	struct xfs_inobt_rec_incore	*irec = &ri->rie;
 	int			error = 0;
 
 	if (xchk_should_terminate(ri->sc, &error))
 		return error;
 
-	ri->rie.ir_freecount = xfs_inobt_rec_freecount(&ri->rie);
-	if (ri->rie.ir_freecount > 0)
+	irec->ir_freecount = xfs_inobt_rec_freecount(irec);
+
+	if (!xfs_verify_agino(ri->sc->sa.pag, irec->ir_startino))
+		return -EFSCORRUPTED;
+	if (irec->ir_count < XFS_INODES_PER_HOLEMASK_BIT ||
+	    irec->ir_count > XFS_INODES_PER_CHUNK)
+		return -EFSCORRUPTED;
+	if (irec->ir_freecount > XFS_INODES_PER_CHUNK)
+		return -EFSCORRUPTED;
+
+	if (irec->ir_freecount > 0)
 		ri->finobt_recs++;
 
-	trace_xrep_ibt_found(ri->sc->mp, ri->sc->sa.pag->pag_agno, &ri->rie);
+	trace_xrep_ibt_found(ri->sc->mp, ri->sc->sa.pag->pag_agno, irec);
 
-	error = xfarray_append(ri->inode_records, &ri->rie);
+	error = xfarray_append(ri->inode_records, irec);
 	if (error)
 		return error;
 
-	ri->rie.ir_startino = NULLAGINO;
+	irec->ir_startino = NULLAGINO;
 	return 0;
 }
 

@@ -690,6 +690,9 @@ xrep_rmap_walk_inobt(
 		return error;
 
 	xfs_inobt_btrec_to_irec(mp, rec, &irec);
+	if (xfs_inobt_check_irec(cur, &irec) != NULL)
+		return -EFSCORRUPTED;
+
 	agino = irec.ir_startino;
 
 	/* Record a non-sparse inode chunk. */
