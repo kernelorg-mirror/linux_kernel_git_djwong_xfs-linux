@@ -175,36 +175,14 @@ xfs_refcount_check_irec(
 	return NULL;
 }
 
-/*
- * Get the data from the pointed-to record.
- */
-int
-xfs_refcount_get_rec(
+static inline int
+xfs_refcount_complain_bad_rec(
 	struct xfs_btree_cur		*cur,
-	struct xfs_refcount_irec	*irec,
-	int				*stat)
+	xfs_failaddr_t			fa,
+	const struct xfs_refcount_irec	*irec)
 {
 	struct xfs_mount		*mp = cur->bc_mp;
-	union xfs_btree_rec		*rec;
-	xfs_failaddr_t			fa;
-	int				error;
 
-	BUILD_BUG_ON(XFS_REFC_LEN_MAX != XFS_RTREFC_LEN_MAX);
-	BUILD_BUG_ON(XFS_REFC_COWFLAG != XFS_RTREFC_COWFLAG);
-
-	error = xfs_btree_get_rec(cur, &rec, stat);
-	if (error || !*stat)
-		return error;
-
-	xfs_refcount_btrec_to_irec(cur, rec, irec);
-	fa = xfs_refcount_check_irec(cur, irec);
-	if (fa)
-		goto out_bad_rec;
-
-	trace_xfs_refcount_get(cur, irec);
-	return 0;
-
-out_bad_rec:
 	if (cur->bc_btnum == XFS_BTNUM_RTREFC) {
 		xfs_warn(mp,
  "RT Refcount BTree record corruption in rtgroup %u detected at %pS!",
@@ -219,6 +197,35 @@ out_bad_rec:
 		irec->rc_startblock, irec->rc_blockcount, irec->rc_refcount);
 	xfs_btree_mark_sick(cur);
 	return -EFSCORRUPTED;
+}
+
+/*
+ * Get the data from the pointed-to record.
+ */
+int
+xfs_refcount_get_rec(
+	struct xfs_btree_cur		*cur,
+	struct xfs_refcount_irec	*irec,
+	int				*stat)
+{
+	union xfs_btree_rec		*rec;
+	xfs_failaddr_t			fa;
+	int				error;
+
+	BUILD_BUG_ON(XFS_REFC_LEN_MAX != XFS_RTREFC_LEN_MAX);
+	BUILD_BUG_ON(XFS_REFC_COWFLAG != XFS_RTREFC_COWFLAG);
+
+	error = xfs_btree_get_rec(cur, &rec, stat);
+	if (error || !*stat)
+		return error;
+
+	xfs_refcount_btrec_to_irec(cur, rec, irec);
+	fa = xfs_refcount_check_irec(cur, irec);
+	if (fa)
+		return xfs_refcount_complain_bad_rec(cur, fa, irec);
+
+	trace_xfs_refcount_get(cur, irec);
+	return 0;
 }
 
 /*
@@ -2081,11 +2088,12 @@ xfs_refcount_query_range_helper(
 {
 	struct xfs_refcount_query_range_info	*query = priv;
 	struct xfs_refcount_irec	irec;
+	xfs_failaddr_t			fa;
 
 	xfs_refcount_btrec_to_irec(cur, rec, &irec);
-	if (xfs_refcount_check_irec(cur, &irec) != NULL) {
+	if ((fa = xfs_refcount_check_irec(cur, &irec)) != NULL) {
 		xfs_btree_mark_sick(cur);
-		return -EFSCORRUPTED;
+		return xfs_refcount_complain_bad_rec(cur, fa, &irec);
 	}
 
 	return query->fn(cur, &irec, query->priv);

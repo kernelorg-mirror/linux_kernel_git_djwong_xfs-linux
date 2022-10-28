@@ -292,33 +292,14 @@ xfs_rmap_check_irec(
 	return NULL;
 }
 
-/*
- * Get the data from the pointed-to record.
- */
-int
-xfs_rmap_get_rec(
-	struct xfs_btree_cur	*cur,
-	struct xfs_rmap_irec	*irec,
-	int			*stat)
+static inline int
+xfs_rmap_complain_bad_rec(
+	struct xfs_btree_cur		*cur,
+	xfs_failaddr_t			fa,
+	const struct xfs_rmap_irec	*irec)
 {
-	struct xfs_mount	*mp = cur->bc_mp;
-	union xfs_btree_rec	*rec;
-	xfs_failaddr_t		fa;
-	int			error;
+	struct xfs_mount		*mp = cur->bc_mp;
 
-	error = xfs_btree_get_rec(cur, &rec, stat);
-	if (error || !*stat)
-		return error;
-
-	fa = xfs_rmap_btrec_to_irec(cur, rec, irec);
-	if (fa)
-		goto out_bad_rec;
-	fa = xfs_rmap_check_irec(cur, irec);
-	if (fa)
-		goto out_bad_rec;
-
-	return 0;
-out_bad_rec:
 	if (cur->bc_flags & XFS_BTREE_IN_MEMORY)
 		xfs_warn(mp,
  "In-Memory Reverse Mapping BTree record corruption detected at %pS!", fa);
@@ -336,6 +317,33 @@ out_bad_rec:
 		irec->rm_blockcount);
 	xfs_btree_mark_sick(cur);
 	return -EFSCORRUPTED;
+}
+
+/*
+ * Get the data from the pointed-to record.
+ */
+int
+xfs_rmap_get_rec(
+	struct xfs_btree_cur	*cur,
+	struct xfs_rmap_irec	*irec,
+	int			*stat)
+{
+	union xfs_btree_rec	*rec;
+	xfs_failaddr_t		fa;
+	int			error;
+
+	error = xfs_btree_get_rec(cur, &rec, stat);
+	if (error || !*stat)
+		return error;
+
+	fa = xfs_rmap_btrec_to_irec(cur, rec, irec);
+	if (fa)
+		return xfs_rmap_complain_bad_rec(cur, fa, irec);
+	fa = xfs_rmap_check_irec(cur, irec);
+	if (fa)
+		return xfs_rmap_complain_bad_rec(cur, fa, irec);
+
+	return 0;
 }
 
 struct xfs_find_left_neighbor_info {
@@ -2513,11 +2521,12 @@ xfs_rmap_query_range_helper(
 {
 	struct xfs_rmap_query_range_info	*query = priv;
 	struct xfs_rmap_irec			irec;
+	xfs_failaddr_t				fa;
 
-	if (xfs_rmap_btrec_to_irec(cur, rec, &irec) != NULL ||
-	    xfs_rmap_check_irec(cur, &irec) != NULL) {
+	if ((fa = xfs_rmap_btrec_to_irec(cur, rec, &irec)) != NULL ||
+	    (fa = xfs_rmap_check_irec(cur, &irec)) != NULL) {
 		xfs_btree_mark_sick(cur);
-		return -EFSCORRUPTED;
+		return xfs_rmap_complain_bad_rec(cur, fa, &irec);
 	}
 
 	return query->fn(cur, &irec, query->priv);
