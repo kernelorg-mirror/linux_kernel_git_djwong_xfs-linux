@@ -264,9 +264,7 @@ xchk_iallocbt_chunk(
 
 	agbno = XFS_AGINO_TO_AGBNO(mp, agino);
 	len = XFS_B_TO_FSB(mp, nr_inodes * mp->m_sb.sb_inodesize);
-	if (agbno + len <= agbno ||
-	    !xfs_verify_agbno(pag, agbno) ||
-	    !xfs_verify_agbno(pag, agbno + len - 1))
+	if (!xfs_verify_agbext(pag, agbno, len))
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 
 	if (bs->sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
