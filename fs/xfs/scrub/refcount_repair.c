@@ -125,19 +125,29 @@ struct xrep_refc {
 STATIC int
 xrep_refc_check_ext(
 	struct xfs_scrub		*sc,
-	const struct xfs_refcount_irec	*rec)
+	const struct xfs_refcount_irec	*irec)
 {
 	enum xfs_btree_keyfill		keyfill;
 	int				error;
+	struct xfs_perag		*pag = sc->sa.pag;
 
-	/* Must be within the AG and not static data. */
-	if (!xfs_verify_agbext(sc->sa.pag, rec->rc_startblock,
-				rec->rc_blockcount))
+	if (irec->rc_blockcount == 0 || irec->rc_blockcount > XFS_REFC_LEN_MAX)
+		return -EFSCORRUPTED;
+
+	if (!xfs_refcount_check_domain(irec))
+		return -EFSCORRUPTED;
+
+	/* check for valid extent range, including overflow */
+	if (!xfs_verify_agbext(pag, irec->rc_startblock,
+				    irec->rc_blockcount))
+		return -EFSCORRUPTED;
+
+	if (irec->rc_refcount == 0 || irec->rc_refcount > XFS_REFC_REFCOUNT_MAX)
 		return -EFSCORRUPTED;
 
 	/* Make sure this isn't free space. */
-	error = xfs_alloc_scan_keyfill(sc->sa.bno_cur, rec->rc_startblock,
-			rec->rc_blockcount, &keyfill);
+	error = xfs_alloc_scan_keyfill(sc->sa.bno_cur, irec->rc_startblock,
+			irec->rc_blockcount, &keyfill);
 	if (error)
 		return error;
 	if (keyfill != XFS_BTREE_KEYFILL_EMPTY)
@@ -145,7 +155,7 @@ xrep_refc_check_ext(
 
 	/* Must not be an inode chunk. */
 	error = xfs_ialloc_has_inodes_at_extent(sc->sa.ino_cur,
-			rec->rc_startblock, rec->rc_blockcount, &keyfill);
+			irec->rc_startblock, irec->rc_blockcount, &keyfill);
 	if (error)
 		return error;
 	if (keyfill != XFS_BTREE_KEYFILL_EMPTY)

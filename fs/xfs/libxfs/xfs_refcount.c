@@ -142,6 +142,39 @@ xfs_refcount_btrec_to_irec(
 	irec->rc_startblock = start;
 }
 
+/* Simple checks for refcount records. */
+xfs_failaddr_t
+xfs_refcount_check_irec(
+	struct xfs_btree_cur		*cur,
+	const struct xfs_refcount_irec	*irec)
+{
+	if (irec->rc_blockcount == 0 || irec->rc_blockcount > XFS_REFC_LEN_MAX)
+		return __this_address;
+
+	if (!xfs_refcount_check_domain(irec))
+		return __this_address;
+
+	/* check for valid extent range, including overflow */
+	if (cur->bc_btnum == XFS_BTNUM_RTREFC) {
+		struct xfs_rtgroup	*rtg = cur->bc_ino.rtg;
+
+		if (!xfs_verify_rgbext(rtg, irec->rc_startblock,
+				irec->rc_blockcount))
+			return __this_address;
+	} else {
+		struct xfs_perag	*pag = cur->bc_ag.pag;
+
+		if (!xfs_verify_agbext(pag, irec->rc_startblock,
+					    irec->rc_blockcount))
+			return __this_address;
+	}
+
+	if (irec->rc_refcount == 0 || irec->rc_refcount > XFS_REFC_REFCOUNT_MAX)
+		return __this_address;
+
+	return NULL;
+}
+
 /*
  * Get the data from the pointed-to record.
  */
@@ -153,6 +186,7 @@ xfs_refcount_get_rec(
 {
 	struct xfs_mount		*mp = cur->bc_mp;
 	union xfs_btree_rec		*rec;
+	xfs_failaddr_t			fa;
 	int				error;
 
 	BUILD_BUG_ON(XFS_REFC_LEN_MAX != XFS_RTREFC_LEN_MAX);
@@ -163,28 +197,8 @@ xfs_refcount_get_rec(
 		return error;
 
 	xfs_refcount_btrec_to_irec(cur, rec, irec);
-	if (irec->rc_blockcount == 0 || irec->rc_blockcount > XFS_REFC_LEN_MAX)
-		goto out_bad_rec;
-
-	if (!xfs_refcount_check_domain(irec))
-		goto out_bad_rec;
-
-	/* check for valid extent range, including overflow */
-	if (cur->bc_btnum == XFS_BTNUM_RTREFC) {
-		struct xfs_rtgroup	*rtg = cur->bc_ino.rtg;
-
-		if (!xfs_verify_rgbext(rtg, irec->rc_startblock,
-				irec->rc_blockcount))
-			goto out_bad_rec;
-	} else {
-		struct xfs_perag	*pag = cur->bc_ag.pag;
-
-		if (!xfs_verify_agbext(pag, irec->rc_startblock,
-					    irec->rc_blockcount))
-			goto out_bad_rec;
-	}
-
-	if (irec->rc_refcount == 0 || irec->rc_refcount > XFS_REFC_REFCOUNT_MAX)
+	fa = xfs_refcount_check_irec(cur, irec);
+	if (fa)
 		goto out_bad_rec;
 
 	trace_xfs_refcount_get(cur, irec);
@@ -193,12 +207,12 @@ xfs_refcount_get_rec(
 out_bad_rec:
 	if (cur->bc_btnum == XFS_BTNUM_RTREFC) {
 		xfs_warn(mp,
- "RT Refcount BTree record corruption in rtgroup %u detected!",
-				cur->bc_ino.rtg->rtg_rgno);
+ "RT Refcount BTree record corruption in rtgroup %u detected at %pS!",
+				cur->bc_ino.rtg->rtg_rgno, fa);
 	} else {
 		xfs_warn(mp,
- "Refcount BTree record corruption in AG %d detected!",
-				cur->bc_ag.pag->pag_agno);
+ "Refcount BTree record corruption in AG %d detected at %pS!",
+				cur->bc_ag.pag->pag_agno, fa);
 	}
 	xfs_warn(mp,
 		"Start block 0x%x, block count 0x%x, references 0x%x",
@@ -1890,8 +1904,8 @@ xfs_refcount_recover_extent(
 			GFP_KERNEL | __GFP_NOFAIL);
 	INIT_LIST_HEAD(&rr->rr_list);
 	xfs_refcount_btrec_to_irec(cur, rec, &rr->rr_rrec);
-
-	if (XFS_IS_CORRUPT(cur->bc_mp,
+	if (xfs_refcount_check_irec(cur, &rr->rr_rrec) != NULL ||
+	    XFS_IS_CORRUPT(cur->bc_mp,
 			   rr->rr_rrec.rc_domain != XFS_REFC_DOMAIN_COW)) {
 		xfs_btree_mark_sick(cur);
 		kfree(rr);
@@ -2069,6 +2083,11 @@ xfs_refcount_query_range_helper(
 	struct xfs_refcount_irec	irec;
 
 	xfs_refcount_btrec_to_irec(cur, rec, &irec);
+	if (xfs_refcount_check_irec(cur, &irec) != NULL) {
+		xfs_btree_mark_sick(cur);
+		return -EFSCORRUPTED;
+	}
+
 	return query->fn(cur, &irec, query->priv);
 }
 

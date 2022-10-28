@@ -441,23 +441,15 @@ xchk_refcountbt_rec(
 {
 	struct xfs_refcount_irec irec;
 	struct xchk_refcbt_records *rrc = bs->private;
-	struct xfs_perag	*pag = bs->cur->bc_ag.pag;
 
 	xfs_refcount_btrec_to_irec(bs->cur, rec, &irec);
-
-	/* Check the domain and refcount are not incompatible. */
-	if (!xfs_refcount_check_domain(&irec))
+	if (xfs_refcount_check_irec(bs->cur, &irec) != NULL) {
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
+		return 0;
+	}
 
 	if (irec.rc_domain == XFS_REFC_DOMAIN_COW)
 		rrc->cow_blocks += irec.rc_blockcount;
-
-	/* Check the extent. */
-	if (!xfs_verify_agbext(pag, irec.rc_startblock, irec.rc_blockcount))
-		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
-
-	if (irec.rc_refcount == 0)
-		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 
 	/* Shared records always come before CoW records. */
 	if (irec.rc_domain == XFS_REFC_DOMAIN_SHARED &&
