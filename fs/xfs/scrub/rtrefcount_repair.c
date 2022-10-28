@@ -129,19 +129,28 @@ struct xrep_rtrefc {
 STATIC int
 xrep_rtrefc_check_ext(
 	struct xfs_scrub		*sc,
-	const struct xfs_refcount_irec	*rec)
+	const struct xfs_refcount_irec	*irec)
 {
 	xfs_rtblock_t			rtbno;
 
+	if (irec->rc_blockcount == 0 || irec->rc_blockcount > XFS_REFC_LEN_MAX)
+		return -EFSCORRUPTED;
+
+	if (!xfs_refcount_check_domain(irec))
+		return -EFSCORRUPTED;
+
 	/* Must be within the rt device. */
-	if (!xfs_verify_rgbext(sc->sr.rtg, rec->rc_startblock,
-				rec->rc_blockcount))
+	if (!xfs_verify_rgbext(sc->sr.rtg, irec->rc_startblock,
+				irec->rc_blockcount))
+		return -EFSCORRUPTED;
+
+	if (irec->rc_refcount == 0 || irec->rc_refcount > XFS_REFC_REFCOUNT_MAX)
 		return -EFSCORRUPTED;
 
 	/* Make sure this isn't free space or misaligned. */
 	rtbno = xfs_rgbno_to_rtb(sc->mp, sc->sr.rtg->rtg_rgno,
-			rec->rc_startblock);
-	return xrep_require_rtext_inuse(sc, rtbno, rec->rc_blockcount, true);
+			irec->rc_startblock);
+	return xrep_require_rtext_inuse(sc, rtbno, irec->rc_blockcount, true);
 }
 
 /* Record a reference count extent. */
