@@ -111,15 +111,15 @@ xfs_inobt_rec_freecount(
 }
 
 /* Simple checks for inode records. */
-xfs_failaddr_t
-xfs_inobt_check_irec(
-	struct xfs_btree_cur			*cur,
+inline xfs_failaddr_t
+__xfs_inobt_check_irec(
+	struct xfs_perag			*pag,
 	const struct xfs_inobt_rec_incore	*irec)
 {
 	/* Record has to be properly aligned within the AG. */
-	if (!xfs_verify_agino(cur->bc_ag.pag, irec->ir_startino))
+	if (!xfs_verify_agino(pag, irec->ir_startino))
 		return __this_address;
-	if (!xfs_verify_agino(cur->bc_ag.pag,
+	if (!xfs_verify_agino(pag,
 				irec->ir_startino + XFS_INODES_PER_CHUNK - 1))
 		return __this_address;
 	if (irec->ir_count < XFS_INODES_PER_HOLEMASK_BIT ||
@@ -132,6 +132,15 @@ xfs_inobt_check_irec(
 		return __this_address;
 
 	return NULL;
+}
+
+/* Simple checks for inode records. */
+xfs_failaddr_t
+xfs_inobt_check_irec(
+	struct xfs_btree_cur			*cur,
+	const struct xfs_inobt_rec_incore	*irec)
+{
+	return __xfs_inobt_check_irec(cur->bc_ag.pag, irec);
 }
 
 static inline int

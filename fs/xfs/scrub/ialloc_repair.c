@@ -184,6 +184,9 @@ xrep_ibt_stash(
 		return error;
 
 	ri->rie.ir_freecount = xfs_inobt_rec_freecount(&ri->rie);
+	if (__xfs_inobt_check_irec(ri->sc->sa.pag, &ri->rie) != NULL)
+		return -EFSCORRUPTED;
+
 	if (ri->rie.ir_freecount > 0)
 		ri->finobt_recs++;
 

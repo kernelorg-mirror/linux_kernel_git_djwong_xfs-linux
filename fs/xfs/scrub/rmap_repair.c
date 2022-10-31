@@ -185,21 +185,7 @@ xrep_rmap_check_mapping(
 	enum xfs_btree_keyfill	keyfill;
 	int			error;
 
-	if (rec->rm_owner == XFS_RMAP_OWN_FS) {
-		/* Static metadata only exists at the start of the AG. */
-		if (rec->rm_startblock != 0)
-			return -EFSCORRUPTED;
-	} else {
-		/* Check that this is within an AG and not static metadata. */
-		if (!xfs_verify_agbext(sc->sa.pag, rec->rm_startblock,
-					rec->rm_blockcount))
-			return -EFSCORRUPTED;
-	}
-
-	/* Check for a valid fork offset, if applicable. */
-	if (!XFS_RMAP_NON_INODE_OWNER(rec->rm_owner) &&
-	    !(rec->rm_flags & XFS_RMAP_BMBT_BLOCK) &&
-	    !xfs_verify_fileext(sc->mp, rec->rm_offset, rec->rm_blockcount))
+	if (__xfs_rmap_check_data_irec(sc->sa.pag, rec) != NULL)
 		return -EFSCORRUPTED;
 
 	/* Make sure this isn't free space. */
