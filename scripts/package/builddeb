@@ -111,6 +111,8 @@ tmpdir=debian/linux-image-mtr$LOCALVERSION
 dbg_dir=debian/linux-image-mtr$LOCALVERSION-dbg
 packagename=linux-image-mtr$LOCALVERSION
 dbg_packagename=$packagename-dbg
+toolsdir=debian/linux-tools-mtr$LOCALVERSION
+toolspackagename=linux-tools-mtr$LOCALVERSION
 
 if [ "$ARCH" = "um" ] ; then
 	packagename=user-mode-linux-$version
@@ -241,5 +243,21 @@ if [ -n "$BUILD_DEBUG" ] ; then
 	ln -s lib/modules/$version/vmlinux $dbg_dir/usr/lib/debug/vmlinux-$version
 	create_package "$dbg_packagename" "$dbg_dir"
 fi
+
+# tools package
+rm -rf "$toolsdir"
+tools_libdir=$toolsdir/usr/lib/linux-tools-$version/
+tools_linkdir=$toolsdir/usr/lib/linux-tools/$version/
+mkdir -p $tools_libdir $tools_linkdir
+cp tools/perf/perf $tools_libdir/
+cp turbostat $tools_libdir/ || true
+cp x86_energy_perf_policy $tools_libdir/ || true
+for i in $tools_libdir/*; do
+	test -e "$i" || continue
+	b="$(basename "$i")"
+	ln -s -f ../../linux-tools-$version/$b $tools_linkdir/$b
+done
+
+create_package "$toolspackagename" "$toolsdir"
 
 exit 0
