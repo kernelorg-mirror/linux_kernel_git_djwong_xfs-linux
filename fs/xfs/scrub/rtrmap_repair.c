@@ -122,29 +122,8 @@ xrep_rtrmap_check_mapping(
 {
 	xfs_rtblock_t		rtbno;
 
-	if (rec->rm_owner == XFS_RMAP_OWN_FS) {
-		/* This must describe the rt superblock */
-		if (rec->rm_startblock != 0)
-			return -EFSCORRUPTED;
-		if (rec->rm_offset != 0)
-			return -EFSCORRUPTED;
-		if (rec->rm_blockcount != sc->mp->m_sb.sb_rextsize)
-			return -EFSCORRUPTED;
-		if (rec->rm_flags)
-			return -EFSCORRUPTED;
-	} else {
-		/* Check that this is within the rt volume. */
-		if (!xfs_verify_rgbext(sc->sr.rtg, rec->rm_startblock,
-					rec->rm_blockcount))
-			return -EFSCORRUPTED;
-
-		/* Check for a valid fork offset, if applicable. */
-		if (!xfs_verify_fileext(sc->mp, rec->rm_offset,
-					rec->rm_blockcount))
-			return -EFSCORRUPTED;
-		if (rec->rm_flags & ~XFS_RMAP_UNWRITTEN)
-			return -EFSCORRUPTED;
-	}
+	if (xfs_rmap_check_rt_irec(sc->sr.rtg, rec) != NULL)
+		return -EFSCORRUPTED;
 
 	/* Make sure this isn't free space. */
 	rtbno = xfs_rgbno_to_rtb(sc->mp, sc->sr.rtg->rtg_rgno,

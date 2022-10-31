@@ -133,9 +133,7 @@ xrep_rtrefc_check_ext(
 {
 	xfs_rtblock_t			rtbno;
 
-	/* Must be within the rt device. */
-	if (!xfs_verify_rgbext(sc->sr.rtg, rec->rc_startblock,
-				rec->rc_blockcount))
+	if (xfs_refcount_check_rt_irec(sc->sr.rtg, rec) != NULL)
 		return -EFSCORRUPTED;
 
 	/* Make sure this isn't free space or misaligned. */

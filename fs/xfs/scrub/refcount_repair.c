@@ -130,9 +130,7 @@ xrep_refc_check_ext(
 	enum xfs_btree_keyfill		keyfill;
 	int				error;
 
-	/* Must be within the AG and not static data. */
-	if (!xfs_verify_agbext(sc->sa.pag, rec->rc_startblock,
-				rec->rc_blockcount))
+	if (xfs_refcount_check_data_irec(sc->sa.pag, rec) != NULL)
 		return -EFSCORRUPTED;
 
 	/* Make sure this isn't free space. */

@@ -232,13 +232,12 @@ xfs_rmap_btrec_to_irec(
 }
 
 /* Simple checks for data rmap records. */
-static inline xfs_failaddr_t
+inline xfs_failaddr_t
 xfs_rmap_check_data_irec(
-	struct xfs_btree_cur		*cur,
+	struct xfs_perag		*pag,
 	const struct xfs_rmap_irec	*irec)
 {
-	struct xfs_mount		*mp = cur->bc_mp;
-	struct xfs_perag		*pag;
+	struct xfs_mount		*mp = pag->pag_mount;
 	bool				is_inode;
 	bool				is_unwritten;
 	bool				is_bmbt;
@@ -246,11 +245,6 @@ xfs_rmap_check_data_irec(
 
 	if (irec->rm_blockcount == 0)
 		return __this_address;
-
-	if (cur->bc_flags & XFS_BTREE_IN_MEMORY)
-		pag = cur->bc_mem.pag;
-	else
-		pag = cur->bc_ag.pag;
 
 	if (irec->rm_startblock <= XFS_AGFL_BLOCK(mp)) {
 		if (irec->rm_owner != XFS_RMAP_OWN_FS)
@@ -296,13 +290,12 @@ xfs_rmap_check_data_irec(
 }
 
 /* Simple checks for rt rmap records. */
-static inline xfs_failaddr_t
+inline xfs_failaddr_t
 xfs_rmap_check_rt_irec(
-	struct xfs_btree_cur		*cur,
+	struct xfs_rtgroup		*rtg,
 	const struct xfs_rmap_irec	*irec)
 {
-	struct xfs_mount		*mp = cur->bc_mp;
-	struct xfs_rtgroup		*rtg;
+	struct xfs_mount		*mp = rtg->rtg_mount;
 	bool				is_inode;
 	bool				is_unwritten;
 	bool				is_bmbt;
@@ -311,11 +304,6 @@ xfs_rmap_check_rt_irec(
 
 	if (irec->rm_blockcount == 0)
 		return __this_address;
-
-	if (cur->bc_flags & XFS_BTREE_IN_MEMORY)
-		rtg = cur->bc_mem.rtg;
-	else
-		rtg = cur->bc_ino.rtg;
 
 	if (irec->rm_owner == XFS_RMAP_OWN_FS) {
 		if (irec->rm_startblock != 0)
@@ -378,9 +366,23 @@ xfs_rmap_check_irec(
 	struct xfs_btree_cur		*cur,
 	const struct xfs_rmap_irec	*irec)
 {
-	if (cur->bc_btnum == XFS_BTNUM_RTRMAP)
-		return xfs_rmap_check_rt_irec(cur, irec);
-	return xfs_rmap_check_data_irec(cur, irec);
+	struct xfs_perag		*pag;
+
+	if (cur->bc_btnum == XFS_BTNUM_RTRMAP) {
+		struct xfs_rtgroup	*rtg;
+
+		if (cur->bc_flags & XFS_BTREE_IN_MEMORY)
+			rtg = cur->bc_mem.rtg;
+		else
+			rtg = cur->bc_ino.rtg;
+		return xfs_rmap_check_rt_irec(rtg, irec);
+	}
+
+	if (cur->bc_flags & XFS_BTREE_IN_MEMORY)
+		pag = cur->bc_mem.pag;
+	else
+		pag = cur->bc_ag.pag;
+	return xfs_rmap_check_data_irec(pag, irec);
 }
 
 static inline int

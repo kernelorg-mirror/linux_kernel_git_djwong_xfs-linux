@@ -143,13 +143,11 @@ xfs_refcount_btrec_to_irec(
 }
 
 /* Simple checks for data refcount records. */
-static inline xfs_failaddr_t
+inline xfs_failaddr_t
 xfs_refcount_check_data_irec(
-	struct xfs_btree_cur		*cur,
+	struct xfs_perag		*pag,
 	const struct xfs_refcount_irec	*irec)
 {
-	struct xfs_perag		*pag = cur->bc_ag.pag;
-
 	if (irec->rc_blockcount == 0 || irec->rc_blockcount > XFS_REFC_LEN_MAX)
 		return __this_address;
 
@@ -167,13 +165,11 @@ xfs_refcount_check_data_irec(
 }
 
 /* Simple checks for rt refcount records. */
-static inline xfs_failaddr_t
+inline xfs_failaddr_t
 xfs_refcount_check_rt_irec(
-	struct xfs_btree_cur		*cur,
+	struct xfs_rtgroup		*rtg,
 	const struct xfs_refcount_irec	*irec)
 {
-	struct xfs_rtgroup		*rtg = cur->bc_ino.rtg;
-
 	if (irec->rc_blockcount == 0 || irec->rc_blockcount > XFS_REFC_LEN_MAX)
 		return __this_address;
 
@@ -197,8 +193,8 @@ xfs_refcount_check_irec(
 	const struct xfs_refcount_irec	*irec)
 {
 	if (cur->bc_btnum == XFS_BTNUM_RTREFC)
-		return xfs_refcount_check_rt_irec(cur, irec);
-	return xfs_refcount_check_data_irec(cur, irec);
+		return xfs_refcount_check_rt_irec(cur->bc_ino.rtg, irec);
+	return xfs_refcount_check_data_irec(cur->bc_ag.pag, irec);
 }
 
 static inline int

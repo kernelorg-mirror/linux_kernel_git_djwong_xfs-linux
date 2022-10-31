@@ -133,9 +133,7 @@ xrep_abt_check_free_ext(
 	enum xfs_btree_keyfill	keyfill;
 	int			error;
 
-	/* Must be within the AG and not static data. */
-	if (!xfs_verify_agbext(sc->sa.pag, rec->ar_startblock,
-				rec->ar_blockcount))
+	if (xfs_alloc_check_ag_irec(sc->sa.pag, rec) != NULL)
 		return -EFSCORRUPTED;
 
 	/* Must not be an inode chunk. */
