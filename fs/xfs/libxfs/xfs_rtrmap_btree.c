@@ -528,10 +528,7 @@ xfs_rtrmapbt_init_common(
 	cur->bc_ino.allocated = 0;
 	cur->bc_ino.flags = 0;
 	cur->bc_ops = &xfs_rtrmapbt_ops;
-
-	/* take a reference for the cursor */
-	atomic_inc(&rtg->rtg_ref);
-	cur->bc_ino.rtg = rtg;
+	cur->bc_ino.rtg = xfs_rtgroup_bump(rtg);
 
 	return cur;
 }
@@ -671,8 +668,7 @@ xfs_rtrmapbt_mem_cursor(
 	cur->bc_nlevels = xfs_btree_mem_head_nlevels(head_bp);
 
 	/* take a reference for the cursor */
-	atomic_inc(&rtg->rtg_ref);
-	cur->bc_mem.rtg = rtg;
+	cur->bc_mem.rtg = xfs_rtgroup_bump(rtg);
 
 	return cur;
 }

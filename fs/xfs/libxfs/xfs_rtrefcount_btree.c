@@ -408,8 +408,7 @@ xfs_rtrefcountbt_init_common(
 	cur->bc_ops = &xfs_rtrefcountbt_ops;
 
 	/* take a reference for the cursor */
-	atomic_inc(&rtg->rtg_ref);
-	cur->bc_ino.rtg = rtg;
+	cur->bc_ino.rtg = xfs_rtgroup_bump(rtg);
 
 	return cur;
 }

@@ -1668,6 +1668,7 @@ xrep_rmapbt(
 	struct xrep_rmap	*rr;
 	int			error;
 
+	return 0;
 	rr = kzalloc(sizeof(struct xrep_rmap), XCHK_GFP_FLAGS);
 	if (!rr)
 		return -ENOMEM;

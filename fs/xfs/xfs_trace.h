@@ -246,6 +246,7 @@ DEFINE_EVENT(xfs_rtgroup_class, name,	\
 		 unsigned long caller_ip),					\
 	TP_ARGS(mp, rgno, refcount, caller_ip))
 DEFINE_RTGROUP_REF_EVENT(xfs_rtgroup_get);
+DEFINE_RTGROUP_REF_EVENT(xfs_rtgroup_bump);
 DEFINE_RTGROUP_REF_EVENT(xfs_rtgroup_put);
 #endif /* CONFIG_XFS_RT */
 

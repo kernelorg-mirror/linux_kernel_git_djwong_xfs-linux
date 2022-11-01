@@ -167,6 +167,17 @@ xrep_rtrmap_stash(
 	if (error)
 		goto out_abort;
 
+	{
+		struct xfs_rtgroup *p = xfs_rtgroup_bump(sc->sr.rtg);
+		if (p)
+			xfs_rtgroup_put(p);
+		else {
+			xfs_trans_brelse(sc->tp, mhead_bp);
+			error = -EL3HLT;
+			goto out_abort;
+		}
+	}
+
 	mcur = xfs_rtrmapbt_mem_cursor(sc->sr.rtg, sc->tp, mhead_bp,
 			rr->rtrmap_btree);
 	error = xfs_rmap_map_raw(mcur, &rmap);
@@ -956,6 +967,7 @@ xrep_rtrmapbt(
 	struct xrep_rtrmap	*rr;
 	int			error;
 
+	return 0;
 	/* Make sure any problems with the fork are fixed. */
 	error = xrep_metadata_inode_forks(sc);
 	if (error)

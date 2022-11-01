@@ -1045,8 +1045,7 @@ xrep_rtgroup_init(
 	sr->rtlock_flags = rtglock_flags;
 
 	/* Grab our own reference to the rtgroup structure. */
-	atomic_inc(&rtg->rtg_ref);
-	sr->rtg = rtg;
+	sr->rtg = xfs_rtgroup_bump(rtg);
 	xrep_rtgroup_btcur_init(sc, sr);
 	return 0;
 }

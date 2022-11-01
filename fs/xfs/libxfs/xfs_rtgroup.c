@@ -56,6 +56,20 @@ xfs_rtgroup_get(
 	return rtg;
 }
 
+struct xfs_rtgroup *
+xfs_rtgroup_bump(
+	struct xfs_rtgroup	*rtg)
+{
+	if (!atomic_inc_not_zero(&rtg->rtg_ref)) {
+		ASSERT(0);
+		return NULL;
+	}
+
+	trace_xfs_rtgroup_bump(rtg->rtg_mount, rtg->rtg_rgno,
+			atomic_read(&rtg->rtg_ref), _RET_IP_);
+	return rtg;
+}
+
 void
 xfs_rtgroup_put(
 	struct xfs_rtgroup	*rtg)

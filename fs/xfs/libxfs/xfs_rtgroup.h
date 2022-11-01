@@ -57,6 +57,7 @@ struct xfs_rtgroup {
 
 #ifdef CONFIG_XFS_RT
 struct xfs_rtgroup *xfs_rtgroup_get(struct xfs_mount *mp, xfs_rgnumber_t rgno);
+struct xfs_rtgroup *xfs_rtgroup_bump(struct xfs_rtgroup *rtg);
 void xfs_rtgroup_put(struct xfs_rtgroup *rtg);
 int xfs_initialize_rtgroups(struct xfs_mount *mp, xfs_rgnumber_t rgcount);
 void xfs_free_rtgroups(struct xfs_mount *mp);
