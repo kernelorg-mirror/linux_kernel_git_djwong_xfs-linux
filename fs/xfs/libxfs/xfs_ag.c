@@ -57,6 +57,21 @@ xfs_perag_get(
 	return pag;
 }
 
+/* Get our own reference to a perag, given an existing active reference. */
+struct xfs_perag *
+xfs_perag_bump(
+	struct xfs_perag	*pag)
+{
+	if (!atomic_inc_not_zero(&pag->pag_ref)) {
+		ASSERT(0);
+		return NULL;
+	}
+
+	trace_xfs_perag_bump(pag->pag_mount, pag->pag_agno,
+			atomic_read(&pag->pag_ref), _RET_IP_);
+	return pag;
+}
+
 /*
  * search from @first to find the next perag with the given tag set.
  */
