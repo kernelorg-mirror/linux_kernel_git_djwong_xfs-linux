@@ -2723,13 +2723,14 @@ xfs_rmap_has_records(
 {
 	union xfs_btree_irec	low;
 	union xfs_btree_irec	high;
+	union xfs_btree_key	mask = { .rmap.rm_startblock = 1, };
 
 	memset(&low, 0, sizeof(low));
 	low.r.rm_startblock = bno;
 	memset(&high, 0xFF, sizeof(high));
 	high.r.rm_startblock = bno + len - 1;
 
-	return xfs_btree_has_records(cur, &low, &high, outcome);
+	return xfs_btree_has_records(cur, &low, &high, &mask, outcome);
 }
 
 /*
