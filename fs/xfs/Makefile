@@ -7,6 +7,28 @@
 ccflags-y += -I $(srctree)/$(src)		# needed for trace events
 ccflags-y += -I $(srctree)/$(src)/libxfs
 
+ccflags-y += -Werror \
+-femit-struct-debug-detailed=any \
+-Wunused-but-set-variable \
+-Wuninitialized \
+-Wno-pointer-sign \
+-Wall \
+-Wextra \
+-Wno-unused-parameter \
+-fstack-usage \
+-Wno-error=unused-but-set-variable \
+-Wno-error=address-of-packed-member \
+-Wno-error=format= \
+-Wno-sign-compare \
+-Wno-type-limits
+ccflags-$(CONFIG_KASAN) += -Wno-error
+
+ifneq ($(CONFIG_XFS_QUOTA),y)
+ccflags-y += -Wno-error=empty-body
+endif
+
+UBSAN_SANITIZE := y
+
 obj-$(CONFIG_XFS_FS)		+= xfs.o
 
 # this one should be compiled first, as the tracing macros can easily blow up
