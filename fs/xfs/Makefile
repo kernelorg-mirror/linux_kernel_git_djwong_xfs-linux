@@ -51,17 +51,25 @@ ccflags-y += -Wdisabled-optimization
 ccflags-y += -Wshadow
 ccflags-y += $(call cc-option, -Wlogical-op)
 ccflags-y += -Wmissing-field-initializers
-#ccflags-y += -Wtype-limits	# breaks BUILD_BUG_ON
+#ccflags-y += -Wtype-limits				# breaks BUILD_BUG_ON
 ccflags-y += $(call cc-option, -Wmaybe-uninitialized)
-ccflags-y += $(call cc-option, -Wunused-macros)
+#ccflags-y += $(call cc-option, -Wunused-macros)	# dont care about excess macros
 
 # wait_event shadows variables intentionally
 ccflags-y += -Wno-error=shadow
 
+# don't fret about unused variables when rt is disabled
 ifneq ($(CONFIG_XFS_RT),y)
 ccflags-y += -Wno-error=unused-variable
+ccflags-y += -Wno-error=unused-but-set-variable
 endif
 
+# not sure what this is about
+ifneq ($(CONFIG_XFS_POSIX_ACL),y)
+ccflags-y += -Wno-error=stringop-truncation
+endif
+
+# don't fret about empty function bodies when quota is disabled
 ifneq ($(CONFIG_XFS_QUOTA),y)
 ccflags-y += -Wno-error=empty-body
 endif
