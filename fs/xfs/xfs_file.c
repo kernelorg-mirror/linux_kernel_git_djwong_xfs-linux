@@ -701,6 +701,7 @@ xfs_file_buffered_write(
 	struct kiocb		*iocb,
 	struct iov_iter		*from)
 {
+	struct xfs_iomap_buffered_ctx ibc = { };
 	struct inode		*inode = iocb->ki_filp->f_mapping->host;
 	struct xfs_inode	*ip = XFS_I(inode);
 	ssize_t			ret;
@@ -722,7 +723,7 @@ write_retry:
 
 	trace_xfs_file_buffered_write(iocb, from);
 	ret = iomap_file_buffered_write(iocb, from,
-			&xfs_buffered_write_iomap_ops, NULL);
+			&xfs_buffered_write_iomap_ops, &ibc);
 	if (likely(ret >= 0))
 		iocb->ki_pos += ret;
 
