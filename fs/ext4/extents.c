@@ -4903,10 +4903,11 @@ out:
 	return error;
 }
 
-static int ext4_iomap_xattr_begin(struct inode *inode, loff_t offset,
-				  loff_t length, unsigned flags,
+static int ext4_iomap_xattr_begin(const struct iomap_iter *iter,
 				  struct iomap *iomap, struct iomap *srcmap)
 {
+	struct inode *inode = iter->inode;
+	loff_t offset = iter->pos;
 	int error;
 
 	error = ext4_iomap_xattr_fiemap(inode, iomap);
