@@ -558,10 +558,13 @@ out_err:
 /* This is just for DAX and the mapping is ephemeral, do not use it for other
  * purposes since there is no block device with a permanent mapping.
  */
-static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
-			    unsigned int flags, struct iomap *iomap,
-			    struct iomap *srcmap)
+static int fuse_iomap_begin(const struct iomap_iter *iter,
+			    struct iomap *iomap, struct iomap *srcmap)
 {
+	struct inode *inode = iter->inode;
+	loff_t pos = iter->pos;
+	loff_t length = iter->len;
+	unsigned int flags = iter->flags;
 	struct fuse_inode *fi = get_fuse_inode(inode);
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct fuse_dax_mapping *dmap;

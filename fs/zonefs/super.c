@@ -109,10 +109,12 @@ static inline void zonefs_i_size_write(struct inode *inode, loff_t isize)
 	}
 }
 
-static int zonefs_read_iomap_begin(struct inode *inode, loff_t offset,
-				   loff_t length, unsigned int flags,
+static int zonefs_read_iomap_begin(const struct iomap_iter *iter,
 				   struct iomap *iomap, struct iomap *srcmap)
 {
+	struct inode *inode = iter->inode;
+	loff_t offset = iter->pos;
+	loff_t length = iter->len;
 	struct zonefs_inode_info *zi = ZONEFS_I(inode);
 	struct super_block *sb = inode->i_sb;
 	loff_t isize;
@@ -145,9 +147,9 @@ static const struct iomap_ops zonefs_read_iomap_ops = {
 	.iomap_begin	= zonefs_read_iomap_begin,
 };
 
-static int zonefs_write_iomap_begin(struct inode *inode, loff_t offset,
-				    loff_t length, unsigned int flags,
-				    struct iomap *iomap, struct iomap *srcmap)
+static int __zonefs_write_iomap_begin(struct inode *inode, loff_t offset,
+		loff_t length, unsigned int flags, struct iomap *iomap,
+		struct iomap *srcmap)
 {
 	struct zonefs_inode_info *zi = ZONEFS_I(inode);
 	struct super_block *sb = inode->i_sb;
@@ -190,6 +192,13 @@ static int zonefs_write_iomap_begin(struct inode *inode, loff_t offset,
 	return 0;
 }
 
+static int zonefs_write_iomap_begin(const struct iomap_iter *iter,
+				    struct iomap *iomap, struct iomap *srcmap)
+{
+	return __zonefs_write_iomap_begin(iter->inode, iter->pos, iter->len,
+			iter->flags, iomap, srcmap);
+}
+
 static const struct iomap_ops zonefs_write_iomap_ops = {
 	.iomap_begin	= zonefs_write_iomap_begin,
 };
@@ -223,8 +232,9 @@ static int zonefs_write_map_blocks(struct iomap_writepage_ctx *wpc,
 	    offset < wpc->iomap.offset + wpc->iomap.length)
 		return 0;
 
-	return zonefs_write_iomap_begin(inode, offset, zi->i_max_size - offset,
-					IOMAP_WRITE, &wpc->iomap, NULL);
+	return __zonefs_write_iomap_begin(inode, offset,
+			zi->i_max_size - offset, IOMAP_WRITE, &wpc->iomap,
+			NULL);
 }
 
 static const struct iomap_writeback_ops zonefs_writeback_ops = {

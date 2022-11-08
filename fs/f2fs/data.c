@@ -4105,10 +4105,13 @@ void f2fs_destroy_bio_entry_cache(void)
 	kmem_cache_destroy(bio_entry_slab);
 }
 
-static int f2fs_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
-			    unsigned int flags, struct iomap *iomap,
-			    struct iomap *srcmap)
+static int f2fs_iomap_begin(const struct iomap_iter *iter,
+			    struct iomap *iomap, struct iomap *srcmap)
 {
+	struct inode *inode = iter->inode;
+	loff_t offset = iter->pos;
+	loff_t length = iter->len;
+	unsigned int flags = iter->flags;
 	struct f2fs_map_blocks map = {};
 	pgoff_t next_pgofs = 0;
 	int err;

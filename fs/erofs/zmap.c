@@ -767,10 +767,12 @@ out:
 	return err;
 }
 
-static int z_erofs_iomap_begin_report(struct inode *inode, loff_t offset,
-				loff_t length, unsigned int flags,
+static int z_erofs_iomap_begin_report(const struct iomap_iter *iter,
 				struct iomap *iomap, struct iomap *srcmap)
 {
+	struct inode *inode = iter->inode;
+	loff_t offset = iter->pos;
+	loff_t length = iter->len;
 	int ret;
 	struct erofs_map_blocks map = { .m_la = offset };
 

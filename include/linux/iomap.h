@@ -152,14 +152,15 @@ struct iomap_page_ops {
 #define IOMAP_DAX		0
 #endif /* CONFIG_FS_DAX */
 
+struct iomap_iter;
+
 struct iomap_ops {
 	/*
 	 * Return the existing mapping at pos, or reserve space starting at
 	 * pos for up to length, as long as we can do it as a single mapping.
 	 * The actual length is returned in iomap->length.
 	 */
-	int (*iomap_begin)(struct inode *inode, loff_t pos, loff_t length,
-			unsigned flags, struct iomap *iomap,
+	int (*iomap_begin)(const struct iomap_iter *iter, struct iomap *iomap,
 			struct iomap *srcmap);
 
 	/*
