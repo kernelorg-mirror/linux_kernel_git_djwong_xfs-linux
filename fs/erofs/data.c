@@ -312,8 +312,8 @@ static int erofs_iomap_begin(const struct iomap_iter *iter,
 	return 0;
 }
 
-static int erofs_iomap_end(struct inode *inode, loff_t pos, loff_t length,
-		ssize_t written, unsigned int flags, struct iomap *iomap)
+static int erofs_iomap_end(const struct iomap_iter *iter, u64 length,
+		ssize_t written, struct iomap *iomap)
 {
 	void *ptr = iomap->private;
 

@@ -881,20 +881,19 @@ const struct iomap_ops xfs_direct_write_iomap_ops = {
 
 static int
 xfs_dax_write_iomap_end(
-	struct inode		*inode,
-	loff_t			pos,
-	loff_t			length,
+	const struct iomap_iter	*iter,
+	u64			mapped_length,
 	ssize_t			written,
-	unsigned		flags,
 	struct iomap		*iomap)
 {
-	struct xfs_inode	*ip = XFS_I(inode);
+	struct xfs_inode	*ip = XFS_I(iter->inode);
+	loff_t			pos = iter->pos;
 
 	if (!xfs_is_cow_inode(ip))
 		return 0;
 
 	if (!written) {
-		xfs_reflink_cancel_cow_range(ip, pos, length, true);
+		xfs_reflink_cancel_cow_range(ip, pos, mapped_length, true);
 		return 0;
 	}
 
@@ -1291,14 +1290,14 @@ out_unlock:
 
 static int
 xfs_buffered_write_iomap_end(
-	struct inode		*inode,
-	loff_t			offset,
-	loff_t			length,
+	const struct iomap_iter	*iter,
+	u64			mapped_length,
 	ssize_t			written,
-	unsigned		flags,
 	struct iomap		*iomap)
 {
-	struct xfs_mount	*mp = XFS_M(inode->i_sb);
+	struct xfs_inode	*ip = XFS_I(iter->inode);
+	struct xfs_mount	*mp = ip->i_mount;
+	loff_t			offset = iter->pos;
 	loff_t			start_byte;
 	loff_t			end_byte;
 	int			error = 0;
@@ -1319,16 +1318,17 @@ xfs_buffered_write_iomap_end(
 		start_byte = round_down(offset, mp->m_sb.sb_blocksize);
 	else
 		start_byte = round_up(offset + written, mp->m_sb.sb_blocksize);
-	end_byte = round_up(offset + length, mp->m_sb.sb_blocksize);
+	end_byte = round_up(offset + mapped_length, mp->m_sb.sb_blocksize);
 
 	/* Nothing to do if we've written the entire delalloc extent */
 	if (start_byte >= end_byte)
 		return 0;
 
-	error = xfs_buffered_write_delalloc_release(inode, start_byte, end_byte);
+	error = xfs_buffered_write_delalloc_release(VFS_I(ip), start_byte,
+			end_byte);
 	if (error && !xfs_is_shutdown(mp)) {
 		xfs_alert(mp, "%s: unable to clean up ino 0x%llx",
-			__func__, XFS_I(inode)->i_ino);
+			__func__, ip->i_ino);
 		return error;
 	}
 	return 0;

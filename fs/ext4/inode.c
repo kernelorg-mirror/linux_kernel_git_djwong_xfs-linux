@@ -3504,8 +3504,8 @@ static int ext4_iomap_overwrite_begin(const struct iomap_iter *iter,
 	return ret;
 }
 
-static int ext4_iomap_end(struct inode *inode, loff_t offset, loff_t length,
-			  ssize_t written, unsigned flags, struct iomap *iomap)
+static int ext4_iomap_end(const struct iomap_iter *iter, u64 length,
+			  ssize_t written, struct iomap *iomap)
 {
 	/*
 	 * Check to see whether an error occurred while writing out the data to
@@ -3514,7 +3514,7 @@ static int ext4_iomap_end(struct inode *inode, loff_t offset, loff_t length,
 	 * the I/O. Any blocks that may have been allocated in preparation for
 	 * the direct I/O will be reused during buffered I/O.
 	 */
-	if (flags & (IOMAP_WRITE | IOMAP_DIRECT) && written == 0)
+	if (iter->flags & (IOMAP_WRITE | IOMAP_DIRECT) && written == 0)
 		return -ENOTBLK;
 
 	return 0;
