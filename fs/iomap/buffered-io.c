@@ -631,7 +631,7 @@ static int iomap_write_begin(struct iomap_iter *iter,
 	 * to zero) and corrupt data.
 	 */
 	if (ops->iomap_valid) {
-		bool iomap_valid = ops->iomap_valid(iter->inode, &iter->iomap);
+		bool iomap_valid = ops->iomap_valid(iter);
 
 		if (!iomap_valid) {
 			iter->iomap.flags |= IOMAP_F_STALE;

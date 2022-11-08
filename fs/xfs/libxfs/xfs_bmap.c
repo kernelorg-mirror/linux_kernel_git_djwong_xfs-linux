@@ -4552,7 +4552,7 @@ xfs_bmapi_convert_delalloc(
 	 */
 	if (!isnullstartblock(bma.got.br_startblock)) {
 		*seq = READ_ONCE(ifp->if_seq);
-		xfs_bmbt_to_iomap(ip, iomap, &bma.got, 0, flags, *seq);
+		xfs_bmbt_to_iomap(ip, iomap, &bma.got, 0, flags);
 		goto out_trans_cancel;
 	}
 
@@ -4600,7 +4600,7 @@ xfs_bmapi_convert_delalloc(
 
 	ASSERT(!isnullstartblock(bma.got.br_startblock));
 	*seq = READ_ONCE(ifp->if_seq);
-	xfs_bmbt_to_iomap(ip, iomap, &bma.got, 0, flags, *seq);
+	xfs_bmbt_to_iomap(ip, iomap, &bma.got, 0, flags);
 
 	if (whichfork == XFS_COW_FORK)
 		xfs_refcount_alloc_cow_extent(tp, bma.blkno, bma.length);

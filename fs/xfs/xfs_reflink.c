@@ -1683,6 +1683,7 @@ xfs_reflink_unshare(
 	xfs_off_t		offset,
 	xfs_off_t		len)
 {
+	struct xfs_iomap_buffered_ctx ibc = { };
 	struct inode		*inode = VFS_I(ip);
 	int			error;
 
@@ -1694,7 +1695,7 @@ xfs_reflink_unshare(
 	inode_dio_wait(inode);
 
 	error = iomap_file_unshare(inode, offset, len,
-			&xfs_buffered_write_iomap_ops, NULL);
+			&xfs_buffered_write_iomap_ops, &ibc);
 	if (error)
 		goto out;
 

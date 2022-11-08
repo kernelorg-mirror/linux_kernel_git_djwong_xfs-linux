@@ -48,14 +48,31 @@ xfs_alert_fsblock_zero(
 	return -EFSCORRUPTED;
 }
 
+static inline void
+xfs_iomap_sample_seq(
+	const struct iomap_iter		*iter,
+	struct xfs_inode		*ip)
+{
+	struct xfs_iomap_buffered_ctx	*ibc = iter->private;
+
+	if (!ibc)
+		return;
+
+	/* The extent tree sequence is needed for iomap validity checking. */
+	ibc->data_seq = READ_ONCE(ip->i_df.if_seq);
+	if (xfs_inode_has_cow_data(ip))
+		ibc->cow_seq = READ_ONCE(ip->i_cowfp->if_seq);
+	else
+		ibc->cow_seq = 0;
+}
+
 int
 xfs_bmbt_to_iomap(
 	struct xfs_inode	*ip,
 	struct iomap		*iomap,
 	struct xfs_bmbt_irec	*imap,
 	unsigned int		mapping_flags,
-	u16			iomap_flags,
-	int			sequence)
+	u16			iomap_flags)
 {
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_buftarg	*target = xfs_inode_buftarg(ip);
@@ -92,9 +109,6 @@ xfs_bmbt_to_iomap(
 	if (xfs_ipincount(ip) &&
 	    (ip->i_itemp->ili_fsync_fields & ~XFS_ILOG_TIMESTAMP))
 		iomap->flags |= IOMAP_F_DIRTY;
-
-	/* The extent tree sequence is needed for iomap validity checking. */
-	*((int *)&iomap->private) = sequence;
 	return 0;
 }
 
@@ -193,14 +207,14 @@ xfs_iomap_eof_align_last_fsb(
 	return end_fsb;
 }
 
-int
-xfs_iomap_write_direct(
+static int
+__xfs_iomap_write_direct(
 	struct xfs_inode	*ip,
 	xfs_fileoff_t		offset_fsb,
 	xfs_fileoff_t		count_fsb,
 	unsigned int		flags,
 	struct xfs_bmbt_irec	*imap,
-	int			*seq)
+	const struct iomap_iter	*iter)
 {
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_trans	*tp;
@@ -290,14 +304,26 @@ xfs_iomap_write_direct(
 		error = xfs_alert_fsblock_zero(ip, imap);
 
 out_unlock:
-	if (seq)
-		*seq = READ_ONCE(ip->i_df.if_seq);
+	if (iter)
+		xfs_iomap_sample_seq(iter, ip);
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	return error;
 
 out_trans_cancel:
 	xfs_trans_cancel(tp);
 	goto out_unlock;
+}
+
+int
+xfs_iomap_write_direct(
+	struct xfs_inode	*ip,
+	xfs_fileoff_t		offset_fsb,
+	xfs_fileoff_t		count_fsb,
+	unsigned int		flags,
+	struct xfs_bmbt_irec	*imap)
+{
+	return __xfs_iomap_write_direct(ip, offset_fsb, count_fsb, flags, imap,
+			NULL);
 }
 
 STATIC bool
@@ -751,7 +777,6 @@ xfs_direct_write_iomap_begin(
 	bool			shared = false;
 	u16			iomap_flags = 0;
 	unsigned int		lockmode = XFS_ILOCK_SHARED;
-	int			seq;
 
 	ASSERT(flags & (IOMAP_WRITE | IOMAP_ZERO));
 
@@ -820,10 +845,10 @@ xfs_direct_write_iomap_begin(
 			goto out_unlock;
 	}
 
-	seq = READ_ONCE(ip->i_df.if_seq);
+	xfs_iomap_sample_seq(iter, ip);
 	xfs_iunlock(ip, lockmode);
 	trace_xfs_iomap_found(ip, offset, length, XFS_DATA_FORK, &imap);
-	return xfs_bmbt_to_iomap(ip, iomap, &imap, flags, iomap_flags, seq);
+	return xfs_bmbt_to_iomap(ip, iomap, &imap, flags, iomap_flags);
 
 allocate_blocks:
 	error = -EAGAIN;
@@ -848,26 +873,26 @@ allocate_blocks:
 		end_fsb = min(end_fsb, imap.br_startoff + imap.br_blockcount);
 	xfs_iunlock(ip, lockmode);
 
-	error = xfs_iomap_write_direct(ip, offset_fsb, end_fsb - offset_fsb,
-			flags, &imap, &seq);
+	error = __xfs_iomap_write_direct(ip, offset_fsb, end_fsb - offset_fsb,
+			flags, &imap, iter);
 	if (error)
 		return error;
 
 	trace_xfs_iomap_alloc(ip, offset, length, XFS_DATA_FORK, &imap);
 	return xfs_bmbt_to_iomap(ip, iomap, &imap, flags,
-				 iomap_flags | IOMAP_F_NEW, seq);
+				 iomap_flags | IOMAP_F_NEW);
 
 out_found_cow:
-	seq = READ_ONCE(ip->i_df.if_seq);
+	xfs_iomap_sample_seq(iter, ip);
 	xfs_iunlock(ip, lockmode);
 	length = XFS_FSB_TO_B(mp, cmap.br_startoff + cmap.br_blockcount);
 	trace_xfs_iomap_found(ip, offset, length - offset, XFS_COW_FORK, &cmap);
 	if (imap.br_startblock != HOLESTARTBLOCK) {
-		error = xfs_bmbt_to_iomap(ip, srcmap, &imap, flags, 0, seq);
+		error = xfs_bmbt_to_iomap(ip, srcmap, &imap, flags, 0);
 		if (error)
 			return error;
 	}
-	return xfs_bmbt_to_iomap(ip, iomap, &cmap, flags, IOMAP_F_SHARED, seq);
+	return xfs_bmbt_to_iomap(ip, iomap, &cmap, flags, IOMAP_F_SHARED);
 
 out_unlock:
 	if (lockmode)
@@ -926,7 +951,6 @@ xfs_buffered_write_iomap_begin(
 	int			allocfork = XFS_DATA_FORK;
 	int			error = 0;
 	unsigned int		lockmode = XFS_ILOCK_EXCL;
-	int			seq;
 
 	if (xfs_is_shutdown(mp))
 		return -EIO;
@@ -1105,29 +1129,29 @@ retry:
 	 * Flag newly allocated delalloc blocks with IOMAP_F_NEW so we punch
 	 * them out if the write happens to fail.
 	 */
-	seq = READ_ONCE(ip->i_df.if_seq);
+	xfs_iomap_sample_seq(iter, ip);
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	trace_xfs_iomap_alloc(ip, offset, count, allocfork, &imap);
-	return xfs_bmbt_to_iomap(ip, iomap, &imap, flags, IOMAP_F_NEW, seq);
+	return xfs_bmbt_to_iomap(ip, iomap, &imap, flags, IOMAP_F_NEW);
 
 found_imap:
-	seq = READ_ONCE(ip->i_df.if_seq);
+	xfs_iomap_sample_seq(iter, ip);
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
-	return xfs_bmbt_to_iomap(ip, iomap, &imap, flags, 0, seq);
+	return xfs_bmbt_to_iomap(ip, iomap, &imap, flags, 0);
 
 found_cow:
-	seq = READ_ONCE(ip->i_df.if_seq);
+	xfs_iomap_sample_seq(iter, ip);
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	if (imap.br_startoff <= offset_fsb) {
-		error = xfs_bmbt_to_iomap(ip, srcmap, &imap, flags, 0, seq);
+		error = xfs_bmbt_to_iomap(ip, srcmap, &imap, flags, 0);
 		if (error)
 			return error;
 		return xfs_bmbt_to_iomap(ip, iomap, &cmap, flags,
-					 IOMAP_F_SHARED, seq);
+					 IOMAP_F_SHARED);
 	}
 
 	xfs_trim_extent(&cmap, offset_fsb, imap.br_startoff - offset_fsb);
-	return xfs_bmbt_to_iomap(ip, iomap, &cmap, flags, 0, seq);
+	return xfs_bmbt_to_iomap(ip, iomap, &cmap, flags, 0);
 
 out_unlock:
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
@@ -1340,12 +1364,15 @@ xfs_buffered_write_iomap_end(
  */
 static bool
 xfs_buffered_write_iomap_valid(
-	struct inode		*inode,
-	const struct iomap	*iomap)
+	const struct iomap_iter		*iter)
 {
-	int			seq = *((int *)&iomap->private);
+	struct xfs_iomap_buffered_ctx	*ibc = iter->private;
+	struct xfs_inode		*ip = XFS_I(iter->inode);
 
-	if (seq != READ_ONCE(XFS_I(inode)->i_df.if_seq))
+	if (ibc->data_seq != READ_ONCE(ip->i_df.if_seq))
+		return false;
+	if (xfs_inode_has_cow_data(ip) &&
+	    ibc->cow_seq != READ_ONCE(ip->i_cowfp->if_seq))
 		return false;
 	return true;
 }
@@ -1383,7 +1410,6 @@ xfs_read_iomap_begin(
 	int			nimaps = 1, error = 0;
 	bool			shared = false;
 	unsigned int		lockmode = XFS_ILOCK_SHARED;
-	int			seq;
 
 	ASSERT(!(flags & (IOMAP_WRITE | IOMAP_ZERO)));
 
@@ -1397,14 +1423,15 @@ xfs_read_iomap_begin(
 			       &nimaps, 0);
 	if (!error && (flags & IOMAP_REPORT))
 		error = xfs_reflink_trim_around_shared(ip, &imap, &shared);
-	seq = READ_ONCE(ip->i_df.if_seq);
+	if (!error)
+		xfs_iomap_sample_seq(iter, ip);
 	xfs_iunlock(ip, lockmode);
 
 	if (error)
 		return error;
 	trace_xfs_iomap_found(ip, offset, length, XFS_DATA_FORK, &imap);
 	return xfs_bmbt_to_iomap(ip, iomap, &imap, flags,
-				 shared ? IOMAP_F_SHARED : 0, seq);
+				 shared ? IOMAP_F_SHARED : 0);
 }
 
 const struct iomap_ops xfs_read_iomap_ops = {
@@ -1463,9 +1490,13 @@ xfs_seek_iomap_begin(
 	if (cow_fsb != NULLFILEOFF && cow_fsb <= offset_fsb) {
 		if (data_fsb < cow_fsb + cmap.br_blockcount)
 			end_fsb = min(end_fsb, data_fsb);
+		xfs_iomap_sample_seq(iter, ip);
 		xfs_trim_extent(&cmap, offset_fsb, end_fsb);
 		error = xfs_bmbt_to_iomap(ip, iomap, &cmap, flags,
-				IOMAP_F_SHARED, READ_ONCE(ip->i_cowfp->if_seq));
+				IOMAP_F_SHARED);
+		if (error)
+			goto out_unlock;
+
 		/*
 		 * This is a COW extent, so we must probe the page cache
 		 * because there could be dirty page cache being backed
@@ -1487,8 +1518,8 @@ xfs_seek_iomap_begin(
 	imap.br_state = XFS_EXT_NORM;
 done:
 	xfs_trim_extent(&imap, offset_fsb, end_fsb);
-	error = xfs_bmbt_to_iomap(ip, iomap, &imap, flags, 0,
-			READ_ONCE(ip->i_df.if_seq));
+	xfs_iomap_sample_seq(iter, ip);
+	error = xfs_bmbt_to_iomap(ip, iomap, &imap, flags, 0);
 out_unlock:
 	xfs_iunlock(ip, lockmode);
 	return error;
@@ -1515,7 +1546,6 @@ xfs_xattr_iomap_begin(
 	struct xfs_bmbt_irec	imap;
 	int			nimaps = 1, error = 0;
 	unsigned		lockmode;
-	int			seq;
 
 	if (xfs_is_shutdown(mp))
 		return -EIO;
@@ -1532,14 +1562,13 @@ xfs_xattr_iomap_begin(
 	error = xfs_bmapi_read(ip, offset_fsb, end_fsb - offset_fsb, &imap,
 			       &nimaps, XFS_BMAPI_ATTRFORK);
 out_unlock:
-
-	seq = READ_ONCE(ip->i_af.if_seq);
+	xfs_iomap_sample_seq(iter, ip);
 	xfs_iunlock(ip, lockmode);
 
 	if (error)
 		return error;
 	ASSERT(nimaps);
-	return xfs_bmbt_to_iomap(ip, iomap, &imap, flags, 0, seq);
+	return xfs_bmbt_to_iomap(ip, iomap, &imap, flags, 0);
 }
 
 const struct iomap_ops xfs_xattr_iomap_ops = {
@@ -1553,13 +1582,14 @@ xfs_zero_range(
 	loff_t			len,
 	bool			*did_zero)
 {
+	struct xfs_iomap_buffered_ctx ibc = { };
 	struct inode		*inode = VFS_I(ip);
 
 	if (IS_DAX(inode))
 		return dax_zero_range(inode, pos, len, did_zero,
 				      &xfs_direct_write_iomap_ops);
 	return iomap_zero_range(inode, pos, len, did_zero,
-				&xfs_buffered_write_iomap_ops, NULL);
+				&xfs_buffered_write_iomap_ops, &ibc);
 }
 
 int
@@ -1568,11 +1598,12 @@ xfs_truncate_page(
 	loff_t			pos,
 	bool			*did_zero)
 {
+	struct xfs_iomap_buffered_ctx ibc = { };
 	struct inode		*inode = VFS_I(ip);
 
 	if (IS_DAX(inode))
 		return dax_truncate_page(inode, pos, did_zero,
 					&xfs_direct_write_iomap_ops);
 	return iomap_truncate_page(inode, pos, did_zero,
-				   &xfs_buffered_write_iomap_ops, NULL);
+				   &xfs_buffered_write_iomap_ops, &ibc);
 }
