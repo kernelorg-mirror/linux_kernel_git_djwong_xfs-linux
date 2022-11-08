@@ -845,9 +845,13 @@ static int ext2_iomap_begin(const struct iomap_iter *iter,
 }
 
 static int
-ext2_iomap_end(struct inode *inode, loff_t offset, loff_t length,
-		ssize_t written, unsigned flags, struct iomap *iomap)
+ext2_iomap_end(const struct iomap_iter *iter, u64 length, ssize_t written,
+		struct iomap *iomap)
 {
+	struct inode *inode = iter->inode;
+	loff_t offset = iter->pos;
+	unsigned int flags = iter->flags;
+
 	if (iomap->type == IOMAP_MAPPED &&
 	    written < length &&
 	    (flags & IOMAP_WRITE))

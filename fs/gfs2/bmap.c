@@ -1126,9 +1126,12 @@ out_unlock:
 	return ret;
 }
 
-static int gfs2_iomap_end(struct inode *inode, loff_t pos, loff_t length,
-			  ssize_t written, unsigned flags, struct iomap *iomap)
+static int gfs2_iomap_end(const struct iomap_iter *iter, u64 length,
+			  ssize_t written, struct iomap *iomap)
 {
+	struct inode *inode = iter->inode;
+	loff_t pos = iter->pos;
+	unsigned int flags = iter->flags;
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
 

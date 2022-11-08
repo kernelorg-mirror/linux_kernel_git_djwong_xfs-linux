@@ -7770,10 +7770,12 @@ err:
 	return ret;
 }
 
-static int btrfs_dio_iomap_end(struct inode *inode, loff_t pos, loff_t length,
-		ssize_t written, unsigned int flags, struct iomap *iomap)
+static int btrfs_dio_iomap_end(const struct iomap_iter *iter, u64 length,
+		ssize_t written, struct iomap *iomap)
 {
-	struct iomap_iter *iter = container_of(iomap, struct iomap_iter, iomap);
+	struct inode *inode = iter->inode;
+	loff_t pos = iter->pos;
+	unsigned int flags = iter->flags;
 	struct btrfs_dio_data *dio_data = iter->private;
 	size_t submitted = dio_data->submitted;
 	const bool write = !!(flags & IOMAP_WRITE);

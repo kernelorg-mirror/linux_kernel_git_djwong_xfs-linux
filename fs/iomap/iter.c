@@ -76,9 +76,8 @@ int iomap_iter(struct iomap_iter *iter, const struct iomap_ops *ops)
 	int ret;
 
 	if (iter->iomap.length && ops->iomap_end) {
-		ret = ops->iomap_end(iter->inode, iter->pos, iomap_length(iter),
-				iter->processed > 0 ? iter->processed : 0,
-				iter->flags, &iter->iomap);
+		ret = ops->iomap_end(iter, iomap_length(iter),
+				max_t(s64, iter->processed, 0), &iter->iomap);
 		if (ret < 0 && !iter->processed)
 			return ret;
 	}
