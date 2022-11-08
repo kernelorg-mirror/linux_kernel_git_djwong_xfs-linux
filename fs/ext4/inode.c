@@ -3428,10 +3428,12 @@ retry:
 	return ret;
 }
 
-
-static int ext4_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
-		unsigned flags, struct iomap *iomap, struct iomap *srcmap)
+static int __ext4_iomap_begin(const struct iomap_iter *iter, unsigned int flags,
+		struct iomap *iomap, struct iomap *srcmap)
 {
+	struct inode *inode = iter->inode;
+	loff_t offset = iter->pos;
+	loff_t length = iter->len;
 	int ret;
 	struct ext4_map_blocks map;
 	u8 blkbits = inode->i_blkbits;
@@ -3481,18 +3483,23 @@ out:
 	return 0;
 }
 
-static int ext4_iomap_overwrite_begin(struct inode *inode, loff_t offset,
-		loff_t length, unsigned flags, struct iomap *iomap,
-		struct iomap *srcmap)
+static int ext4_iomap_begin(const struct iomap_iter *iter,
+		struct iomap *iomap, struct iomap *srcmap)
 {
-	int ret;
+	return __ext4_iomap_begin(iter, iter->flags, iomap, srcmap);
+}
 
+static int ext4_iomap_overwrite_begin(const struct iomap_iter *iter,
+		struct iomap *iomap, struct iomap *srcmap)
+{
 	/*
 	 * Even for writes we don't need to allocate blocks, so just pretend
 	 * we are reading to save overhead of starting a transaction.
 	 */
-	flags &= ~IOMAP_WRITE;
-	ret = ext4_iomap_begin(inode, offset, length, flags, iomap, srcmap);
+	unsigned int flags = iter->flags & ~IOMAP_WRITE;
+	int ret;
+
+	ret = __ext4_iomap_begin(iter, flags, iomap, srcmap);
 	WARN_ON_ONCE(iomap->type != IOMAP_MAPPED);
 	return ret;
 }
@@ -3546,10 +3553,13 @@ static bool ext4_iomap_is_delalloc(struct inode *inode,
 	return true;
 }
 
-static int ext4_iomap_begin_report(struct inode *inode, loff_t offset,
-				   loff_t length, unsigned int flags,
+static int ext4_iomap_begin_report(const struct iomap_iter *iter,
 				   struct iomap *iomap, struct iomap *srcmap)
 {
+	struct inode *inode = iter->inode;
+	loff_t offset = iter->pos;
+	loff_t length = iter->len;
+	unsigned int flags = iter->flags;
 	int ret;
 	bool delalloc = false;
 	struct ext4_map_blocks map;

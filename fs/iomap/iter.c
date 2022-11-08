@@ -88,8 +88,7 @@ int iomap_iter(struct iomap_iter *iter, const struct iomap_ops *ops)
 	if (ret <= 0)
 		return ret;
 
-	ret = ops->iomap_begin(iter->inode, iter->pos, iter->len, iter->flags,
-			       &iter->iomap, &iter->srcmap);
+	ret = ops->iomap_begin(iter, &iter->iomap, &iter->srcmap);
 	if (ret < 0)
 		return ret;
 	iomap_iter_done(iter);
