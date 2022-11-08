@@ -1694,7 +1694,7 @@ xfs_reflink_unshare(
 	inode_dio_wait(inode);
 
 	error = iomap_file_unshare(inode, offset, len,
-			&xfs_buffered_write_iomap_ops);
+			&xfs_buffered_write_iomap_ops, NULL);
 	if (error)
 		goto out;
 
