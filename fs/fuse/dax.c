@@ -635,9 +635,8 @@ iomap_hole:
 	return 0;
 }
 
-static int fuse_iomap_end(struct inode *inode, loff_t pos, loff_t length,
-			  ssize_t written, unsigned int flags,
-			  struct iomap *iomap)
+static int fuse_iomap_end(const struct iomap_iter *iter, u64 length,
+			  ssize_t written, struct iomap *iomap)
 {
 	struct fuse_dax_mapping *dmap = iomap->private;
 

@@ -169,8 +169,8 @@ struct iomap_ops {
 	 * needs to be commited, while the rest needs to be unreserved.
 	 * Written might be zero if no data was written.
 	 */
-	int (*iomap_end)(struct inode *inode, loff_t pos, loff_t length,
-			ssize_t written, unsigned flags, struct iomap *iomap);
+	int (*iomap_end)(const struct iomap_iter *iter, u64 mapped_length,
+			ssize_t written, struct iomap *iomap);
 
 	/*
 	 * Check that the cached iomap still maps correctly to the filesystem's
