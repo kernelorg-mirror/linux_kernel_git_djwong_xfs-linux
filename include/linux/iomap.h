@@ -182,7 +182,7 @@ struct iomap_ops {
 	 * This is called with the folio over the specified file position
 	 * held locked by the iomap code.
 	 */
-	bool (*iomap_valid)(struct inode *inode, const struct iomap *iomap);
+	bool (*iomap_valid)(const struct iomap_iter *iter);
 };
 
 /**
