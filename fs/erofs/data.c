@@ -249,9 +249,13 @@ int erofs_map_dev(struct super_block *sb, struct erofs_map_dev *map)
 	return 0;
 }
 
-static int erofs_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
-		unsigned int flags, struct iomap *iomap, struct iomap *srcmap)
+static int erofs_iomap_begin(const struct iomap_iter *iter,
+		struct iomap *iomap, struct iomap *srcmap)
 {
+	struct inode *inode = iter->inode;
+	loff_t offset = iter->pos;
+	loff_t length = iter->len;
+	unsigned int flags = iter->flags;
 	int ret;
 	struct erofs_map_blocks map;
 	struct erofs_map_dev mdev;

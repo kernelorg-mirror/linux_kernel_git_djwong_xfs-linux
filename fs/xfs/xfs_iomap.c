@@ -734,13 +734,14 @@ imap_spans_range(
 
 static int
 xfs_direct_write_iomap_begin(
-	struct inode		*inode,
-	loff_t			offset,
-	loff_t			length,
-	unsigned		flags,
+	const struct iomap_iter	*iter,
 	struct iomap		*iomap,
 	struct iomap		*srcmap)
 {
+	struct inode		*inode = iter->inode;
+	loff_t			offset = iter->pos;
+	loff_t			length = iter->len;
+	unsigned int		flags = iter->flags;
 	struct xfs_inode	*ip = XFS_I(inode);
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_bmbt_irec	imap, cmap;
@@ -907,13 +908,14 @@ const struct iomap_ops xfs_dax_write_iomap_ops = {
 
 static int
 xfs_buffered_write_iomap_begin(
-	struct inode		*inode,
-	loff_t			offset,
-	loff_t			count,
-	unsigned		flags,
+	const struct iomap_iter *iter,
 	struct iomap		*iomap,
 	struct iomap		*srcmap)
 {
+	struct inode		*inode = iter->inode;
+	loff_t			offset = iter->pos;
+	loff_t			count = iter->len;
+	unsigned int		flags = iter->flags;
 	struct xfs_inode	*ip = XFS_I(inode);
 	struct xfs_mount	*mp = ip->i_mount;
 	xfs_fileoff_t		offset_fsb = XFS_B_TO_FSBT(mp, offset);
@@ -932,8 +934,7 @@ xfs_buffered_write_iomap_begin(
 
 	/* we can't use delayed allocations when using extent size hints */
 	if (xfs_get_extsz_hint(ip))
-		return xfs_direct_write_iomap_begin(inode, offset, count,
-				flags, iomap, srcmap);
+		return xfs_direct_write_iomap_begin(iter, iomap, srcmap);
 
 	ASSERT(!XFS_IS_REALTIME_INODE(ip));
 
@@ -1366,13 +1367,14 @@ const struct iomap_ops xfs_page_mkwrite_iomap_ops = {
 
 static int
 xfs_read_iomap_begin(
-	struct inode		*inode,
-	loff_t			offset,
-	loff_t			length,
-	unsigned		flags,
+	const struct iomap_iter	*iter,
 	struct iomap		*iomap,
 	struct iomap		*srcmap)
 {
+	struct inode		*inode = iter->inode;
+	loff_t			offset = iter->pos;
+	loff_t			length = iter->len;
+	unsigned int		flags = iter->flags;
 	struct xfs_inode	*ip = XFS_I(inode);
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_bmbt_irec	imap;
@@ -1411,13 +1413,14 @@ const struct iomap_ops xfs_read_iomap_ops = {
 
 static int
 xfs_seek_iomap_begin(
-	struct inode		*inode,
-	loff_t			offset,
-	loff_t			length,
-	unsigned		flags,
+	const struct iomap_iter	*iter,
 	struct iomap		*iomap,
 	struct iomap		*srcmap)
 {
+	struct inode		*inode = iter->inode;
+	loff_t			offset = iter->pos;
+	loff_t			length = iter->len;
+	unsigned int		flags = iter->flags;
 	struct xfs_inode	*ip = XFS_I(inode);
 	struct xfs_mount	*mp = ip->i_mount;
 	xfs_fileoff_t		offset_fsb = XFS_B_TO_FSBT(mp, offset);
@@ -1497,13 +1500,14 @@ const struct iomap_ops xfs_seek_iomap_ops = {
 
 static int
 xfs_xattr_iomap_begin(
-	struct inode		*inode,
-	loff_t			offset,
-	loff_t			length,
-	unsigned		flags,
+	const struct iomap_iter	*iter,
 	struct iomap		*iomap,
 	struct iomap		*srcmap)
 {
+	struct inode		*inode = iter->inode;
+	loff_t			offset = iter->pos;
+	loff_t			length = iter->len;
+	unsigned int		flags = iter->flags;
 	struct xfs_inode	*ip = XFS_I(inode);
 	struct xfs_mount	*mp = ip->i_mount;
 	xfs_fileoff_t		offset_fsb = XFS_B_TO_FSBT(mp, offset);

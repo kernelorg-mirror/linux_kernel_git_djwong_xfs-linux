@@ -991,12 +991,15 @@ static const struct iomap_page_ops gfs2_iomap_page_ops = {
 	.page_done = gfs2_iomap_page_done,
 };
 
-static int gfs2_iomap_begin_write(struct inode *inode, loff_t pos,
-				  loff_t length, unsigned flags,
+static int gfs2_iomap_begin_write(const struct iomap_iter *iter,
 				  struct iomap *iomap,
 				  struct metapath *mp)
 {
-	struct gfs2_inode *ip = GFS2_I(inode);
+	struct inode *inode = iter->inode;
+	loff_t pos = iter->pos;
+	loff_t length = iter->len;
+	unsigned int flags = iter->flags;
+ 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
 	bool unstuff;
 	int ret;
@@ -1076,10 +1079,13 @@ out_qunlock:
 	return ret;
 }
 
-static int gfs2_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
-			    unsigned flags, struct iomap *iomap,
+static int gfs2_iomap_begin(const struct iomap_iter *iter, struct iomap *iomap,
 			    struct iomap *srcmap)
 {
+	struct inode *inode = iter->inode;
+	loff_t pos = iter->pos;
+	loff_t length = iter->len;
+	unsigned int flags = iter->flags;
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct metapath mp = { .mp_aheight = 1, };
 	int ret;
@@ -1112,7 +1118,7 @@ static int gfs2_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 		goto out_unlock;
 	}
 
-	ret = gfs2_iomap_begin_write(inode, pos, length, flags, iomap, &mp);
+	ret = gfs2_iomap_begin_write(iter, iomap, &mp);
 
 out_unlock:
 	release_metapath(&mp);

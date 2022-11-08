@@ -7517,11 +7517,13 @@ out:
 	return ret;
 }
 
-static int btrfs_dio_iomap_begin(struct inode *inode, loff_t start,
-		loff_t length, unsigned int flags, struct iomap *iomap,
-		struct iomap *srcmap)
+static int btrfs_dio_iomap_begin(const struct iomap_iter *iter,
+		struct iomap *iomap, struct iomap *srcmap)
 {
-	struct iomap_iter *iter = container_of(iomap, struct iomap_iter, iomap);
+	struct inode *inode = iter->inode;
+	loff_t start = iter->pos;
+	loff_t length = iter->len;
+	unsigned int flags = iter->flags;
 	struct btrfs_fs_info *fs_info = btrfs_sb(inode->i_sb);
 	struct extent_map *em;
 	struct extent_state *cached_state = NULL;
