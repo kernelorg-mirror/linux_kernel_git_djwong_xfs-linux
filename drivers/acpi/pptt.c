@@ -539,6 +539,10 @@ static struct acpi_table_header *acpi_get_pptt(void)
 	static struct acpi_table_header *pptt;
 	acpi_status status;
 
+	/* djwong hack to shut up OCI */
+	acpi_pptt_warn_missing();
+	return NULL;
+
 	/*
 	 * PPTT will be used at runtime on every CPU hotplug in path, so we
 	 * don't need to call acpi_put_table() to release the table mapping.
