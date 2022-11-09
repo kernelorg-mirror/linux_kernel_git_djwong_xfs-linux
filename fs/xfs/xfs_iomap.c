@@ -1370,6 +1370,9 @@ xfs_buffered_write_iomap_valid(
 
 	if (ibc->data_seq != READ_ONCE(ip->i_df.if_seq))
 		return false;
+	if (ibc->has_cow_seq &&
+	    ibc->cow_seq != READ_ONCE(ip->i_cowfp->if_seq))
+		return false;
 	return true;
 }
 
