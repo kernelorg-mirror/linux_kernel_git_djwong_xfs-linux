@@ -27,6 +27,8 @@
 #include "xfs_dquot_item.h"
 #include "xfs_dquot.h"
 #include "xfs_reflink.h"
+#include "xfs_error.h"
+#include "xfs_errortag.h"
 
 #define XFS_ALLOC_ALIGN(mp, off) \
 	(((off) >> mp->m_allocsize_log) << mp->m_allocsize_log)
@@ -1368,11 +1370,17 @@ xfs_buffered_write_iomap_valid(
 	struct xfs_iomap_buffered_ctx	*ibc = iter->private;
 	struct xfs_inode		*ip = XFS_I(iter->inode);
 
-	if (ibc->data_seq != READ_ONCE(ip->i_df.if_seq))
+	if (ibc->data_seq != READ_ONCE(ip->i_df.if_seq)) {
+		XFS_ERRORTAG_REPORT(ip->i_mount, XFS_ERRTAG_WRITE_DELAY_MS);
 		return false;
+	}
 	if (ibc->has_cow_seq &&
-	    ibc->cow_seq != READ_ONCE(ip->i_cowfp->if_seq))
+	    ibc->cow_seq != READ_ONCE(ip->i_cowfp->if_seq)) {
+		XFS_ERRORTAG_REPORT(ip->i_mount, XFS_ERRTAG_WRITE_DELAY_MS);
 		return false;
+	}
+
+	XFS_ERRORTAG_DELAY(ip->i_mount, XFS_ERRTAG_WRITE_DELAY_MS);
 	return true;
 }
 
