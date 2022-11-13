@@ -621,6 +621,16 @@ static inline void xfs_iext_inc_seq(struct xfs_ifork *ifp)
 	WRITE_ONCE(ifp->if_seq, READ_ONCE(ifp->if_seq) + 1);
 }
 
+extern int xfs_iext_moocow(struct xfs_ifork *ifp, struct xfs_iext_cursor *icur);
+
+int xfs_iext_moocow(struct xfs_ifork *ifp, struct xfs_iext_cursor *icur)
+{
+	if (!icur->leaf)
+		return -1;
+
+	return xfs_iext_leaf_nr_entries(ifp, icur->leaf, 0);
+}
+
 void
 xfs_iext_insert_raw(
 	struct xfs_ifork	*ifp,

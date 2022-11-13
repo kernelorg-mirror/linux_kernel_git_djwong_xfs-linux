@@ -309,6 +309,11 @@ xfs_check_block(
 	}
 }
 
+extern bool __xfs_iunlock_check_datafork(struct xfs_inode *ip, const char *fn,
+		int line);
+#define xfs_iunlock_check_datafork(ip) \
+	__xfs_iunlock_check_datafork((ip), __func__, __LINE__)
+
 /*
  * Check that the extents for the inode ip are in the right order in all
  * btree leaves. THis becomes prohibitively expensive for large extent count
@@ -335,6 +340,8 @@ xfs_bmap_check_leaf_extents(
 	xfs_bmbt_rec_t		last = {0, 0}; /* last extent in prev block */
 	xfs_bmbt_rec_t		*nextp;	/* pointer to next extent */
 	int			bp_release = 0;
+
+	xfs_iunlock_check_datafork(ip);
 
 	if (ifp->if_format != XFS_DINODE_FMT_BTREE)
 		return;
@@ -2620,9 +2627,13 @@ xfs_bmap_add_extent_hole_delay(
 		left.br_startblock = nullstartblock(newlen);
 		left.br_blockcount = temp;
 
+		xfs_iunlock_check_datafork(ip);
 		xfs_iext_remove(ip, icur, state);
+		xfs_iunlock_check_datafork(ip);
 		xfs_iext_prev(ifp, icur);
+		xfs_iunlock_check_datafork(ip);
 		xfs_iext_update_extent(ip, state, icur, &left);
+		xfs_iunlock_check_datafork(ip);
 		break;
 
 	case BMAP_LEFT_CONTIG:
@@ -2640,8 +2651,11 @@ xfs_bmap_add_extent_hole_delay(
 		left.br_blockcount = temp;
 		left.br_startblock = nullstartblock(newlen);
 
+		xfs_iunlock_check_datafork(ip);
 		xfs_iext_prev(ifp, icur);
+		xfs_iunlock_check_datafork(ip);
 		xfs_iext_update_extent(ip, state, icur, &left);
+		xfs_iunlock_check_datafork(ip);
 		break;
 
 	case BMAP_RIGHT_CONTIG:
@@ -2658,7 +2672,9 @@ xfs_bmap_add_extent_hole_delay(
 		right.br_startoff = new->br_startoff;
 		right.br_startblock = nullstartblock(newlen);
 		right.br_blockcount = temp;
+		xfs_iunlock_check_datafork(ip);
 		xfs_iext_update_extent(ip, state, icur, &right);
+		xfs_iunlock_check_datafork(ip);
 		break;
 
 	case 0:
@@ -2668,7 +2684,9 @@ xfs_bmap_add_extent_hole_delay(
 		 * Insert a new entry.
 		 */
 		oldlen = newlen = 0;
+		xfs_iunlock_check_datafork(ip);
 		xfs_iext_insert(ip, icur, new, state);
+		xfs_iunlock_check_datafork(ip);
 		break;
 	}
 	if (oldlen != newlen) {
@@ -4026,6 +4044,7 @@ xfs_bmapi_read(
 	return 0;
 }
 
+extern int xfs_iext_moocow(struct xfs_ifork *ifp, struct xfs_iext_cursor *icur);
 /*
  * Add a delayed allocation extent to an inode. Blocks are reserved from the
  * global pool and the extent inserted into the inode in-core extent tree.
@@ -4050,6 +4069,14 @@ xfs_bmapi_reserve_delalloc(
 	struct xfs_iext_cursor	*icur,
 	int			eof)
 {
+struct xfs_iext_cursor oldicur = *icur;
+struct xfs_bmbt_irec oldgot = *got;
+struct xfs_bmbt_irec freshgot =  { 0 };
+xfs_fileoff_t oldoff = off;
+xfs_filblks_t oldlen = len;
+xfs_filblks_t oldprealloc = prealloc;
+void *oldleaf = icur->leaf;
+int oldleafnr = xfs_iext_moocow(xfs_ifork_ptr(ip, whichfork), icur);
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_ifork	*ifp = xfs_ifork_ptr(ip, whichfork);
 	xfs_extlen_t		alen;
@@ -4113,7 +4140,26 @@ xfs_bmapi_reserve_delalloc(
 	got->br_blockcount = alen;
 	got->br_state = XFS_EXT_NORM;
 
+	xfs_iext_get_extent(ifp, icur, &freshgot);
 	xfs_bmap_add_extent_hole_delay(ip, whichfork, icur, got);
+	if (!xfs_iunlock_check_datafork(ip)) {
+		int newleafnr;
+
+		xfs_err(ip->i_mount, "ino 0x%llx fork %d oldoff 0x%llx oldlen 0x%llx oldprealloc 0x%llx",
+				ip->i_ino, whichfork, oldoff, oldlen, oldprealloc);
+		xfs_err(ip->i_mount, "    ino 0x%llx oldgotoff 0x%llx oldgotstart 0x%llx oldgotcount 0x%llx oldgotstate %u",
+				ip->i_ino, oldgot.br_startoff, oldgot.br_startblock, oldgot.br_blockcount, oldgot.br_state);
+		xfs_err(ip->i_mount, "    ino 0x%llx freshgotoff 0x%llx freshgotstart 0x%llx freshgotcount 0x%llx freshgotstate %u",
+				ip->i_ino, freshgot.br_startoff, freshgot.br_startblock, freshgot.br_blockcount, freshgot.br_state);
+		xfs_err(ip->i_mount, "    ino 0x%llx nowgotoff 0x%llx nowgotstart 0x%llx nowgotcount 0x%llx nowgotstate %u",
+				ip->i_ino, got->br_startoff, got->br_startblock, got->br_blockcount, got->br_state);
+
+		xfs_err(ip->i_mount, "    ino 0x%llx oldicurpos %u oldleafnr %u oldleaf 0x%llx",
+				ip->i_ino, oldicur.pos, oldleafnr, (unsigned long long)oldleaf);
+		newleafnr = xfs_iext_moocow(ifp, icur);
+		xfs_err(ip->i_mount, "    ino 0x%llx newicurpos %u newleafnr %u newleaf 0x%llx",
+				ip->i_ino, icur->pos, newleafnr, (unsigned long long)icur->leaf);
+	}
 
 	/*
 	 * Tag the inode if blocks were preallocated. Note that COW fork
