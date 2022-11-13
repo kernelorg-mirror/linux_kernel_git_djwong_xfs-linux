@@ -309,6 +309,10 @@ xfs_check_block(
 	}
 }
 
+extern void
+xfs_iunlock_check_datafork(
+	struct xfs_inode	*ip);
+
 /*
  * Check that the extents for the inode ip are in the right order in all
  * btree leaves. THis becomes prohibitively expensive for large extent count
@@ -335,6 +339,8 @@ xfs_bmap_check_leaf_extents(
 	xfs_bmbt_rec_t		last = {0, 0}; /* last extent in prev block */
 	xfs_bmbt_rec_t		*nextp;	/* pointer to next extent */
 	int			bp_release = 0;
+
+	xfs_iunlock_check_datafork(ip);
 
 	if (ifp->if_format != XFS_DINODE_FMT_BTREE)
 		return;

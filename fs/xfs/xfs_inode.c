@@ -103,6 +103,33 @@ xfs_lock_flags_assert(
 	ASSERT(lock_flags != 0);
 }
 
+extern void
+xfs_iunlock_check_datafork(
+	struct xfs_inode	*ip);
+void
+xfs_iunlock_check_datafork(
+	struct xfs_inode	*ip)
+{
+	struct xfs_iext_cursor	icur;
+	struct xfs_bmbt_irec	got;
+	struct xfs_ifork	*ifp = xfs_ifork_ptr(ip, XFS_DATA_FORK);
+	xfs_fileoff_t		nextoff = NULLFILEOFF;
+	uint64_t		nr = 0;
+
+	if (ip->i_df.if_format != XFS_DINODE_FMT_EXTENTS)
+		return;
+
+	for_each_xfs_iext(ifp, &icur, &got) {
+		if (nr > 0) {
+			if (got.br_startoff < nextoff)
+				xfs_err(ip->i_mount, "ino 0x%llx nr 0x%llx offset 0x%llx nextoff 0x%llx", ip->i_ino, nr, got.br_startoff, nextoff);
+			ASSERT(got.br_startoff >= nextoff);
+		}
+		nextoff = got.br_startoff + got.br_blockcount;
+		nr++;
+	}
+}
+
 /*
  * In addition to i_rwsem in the VFS inode, the xfs inode contains 2
  * multi-reader locks: invalidate_lock and the i_lock.  This routine allows
@@ -162,6 +189,9 @@ xfs_ilock(
 		mrupdate_nested(&ip->i_lock, XFS_ILOCK_DEP(lock_flags));
 	else if (lock_flags & XFS_ILOCK_SHARED)
 		mraccess_nested(&ip->i_lock, XFS_ILOCK_DEP(lock_flags));
+
+	if (lock_flags & (XFS_ILOCK_SHARED | XFS_ILOCK_EXCL))
+		xfs_iunlock_check_datafork(ip);
 }
 
 /*
@@ -208,6 +238,9 @@ xfs_ilock_nowait(
 		if (!mrtryaccess(&ip->i_lock))
 			goto out_undo_mmaplock;
 	}
+
+	if (lock_flags & (XFS_ILOCK_SHARED | XFS_ILOCK_EXCL))
+		xfs_iunlock_check_datafork(ip);
 	return 1;
 
 out_undo_mmaplock:
@@ -243,6 +276,9 @@ xfs_iunlock(
 {
 	xfs_lock_flags_assert(lock_flags);
 
+	if (lock_flags & (XFS_ILOCK_SHARED | XFS_ILOCK_EXCL))
+		xfs_iunlock_check_datafork(ip);
+
 	if (lock_flags & XFS_IOLOCK_EXCL)
 		up_write(&VFS_I(ip)->i_rwsem);
 	else if (lock_flags & XFS_IOLOCK_SHARED)
@@ -273,6 +309,9 @@ xfs_ilock_demote(
 	ASSERT(lock_flags & (XFS_IOLOCK_EXCL|XFS_MMAPLOCK_EXCL|XFS_ILOCK_EXCL));
 	ASSERT((lock_flags &
 		~(XFS_IOLOCK_EXCL|XFS_MMAPLOCK_EXCL|XFS_ILOCK_EXCL)) == 0);
+
+	if (lock_flags & (XFS_ILOCK_SHARED | XFS_ILOCK_EXCL))
+		xfs_iunlock_check_datafork(ip);
 
 	if (lock_flags & XFS_ILOCK_EXCL)
 		mrdemote(&ip->i_lock);
