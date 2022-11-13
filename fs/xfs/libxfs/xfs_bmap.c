@@ -309,6 +309,13 @@ xfs_check_block(
 	}
 }
 
+extern void __xfs_iunlock_check_datafork(struct xfs_inode *ip, const char *fn,
+		int line);
+#define xfs_iunlock_check_datafork(ip) \
+	do { \
+		__xfs_iunlock_check_datafork((ip), __func__, __LINE__); \
+	} while (0)
+
 /*
  * Check that the extents for the inode ip are in the right order in all
  * btree leaves. THis becomes prohibitively expensive for large extent count
@@ -335,6 +342,8 @@ xfs_bmap_check_leaf_extents(
 	xfs_bmbt_rec_t		last = {0, 0}; /* last extent in prev block */
 	xfs_bmbt_rec_t		*nextp;	/* pointer to next extent */
 	int			bp_release = 0;
+
+	xfs_iunlock_check_datafork(ip);
 
 	if (ifp->if_format != XFS_DINODE_FMT_BTREE)
 		return;
@@ -2620,9 +2629,13 @@ xfs_bmap_add_extent_hole_delay(
 		left.br_startblock = nullstartblock(newlen);
 		left.br_blockcount = temp;
 
+		xfs_iunlock_check_datafork(ip);
 		xfs_iext_remove(ip, icur, state);
+		xfs_iunlock_check_datafork(ip);
 		xfs_iext_prev(ifp, icur);
+		xfs_iunlock_check_datafork(ip);
 		xfs_iext_update_extent(ip, state, icur, &left);
+		xfs_iunlock_check_datafork(ip);
 		break;
 
 	case BMAP_LEFT_CONTIG:
@@ -2640,8 +2653,11 @@ xfs_bmap_add_extent_hole_delay(
 		left.br_blockcount = temp;
 		left.br_startblock = nullstartblock(newlen);
 
+		xfs_iunlock_check_datafork(ip);
 		xfs_iext_prev(ifp, icur);
+		xfs_iunlock_check_datafork(ip);
 		xfs_iext_update_extent(ip, state, icur, &left);
+		xfs_iunlock_check_datafork(ip);
 		break;
 
 	case BMAP_RIGHT_CONTIG:
@@ -2658,7 +2674,9 @@ xfs_bmap_add_extent_hole_delay(
 		right.br_startoff = new->br_startoff;
 		right.br_startblock = nullstartblock(newlen);
 		right.br_blockcount = temp;
+		xfs_iunlock_check_datafork(ip);
 		xfs_iext_update_extent(ip, state, icur, &right);
+		xfs_iunlock_check_datafork(ip);
 		break;
 
 	case 0:
@@ -2668,7 +2686,9 @@ xfs_bmap_add_extent_hole_delay(
 		 * Insert a new entry.
 		 */
 		oldlen = newlen = 0;
+		xfs_iunlock_check_datafork(ip);
 		xfs_iext_insert(ip, icur, new, state);
+		xfs_iunlock_check_datafork(ip);
 		break;
 	}
 	if (oldlen != newlen) {
