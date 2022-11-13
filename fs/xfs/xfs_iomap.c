@@ -958,8 +958,12 @@ xfs_buffered_write_iomap_begin(
 	 * perform read-modify-write cycles for unaligned writes.
 	 */
 	eof = !xfs_iext_lookup_extent(ip, &ip->i_df, offset_fsb, &icur, &imap);
-	if (eof)
+	if (eof) {
 		imap.br_startoff = end_fsb; /* fake hole until the end */
+		imap.br_startblock = HOLESTARTBLOCK;
+		imap.br_blockcount = 0;
+		imap.br_state = XFS_EXT_NORM;
+	}
 
 	/* We never need to allocate blocks for zeroing a hole. */
 	if ((flags & IOMAP_ZERO) && imap.br_startoff > offset_fsb) {

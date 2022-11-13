@@ -621,6 +621,16 @@ static inline void xfs_iext_inc_seq(struct xfs_ifork *ifp)
 	WRITE_ONCE(ifp->if_seq, READ_ONCE(ifp->if_seq) + 1);
 }
 
+extern int xfs_iext_moocow(struct xfs_ifork *ifp, struct xfs_iext_cursor *icur);
+
+int xfs_iext_moocow(struct xfs_ifork *ifp, struct xfs_iext_cursor *icur)
+{
+	if (!icur->leaf)
+		return -1;
+
+	return xfs_iext_leaf_nr_entries(ifp, icur->leaf, 0);
+}
+
 void
 xfs_iext_insert_raw(
 	struct xfs_ifork	*ifp,
@@ -672,6 +682,8 @@ xfs_iext_insert(
 	int			state)
 {
 	struct xfs_ifork	*ifp = xfs_iext_state_to_fork(ip, state);
+
+	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL));
 
 	xfs_iext_insert_raw(ifp, cur, irec);
 	trace_xfs_iext_insert(ip, cur, state, _RET_IP_);
@@ -878,6 +890,8 @@ xfs_iext_remove(
 	xfs_fileoff_t		offset = xfs_iext_leaf_key(leaf, 0);
 	int			i, nr_entries;
 
+	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL));
+
 	trace_xfs_iext_remove(ip, cur, state, _RET_IP_);
 
 	ASSERT(ifp->if_height > 0);
@@ -932,6 +946,8 @@ xfs_iext_lookup_extent(
 	struct xfs_iext_cursor	*cur,
 	struct xfs_bmbt_irec	*gotp)
 {
+	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL | XFS_ILOCK_SHARED));
+
 	XFS_STATS_INC(ip->i_mount, xs_look_exlist);
 
 	cur->leaf = xfs_iext_find_level(ifp, offset, 1);
@@ -973,6 +989,8 @@ xfs_iext_lookup_extent_before(
 	struct xfs_iext_cursor	*cur,
 	struct xfs_bmbt_irec	*gotp)
 {
+	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL | XFS_ILOCK_SHARED));
+
 	/* could be optimized to not even look up the next on a match.. */
 	if (xfs_iext_lookup_extent(ip, ifp, *end - 1, cur, gotp) &&
 	    gotp->br_startoff <= *end - 1)
@@ -991,6 +1009,8 @@ xfs_iext_update_extent(
 	struct xfs_bmbt_irec	*new)
 {
 	struct xfs_ifork	*ifp = xfs_iext_state_to_fork(ip, state);
+
+	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL));
 
 	xfs_iext_inc_seq(ifp);
 

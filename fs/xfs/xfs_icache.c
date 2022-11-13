@@ -1982,8 +1982,10 @@ xfs_inodegc_set_reclaimable(
 	struct xfs_perag	*pag;
 
 	if (!xfs_is_shutdown(mp) && ip->i_delayed_blks) {
+		xfs_ilock(ip, XFS_ILOCK_SHARED);
 		xfs_check_delalloc(ip, XFS_DATA_FORK);
 		xfs_check_delalloc(ip, XFS_COW_FORK);
+		xfs_iunlock(ip, XFS_ILOCK_SHARED);
 		ASSERT(0);
 	}
 

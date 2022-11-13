@@ -151,7 +151,11 @@ xfs_iformat_extents(
 						fa, &new);
 			}
 
-			xfs_iext_insert(ip, &icur, &new, state);
+			//xfs_iext_insert(ip, &icur, &new, state);
+			{
+				struct xfs_ifork	*ifp = xfs_iext_state_to_fork(ip, state);
+				xfs_iext_insert_raw(ifp, &icur, &new);
+			}
 			trace_xfs_read_extent(ip, &icur, state, _THIS_IP_);
 			xfs_iext_next(ifp, &icur);
 		}
