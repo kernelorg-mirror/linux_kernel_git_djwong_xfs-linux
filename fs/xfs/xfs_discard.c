@@ -19,6 +19,7 @@
 #include "xfs_log.h"
 #include "xfs_ag.h"
 #include "xfs_health.h"
+#include "xfs_rtbitmap.h"
 
 STATIC int
 xfs_trim_perag_extents(
@@ -168,6 +169,86 @@ xfs_trim_ddev_extents(
 	return last_error;
 }
 
+#ifdef CONFIG_XFS_RT
+static int
+xfs_trim_rtdev_extent(
+	struct xfs_mount		*mp,
+	struct xfs_trans		*tp,
+	const struct xfs_rtalloc_rec	*rec,
+	void				*priv)
+{
+	struct block_device	*bdev = xfs_buftarg_bdev(mp->m_rtdev_targp);
+	uint64_t		*blocks_trimmed = priv;
+	xfs_rtblock_t		rbno, rlen;
+	xfs_daddr_t		dbno, dlen;
+	int			error;
+
+	if (fatal_signal_pending(current))
+		return -ERESTARTSYS;
+
+	rbno = xfs_rtx_to_rtb(mp, rec->ar_startext);
+	rlen = xfs_rtx_to_rtb(mp, rec->ar_extcount);
+
+	trace_xfs_discard_rtextent(mp, rbno, rlen);
+
+	dbno = XFS_FSB_TO_BB(mp, rbno);
+	dlen = XFS_FSB_TO_BB(mp, rlen);
+
+	error = blkdev_issue_discard(bdev, dbno, dlen, GFP_NOFS);
+	if (error)
+		return error;
+
+	*blocks_trimmed += rlen;
+	return 0;
+}
+
+static int
+xfs_trim_rtdev_extents(
+	struct xfs_mount	*mp,
+	xfs_daddr_t		start,
+	xfs_daddr_t		end,
+	xfs_daddr_t		minlen,
+	uint64_t		*blocks_trimmed)
+{
+	struct xfs_rtalloc_rec	low = { }, high = { };
+	xfs_daddr_t		rtdev_daddr;
+	xfs_extlen_t		mod;
+	int			error;
+
+	/* Shift the start and end downwards to match the rt device. */
+	rtdev_daddr = XFS_FSB_TO_BB(mp, mp->m_sb.sb_dblocks);
+	if (start > rtdev_daddr)
+		start -= rtdev_daddr;
+	else
+		start = 0;
+
+	if (end <= rtdev_daddr)
+		return 0;
+	end -= rtdev_daddr;
+
+	if (end > XFS_FSB_TO_BB(mp, mp->m_sb.sb_rblocks) - 1)
+		end = XFS_FSB_TO_BB(mp, mp->m_sb.sb_rblocks) - 1;
+
+	/* Convert the rt blocks to rt extents */
+	low.ar_startext = xfs_rtb_to_rtx(mp, XFS_BB_TO_FSB(mp, start), &mod);
+	if (mod)
+		low.ar_startext++;
+	high.ar_startext = xfs_rtb_to_rtx(mp, XFS_BB_TO_FSBT(mp, end), &mod);
+
+	/*
+	 * Walk the free ranges between low and high.  The query_range function
+	 * trims the extents returned.
+	 */
+	xfs_rtbitmap_lock_shared(mp, XFS_RBMLOCK_BITMAP);
+	error = xfs_rtalloc_query_range(mp, NULL, &low, &high,
+			xfs_trim_rtdev_extent, blocks_trimmed);
+	xfs_rtbitmap_unlock_shared(mp, XFS_RBMLOCK_BITMAP);
+	return error;
+}
+#else
+# define xfs_trim_rtdev_extents(m,s,e,n,b)	(-EOPNOTSUPP)
+#endif /* CONFIG_XFS_RT */
+
 /*
  * trim a range of the filesystem.
  *
@@ -176,6 +257,9 @@ xfs_trim_ddev_extents(
  * addressing. FSB addressing is sparse (AGNO|AGBNO), while the incoming format
  * is a linear address range. Hence we need to use DADDR based conversions and
  * comparisons for determining the correct offset and regions to trim.
+ *
+ * The realtime device is mapped into the FITRIM "address space" immediately
+ * after the data device.
  */
 int
 xfs_ioc_trim(
@@ -183,8 +267,10 @@ xfs_ioc_trim(
 	struct fstrim_range __user	*urange)
 {
 	struct block_device	*bdev = xfs_buftarg_bdev(mp->m_ddev_targp);
+	struct block_device	*rt_bdev = NULL;
 	unsigned int		granularity = bdev_discard_granularity(bdev);
 	struct fstrim_range	range;
+	xfs_rfsblock_t		max_blocks;
 	xfs_daddr_t		start, end, minlen;
 	uint64_t		blocks_trimmed = 0;
 	int			error, last_error = 0;
@@ -193,6 +279,14 @@ xfs_ioc_trim(
 		return -EPERM;
 	if (!bdev_max_discard_sectors(bdev))
 		return -EOPNOTSUPP;
+
+	if (mp->m_rtdev_targp) {
+		rt_bdev = xfs_buftarg_bdev(mp->m_rtdev_targp);
+		if (!bdev_max_discard_sectors(rt_bdev))
+			return -EOPNOTSUPP;
+		granularity = max(granularity,
+				  bdev_discard_granularity(rt_bdev));
+	}
 
 	/*
 	 * We haven't recovered the log, so we cannot use our bnobt-guided
@@ -213,7 +307,8 @@ xfs_ioc_trim(
 	 * used by the fstrim application.  In the end it really doesn't
 	 * matter as trimming blocks is an advisory interface.
 	 */
-	if (range.start >= XFS_FSB_TO_B(mp, mp->m_sb.sb_dblocks) ||
+	max_blocks = mp->m_sb.sb_dblocks + mp->m_sb.sb_rblocks;
+	if (range.start >= XFS_FSB_TO_B(mp, max_blocks) ||
 	    range.minlen > XFS_FSB_TO_B(mp, mp->m_ag_max_usable) ||
 	    range.len < mp->m_sb.sb_blocksize)
 		return -EINVAL;
@@ -226,6 +321,15 @@ xfs_ioc_trim(
 		return error;
 	if (error)
 		last_error = error;
+
+	if (rt_bdev) {
+		error = xfs_trim_rtdev_extents(mp, start, end, minlen,
+				&blocks_trimmed);
+		if (error == -ERESTARTSYS)
+			return error;
+		if (error)
+			last_error = error;
+	}
 
 	if (last_error)
 		return last_error;
