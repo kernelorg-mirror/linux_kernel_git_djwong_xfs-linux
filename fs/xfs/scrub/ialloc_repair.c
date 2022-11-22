@@ -596,6 +596,30 @@ xrep_fibt_claim_block(
 	return xrep_newbt_claim_block(cur, &ri->new_finobt, ptr);
 }
 
+/* Make sure the records do not overlap in inumber address space. */
+STATIC int
+xrep_ibt_check_startino(
+	struct xrep_ibt			*ri)
+{
+	struct xfs_inobt_rec_incore	irec;
+	xfarray_idx_t			cur;
+	xfs_agino_t			next_agino = 0;
+	int				error;
+
+	foreach_xfarray_idx(ri->inode_records, cur) {
+		error = xfarray_load(ri->inode_records, cur, &irec);
+		if (error)
+			return error;
+
+		if (irec.ir_startino < next_agino)
+			return -EFSCORRUPTED;
+
+		next_agino = irec.ir_startino + XFS_INODES_PER_CHUNK;
+	}
+
+	return error;
+}
+
 /* Build new inode btrees and dispose of the old one. */
 STATIC int
 xrep_ibt_build_new_trees(
@@ -613,8 +637,16 @@ xrep_ibt_build_new_trees(
 	/*
 	 * Create new btrees for staging all the inobt records we collected
 	 * earlier.  The records were collected in order of increasing agino,
-	 * so we do not have to sort them.  The new btrees will not be rooted
-	 * in the AGI until we've successfully rebuilt the tree.
+	 * so we do not have to sort them.  Ensure there are no overlapping
+	 * records.
+	 */
+	error = xrep_ibt_check_startino(ri);
+	if (error)
+		return error;
+
+	/*
+	 * The new inode btrees will not be rooted in the AGI until we've
+	 * successfully rebuilt the tree.
 	 *
 	 * Start by setting up the inobt staging cursor.
 	 */

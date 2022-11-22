@@ -580,6 +580,39 @@ xrep_refc_reset_counters(
 	return xrep_reinit_pagf(sc);
 }
 
+/* Make sure the records do not overlap in physical space. */
+STATIC int
+xrep_refc_check_startblock(
+	struct xrep_refc		*rr)
+{
+	struct xfs_refcount_irec	irec;
+	xfarray_idx_t			cur;
+	enum xfs_refc_domain		dom = XFS_REFC_DOMAIN_SHARED;
+	xfs_agblock_t			next_agbno = 0;
+	int				error;
+
+	foreach_xfarray_idx(rr->refcount_records, cur) {
+		error = xfarray_load(rr->refcount_records, cur, &irec);
+		if (error)
+			return error;
+
+		if (dom == XFS_REFC_DOMAIN_SHARED &&
+		    irec.rc_domain == XFS_REFC_DOMAIN_COW) {
+			dom = irec.rc_domain;
+			next_agbno = 0;
+		}
+
+		if (dom != irec.rc_domain)
+			return -EFSCORRUPTED;
+		if (irec.rc_startblock < next_agbno)
+			return -EFSCORRUPTED;
+
+		next_agbno = irec.rc_startblock + irec.rc_blockcount;
+	}
+
+	return error;
+}
+
 /*
  * Use the collected refcount information to stage a new refcount btree.  If
  * this is successful we'll return with the new btree root information logged
@@ -597,10 +630,15 @@ xrep_refc_build_new_tree(
 
 	/*
 	 * Sort the refcount extents by startblock or else the btree records
-	 * will be in the wrong order.
+	 * will be in the wrong order.  Ensure there are no overlapping
+	 * records.
 	 */
 	error = xfarray_sort(rr->refcount_records, xrep_refc_extent_cmp,
 			XFARRAY_SORT_KILLABLE);
+	if (error)
+		return error;
+
+	error = xrep_refc_check_startblock(rr);
 	if (error)
 		return error;
 

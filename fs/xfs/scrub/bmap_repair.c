@@ -688,9 +688,8 @@ xrep_bmap_build_new_fork(
 	int			error;
 
 	/*
-	 * Sort the bmap extents by startblock to avoid btree splits when we
-	 * rebuild the bmbt btree, then check the file offset ranges to make
-	 * sure we don't corrupt the key space.
+	 * Sort the bmap extents by fork offset or else the records will be in
+	 * the wrong order.  Ensure there are no overlapping records.
 	 */
 	error = xfarray_sort(rb->bmap_records, xrep_bmap_extent_cmp,
 			XFARRAY_SORT_KILLABLE);

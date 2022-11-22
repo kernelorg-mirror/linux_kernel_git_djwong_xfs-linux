@@ -613,6 +613,26 @@ xrep_abt_reset_counters(
 	return xrep_reinit_pagf(sc);
 }
 
+/* Make sure the records do not overlap in physical space. */
+STATIC int
+xrep_abt_check_startblock(
+	struct xrep_abt			*ra)
+{
+	struct xfs_alloc_rec_incore	arec;
+	xfarray_idx_t			cur = XFARRAY_CURSOR_INIT;
+	xfs_agblock_t			next_agbno = 0;
+	int				error;
+
+	while ((error = xfarray_iter(ra->free_records, &cur, &arec)) == 1) {
+		if (arec.ar_startblock < next_agbno)
+			return -EFSCORRUPTED;
+
+		next_agbno = arec.ar_startblock + arec.ar_blockcount;
+	}
+
+	return error;
+}
+
 /*
  * Use the collected free space information to stage new free space btrees.
  * If this is successful we'll return with the new btree root
@@ -699,12 +719,18 @@ xrep_abt_build_new_trees(
 	if (error)
 		goto err_levels;
 
-	/* Re-sort the free extents by block number so so that we can put the
-	 * records into the bnobt in the correct order.
+	/*
+	 * Re-sort the free extents by block number so so that we can put the
+	 * records into the bnobt in the correct order.  Ensure there are no
+	 * overlapping records.
 	 */
 	error = xfarray_sort(ra->free_records, xrep_bnobt_extent_cmp, 0);
 	if (error)
 		goto err_levels;
+
+	error = xrep_abt_check_startblock(ra);
+	if (error)
+		return error;
 
 	/* Load the free space by block number tree. */
 	ra->array_cur = XFARRAY_CURSOR_INIT;
