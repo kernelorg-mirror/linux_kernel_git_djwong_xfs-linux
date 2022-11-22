@@ -140,6 +140,35 @@ out_put_perag:
 	return error;
 }
 
+static int
+xfs_trim_ddev_extents(
+	struct xfs_mount	*mp,
+	xfs_daddr_t		start,
+	xfs_daddr_t		end,
+	xfs_daddr_t		minlen,
+	uint64_t		*blocks_trimmed)
+{
+	xfs_agnumber_t		start_agno, end_agno, agno;
+	int			error, last_error = 0;
+
+	if (end > XFS_FSB_TO_BB(mp, mp->m_sb.sb_dblocks) - 1)
+		end = XFS_FSB_TO_BB(mp, mp->m_sb.sb_dblocks) - 1;
+
+	start_agno = xfs_daddr_to_agno(mp, start);
+	end_agno = xfs_daddr_to_agno(mp, end);
+
+	for (agno = start_agno; agno <= end_agno; agno++) {
+		error = xfs_trim_extents(mp, agno, start, end, minlen,
+				blocks_trimmed);
+		if (error == -ERESTARTSYS)
+			return error;
+		if (error)
+			last_error = error;
+	}
+
+	return last_error;
+}
+
 /*
  * trim a range of the filesystem.
  *
@@ -158,7 +187,6 @@ xfs_ioc_trim(
 	unsigned int		granularity = bdev_discard_granularity(bdev);
 	struct fstrim_range	range;
 	xfs_daddr_t		start, end, minlen;
-	xfs_agnumber_t		start_agno, end_agno, agno;
 	uint64_t		blocks_trimmed = 0;
 	int			error, last_error = 0;
 
@@ -194,21 +222,11 @@ xfs_ioc_trim(
 	start = BTOBB(range.start);
 	end = start + BTOBBT(range.len) - 1;
 
-	if (end > XFS_FSB_TO_BB(mp, mp->m_sb.sb_dblocks) - 1)
-		end = XFS_FSB_TO_BB(mp, mp->m_sb.sb_dblocks)- 1;
-
-	start_agno = xfs_daddr_to_agno(mp, start);
-	end_agno = xfs_daddr_to_agno(mp, end);
-
-	for (agno = start_agno; agno <= end_agno; agno++) {
-		error = xfs_trim_extents(mp, agno, start, end, minlen,
-					  &blocks_trimmed);
-		if (error) {
-			last_error = error;
-			if (error == -ERESTARTSYS)
-				break;
-		}
-	}
+	error = xfs_trim_ddev_extents(mp, start, end, minlen, &blocks_trimmed);
+	if (error == -ERESTARTSYS)
+		return error;
+	if (error)
+		last_error = error;
 
 	if (last_error)
 		return last_error;
