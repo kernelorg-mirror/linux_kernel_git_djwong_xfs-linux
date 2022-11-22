@@ -21,23 +21,21 @@
 #include "xfs_health.h"
 
 STATIC int
-xfs_trim_extents(
-	struct xfs_mount	*mp,
-	xfs_agnumber_t		agno,
+xfs_trim_perag_extents(
+	struct xfs_perag	*pag,
 	xfs_daddr_t		start,
 	xfs_daddr_t		end,
 	xfs_daddr_t		minlen,
 	uint64_t		*blocks_trimmed)
 {
+	struct xfs_mount	*mp = pag->pag_mount;
 	struct block_device	*bdev = xfs_buftarg_bdev(mp->m_ddev_targp);
 	struct xfs_btree_cur	*cur;
 	struct xfs_buf		*agbp;
 	struct xfs_agf		*agf;
-	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno = pag->pag_agno;
 	int			error;
 	int			i;
-
-	pag = xfs_perag_get(mp, agno);
 
 	/*
 	 * Force out the log.  This means any transactions that might have freed
@@ -48,7 +46,7 @@ xfs_trim_extents(
 
 	error = xfs_alloc_read_agf(pag, NULL, 0, &agbp);
 	if (error)
-		goto out_put_perag;
+		return error;
 	agf = agbp->b_addr;
 
 	cur = xfs_allocbt_init_cursor(mp, NULL, agbp, pag, XFS_BTNUM_CNT);
@@ -135,8 +133,6 @@ next_extent:
 out_del_cursor:
 	xfs_btree_del_cursor(cur, error);
 	xfs_buf_relse(agbp);
-out_put_perag:
-	xfs_perag_put(pag);
 	return error;
 }
 
@@ -148,7 +144,8 @@ xfs_trim_ddev_extents(
 	xfs_daddr_t		minlen,
 	uint64_t		*blocks_trimmed)
 {
-	xfs_agnumber_t		start_agno, end_agno, agno;
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		start_agno, end_agno;
 	int			error, last_error = 0;
 
 	if (end > XFS_FSB_TO_BB(mp, mp->m_sb.sb_dblocks) - 1)
@@ -157,11 +154,13 @@ xfs_trim_ddev_extents(
 	start_agno = xfs_daddr_to_agno(mp, start);
 	end_agno = xfs_daddr_to_agno(mp, end);
 
-	for (agno = start_agno; agno <= end_agno; agno++) {
-		error = xfs_trim_extents(mp, agno, start, end, minlen,
+	for_each_perag_range(mp, start_agno, end_agno, pag) {
+		error = xfs_trim_perag_extents(pag, start, end, minlen,
 				blocks_trimmed);
-		if (error == -ERESTARTSYS)
+		if (error == -ERESTARTSYS) {
+			xfs_perag_put(pag);
 			return error;
+		}
 		if (error)
 			last_error = error;
 	}
