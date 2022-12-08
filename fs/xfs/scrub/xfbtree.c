@@ -384,7 +384,7 @@ xfbtree_rec_bytes(
 {
 	unsigned int			blocklen = xfo_to_b(1);
 
-	if (cfg->flags & XFBTREE_CREATE_LONG_PTRS) {
+	if (cfg->btree_ops->geom_flags & XFS_BTREE_LONG_PTRS) {
 		if (xfs_has_crc(mp))
 			return blocklen - XFS_BTREE_LBLOCK_CRC_LEN;
 
@@ -481,7 +481,7 @@ xfbtree_create(
 	xbitmap_init(xfbt->freespace);
 
 	/* Set up min/maxrecs for this btree. */
-	if (cfg->flags & XFBTREE_CREATE_LONG_PTRS)
+	if (cfg->btree_ops->geom_flags & XFS_BTREE_LONG_PTRS)
 		keyptr_len += sizeof(__be64);
 	else
 		keyptr_len += sizeof(__be32);
