@@ -669,7 +669,6 @@ xfs_rmapbt_mem_create(
 	struct xfbtree_config	cfg = {
 		.btree_ops	= &xfs_rmapbt_mem_ops,
 		.target		= target,
-		.btnum		= XFS_BTNUM_RMAP,
 		.owner		= agno,
 	};
 
