@@ -66,7 +66,7 @@ xfile_create(
 	struct xfile		*xf;
 	int			error = -ENOMEM;
 
-	xf = kmalloc(sizeof(struct xfile), XCHK_GFP_FLAGS);
+	xf = kzalloc(sizeof(struct xfile), XCHK_GFP_FLAGS);
 	if (!xf)
 		return -ENOMEM;
 
@@ -110,6 +110,117 @@ out_xfile:
 	return error;
 }
 
+/* Evict a cache entry and release the page. */
+static inline int
+xfile_cache_evict(
+	struct xfile		*xf,
+	struct xfile_cache	*entry)
+{
+	int			error;
+
+	if (!entry->xfpage.page)
+		return 0;
+
+	lock_page(entry->xfpage.page);
+	kunmap(entry->kaddr);
+
+	error = xfile_put_page(xf, &entry->xfpage);
+	memset(entry, 0, sizeof(struct xfile_cache));
+	return error;
+}
+
+/*
+ * Grab a page, map it into the kernel address space, and fill out the cache
+ * entry.
+ */
+static int
+xfile_cache_fill(
+	struct xfile		*xf,
+	loff_t			key,
+	struct xfile_cache	*entry)
+{
+	int			error;
+
+	error = xfile_get_page(xf, key, PAGE_SIZE, &entry->xfpage);
+	if (error)
+		return error;
+
+	entry->kaddr = kmap(entry->xfpage.page);
+	unlock_page(entry->xfpage.page);
+	return 0;
+}
+
+/* Return the kernel address of a cached position in the xfile. */
+static void *
+xfile_cache_lookup(
+	struct xfile		*xf,
+	loff_t			pos)
+{
+	loff_t			key = round_down(pos, PAGE_SIZE);
+	unsigned int		i;
+	int			ret;
+
+	/* Is it already in the cache? */
+	for (i = 0; i < XFILE_CACHE_ENTRIES; i++) {
+		if (!xf->cached[i].xfpage.page)
+			continue;
+		if (page_offset(xf->cached[i].xfpage.page) != key)
+			continue;
+
+		goto found;
+	}
+
+	/* Find the least-used slot here so we can evict it. */
+	for (i = 0; i < XFILE_CACHE_ENTRIES; i++) {
+		if (!xf->cached[i].xfpage.page)
+			goto insert;
+	}
+	i = min_t(unsigned int, i, XFILE_CACHE_ENTRIES - 1);
+
+	ret = xfile_cache_evict(xf, &xf->cached[i]);
+	if (ret)
+		return ERR_PTR(ret);
+
+insert:
+	ret = xfile_cache_fill(xf, key, &xf->cached[i]);
+	if (ret)
+		return ERR_PTR(ret);
+
+found:
+	/* Stupid MRU moves this cache entry to the front. */
+	if (i != 0)
+		swap(xf->cached[0], xf->cached[i]);
+
+	return xf->cached[0].kaddr;
+}
+
+/* Release the cached page corresponding to a given kernel address. */
+static int
+xfile_cache_rele(
+	struct xfile		*xf,
+	void			*kaddr)
+{
+	unsigned int		i;
+
+	for (i = 0; i < XFILE_CACHE_ENTRIES; i++) {
+		if (xf->cached[i].kaddr == kaddr)
+			return xfile_cache_evict(xf, &xf->cached[i]);
+	}
+
+	return 0;
+}
+
+/* Drop all cached xfile pages. */
+static void
+xfile_cache_drop(
+	struct xfile		*xf)
+{
+	unsigned int		i;
+
+	for (i = 0; i < XFILE_CACHE_ENTRIES; i++)
+		xfile_cache_evict(xf, &xf->cached[i]);
+}
+
 /* Close the file and release all resources. */
 void
 xfile_destroy(
@@ -118,6 +229,8 @@ xfile_destroy(
 	struct inode		*inode = file_inode(xf->file);
 
 	trace_xfile_destroy(xf);
+
+	xfile_cache_drop(xf);
 
 	lockdep_set_class(&inode->i_rwsem, &inode->i_sb->s_type->i_mutex_key);
 	fput(xf->file);
@@ -138,8 +251,6 @@ xfile_pread(
 	loff_t			pos)
 {
 	struct inode		*inode = file_inode(xf->file);
-	struct address_space	*mapping = inode->i_mapping;
-	struct page		*page = NULL;
 	ssize_t			read = 0;
 	unsigned int		pflags;
 	int			error = 0;
@@ -158,37 +269,21 @@ xfile_pread(
 
 		len = min_t(ssize_t, count, PAGE_SIZE - offset_in_page(pos));
 
-		/*
-		 * In-kernel reads of a shmem file cause it to allocate a page
-		 * if the mapping shows a hole.  Therefore, if we hit ENOMEM
-		 * we can continue by zeroing the caller's buffer.
-		 */
-		page = shmem_read_mapping_page_gfp(mapping, pos >> PAGE_SHIFT,
-				__GFP_NOWARN);
-		if (IS_ERR(page)) {
-			error = PTR_ERR(page);
-			if (error != -ENOMEM)
+		kaddr = xfile_cache_lookup(xf, pos);
+		if (IS_ERR(kaddr)) {
+			error = PTR_ERR(kaddr);
+			break;
+		}
+
+		p = kaddr + offset_in_page(pos);
+		memcpy(buf, p, len);
+
+		if (xf->flags & XFILE_UNCACHED) {
+			error = xfile_cache_rele(xf, kaddr);
+			if (error)
 				break;
-
-			memset(buf, 0, len);
-			goto advance;
 		}
 
-		if (PageUptodate(page)) {
-			/*
-			 * xfile pages must never be mapped into userspace, so
-			 * we skip the dcache flush.
-			 */
-			kaddr = kmap_local_page(page);
-			p = kaddr + offset_in_page(pos);
-			memcpy(buf, p, len);
-			kunmap_local(kaddr);
-		} else {
-			memset(buf, 0, len);
-		}
-		put_page(page);
-
-advance:
 		count -= len;
 		pos += len;
 		buf += len;
@@ -215,9 +310,6 @@ xfile_pwrite(
 	loff_t			pos)
 {
 	struct inode		*inode = file_inode(xf->file);
-	struct address_space	*mapping = inode->i_mapping;
-	const struct address_space_operations *aops = mapping->a_ops;
-	struct page		*page = NULL;
 	ssize_t			written = 0;
 	unsigned int		pflags;
 	int			error = 0;
@@ -231,52 +323,30 @@ xfile_pwrite(
 
 	pflags = memalloc_nofs_save();
 	while (count > 0) {
-		void		*fsdata = NULL;
 		void		*p, *kaddr;
 		unsigned int	len;
-		int		ret;
 
 		len = min_t(ssize_t, count, PAGE_SIZE - offset_in_page(pos));
 
-		/*
-		 * We call write_begin directly here to avoid all the freezer
-		 * protection lock-taking that happens in the normal path.
-		 * shmem doesn't support fs freeze, but lockdep doesn't know
-		 * that and will trip over that.
-		 */
-		error = aops->write_begin(NULL, mapping, pos, len, &page,
-				&fsdata);
-		if (error)
+		kaddr = xfile_cache_lookup(xf, pos);
+		if (IS_ERR(kaddr)) {
+			error = PTR_ERR(kaddr);
 			break;
-
-		/*
-		 * xfile pages must never be mapped into userspace, so we skip
-		 * the dcache flush.  If the page is not uptodate, zero it
-		 * before writing data.
-		 */
-		kaddr = kmap_local_page(page);
-		if (!PageUptodate(page)) {
-			memset(kaddr, 0, PAGE_SIZE);
-			SetPageUptodate(page);
 		}
+
 		p = kaddr + offset_in_page(pos);
 		memcpy(p, buf, len);
-		kunmap_local(kaddr);
 
-		ret = aops->write_end(NULL, mapping, pos, len, len, page,
-				fsdata);
-		if (ret < 0) {
-			error = ret;
-			break;
+		if (xf->flags & XFILE_UNCACHED) {
+			error = xfile_cache_rele(xf, kaddr);
+			if (error)
+				break;
 		}
 
-		written += ret;
-		if (ret != len)
-			break;
-
-		count -= ret;
-		pos += ret;
-		buf += ret;
+		written += len;
+		count -= len;
+		pos += len;
+		buf += len;
 	}
 	memalloc_nofs_restore(pflags);
 
@@ -293,6 +363,7 @@ xfile_discard(
 	u64			count)
 {
 	trace_xfile_discard(xf, pos, count);
+	xfile_cache_drop(xf);
 	shmem_truncate_range(file_inode(xf->file), pos, pos + count - 1);
 }
 
@@ -304,9 +375,6 @@ xfile_prealloc(
 	u64			count)
 {
 	struct inode		*inode = file_inode(xf->file);
-	struct address_space	*mapping = inode->i_mapping;
-	const struct address_space_operations *aops = mapping->a_ops;
-	struct page		*page = NULL;
 	unsigned int		pflags;
 	int			error = 0;
 
@@ -319,46 +387,20 @@ xfile_prealloc(
 
 	pflags = memalloc_nofs_save();
 	while (count > 0) {
-		void		*fsdata = NULL;
+		void		*kaddr;
 		unsigned int	len;
-		int		ret;
 
 		len = min_t(ssize_t, count, PAGE_SIZE - offset_in_page(pos));
 
-		/*
-		 * We call write_begin directly here to avoid all the freezer
-		 * protection lock-taking that happens in the normal path.
-		 * shmem doesn't support fs freeze, but lockdep doesn't know
-		 * that and will trip over that.
-		 */
-		error = aops->write_begin(NULL, mapping, pos, len, &page,
-				&fsdata);
+		kaddr = xfile_cache_lookup(xf, pos);
+		if (IS_ERR(kaddr)) {
+			error = PTR_ERR(kaddr);
+			break;
+		}
+
+		error = xfile_cache_rele(xf, kaddr);
 		if (error)
 			break;
-
-		/*
-		 * xfile pages must never be mapped into userspace, so we skip
-		 * the dcache flush.  If the page is not uptodate, zero it to
-		 * ensure we never go lacking for space here.
-		 */
-		if (!PageUptodate(page)) {
-			void	*kaddr = kmap_local_page(page);
-
-			memset(kaddr, 0, PAGE_SIZE);
-			SetPageUptodate(page);
-			kunmap_local(kaddr);
-		}
-
-		ret = aops->write_end(NULL, mapping, pos, len, len, page,
-				fsdata);
-		if (ret < 0) {
-			error = ret;
-			break;
-		}
-		if (ret != len) {
-			error = -EIO;
-			break;
-		}
 
 		count -= len;
 		pos += len;
@@ -490,7 +532,7 @@ xfile_put_page(
 	unsigned int		pflags;
 	int			ret;
 
-	trace_xfile_put_page(xf, xfpage->pos, PAGE_SIZE);
+	trace_xfile_put_page(xf, xfpage->pos, xfpage->page);
 
 	/* Give back the reference that we took in xfile_get_page. */
 	put_page(xfpage->page);
