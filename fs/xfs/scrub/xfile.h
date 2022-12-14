@@ -24,9 +24,24 @@ static inline pgoff_t xfile_page_index(const struct xfile_page *xfpage)
 	return xfpage->page->index;
 }
 
+struct xfile_cache {
+	struct xfile_page	xfpage;
+	void			*kaddr;
+};
+
+#define XFILE_CACHE_ENTRIES	4
+
 struct xfile {
 	struct file		*file;
+
+	/* XFILE_* flags */
+	unsigned int		flags;
+
+	struct xfile_cache	cached[XFILE_CACHE_ENTRIES];
 };
+
+/* Do not cache pages for faster access. */
+#define XFILE_UNCACHED		(1U << 0)
 
 int xfile_create(struct xfs_mount *mp, const char *description, loff_t isize,
 		struct xfile **xfilep);

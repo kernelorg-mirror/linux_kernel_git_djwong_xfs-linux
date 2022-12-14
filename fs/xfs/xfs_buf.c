@@ -2387,6 +2387,7 @@ xfs_alloc_memory_buftarg(
 	if (!btp)
 		return -ENOMEM;
 
+	xfile->flags |= XFILE_UNCACHED;
 	btp->bt_xfile = xfile;
 	btp->bt_dev = (dev_t)-1U;
 
