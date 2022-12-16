@@ -2000,6 +2000,8 @@ xfs_inodegc_want_queue_work(
  *
  * Note: If the current thread is running a transaction, we don't ever want to
  * wait for other transactions because that could introduce a deadlock.
+ *
+ * Don't let kswapd background reclamation stall on inactivations.
  */
 static inline bool
 xfs_inodegc_want_flush_work(
@@ -2008,6 +2010,9 @@ xfs_inodegc_want_flush_work(
 	unsigned int		shrinker_hits)
 {
 	if (current->journal_info)
+		return false;
+
+	if (current_is_kswapd())
 		return false;
 
 	if (shrinker_hits > 0)
