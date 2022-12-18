@@ -4666,7 +4666,11 @@ xfs_btree_space_to_height(
 	const unsigned int	*limits,
 	unsigned long long	leaf_blocks)
 {
-	unsigned long long	node_blocks = limits[1];
+	/*
+	 * The root btree block can have a fanout between 2 and maxrecs because
+	 * the tree might not be big enough to fill it.
+	 */
+	unsigned long long	node_blocks = 2;
 	unsigned long long	blocks_left = leaf_blocks - 1;
 	unsigned int		height = 1;
 
