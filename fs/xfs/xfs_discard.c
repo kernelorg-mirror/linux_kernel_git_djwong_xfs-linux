@@ -20,9 +20,11 @@
 #include "xfs_ag.h"
 #include "xfs_health.h"
 
-STATIC int
-xfs_trim_perag_extents(
+/* Trim the free space in this AG by length. */
+static inline int
+xfs_trim_perag_bylen(
 	struct xfs_perag	*pag,
+	struct xfs_buf		*agbp,
 	xfs_daddr_t		start,
 	xfs_daddr_t		end,
 	xfs_daddr_t		minlen,
@@ -31,23 +33,10 @@ xfs_trim_perag_extents(
 	struct xfs_mount	*mp = pag->pag_mount;
 	struct block_device	*bdev = xfs_buftarg_bdev(mp->m_ddev_targp);
 	struct xfs_btree_cur	*cur;
-	struct xfs_buf		*agbp;
-	struct xfs_agf		*agf;
+	struct xfs_agf		*agf = agbp->b_addr;
 	xfs_agnumber_t		agno = pag->pag_agno;
 	int			error;
 	int			i;
-
-	/*
-	 * Force out the log.  This means any transactions that might have freed
-	 * space before we take the AGF buffer lock are now on disk, and the
-	 * volatile disk cache is flushed.
-	 */
-	xfs_log_force(mp, XFS_LOG_SYNC);
-
-	error = xfs_alloc_read_agf(pag, NULL, 0, &agbp);
-	if (error)
-		return error;
-	agf = agbp->b_addr;
 
 	cur = xfs_allocbt_init_cursor(mp, NULL, agbp, pag, XFS_BTNUM_CNT);
 
@@ -132,6 +121,34 @@ next_extent:
 
 out_del_cursor:
 	xfs_btree_del_cursor(cur, error);
+	return error;
+}
+
+STATIC int
+xfs_trim_perag(
+	struct xfs_perag	*pag,
+	xfs_daddr_t		start,
+	xfs_daddr_t		end,
+	xfs_daddr_t		minlen,
+	uint64_t		*blocks_trimmed)
+{
+	struct xfs_mount	*mp = pag->pag_mount;
+	struct xfs_buf		*agbp;
+	int			error;
+
+	/*
+	 * Force out the log.  This means any transactions that might have freed
+	 * space before we take the AGF buffer lock are now on disk, and the
+	 * volatile disk cache is flushed.
+	 */
+	xfs_log_force(mp, XFS_LOG_SYNC);
+
+	error = xfs_alloc_read_agf(pag, NULL, 0, &agbp);
+	if (error)
+		return error;
+
+	error = xfs_trim_perag_bylen(pag, agbp, start, end, minlen,
+			blocks_trimmed);
 	xfs_buf_relse(agbp);
 	return error;
 }
@@ -155,7 +172,7 @@ xfs_trim_ddev_extents(
 	end_agno = xfs_daddr_to_agno(mp, end);
 
 	for_each_perag_range(mp, start_agno, end_agno, pag) {
-		error = xfs_trim_perag_extents(pag, start, end, minlen,
+		error = xfs_trim_perag(pag, start, end, minlen,
 				blocks_trimmed);
 		if (error == -ERESTARTSYS) {
 			xfs_perag_put(pag);
