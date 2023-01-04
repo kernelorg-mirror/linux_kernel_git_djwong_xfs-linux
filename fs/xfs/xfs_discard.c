@@ -20,11 +20,17 @@
 #include "xfs_ag.h"
 #include "xfs_health.h"
 
+/*
+ * For trim functions that support it, cycle the metadata locks periodically
+ * to prevent other parts of the filesystem from starving.
+ */
+#define XFS_TRIM_RELAX_INTERVAL	(HZ)
+
 /* Trim the free space in this AG by block number. */
 static inline int
 xfs_trim_perag_bybno(
 	struct xfs_perag	*pag,
-	struct xfs_buf		*agbp,
+	struct xfs_buf		**agbpp,
 	xfs_daddr_t		start,
 	xfs_daddr_t		end,
 	xfs_daddr_t		minlen,
@@ -33,11 +39,12 @@ xfs_trim_perag_bybno(
 	struct xfs_mount	*mp = pag->pag_mount;
 	struct block_device	*bdev = xfs_buftarg_bdev(mp->m_ddev_targp);
 	struct xfs_btree_cur	*cur;
-	struct xfs_agf		*agf = agbp->b_addr;
+	struct xfs_agf		*agf = (*agbpp)->b_addr;
 	xfs_agnumber_t		agno = pag->pag_agno;
 	xfs_agblock_t		start_agbno;
 	xfs_agblock_t		end_agbno;
 	xfs_extlen_t		minlen_fsb = XFS_BB_TO_FSB(mp, minlen);
+	unsigned long		last_relax = jiffies;
 	int			i;
 	int			error;
 
@@ -48,7 +55,7 @@ xfs_trim_perag_bybno(
 	end_agbno = xfs_daddr_to_agbno(mp, end);
 
 	//trace_printk("%d agno 0x%x start_agbno 0x%x end_agbno 0x%x minlen_fsb 0x%x", __LINE__, agno, start_agbno, end_agbno, minlen_fsb);
-	cur = xfs_allocbt_init_cursor(mp, NULL, agbp, pag, XFS_BTNUM_BNO);
+	cur = xfs_allocbt_init_cursor(mp, NULL, *agbpp, pag, XFS_BTNUM_BNO);
 
 	error = xfs_alloc_lookup_le(cur, start_agbno, 0, &i);
 	if (error)
@@ -124,8 +131,27 @@ xfs_trim_perag_bybno(
 			goto out_del_cursor;
 		*blocks_trimmed += flen;
 
+		if (time_after(jiffies, last_relax + XFS_TRIM_RELAX_INTERVAL)) {
+			/*
+			 * Cycle the AGF lock since we know how to pick up
+			 * where we left off.
+			 */
+			trace_xfs_discard_relax(mp, agno, fbno, flen);
+			xfs_btree_del_cursor(cur, error);
+			xfs_buf_relse(*agbpp);
+
+			error = xfs_alloc_read_agf(pag, NULL, 0, agbpp);
+			if (error)
+				return error;
+
+			cur = xfs_allocbt_init_cursor(mp, NULL, *agbpp, pag,
+					XFS_BTNUM_BNO);
+			error = xfs_alloc_lookup_ge(cur, fbno + flen, 0, &i);
+			last_relax = jiffies;
+		} else {
 next_extent:
-		error = xfs_btree_increment(cur, 0, &i);
+			error = xfs_btree_increment(cur, 0, &i);
+		}
 		if (error)
 			goto out_del_cursor;
 
@@ -263,7 +289,7 @@ xfs_trim_perag(
 	if (start > XFS_AGB_TO_DADDR(mp, agno, 0) ||
 	    end < XFS_AGB_TO_DADDR(mp, agno, be32_to_cpu(agf->agf_length)) - 1) {
 		/* Only trimming part of this AG */
-		error = xfs_trim_perag_bybno(pag, agbp, start, end, minlen,
+		error = xfs_trim_perag_bybno(pag, &agbp, start, end, minlen,
 				blocks_trimmed);
 	} else {
 		/* Trim this entire AG */
