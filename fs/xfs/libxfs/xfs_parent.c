@@ -75,7 +75,7 @@ xfs_init_parent_name_rec(
 void
 xfs_init_parent_name_irec(
 	struct xfs_parent_name_irec	*irec,
-	struct xfs_parent_name_rec	*rec)
+	const struct xfs_parent_name_rec *rec)
 {
 	irec->p_ino = be64_to_cpu(rec->p_ino);
 	irec->p_gen = be32_to_cpu(rec->p_gen);
