@@ -137,6 +137,8 @@ ifeq ($(CONFIG_MEMORY_FAILURE),y)
 xfs-$(CONFIG_FS_DAX)		+= xfs_notify_failure.o
 endif
 
+xfs-$(CONFIG_XFS_LIVE_HOOKS)	+= xfs_hooks.o
+
 # online scrub/repair
 ifeq ($(CONFIG_XFS_ONLINE_SCRUB),y)
 
