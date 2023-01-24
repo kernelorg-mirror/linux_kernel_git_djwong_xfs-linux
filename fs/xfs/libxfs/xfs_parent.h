@@ -6,6 +6,8 @@
 #ifndef	__XFS_PARENT_H__
 #define	__XFS_PARENT_H__
 
+extern struct kmem_cache	*xfs_parent_intent_cache;
+
 /*
  * Dynamically allocd structure used to wrap the needed data to pass around
  * the defer ops machinery

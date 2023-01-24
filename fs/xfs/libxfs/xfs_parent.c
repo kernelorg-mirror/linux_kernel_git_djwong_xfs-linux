@@ -27,6 +27,8 @@
 #include "xfs_parent.h"
 #include "xfs_trans_space.h"
 
+struct kmem_cache		*xfs_parent_intent_cache;
+
 /* Initializes a xfs_parent_ptr from an xfs_parent_name_rec */
 void
 xfs_init_parent_ptr(struct xfs_parent_ptr		*xpp,
@@ -95,7 +97,7 @@ xfs_parent_init(
 	if (error)
 		return error;
 
-	parent = kzalloc(sizeof(*parent), GFP_KERNEL);
+	parent = kmem_cache_zalloc(xfs_parent_intent_cache, GFP_KERNEL);
 	if (!parent) {
 		xfs_attr_rele_log_assist(mp);
 		return -ENOMEM;
@@ -191,7 +193,7 @@ xfs_parent_cancel(
 	struct xfs_parent_defer *parent)
 {
 	xlog_drop_incompat_feat(mp->m_log);
-	kfree(parent);
+	kmem_cache_free(xfs_parent_intent_cache, parent);
 }
 
 unsigned int
