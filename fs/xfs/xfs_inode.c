@@ -994,7 +994,7 @@ xfs_create(
 	uint			resblks;
 	xfs_ino_t		ino;
 	xfs_dir2_dataptr_t	diroffset;
-	struct xfs_parent_defer	*parent = NULL;
+	struct xfs_parent_defer	*parent;
 
 	trace_xfs_create(dp, name);
 
@@ -1021,11 +1021,9 @@ xfs_create(
 		tres = &M_RES(mp)->tr_create;
 	}
 
-	if (xfs_has_parent(mp)) {
-		error = xfs_parent_init(mp, &parent);
-		if (error)
-			goto out_release_dquots;
-	}
+	error = xfs_parent_start(mp, &parent);
+	if (error)
+		goto out_release_dquots;
 
 	/*
 	 * Initially assume that the file does not exist and
@@ -1042,7 +1040,7 @@ xfs_create(
 				resblks, &tp);
 	}
 	if (error)
-		goto drop_incompat;
+		goto out_parent;
 
 	xfs_ilock(dp, XFS_ILOCK_EXCL | XFS_ILOCK_PARENT);
 	unlock_dp_on_error = true;
@@ -1124,6 +1122,7 @@ xfs_create(
 	*ipp = ip;
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	xfs_iunlock(dp, XFS_ILOCK_EXCL);
+	xfs_parent_finish(mp, parent);
 	return 0;
 
  out_trans_cancel:
@@ -1139,9 +1138,8 @@ xfs_create(
 		xfs_finish_inode_setup(ip);
 		xfs_irele(ip);
 	}
- drop_incompat:
-	if (parent)
-		xfs_parent_cancel(mp, parent);
+ out_parent:
+	xfs_parent_finish(mp, parent);
  out_release_dquots:
 	xfs_qm_dqrele(udqp);
 	xfs_qm_dqrele(gdqp);
@@ -1291,17 +1289,15 @@ xfs_link(
 	if (error)
 		goto std_return;
 
-	if (xfs_has_parent(mp)) {
-		error = xfs_parent_init(mp, &parent);
-		if (error)
-			goto std_return;
-	}
+	error = xfs_parent_start(mp, &parent);
+	if (error)
+		goto std_return;
 
 	resblks = xfs_link_space_res(mp, target_name->len);
 	error = xfs_trans_alloc_dir(tdp, &M_RES(mp)->tr_link, sip, &resblks,
 			&tp, &nospace_error);
 	if (error)
-		goto drop_incompat;
+		goto out_parent;
 
 	/*
 	 * If we are using project inheritance, we only allow hard link
@@ -1366,15 +1362,15 @@ xfs_link(
 	error = xfs_trans_commit(tp);
 	xfs_iunlock(tdp, XFS_ILOCK_EXCL);
 	xfs_iunlock(sip, XFS_ILOCK_EXCL);
+	xfs_parent_finish(mp, parent);
 	return error;
 
  error_return:
 	xfs_trans_cancel(tp);
 	xfs_iunlock(tdp, XFS_ILOCK_EXCL);
 	xfs_iunlock(sip, XFS_ILOCK_EXCL);
- drop_incompat:
-	if (parent)
-		xfs_parent_cancel(mp, parent);
+ out_parent:
+	xfs_parent_finish(mp, parent);
  std_return:
 	if (error == -ENOSPC && nospace_error)
 		error = nospace_error;
@@ -2539,11 +2535,9 @@ xfs_remove(
 	if (error)
 		goto std_return;
 
-	if (xfs_has_parent(mp)) {
-		error = xfs_parent_init(mp, &parent);
-		if (error)
-			goto std_return;
-	}
+	error = xfs_parent_start(mp, &parent);
+	if (error)
+		goto std_return;
 
 	/*
 	 * We try to get the real space reservation first, allowing for
@@ -2561,7 +2555,7 @@ xfs_remove(
 			&tp, &dontcare);
 	if (error) {
 		ASSERT(error != -ENOSPC);
-		goto drop_incompat;
+		goto out_parent;
 	}
 
 	/*
@@ -2644,6 +2638,7 @@ xfs_remove(
 
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	xfs_iunlock(dp, XFS_ILOCK_EXCL);
+	xfs_parent_finish(mp, parent);
 	return 0;
 
  out_trans_cancel:
@@ -2651,9 +2646,8 @@ xfs_remove(
  out_unlock:
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	xfs_iunlock(dp, XFS_ILOCK_EXCL);
- drop_incompat:
-	if (parent)
-		xfs_parent_cancel(mp, parent);
+ out_parent:
+	xfs_parent_finish(mp, parent);
  std_return:
 	return error;
 }
@@ -2749,9 +2743,11 @@ xfs_cross_rename(
 	struct xfs_inode		*dp1,
 	struct xfs_name			*name1,
 	struct xfs_inode		*ip1,
+	struct xfs_parent_defer		*ip1_pptr,
 	struct xfs_inode		*dp2,
 	struct xfs_name			*name2,
 	struct xfs_inode		*ip2,
+	struct xfs_parent_defer		*ip2_pptr,
 	int				spaceres)
 {
 	struct xfs_mount		*mp = dp1->i_mount;
@@ -2760,17 +2756,6 @@ xfs_cross_rename(
 	int				ip2_flags = 0;
 	int				dp2_flags = 0;
 	int				new_diroffset, old_diroffset;
-	struct xfs_parent_defer		*parent_ptr = NULL;
-	struct xfs_parent_defer		*parent_ptr2 = NULL;
-
-	if (xfs_has_parent(mp)) {
-		error = xfs_parent_init(mp, &parent_ptr);
-		if (error)
-			goto out_trans_abort;
-		error = xfs_parent_init(mp, &parent_ptr2);
-		if (error)
-			goto out_trans_abort;
-	}
 
 	/* Swap inode number for dirent in first parent */
 	error = xfs_dir_replace(tp, dp1, name1, ip2->i_ino, spaceres, &old_diroffset);
@@ -2840,12 +2825,12 @@ xfs_cross_rename(
 	}
 
 	if (xfs_has_parent(mp)) {
-		error = xfs_parent_defer_replace(tp, parent_ptr, dp1,
+		error = xfs_parent_defer_replace(tp, ip1_pptr, dp1,
 				old_diroffset, name2, dp2, new_diroffset, ip1);
 		if (error)
 			goto out_trans_abort;
 
-		error = xfs_parent_defer_replace(tp, parent_ptr2, dp2,
+		error = xfs_parent_defer_replace(tp, ip2_pptr, dp2,
 				new_diroffset, name1, dp1, old_diroffset, ip2);
 		if (error)
 			goto out_trans_abort;
@@ -2865,17 +2850,10 @@ xfs_cross_rename(
 	}
 	xfs_trans_ichgtime(tp, dp1, XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
 	xfs_trans_log_inode(tp, dp1, XFS_ILOG_CORE);
+	return xfs_finish_rename(tp);
 
-	error = xfs_finish_rename(tp);
-	goto out;
 out_trans_abort:
 	xfs_trans_cancel(tp);
-out:
-	if (parent_ptr)
-		xfs_parent_cancel(mp, parent_ptr);
-	if (parent_ptr2)
-		xfs_parent_cancel(mp, parent_ptr2);
-
 	return error;
 }
 
@@ -2978,9 +2956,9 @@ xfs_rename(
 	int				error, nospace_error = 0;
 	xfs_dir2_dataptr_t		new_diroffset;
 	xfs_dir2_dataptr_t		old_diroffset;
-	struct xfs_parent_defer		*new_parent_ptr = NULL;
-	struct xfs_parent_defer		*target_parent_ptr = NULL;
-	struct xfs_parent_defer		*wip_parent_ptr = NULL;
+	struct xfs_parent_defer		*src_ip_pptr = NULL;
+	struct xfs_parent_defer		*tgt_ip_pptr = NULL;
+	struct xfs_parent_defer		*wip_pptr = NULL;
 
 	trace_xfs_rename(src_dp, target_dp, src_name, target_name);
 
@@ -3004,26 +2982,26 @@ xfs_rename(
 
 	xfs_sort_for_rename(src_dp, target_dp, src_ip, target_ip, wip,
 				inodes, &num_inodes);
-	if (xfs_has_parent(mp)) {
-		error = xfs_parent_init(mp, &new_parent_ptr);
+
+	error = xfs_parent_start(mp, &src_ip_pptr);
+	if (error)
+		goto out_release_wip;
+
+	if (wip) {
+		error = xfs_parent_start(mp, &wip_pptr);
 		if (error)
-			goto out_release_wip;
-		if (wip) {
-			error = xfs_parent_init(mp, &wip_parent_ptr);
-			if (error)
-				goto out_release_wip;
-		}
-		if (target_ip != NULL) {
-			error = xfs_parent_init(mp, &target_parent_ptr);
-			if (error)
-				goto out_release_wip;
-		}
+			goto out_src_ip_pptr;
+	}
+	if (target_ip) {
+		error = xfs_parent_start(mp, &tgt_ip_pptr);
+		if (error)
+			goto out_wip_pptr;
 	}
 
 retry:
 	nospace_error = 0;
-	spaceres = xfs_rename_space_res(mp, src_name, target_parent_ptr,
-			target_name, new_parent_ptr, wip);
+	spaceres = xfs_rename_space_res(mp, src_name, tgt_ip_pptr,
+			target_name, src_ip_pptr, wip);
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_rename, spaceres, 0, 0, &tp);
 	if (error == -ENOSPC) {
 		nospace_error = error;
@@ -3032,7 +3010,7 @@ retry:
 				&tp);
 	}
 	if (error)
-		goto out_release_wip;
+		goto out_tgt_ip_pptr;
 
 	/*
 	 * Attach the dquots to the inodes
@@ -3075,8 +3053,8 @@ retry:
 	/* RENAME_EXCHANGE is unique from here on. */
 	if (flags & RENAME_EXCHANGE) {
 		error = xfs_cross_rename(tp, src_dp, src_name, src_ip,
-					target_dp, target_name, target_ip,
-					spaceres);
+				src_ip_pptr, target_dp, target_name, target_ip,
+				tgt_ip_pptr, spaceres);
 		goto out_unlock;
 	}
 
@@ -3298,25 +3276,25 @@ retry:
 	if (error)
 		goto out_trans_cancel;
 
-	if (new_parent_ptr) {
-		if (wip) {
-			error = xfs_parent_defer_add(tp, wip_parent_ptr,
-						     src_dp, src_name,
-						     old_diroffset, wip);
-			if (error)
-				goto out_trans_cancel;
-		}
+	if (wip_pptr) {
+		error = xfs_parent_defer_add(tp, wip_pptr,
+					     src_dp, src_name,
+					     old_diroffset, wip);
+		if (error)
+			goto out_trans_cancel;
+	}
 
-		error = xfs_parent_defer_replace(tp, new_parent_ptr, src_dp,
+	if (src_ip_pptr) {
+		error = xfs_parent_defer_replace(tp, src_ip_pptr, src_dp,
 				old_diroffset, target_name, target_dp,
 				new_diroffset, src_ip);
 		if (error)
 			goto out_trans_cancel;
 	}
 
-	if (target_parent_ptr) {
+	if (tgt_ip_pptr) {
 		error = xfs_parent_defer_remove(tp, target_dp,
-						target_parent_ptr,
+						tgt_ip_pptr,
 						new_diroffset, target_ip);
 		if (error)
 			goto out_trans_cancel;
@@ -3335,14 +3313,14 @@ out_trans_cancel:
 	xfs_trans_cancel(tp);
 out_unlock:
 	xfs_iunlock_rename(inodes, num_inodes);
-out_release_wip:
-	if (new_parent_ptr)
-		xfs_parent_cancel(mp, new_parent_ptr);
-	if (target_parent_ptr)
-		xfs_parent_cancel(mp, target_parent_ptr);
-	if (wip_parent_ptr)
-		xfs_parent_cancel(mp, wip_parent_ptr);
+out_tgt_ip_pptr:
+	xfs_parent_finish(mp, tgt_ip_pptr);
+out_wip_pptr:
+	xfs_parent_finish(mp, wip_pptr);
+out_src_ip_pptr:
+	xfs_parent_finish(mp, src_ip_pptr);
 
+out_release_wip:
 	if (wip)
 		xfs_irele(wip);
 	if (error == -ENOSPC && nospace_error)

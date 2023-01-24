@@ -83,15 +83,12 @@ xfs_init_parent_name_irec(
 }
 
 int
-xfs_parent_init(
+__xfs_parent_init(
 	struct xfs_mount		*mp,
 	struct xfs_parent_defer		**parentp)
 {
 	struct xfs_parent_defer		*parent;
 	int				error;
-
-	if (!xfs_has_parent(mp))
-		return 0;
 
 	error = xfs_attr_grab_log_assist(mp);
 	if (error)
@@ -188,7 +185,7 @@ xfs_parent_defer_replace(
 }
 
 void
-xfs_parent_cancel(
+__xfs_parent_cancel(
 	xfs_mount_t		*mp,
 	struct xfs_parent_defer *parent)
 {

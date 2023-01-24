@@ -192,7 +192,7 @@ xfs_symlink(
 	uint			resblks;
 	xfs_ino_t		ino;
 	xfs_dir2_dataptr_t      diroffset;
-	struct xfs_parent_defer *parent = NULL;
+	struct xfs_parent_defer *parent;
 
 	*ipp = NULL;
 
@@ -233,16 +233,14 @@ xfs_symlink(
 		fs_blocks = xfs_symlink_blocks(mp, pathlen);
 	resblks = xfs_symlink_space_res(mp, link_name->len, fs_blocks);
 
-	if (xfs_has_parent(mp)) {
-		error = xfs_parent_init(mp, &parent);
-		if (error)
-			return error;
-	}
+	error = xfs_parent_start(mp, &parent);
+	if (error)
+		goto out_release_dquots;
 
 	error = xfs_trans_alloc_icreate(mp, &M_RES(mp)->tr_symlink, udqp, gdqp,
 			pdqp, resblks, &tp);
 	if (error)
-		goto out_release_dquots;
+		goto out_parent;
 
 	xfs_ilock(dp, XFS_ILOCK_EXCL | XFS_ILOCK_PARENT);
 	unlock_dp_on_error = true;
@@ -376,6 +374,7 @@ xfs_symlink(
 	*ipp = ip;
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	xfs_iunlock(dp, XFS_ILOCK_EXCL);
+	xfs_parent_finish(mp, parent);
 	return 0;
 
 out_trans_cancel:
@@ -391,6 +390,8 @@ out_release_inode:
 		xfs_finish_inode_setup(ip);
 		xfs_irele(ip);
 	}
+out_parent:
+	xfs_parent_finish(mp, parent);
 out_release_dquots:
 	xfs_qm_dqrele(udqp);
 	xfs_qm_dqrele(gdqp);
@@ -398,8 +399,6 @@ out_release_dquots:
 
 	if (unlock_dp_on_error)
 		xfs_iunlock(dp, XFS_ILOCK_EXCL);
-	if (parent)
-		xfs_parent_cancel(mp, parent);
 
 	return error;
 }
