@@ -124,6 +124,9 @@ struct xrep_dir {
 	/* Mutex protecting namebuf, dir_entries, dir_names, and parent_ino. */
 	struct mutex		lock;
 
+	/* Hook to capture directory entry updates. */
+	struct xfs_dirent_hook	hooks;
+
 	/*
 	 * This is the dotdot inumber that we're going to set on the
 	 * reconstructed directory.
@@ -141,6 +144,7 @@ xrep_dir_teardown(
 {
 	struct xrep_dir		*rd = sc->buf;
 
+	xfs_dirent_hook_del(sc->mp, &rd->hooks);
 	xchk_iscan_finish(&rd->iscan);
 	mutex_destroy(&rd->lock);
 	xfblob_destroy(rd->dir_names);
@@ -154,6 +158,8 @@ xrep_setup_directory(
 {
 	struct xrep_dir		*rd;
 	int			error;
+
+	xchk_fshooks_enable(sc, XCHK_FSHOOKS_DIRENTS);
 
 	error = xrep_tempfile_create(sc, S_IFDIR);
 	if (error)
@@ -841,6 +847,12 @@ xrep_dir_rebuild_tree(
 	if (error)
 		return error;
 
+	/*
+	 * Abort the inode scan so that the live hooks won't stash any more
+	 * directory updates.
+	 */
+	xchk_iscan_abort(&rd->iscan);
+
 	error = xrep_dir_replay_updates(rd);
 	if (error)
 		return error;
@@ -880,6 +892,72 @@ xrep_dir_rebuild_tree(
 	return xrep_dir_replay_updates(rd);
 }
 
+/*
+ * Capture dirent updates being made by other threads which are relevant to the
+ * directory being repaired.
+ */
+STATIC int
+xrep_dir_live_update(
+	struct notifier_block		*nb,
+	unsigned long			action,
+	void				*data)
+{
+	struct xfs_dirent_update_params	*p = data;
+	struct xrep_dir			*rd;
+	struct xfs_scrub		*sc;
+	int				error = 0;
+
+	rd = container_of(nb, struct xrep_dir, hooks.delta_hook.nb);
+	sc = rd->sc;
+
+	if (action != XFS_DIRENT_CHILD_DELTA)
+		return NOTIFY_DONE;
+
+	/*
+	 * This thread updated a dirent in the directory that we're rebuilding,
+	 * so stash the update for replay against the temporary directory.
+	 */
+	if (p->dp->i_ino == sc->ip->i_ino &&
+	    xchk_iscan_want_live_update(&rd->iscan, p->ip->i_ino)) {
+		mutex_lock(&rd->lock);
+		if (p->delta > 0)
+			error = xrep_dir_add_dirent(rd, p->name, p->ip->i_ino,
+					p->diroffset);
+		else
+			error = xrep_dir_remove_dirent(rd, p->name,
+					p->ip->i_ino, p->diroffset);
+		mutex_unlock(&rd->lock);
+		if (error)
+			goto out_abort;
+	}
+
+	/*
+	 * This thread updated a dirent that points to the directory that we're
+	 * rebuilding, so remember the new dotdot target.
+	 */
+	if (p->ip->i_ino == sc->ip->i_ino &&
+	    xchk_iscan_want_live_update(&rd->iscan, p->dp->i_ino)) {
+		mutex_lock(&rd->lock);
+		if (p->delta > 0) {
+			trace_xrep_dir_add_dirent(sc->tempip, &xfs_name_dotdot,
+					p->dp->i_ino, 0);
+
+			rd->parent_ino = p->dp->i_ino;
+		} else {
+			trace_xrep_dir_remove_dirent(sc->tempip,
+					&xfs_name_dotdot, NULLFSINO, 0);
+
+			rd->parent_ino = NULLFSINO;
+		}
+		mutex_unlock(&rd->lock);
+	}
+
+	return NOTIFY_DONE;
+out_abort:
+	xchk_iscan_abort(&rd->iscan);
+	return NOTIFY_DONE;
+}
+
 /* Set up the filesystem scan so we can regenerate directory entries. */
 STATIC int
 xrep_dir_setup_scan(
@@ -902,8 +980,24 @@ xrep_dir_setup_scan(
 	/* Retry iget every tenth of a second for up to 30 seconds. */
 	xchk_iscan_start(&rd->iscan, 30000, 100);
 
+	/*
+	 * Hook into the dirent update code.  The hook only operates on inodes
+	 * that were already scanned, and the scanner thread takes each inode's
+	 * ILOCK, which means that any in-progress inode updates will finish
+	 * before we can scan the inode.
+	 */
+	ASSERT(sc->flags & XCHK_FSHOOKS_DIRENTS);
+	xfs_hook_setup(&rd->hooks.delta_hook, xrep_dir_live_update);
+	error = xfs_dirent_hook_add(sc->mp, &rd->hooks);
+	if (error)
+		goto out_scan;
+
 	return 0;
 
+out_scan:
+	xchk_iscan_finish(&rd->iscan);
+	mutex_destroy(&rd->lock);
+	xfblob_destroy(rd->dir_names);
 out_entries:
 	xfarray_destroy(rd->dir_entries);
 	return error;
