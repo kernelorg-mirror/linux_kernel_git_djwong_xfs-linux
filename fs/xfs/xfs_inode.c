@@ -2988,12 +2988,13 @@ xfs_rename(
 		goto out_release_wip;
 
 	if (wip) {
-		error = xfs_parent_start(mp, &wip_pptr);
+		error = xfs_parent_start_another(mp, &wip_pptr);
 		if (error)
 			goto out_src_ip_pptr;
 	}
+
 	if (target_ip) {
-		error = xfs_parent_start(mp, &tgt_ip_pptr);
+		error = xfs_parent_start_another(mp, &tgt_ip_pptr);
 		if (error)
 			goto out_wip_pptr;
 	}
