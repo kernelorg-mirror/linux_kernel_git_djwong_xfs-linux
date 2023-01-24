@@ -96,8 +96,10 @@ xfs_parent_init(
 		return error;
 
 	parent = kzalloc(sizeof(*parent), GFP_KERNEL);
-	if (!parent)
+	if (!parent) {
+		xfs_attr_rele_log_assist(mp);
 		return -ENOMEM;
+	}
 
 	/* init parent da_args */
 	parent->args.geo = mp->m_attr_geo;
