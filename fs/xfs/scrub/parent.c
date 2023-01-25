@@ -20,6 +20,9 @@
 #include "scrub/common.h"
 #include "scrub/readdir.h"
 #include "scrub/listxattr.h"
+#include "scrub/xfile.h"
+#include "scrub/xfarray.h"
+#include "scrub/xfblob.h"
 #include "scrub/trace.h"
 
 /* Set us up to scrub parents. */
@@ -302,11 +305,35 @@ xchk_parent(
  * to the child file.
  */
 
+/* Deferred parent pointer entry that we saved for later. */
+struct xchk_pptr {
+	/* Cookie for retrieval of the pptr name. */
+	xfblob_cookie			name_cookie;
+
+	/* Parent pointer attr key. */
+	struct xfs_parent_name_rec	attr_key;
+
+	/* Length of the pptr name. */
+	uint8_t				namelen;
+};
+
 struct xchk_pptrs {
 	struct xfs_scrub	*sc;
 
+	/* Fixed-size array of xchk_pptr structures. */
+	struct xfarray		*pptr_entries;
+
+	/* Blobs containing parent pointer names. */
+	struct xfblob		*pptr_names;
+
 	/* Parent of this directory. */
 	xfs_ino_t		parent_ino;
+
+	/* If we've cycled the ILOCK, we must revalidate all deferred pptrs. */
+	bool			need_revalidate;
+
+	/* Name buffer for revalidation. */
+	uint8_t			namebuf[MAXNAMELEN];
 };
 
 /* Look up the dotdot entry so that we can check it as we walk the pptrs. */
@@ -538,8 +565,24 @@ xchk_parent_scan_attr(
 	/* Try to lock the inode. */
 	lockmode = xchk_parent_lock_dir(sc, dp);
 	if (!lockmode) {
-		xchk_set_incomplete(sc);
-		error = -ECANCELED;
+		struct xchk_pptr	save_pp = {
+			.namelen	= valuelen,
+		};
+
+		/* Couldn't lock the inode, so save the pptr for later. */
+		memcpy(&save_pp.attr_key, attr_key, sizeof(save_pp.attr_key));
+
+		trace_xchk_parent_defer(sc->ip, value, valuelen, dp->i_ino);
+
+		error = xfblob_store(pp->pptr_names, &save_pp.name_cookie,
+				value, valuelen);
+		if (xchk_fblock_process_error(sc, XFS_ATTR_FORK, 0, &error))
+			goto out_rele;
+
+		error = xfarray_append(pp->pptr_entries, &save_pp);
+		if (xchk_fblock_process_error(sc, XFS_ATTR_FORK, 0, &error))
+			goto out_rele;
+
 		goto out_rele;
 	}
 
@@ -552,6 +595,171 @@ out_unlock:
 out_rele:
 	xchk_irele(sc, dp);
 	return error;
+}
+
+/*
+ * Revalidate a parent pointer that we collected in the past but couldn't check
+ * because of lock contention.  Returns 0 if the parent pointer is still valid,
+ * -ENOENT if it has gone away on us, or a negative errno.
+ */
+STATIC int
+xchk_parent_revalidate_pptr(
+	struct xchk_pptrs	*pp,
+	struct xchk_pptr	*pptr,
+	const unsigned char	*name)
+{
+	struct xfs_scrub	*sc = pp->sc;
+	struct xfs_da_args	args = {
+		.attr_filter	= XFS_ATTR_PARENT,
+		.dp		= sc->ip,
+		.geo		= sc->mp->m_attr_geo,
+		.name		= (const uint8_t *)&pptr->attr_key,
+		.namelen	= sizeof(pptr->attr_key),
+		.op_flags	= XFS_DA_OP_OKNOENT,
+		.valuelen	= MAXNAMELEN,
+		.value		= pp->namebuf,
+		.whichfork	= XFS_ATTR_FORK,
+	};
+	int			error;
+
+	args.hashval = xfs_da_hashname(args.name, args.namelen);
+
+	error = xfs_attr_get_ilocked(&args);
+	if (error == -ENOATTR) {
+		/*  Parent pointer went away, nothing to revalidate. */
+		return -ENOENT;
+	}
+	if (error != -EEXIST)
+		return error;
+
+	/*
+	 * The dirent name changed length while we were unlocked.  No need
+	 * to revalidate this.
+	 */
+	if (args.valuelen != pptr->namelen)
+		return -ENOENT;
+
+	/* The dirent name itself changed; there's nothing to revalidate. */
+	if (memcmp(pp->namebuf, name, pptr->namelen))
+		return -ENOENT;
+	return 0;
+}
+
+/*
+ * Check a parent pointer the slow way, which means we cycle locks a bunch
+ * and put up with revalidation until we get it done.
+ */
+STATIC int
+xchk_parent_slow_pptr(
+	struct xchk_pptrs	*pp,
+	struct xchk_pptr	*pptr)
+{
+	struct xfs_scrub	*sc = pp->sc;
+	struct xfs_inode	*dp;
+	unsigned int		lockmode;
+	xfs_dir2_dataptr_t	diroffset = XFS_DIR2_NULL_DATAPTR;
+	int			error;
+
+	/* Check that the deferred parent pointer still exists. */
+	if (pp->need_revalidate) {
+		error = xchk_parent_revalidate_pptr(pp, pptr, pp->namebuf);
+		if (error == -ENOENT)
+			return 0;
+		if (!xchk_fblock_xref_process_error(sc, XFS_ATTR_FORK, 0,
+					&error))
+			return error;
+	}
+
+	error = xchk_parent_iget(sc, &pptr->attr_key, &dp, &diroffset);
+	if (error)
+		return error;
+
+	/*
+	 * If we can grab both IOLOCK and ILOCK of the alleged parent, we
+	 * can proceed with the validation.
+	 */
+	lockmode = xchk_parent_lock_dir(sc, dp);
+	if (lockmode)
+		goto check_dirent;
+
+	/*
+	 * We couldn't lock the parent dir.  Drop all the locks and try to
+	 * get them again, one at a time.
+	 */
+	xchk_iunlock(sc, sc->ilock_flags);
+	pp->need_revalidate = true;
+
+	trace_xchk_parent_slowpath(sc->ip, pp->namebuf, pptr->namelen,
+			dp->i_ino);
+
+	while (true) {
+		xchk_ilock(sc, XFS_IOLOCK_EXCL);
+		if (xfs_ilock_nowait(dp, XFS_IOLOCK_SHARED)) {
+			xchk_ilock(sc, XFS_ILOCK_EXCL);
+			if (xfs_ilock_nowait(dp, XFS_ILOCK_EXCL)) {
+				break;
+			}
+			xchk_iunlock(sc, XFS_ILOCK_EXCL);
+		}
+		xchk_iunlock(sc, XFS_IOLOCK_EXCL);
+
+		if (xchk_should_terminate(sc, &error))
+			goto out_rele;
+
+		delay(1);
+	}
+	lockmode = XFS_IOLOCK_SHARED | XFS_ILOCK_EXCL;
+
+	/*
+	 * If we didn't already find a parent pointer matching the dotdot
+	 * entry, re-query the dotdot entry so that we can validate it.
+	 */
+	if (pp->parent_ino != NULLFSINO) {
+		error = xchk_parent_dotdot(pp);
+		if (error)
+			goto out_unlock;
+	}
+
+check_dirent:
+	error = xchk_parent_dirent(pp, dp, pp->namebuf, pptr->namelen,
+			diroffset);
+out_unlock:
+	xfs_iunlock(dp, lockmode);
+out_rele:
+	xchk_irele(sc, dp);
+	return error;
+}
+
+/* Check all the parent pointers that we deferred the first time around. */
+STATIC int
+xchk_parent_finish_slow_pptrs(
+	struct xchk_pptrs	*pp)
+{
+	xfarray_idx_t		array_cur;
+	int			error;
+
+	foreach_xfarray_idx(pp->pptr_entries, array_cur) {
+		struct xchk_pptr	pptr;
+
+		error = xfarray_load(pp->pptr_entries, array_cur, &pptr);
+		if (error)
+			return error;
+
+		error = xfblob_load(pp->pptr_names, pptr.name_cookie,
+				pp->namebuf, pptr.namelen);
+		if (error)
+			return error;
+		pp->namebuf[MAXNAMELEN - 1] = 0;
+
+		error = xchk_parent_slow_pptr(pp, &pptr);
+		if (error)
+			return error;
+	}
+
+	/* Empty out both xfiles now that we've checked everything. */
+	xfarray_truncate(pp->pptr_entries);
+	xfblob_truncate(pp->pptr_names);
+	return 0;
 }
 
 /* Check parent pointers of a file. */
@@ -571,14 +779,35 @@ xchk_parent_pptr(
 	if (error)
 		goto out_pp;
 
-	error = xchk_xattr_walk(sc, sc->ip, xchk_parent_scan_attr, pp);
-	if (error == -ECANCELED) {
-		error = 0;
-		goto out_pp;
-	}
+	/*
+	 * Set up some staging memory for parent pointers that we can't check
+	 * due to locking contention.
+	 */
+	error = xfarray_create(sc->mp, "pptr entries", 0,
+			sizeof(struct xchk_pptr), &pp->pptr_entries);
 	if (error)
 		goto out_pp;
 
+	error = xfblob_create(sc->mp, "pptr names", &pp->pptr_names);
+	if (error)
+		goto out_entries;
+
+	error = xchk_xattr_walk(sc, sc->ip, xchk_parent_scan_attr, pp);
+	if (error == -ECANCELED) {
+		error = 0;
+		goto out_names;
+	}
+	if (error)
+		goto out_names;
+
+	error = xchk_parent_finish_slow_pptrs(pp);
+	if (error)
+		goto out_names;
+
+out_names:
+	xfblob_destroy(pp->pptr_names);
+out_entries:
+	xfarray_destroy(pp->pptr_entries);
 out_pp:
 	kvfree(pp);
 	return error;
