@@ -179,6 +179,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   bitmap.o \
 				   repair.o \
 				   tempfile.o \
+				   xfblob.o \
 				   )
 endif
 endif
