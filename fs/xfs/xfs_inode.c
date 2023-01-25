@@ -1300,6 +1300,16 @@ xfs_link(
 		goto out_parent;
 
 	/*
+	 * We don't allow reservationless or quotaless hardlinking when parent
+	 * pointers are enabled because we can't back out if the xattrs must
+	 * grow.
+	 */
+	if (parent && nospace_error) {
+		error = nospace_error;
+		goto error_return;
+	}
+
+	/*
 	 * If we are using project inheritance, we only allow hard link
 	 * creation in our tree when the project IDs are the same; else
 	 * the tree quota mechanism could be circumvented.
@@ -2559,6 +2569,20 @@ xfs_remove(
 	}
 
 	/*
+	 * We don't allow reservationless or quotaless unlinking when parent
+	 * pointers are enabled because we can't back out if the xattrs must
+	 * grow.
+	 *
+	 * XXX: Actually, let's try this and see what happens.
+	 */
+#if 0
+	if (parent && dontcare) {
+		error = dontcare;
+		goto out_trans_cancel;
+	}
+#endif
+
+	/*
 	 * If we're removing a directory perform some additional validation.
 	 */
 	if (is_dir) {
@@ -3014,6 +3038,16 @@ retry:
 		goto out_tgt_ip_pptr;
 
 	/*
+	 * We don't allow reservationless renaming when parent pointers are
+	 * enabled because we can't back out if the xattrs must grow.
+	 */
+	if (src_ip_pptr && nospace_error) {
+		error = nospace_error;
+		xfs_trans_cancel(tp);
+		goto out_tgt_ip_pptr;
+	}
+
+	/*
 	 * Attach the dquots to the inodes
 	 */
 	error = xfs_qm_vop_rename_dqattach(inodes);
@@ -3083,6 +3117,15 @@ retry:
 		}
 		if (error)
 			goto out_trans_cancel;
+	}
+
+	/*
+	 * We don't allow quotaless renaming when parent pointers are enabled
+	 * because we can't back out if the xattrs must grow.
+	 */
+	if (src_ip_pptr && nospace_error) {
+		error = nospace_error;
+		goto out_trans_cancel;
 	}
 
 	/*
