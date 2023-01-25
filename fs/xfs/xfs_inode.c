@@ -1135,9 +1135,9 @@ xfs_create(
 	 * transactions and deadlocks from xfs_inactive.
 	 */
 	if (ip) {
+		xfs_iunlock(ip, XFS_ILOCK_EXCL);
 		xfs_finish_inode_setup(ip);
 		xfs_irele(ip);
-		xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	}
  drop_incompat:
 	if (parent)

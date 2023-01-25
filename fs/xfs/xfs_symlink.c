@@ -387,6 +387,7 @@ out_release_inode:
 	 * transactions and deadlocks from xfs_inactive.
 	 */
 	if (ip) {
+		xfs_iunlock(ip, XFS_ILOCK_EXCL);
 		xfs_finish_inode_setup(ip);
 		xfs_irele(ip);
 	}
@@ -397,8 +398,6 @@ out_release_dquots:
 
 	if (unlock_dp_on_error)
 		xfs_iunlock(dp, XFS_ILOCK_EXCL);
-	if (ip)
-		xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	if (parent)
 		xfs_parent_cancel(mp, parent);
 
