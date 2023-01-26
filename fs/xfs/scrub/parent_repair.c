@@ -502,7 +502,10 @@ xrep_pptr_scan_dirtree(
 	return 0;
 }
 
-/* Dump a parent pointer from the temporary file. */
+/*
+ * Dump a parent pointer from the temporary file and check it against the file
+ * we're rebuilding.  We are not committing any of this.
+ */
 STATIC int
 xrep_pptr_dump_tempptr(
 	struct xfs_scrub	*sc,
@@ -518,11 +521,59 @@ xrep_pptr_dump_tempptr(
 		.name		= value,
 		.len		= valuelen,
 	};
+	struct xrep_pptrs	*rp = priv;
+	const struct xfs_parent_name_rec *attr_key = name;
+	struct xfs_inode	*other_ip;
+	int			error;
 
 	if (!(attr_flags & XFS_ATTR_PARENT))
 		return 0;
 
+	if (ip == sc->ip)
+		other_ip = sc->tempip;
+	else if (ip == sc->tempip)
+		other_ip = sc->ip;
+	else
+		return -EFSCORRUPTED;
+
 	trace_xrep_pptr_dumpname(sc->tempip, name, &xname);
+
+	/* Check that the file being repaired has the same pptrs. */
+	memset(&rp->args, 0, sizeof(struct xfs_da_args));
+	rp->args.attr_filter	= XFS_ATTR_PARENT;
+	rp->args.dp		= other_ip;
+	rp->args.geo		= sc->mp->m_attr_geo;
+	rp->args.name		= (const unsigned char *)attr_key;
+	rp->args.namelen	= sizeof(*attr_key);
+	rp->args.op_flags	= XFS_DA_OP_OKNOENT;
+	rp->args.trans		= sc->tp;
+	rp->args.valuelen	= MAXNAMELEN;
+	rp->args.value		= rp->namebuf;
+	rp->args.whichfork	= XFS_ATTR_FORK;
+	rp->args.hashval	= xfs_da_hashname(rp->args.name,
+						  rp->args.namelen);
+
+	error = xfs_attr_get_ilocked(&rp->args);
+	if (error == -ENOATTR) {
+		trace_xrep_pptr_checkname(other_ip, attr_key, &xname);
+		ASSERT(error != -ENOATTR);
+		return -EFSCORRUPTED;
+	}
+	if (error)
+		return error;
+
+	if (valuelen != rp->args.valuelen) {
+		trace_xrep_pptr_checkname(other_ip, attr_key, &xname);
+		ASSERT(valuelen == rp->args.valuelen);
+		return -EFSCORRUPTED;
+	}
+
+	if (memcmp(rp->namebuf, value, valuelen)) {
+		trace_xrep_pptr_checkname(other_ip, attr_key, &xname);
+		ASSERT(0);
+		return -EFSCORRUPTED;
+	}
+
 	return 0;
 }
 
@@ -578,8 +629,16 @@ xrep_pptr_rebuild_tree(
 
 	trace_xrep_pptr_rebuild_tree(sc->ip, 0);
 
-	xrep_tempfile_ilock(sc);
-	return xchk_xattr_walk(sc, sc->tempip, xrep_pptr_dump_tempptr, rp);
+	xchk_ilock(sc, XFS_ILOCK_EXCL);
+	error = xrep_tempfile_ilock_polled(sc);
+	if (error)
+		return error;
+
+	error = xchk_xattr_walk(sc, sc->tempip, xrep_pptr_dump_tempptr, rp);
+	if (error)
+		return error;
+
+	return xchk_xattr_walk(sc, sc->ip, xrep_pptr_dump_tempptr, rp);
 }
 
 /*

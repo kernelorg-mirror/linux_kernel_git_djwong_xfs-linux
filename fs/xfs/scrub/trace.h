@@ -1360,6 +1360,7 @@ DEFINE_XREP_PPTR_CLASS(xrep_pptr_remove_pointer);
 DEFINE_XREP_PPTR_CLASS(xrep_pptr_createname);
 DEFINE_XREP_PPTR_CLASS(xrep_pptr_removename);
 DEFINE_XREP_PPTR_CLASS(xrep_pptr_dumpname);
+DEFINE_XREP_PPTR_CLASS(xrep_pptr_checkname);
 
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
 
