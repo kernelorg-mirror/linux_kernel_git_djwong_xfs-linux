@@ -1356,7 +1356,9 @@ DEFINE_EVENT(xrep_pptr_class, name, \
 		 const struct xfs_name *name), \
 	TP_ARGS(ip, pptr, name))
 DEFINE_XREP_PPTR_CLASS(xrep_pptr_add_pointer);
+DEFINE_XREP_PPTR_CLASS(xrep_pptr_remove_pointer);
 DEFINE_XREP_PPTR_CLASS(xrep_pptr_createname);
+DEFINE_XREP_PPTR_CLASS(xrep_pptr_removename);
 DEFINE_XREP_PPTR_CLASS(xrep_pptr_dumpname);
 
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
