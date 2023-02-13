@@ -896,6 +896,39 @@ TRACE_EVENT(xchk_nlinks_live_update,
 		  __get_str(name))
 );
 
+TRACE_EVENT(xchk_parent_bad_dapos,
+	TP_PROTO(struct xfs_inode *ip, unsigned int p_diroffset,
+		 xfs_ino_t parent_ino, unsigned int dapos,
+		 const char *name, unsigned int namelen),
+	TP_ARGS(ip, p_diroffset, parent_ino, dapos, name, namelen),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(unsigned int, p_diroffset)
+		__field(xfs_ino_t, parent_ino)
+		__field(unsigned int, dapos)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, namelen)
+	),
+	TP_fast_assign(
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->p_diroffset = p_diroffset;
+		__entry->parent_ino = parent_ino;
+		__entry->dapos = dapos;
+		__entry->namelen = namelen;
+		memcpy(__get_str(name), name, namelen);
+	),
+	TP_printk("dev %d:%d ino 0x%llx p_diroff 0x%x parent_ino 0x%llx parent_diroff 0x%x name '%.*s'",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->p_diroffset,
+		  __entry->parent_ino,
+		  __entry->dapos,
+		  __entry->namelen,
+		  __get_str(name))
+);
+
 /* repair tracepoints */
 #if IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR)
 
