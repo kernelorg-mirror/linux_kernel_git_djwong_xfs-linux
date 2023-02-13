@@ -74,7 +74,7 @@ struct xfs_inobt_rec_incore;
 union xfs_btree_ptr;
 struct xfs_dqtrx;
 struct xfs_icwalk;
-struct xfs_pptr_info;
+struct xfs_getparents;
 struct xfs_parent_name_irec;
 struct xfs_attrlist_cursor_kern;
 
@@ -4321,7 +4321,7 @@ TRACE_EVENT(xfs_force_shutdown,
 );
 
 TRACE_EVENT(xfs_getparent_listent,
-	TP_PROTO(struct xfs_inode *ip, const struct xfs_pptr_info *ppi,
+	TP_PROTO(struct xfs_inode *ip, const struct xfs_getparents *ppi,
 	         const struct xfs_parent_name_irec *irec),
 	TP_ARGS(ip, ppi, irec),
 	TP_STRUCT__entry(
@@ -4337,8 +4337,8 @@ TRACE_EVENT(xfs_getparent_listent,
 	TP_fast_assign(
 		__entry->dev = ip->i_mount->m_super->s_dev;
 		__entry->ino = ip->i_ino;
-		__entry->pused = ppi->pi_ptrs_used;
-		__entry->psize = ppi->pi_ptrs_size;
+		__entry->pused = ppi->gp_ptrs_used;
+		__entry->psize = ppi->gp_ptrs_size;
 		__entry->parent_ino = irec->p_ino;
 		__entry->parent_gen = irec->p_gen;
 		__entry->namelen = irec->p_namelen;
@@ -4356,7 +4356,7 @@ TRACE_EVENT(xfs_getparent_listent,
 );
 
 TRACE_EVENT(xfs_getparent_pointers,
-	TP_PROTO(struct xfs_inode *ip, const struct xfs_pptr_info *ppi,
+	TP_PROTO(struct xfs_inode *ip, const struct xfs_getparents *ppi,
 		 const struct xfs_attrlist_cursor_kern *cur),
 	TP_ARGS(ip, ppi, cur),
 	TP_STRUCT__entry(
@@ -4372,8 +4372,8 @@ TRACE_EVENT(xfs_getparent_pointers,
 	TP_fast_assign(
 		__entry->dev = ip->i_mount->m_super->s_dev;
 		__entry->ino = ip->i_ino;
-		__entry->flags = ppi->pi_flags;
-		__entry->psize = ppi->pi_ptrs_size;
+		__entry->flags = ppi->gp_flags;
+		__entry->psize = ppi->gp_ptrs_size;
 		__entry->hashval = cur->hashval;
 		__entry->blkno = cur->blkno;
 		__entry->offset = cur->offset;

@@ -158,7 +158,7 @@ xfs_check_ondisk_structs(void)
 
 	/* parent pointer ioctls */
 	XFS_CHECK_STRUCT_SIZE(struct xfs_parent_ptr,            280);
-	XFS_CHECK_STRUCT_SIZE(struct xfs_pptr_info,             104);
+	XFS_CHECK_STRUCT_SIZE(struct xfs_getparents,		104);
 
 	/*
 	 * The v5 superblock format extended several v4 header structures with

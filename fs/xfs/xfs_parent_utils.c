@@ -26,7 +26,7 @@
 struct xfs_getparent_ctx {
 	struct xfs_attr_list_context	context;
 	struct xfs_parent_name_irec	pptr_irec;
-	struct xfs_pptr_info		*ppi;
+	struct xfs_getparents		*ppi;
 };
 
 static void
@@ -39,7 +39,7 @@ xfs_getparent_listent(
 	int				valuelen)
 {
 	struct xfs_getparent_ctx	*gp;
-	struct xfs_pptr_info		*ppi;
+	struct xfs_getparents		*ppi;
 	struct xfs_parent_ptr		*pptr;
 	struct xfs_parent_name_irec	*irec;
 	struct xfs_mount		*mp = context->dp->i_mount;
@@ -69,7 +69,7 @@ xfs_getparent_listent(
 	 * to the caller that we did /not/ reach the end of the parent pointer
 	 * recordset.
 	 */
-	if (ppi->pi_ptrs_used >= ppi->pi_ptrs_size) {
+	if (ppi->gp_ptrs_used >= ppi->gp_ptrs_size) {
 		context->seen_enough = 1;
 		return;
 	}
@@ -80,7 +80,7 @@ xfs_getparent_listent(
 	trace_xfs_getparent_listent(context->dp, ppi, irec);
 
 	/* Format the parent pointer directly into the caller buffer. */
-	pptr = &ppi->pi_parents[ppi->pi_ptrs_used++];
+	pptr = &ppi->gp_parents[ppi->gp_ptrs_used++];
 	pptr->xpp_ino = irec->p_ino;
 	pptr->xpp_gen = irec->p_gen;
 	pptr->xpp_rsvd2 = 0;
@@ -95,7 +95,7 @@ xfs_getparent_listent(
 int
 xfs_getparent_pointers(
 	struct xfs_inode		*ip,
-	struct xfs_pptr_info		*ppi)
+	struct xfs_getparents		*ppi)
 {
 	struct xfs_getparent_ctx	*gp;
 	int				error;
@@ -110,9 +110,9 @@ xfs_getparent_pointers(
 	gp->context.bufsize = 1; /* always init cursor */
 
 	/* Copy the cursor provided by caller */
-	memcpy(&gp->context.cursor, &ppi->pi_cursor,
+	memcpy(&gp->context.cursor, &ppi->gp_cursor,
 			sizeof(struct xfs_attrlist_cursor));
-	ppi->pi_ptrs_used = 0;
+	ppi->gp_ptrs_used = 0;
 
 	trace_xfs_getparent_pointers(ip, ppi, &gp->context.cursor);
 
@@ -126,17 +126,17 @@ xfs_getparent_pointers(
 
 	/* Is this the root directory? */
 	if (ip->i_ino == ip->i_mount->m_sb.sb_rootino)
-		ppi->pi_flags |= XFS_PPTR_OFLAG_ROOT;
+		ppi->gp_flags |= XFS_GETPARENTS_OFLAG_ROOT;
 
 	/*
 	 * If we did not run out of buffer space, then we reached the end of
 	 * the pptr recordset, so set the DONE flag.
 	 */
 	if (gp->context.seen_enough == 0)
-		ppi->pi_flags |= XFS_PPTR_OFLAG_DONE;
+		ppi->gp_flags |= XFS_GETPARENTS_OFLAG_DONE;
 
 	/* Update the caller with the current cursor position */
-	memcpy(&ppi->pi_cursor, &gp->context.cursor,
+	memcpy(&ppi->gp_cursor, &gp->context.cursor,
 			sizeof(struct xfs_attrlist_cursor));
 out_free:
 	kfree(gp);

@@ -6,6 +6,6 @@
 #ifndef	__XFS_PARENT_UTILS_H__
 #define	__XFS_PARENT_UTILS_H__
 
-int xfs_getparent_pointers(struct xfs_inode *ip, struct xfs_pptr_info *ppi);
+int xfs_getparent_pointers(struct xfs_inode *ip, struct xfs_getparents *ppi);
 
 #endif	/* __XFS_PARENT_UTILS_H__ */
