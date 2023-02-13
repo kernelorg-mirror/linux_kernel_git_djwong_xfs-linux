@@ -105,7 +105,7 @@ xchk_dir_actor(
 	}
 
 	/* Verify that we can look up this name by hash. */
-	error = xchk_dir_lookup(sc, dp, name, &lookup_ino);
+	error = xchk_dir_lookup(sc, dp, name, &lookup_ino, NULL);
 	/* ENOENT means the hash lookup failed and the dir is corrupt */
 	if (error == -ENOENT)
 		error = -EFSCORRUPTED;
