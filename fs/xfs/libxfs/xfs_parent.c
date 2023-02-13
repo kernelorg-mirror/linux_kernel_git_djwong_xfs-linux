@@ -298,3 +298,41 @@ xfs_pptr_calc_space_res(
 	       XFS_NEXTENTADD_SPACE_RES(mp, namelen, XFS_ATTR_FORK);
 }
 
+/*
+ * Look up the @name associated with the parent pointer (@pptr) of @ip.  Caller
+ * must hold at least ILOCK_SHARED.  Returns the length of the dirent name, or
+ * a negative errno.  The scratchpad need not be initialized.
+ */
+int
+xfs_parent_lookup(
+	struct xfs_trans		*tp,
+	struct xfs_inode		*ip,
+	const struct xfs_parent_name_irec *pptr,
+	unsigned char			*name,
+	unsigned int			namelen,
+	struct xfs_parent_scratch	*scr)
+{
+	int				error;
+
+	xfs_parent_irec_to_disk(&scr->rec, NULL, NULL, pptr);
+
+	memset(&scr->args, 0, sizeof(struct xfs_da_args));
+	scr->args.attr_filter	= XFS_ATTR_PARENT;
+	scr->args.dp		= ip;
+	scr->args.geo		= ip->i_mount->m_attr_geo;
+	scr->args.name		= (const unsigned char *)&scr->rec;
+	scr->args.namelen	= sizeof(struct xfs_parent_name_rec);
+	scr->args.op_flags	= XFS_DA_OP_OKNOENT;
+	scr->args.trans		= tp;
+	scr->args.valuelen	= namelen;
+	scr->args.value		= name;
+	scr->args.whichfork	= XFS_ATTR_FORK;
+
+	scr->args.hashval = xfs_da_hashname(scr->args.name, scr->args.namelen);
+
+	error = xfs_attr_get_ilocked(&scr->args);
+	if (error)
+		return error;
+
+	return scr->args.valuelen;
+}
