@@ -40,7 +40,7 @@ xfs_getparent_listent(
 {
 	struct xfs_getparent_ctx	*gp;
 	struct xfs_getparents		*ppi;
-	struct xfs_parent_ptr		*pptr;
+	struct xfs_getparents_rec	*pptr;
 	struct xfs_parent_name_irec	*irec;
 	struct xfs_mount		*mp = context->dp->i_mount;
 
@@ -81,14 +81,14 @@ xfs_getparent_listent(
 
 	/* Format the parent pointer directly into the caller buffer. */
 	pptr = &ppi->gp_parents[ppi->gp_ptrs_used++];
-	pptr->xpp_ino = irec->p_ino;
-	pptr->xpp_gen = irec->p_gen;
-	pptr->xpp_rsvd2 = 0;
-	pptr->xpp_rsvd = 0;
+	pptr->gpr_ino = irec->p_ino;
+	pptr->gpr_gen = irec->p_gen;
+	pptr->gpr_rsvd2 = 0;
+	pptr->gpr_rsvd = 0;
 
-	memcpy(pptr->xpp_name, irec->p_name, irec->p_namelen);
-	memset(pptr->xpp_name + irec->p_namelen, 0,
-			sizeof(pptr->xpp_name) - irec->p_namelen);
+	memcpy(pptr->gpr_name, irec->p_name, irec->p_namelen);
+	memset(pptr->gpr_name + irec->p_namelen, 0,
+			sizeof(pptr->gpr_name) - irec->p_namelen);
 }
 
 /* Retrieve the parent pointers for a given inode. */

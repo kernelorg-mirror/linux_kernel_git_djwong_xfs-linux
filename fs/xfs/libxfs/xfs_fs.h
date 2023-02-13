@@ -768,12 +768,12 @@ struct xfs_scrub_metadata {
 					 XFS_GETPARENTS_OFLAG_DONE)
 
 /* Get an inode parent pointer through ioctl */
-struct xfs_parent_ptr {
-	__u64		xpp_ino;			/* Inode */
-	__u32		xpp_gen;			/* Inode generation */
-	__u32		xpp_rsvd;			/* Reserved */
-	__u64		xpp_rsvd2;			/* Reserved */
-	__u8		xpp_name[XFS_GETPARENTS_MAXNAMELEN];	/* File name */
+struct xfs_getparents_rec {
+	__u64		gpr_ino;			/* Inode */
+	__u32		gpr_gen;			/* Inode generation */
+	__u32		gpr_rsvd;			/* Reserved */
+	__u64		gpr_rsvd2;			/* Reserved */
+	__u8		gpr_name[XFS_GETPARENTS_MAXNAMELEN];	/* File name */
 };
 
 /* Iterate through an inodes parent pointers */
@@ -804,21 +804,21 @@ struct xfs_getparents {
 	__u64				gp_reserved2[6];
 
 	/*
-	 * An array of struct xfs_parent_ptr follows the header
+	 * An array of struct xfs_getparents_rec follows the header
 	 * information. Use xfs_getparents_rec() to access the
 	 * parent pointer array entries.
 	 */
-	struct xfs_parent_ptr		gp_parents[];
+	struct xfs_getparents_rec		gp_parents[];
 };
 
 static inline size_t
 xfs_getparents_sizeof(int nr_ptrs)
 {
 	return sizeof(struct xfs_getparents) +
-	       (nr_ptrs * sizeof(struct xfs_parent_ptr));
+	       (nr_ptrs * sizeof(struct xfs_getparents_rec));
 }
 
-static inline struct xfs_parent_ptr*
+static inline struct xfs_getparents_rec*
 xfs_getparents_rec(
 	struct xfs_getparents	*info,
 	unsigned int		idx)
@@ -871,7 +871,7 @@ xfs_getparents_rec(
 /*	XFS_IOC_GETFSMAP ------ hoisted 59         */
 #define XFS_IOC_SCRUB_METADATA	_IOWR('X', 60, struct xfs_scrub_metadata)
 #define XFS_IOC_AG_GEOMETRY	_IOWR('X', 61, struct xfs_ag_geometry)
-#define XFS_IOC_GETPARENTS	_IOWR('X', 62, struct xfs_parent_ptr)
+#define XFS_IOC_GETPARENTS	_IOWR('X', 62, struct xfs_getparents_rec)
 
 /*
  * ioctl commands that replace IRIX syssgi()'s
