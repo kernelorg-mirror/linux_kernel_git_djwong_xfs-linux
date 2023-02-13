@@ -179,6 +179,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   agheader_repair.o \
 				   dir_repair.o \
 				   bitmap.o \
+				   parent_repair.o \
 				   repair.o \
 				   tempfile.o \
 				   xfblob.o \
