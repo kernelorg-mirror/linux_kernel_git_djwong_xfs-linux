@@ -350,7 +350,7 @@ struct xchk_pptrs {
 	struct xfs_parent_scratch pptr_scratch;
 
 	/* Name hashes */
-	uint8_t			child_namehash[XFS_PARENT_NAME_HASH_SIZE];
+	uint8_t			child_namehash[XFS_PARENT_NAME_MAX_HASH_SIZE];
 
 	/* Name buffer for revalidation. */
 	uint8_t			namebuf[MAXNAMELEN];
@@ -548,7 +548,7 @@ xchk_parent_scan_attr(
 		return -ECANCELED;
 	}
 
-	if (!xfs_parent_valuecheck(sc->mp, value, valuelen)) {
+	if (!xfs_parent_valuecheck(sc->mp, namelen, value, valuelen)) {
 		xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, 0);
 		return -ECANCELED;
 	}

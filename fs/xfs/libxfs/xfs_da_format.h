@@ -825,19 +825,24 @@ xfs_failaddr_t xfs_da3_blkinfo_verify(struct xfs_buf *bp,
 				      struct xfs_da3_blkinfo *hdr3);
 
 /* We use sha512 for the parent pointer name hash. */
-#define XFS_PARENT_NAME_HASH_SIZE	(64)
+#define XFS_PARENT_NAME_SHA512_SIZE	(64)
 
 /*
  * Parent pointer attribute format definition
  *
  * The EA name encodes the parent inode number, generation and a collision
- * resistant hash computed from the dirent name.  The hash is defined to be:
+ * resistant hash computed from the dirent name.  The hash is defined to be
+ * one of the following:
  *
- * - The dirent name if it fits within the EA name.
+ * - The dirent name, as long as it does not use the last possible byte of the
+ *   EA name space.
  *
- * - The sha512 of the child inode generation and the dirent name.
+ * - The truncated dirent name, with the sha512 hash of the child inode
+ *   generation number and dirent name.  The hash is written at the end of the
+ *   EA name.
  *
- * The EA value contains the same name as the dirent in the parent directory.
+ * The EA value contains however much of the dirent name that does not fit in
+ * the EA name.
  */
 struct xfs_parent_name_rec {
 	__be64  p_ino;
@@ -845,8 +850,17 @@ struct xfs_parent_name_rec {
 	__u8	p_namehash[];
 } __attribute__((packed));
 
+/* Maximum size of a parent pointer EA name. */
 #define XFS_PARENT_NAME_MAX_SIZE \
-	(sizeof(struct xfs_parent_name_rec) + XFS_PARENT_NAME_HASH_SIZE)
+	(MAXNAMELEN - 1)
+
+/* Maximum size of a parent pointer name hash. */
+#define XFS_PARENT_NAME_MAX_HASH_SIZE \
+	(XFS_PARENT_NAME_MAX_SIZE - sizeof(struct xfs_parent_name_rec))
+
+/* Offset of the sha512 hash, if used. */
+#define XFS_PARENT_NAME_SHA512_OFFSET \
+	(XFS_PARENT_NAME_MAX_HASH_SIZE - XFS_PARENT_NAME_SHA512_SIZE)
 
 static inline unsigned int
 xfs_parent_name_rec_sizeof(
