@@ -139,16 +139,20 @@ xchk_dir_lock_child(
 STATIC int
 xchk_dir_parent_pointer(
 	struct xchk_dir		*sd,
-	xfs_dir2_dataptr_t	dapos,
 	const struct xfs_name	*name,
 	struct xfs_inode	*ip)
 {
 	struct xfs_scrub	*sc = sd->sc;
 	int			pptr_namelen;
+	int			error;
 
 	sd->pptr.p_ino = sc->ip->i_ino;
 	sd->pptr.p_gen = VFS_I(sc->ip)->i_generation;
-	sd->pptr.p_diroffset = dapos;
+
+	error = xfs_parent_namehash(ip, name, &sd->pptr.p_namehash,
+			sizeof(sd->pptr.p_namehash));
+	if (error)
+		return error;
 
 	pptr_namelen = xfs_parent_lookup(sc->tp, ip, &sd->pptr, sd->namebuf,
 			MAXNAMELEN, &sd->pptr_scratch);
@@ -216,7 +220,7 @@ xchk_dir_check_pptr_fast(
 		return 0;
 	}
 
-	error = xchk_dir_parent_pointer(sd, dapos, name, ip);
+	error = xchk_dir_parent_pointer(sd, name, ip);
 	xfs_iunlock(ip, lockmode);
 	return error;
 }
@@ -1041,7 +1045,7 @@ xchk_dir_slow_dirent(
 		goto out_unlock;
 
 check_pptr:
-	error = xchk_dir_parent_pointer(sd, dirent->diroffset, &xname, ip);
+	error = xchk_dir_parent_pointer(sd, &xname, ip);
 out_unlock:
 	xfs_iunlock(ip, lockmode);
 out_rele:

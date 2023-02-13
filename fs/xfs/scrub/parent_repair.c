@@ -95,7 +95,6 @@ struct xrep_pptr {
 	/* Parent pointer attr key. */
 	xfs_ino_t			p_ino;
 	uint32_t			p_gen;
-	xfs_dir2_dataptr_t		p_diroffset;
 
 	/* Length of the pptr name. */
 	uint8_t				namelen;
@@ -183,11 +182,15 @@ xrep_pptr_replay_update(
 	const struct xrep_pptr	*pptr)
 {
 	struct xfs_scrub	*sc = rp->sc;
+	int			error;
 
 	rp->pptr.p_ino = pptr->p_ino;
 	rp->pptr.p_gen = pptr->p_gen;
-	rp->pptr.p_diroffset = pptr->p_diroffset;
 	rp->pptr.p_namelen = pptr->namelen;
+
+	error = xfs_parent_irec_hash(sc->ip, &rp->pptr);
+	if (error)
+		return error;
 
 	if (pptr->action == XREP_PPTR_ADD) {
 		/* Create parent pointer. */
@@ -261,19 +264,17 @@ STATIC int
 xrep_pptr_add_pointer(
 	struct xrep_pptrs	*rp,
 	const struct xfs_name	*name,
-	const struct xfs_inode	*dp,
-	xfs_dir2_dataptr_t	diroffset)
+	const struct xfs_inode	*dp)
 {
 	struct xrep_pptr	pptr = {
 		.action		= XREP_PPTR_ADD,
 		.namelen	= name->len,
 		.p_ino		= dp->i_ino,
 		.p_gen		= VFS_IC(dp)->i_generation,
-		.p_diroffset	= diroffset,
 	};
 	int			error;
 
-	trace_xrep_pptr_add_pointer(rp->sc->tempip, dp, diroffset, name);
+	trace_xrep_pptr_add_pointer(rp->sc->tempip, dp, name);
 
 	error = xfblob_store(rp->pptr_names, &pptr.name_cookie, name->name,
 			name->len);
@@ -291,19 +292,17 @@ STATIC int
 xrep_pptr_remove_pointer(
 	struct xrep_pptrs	*rp,
 	const struct xfs_name	*name,
-	const struct xfs_inode	*dp,
-	xfs_dir2_dataptr_t	diroffset)
+	const struct xfs_inode	*dp)
 {
 	struct xrep_pptr	pptr = {
 		.action		= XREP_PPTR_REMOVE,
 		.namelen	= name->len,
 		.p_ino		= dp->i_ino,
 		.p_gen		= VFS_IC(dp)->i_generation,
-		.p_diroffset	= diroffset,
 	};
 	int			error;
 
-	trace_xrep_pptr_remove_pointer(rp->sc->tempip, dp, diroffset, name);
+	trace_xrep_pptr_remove_pointer(rp->sc->tempip, dp, name);
 
 	error = xfblob_store(rp->pptr_names, &pptr.name_cookie, name->name,
 			name->len);
@@ -352,7 +351,7 @@ xrep_pptr_scan_dirent(
 	 * addition to the temporary file.
 	 */
 	mutex_lock(&rp->lock);
-	error = xrep_pptr_add_pointer(rp, name, dp, dapos);
+	error = xrep_pptr_add_pointer(rp, name, dp);
 	mutex_unlock(&rp->lock);
 	return error;
 }
@@ -665,11 +664,9 @@ xrep_pptr_live_update(
 	    xchk_iscan_want_live_update(&rp->iscan, p->dp->i_ino)) {
 		mutex_lock(&rp->lock);
 		if (p->delta > 0)
-			error = xrep_pptr_add_pointer(rp, p->name, p->dp,
-					p->diroffset);
+			error = xrep_pptr_add_pointer(rp, p->name, p->dp);
 		else
-			error = xrep_pptr_remove_pointer(rp, p->name, p->dp,
-					p->diroffset);
+			error = xrep_pptr_remove_pointer(rp, p->name, p->dp);
 		mutex_unlock(&rp->lock);
 		if (error)
 			goto out_abort;

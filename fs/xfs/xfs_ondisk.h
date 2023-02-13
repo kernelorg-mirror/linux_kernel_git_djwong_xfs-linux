@@ -6,6 +6,8 @@
 #ifndef __XFS_ONDISK_H
 #define __XFS_ONDISK_H
 
+#include <crypto/sha2.h>
+
 #define XFS_CHECK_STRUCT_SIZE(structname, size) \
 	BUILD_BUG_ON_MSG(sizeof(structname) != (size), "XFS: sizeof(" \
 		#structname ") is wrong, expected " #size)
@@ -114,6 +116,8 @@ xfs_check_ondisk_structs(void)
 	XFS_CHECK_OFFSET(xfs_dir2_sf_entry_t, offset,		1);
 	XFS_CHECK_OFFSET(xfs_dir2_sf_entry_t, name,		3);
 	XFS_CHECK_STRUCT_SIZE(xfs_dir2_sf_hdr_t,		10);
+	XFS_CHECK_STRUCT_SIZE(struct xfs_parent_name_rec,	76);
+	BUILD_BUG_ON(XFS_PARENT_NAME_HASH_SIZE != SHA512_DIGEST_SIZE);
 
 	/* log structures */
 	XFS_CHECK_STRUCT_SIZE(struct xfs_buf_log_format,	88);

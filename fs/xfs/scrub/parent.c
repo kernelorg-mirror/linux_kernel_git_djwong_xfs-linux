@@ -323,7 +323,6 @@ struct xchk_pptr {
 	/* Parent pointer attr key. */
 	xfs_ino_t			p_ino;
 	uint32_t			p_gen;
-	xfs_dir2_dataptr_t		p_diroffset;
 
 	/* Length of the pptr name. */
 	uint8_t				namelen;
@@ -349,6 +348,9 @@ struct xchk_pptrs {
 
 	/* xattr key and da args for parent pointer revalidation. */
 	struct xfs_parent_scratch pptr_scratch;
+
+	/* Name hashes */
+	uint8_t			child_namehash[XFS_PARENT_NAME_HASH_SIZE];
 
 	/* Name buffer for revalidation. */
 	uint8_t			namebuf[MAXNAMELEN];
@@ -426,14 +428,13 @@ xchk_parent_dirent(
 	};
 	struct xfs_scrub	*sc = pp->sc;
 	xfs_ino_t		child_ino;
-	xfs_dir2_dataptr_t	child_diroffset;
 	int			error;
 
 	/*
 	 * Use the name attached to this parent pointer to look up the
 	 * directory entry in the alleged parent.
 	 */
-	error = xchk_dir_lookup(sc, dp, &xname, &child_ino, &child_diroffset);
+	error = xchk_dir_lookup(sc, dp, &xname, &child_ino, NULL);
 	if (error == -ENOENT) {
 		xchk_fblock_xref_set_corrupt(sc, XFS_ATTR_FORK, 0);
 		return 0;
@@ -443,15 +444,6 @@ xchk_parent_dirent(
 
 	/* Does the inode number match? */
 	if (child_ino != sc->ip->i_ino) {
-		xchk_fblock_xref_set_corrupt(sc, XFS_ATTR_FORK, 0);
-		return 0;
-	}
-
-	/* Does the directory offset match? */
-	if (pp->pptr.p_diroffset != child_diroffset) {
-		trace_xchk_parent_bad_dapos(sc->ip, pp->pptr.p_diroffset,
-				dp->i_ino, child_diroffset, xname.name,
-				xname.len);
 		xchk_fblock_xref_set_corrupt(sc, XFS_ATTR_FORK, 0);
 		return 0;
 	}
@@ -534,6 +526,7 @@ xchk_parent_scan_attr(
 	unsigned int		valuelen,
 	void			*priv)
 {
+	struct xfs_name		xname = { };
 	struct xchk_pptrs	*pp = priv;
 	struct xfs_inode	*dp = NULL;
 	const struct xfs_parent_name_rec *rec = (const void *)name;
@@ -561,6 +554,26 @@ xchk_parent_scan_attr(
 
 	xfs_parent_irec_from_disk(&pp->pptr, rec, value, valuelen);
 
+	xname.name = pp->pptr.p_name;
+	xname.len = pp->pptr.p_namelen;
+
+	/*
+	 * Does the namehash in the parent pointer match the actual name?
+	 * If not, there's no point in checking further.
+	 */
+	error = xfs_parent_namehash(sc->ip, &xname, pp->child_namehash,
+			sizeof(pp->child_namehash));
+	if (!xchk_fblock_xref_process_error(sc, XFS_ATTR_FORK, 0, &error))
+		return error;
+
+	if (memcmp(pp->pptr.p_namehash, pp->child_namehash,
+				sizeof(pp->pptr.p_namehash))) {
+		trace_xchk_parent_bad_namehash(sc->ip, pp->pptr.p_ino,
+				xname.name, xname.len);
+		xchk_fblock_xref_set_corrupt(sc, XFS_ATTR_FORK, 0);
+		return 0;
+	}
+
 	error = xchk_parent_iget(pp, &dp);
 	if (error)
 		return error;
@@ -573,7 +586,6 @@ xchk_parent_scan_attr(
 		struct xchk_pptr	save_pp = {
 			.p_ino		= pp->pptr.p_ino,
 			.p_gen		= pp->pptr.p_gen,
-			.p_diroffset	= pp->pptr.p_diroffset,
 			.namelen	= pp->pptr.p_namelen,
 		};
 
@@ -655,7 +667,6 @@ xchk_parent_slow_pptr(
 	/* Restore the saved parent pointer into the irec. */
 	pp->pptr.p_ino = pptr->p_ino;
 	pp->pptr.p_gen = pptr->p_gen;
-	pp->pptr.p_diroffset = pptr->p_diroffset;
 
 	error = xfblob_load(pp->pptr_names, pptr->name_cookie, pp->pptr.p_name,
 			pptr->namelen);
@@ -663,6 +674,10 @@ xchk_parent_slow_pptr(
 		return error;
 	pp->pptr.p_name[MAXNAMELEN - 1] = 0;
 	pp->pptr.p_namelen = pptr->namelen;
+
+	error = xfs_parent_irec_hash(sc->ip, &pp->pptr);
+	if (error)
+		return error;
 
 	/* Check that the deferred parent pointer still exists. */
 	if (pp->need_revalidate) {
