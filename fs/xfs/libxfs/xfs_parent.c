@@ -94,11 +94,11 @@ xfs_parent_valuecheck(
 static inline void
 xfs_init_parent_name_rec(
 	struct xfs_parent_name_rec	*rec,
-	struct xfs_inode		*ip,
+	const struct xfs_inode		*ip,
 	uint32_t			p_diroffset)
 {
 	xfs_ino_t			p_ino = ip->i_ino;
-	uint32_t			p_gen = VFS_I(ip)->i_generation;
+	uint32_t			p_gen = VFS_IC(ip)->i_generation;
 
 	rec->p_ino = cpu_to_be64(p_ino);
 	rec->p_gen = cpu_to_be32(p_gen);
@@ -335,4 +335,31 @@ xfs_parent_lookup(
 		return error;
 
 	return scr->args.valuelen;
+}
+
+/*
+ * Attach the parent pointer (@pptr -> @name) to @ip immediately.  Caller must
+ * not have a transaction or hold the ILOCK.  The update will not use logged
+ * xattrs.  This is for specialized repair functions only.  The scratchpad need
+ * not be initialized.
+ */
+int
+xfs_parent_set(
+	struct xfs_inode		*ip,
+	const struct xfs_parent_name_irec *pptr,
+	struct xfs_parent_scratch	*scr)
+{
+	xfs_parent_irec_to_disk(&scr->rec, NULL, NULL, pptr);
+
+	memset(&scr->args, 0, sizeof(struct xfs_da_args));
+	scr->args.attr_filter	= XFS_ATTR_PARENT;
+	scr->args.dp		= ip;
+	scr->args.geo		= ip->i_mount->m_attr_geo;
+	scr->args.name		= (const unsigned char *)&scr->rec;
+	scr->args.namelen	= sizeof(struct xfs_parent_name_rec);
+	scr->args.valuelen	= pptr->p_namelen;
+	scr->args.value		= (void *)pptr->p_name;
+	scr->args.whichfork	= XFS_ATTR_FORK;
+
+	return xfs_attr_set(&scr->args);
 }
