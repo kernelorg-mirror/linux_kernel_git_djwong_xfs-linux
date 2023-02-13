@@ -1679,12 +1679,12 @@ xfs_ioc_scrub_metadata(
 
 /*
  * IOCTL routine to get the parent pointers of an inode and return it to user
- * space.  Caller must pass a buffer space containing a struct xfs_pptr_info,
+ * space.  Caller must pass a buffer space containing a struct xfs_getparents,
  * followed by a region large enough to contain an array of struct
- * xfs_parent_ptr of a size specified in pi_ptrs_size.  If the inode contains
+ * xfs_parent_ptr of a size specified in gp_ptrs_size.  If the inode contains
  * more parent pointers than can fit in the buffer space, caller may re-call
- * the function using the returned pi_cursor to resume iteration.  The
- * number of xfs_parent_ptr returned will be stored in pi_ptrs_used.
+ * the function using the returned gp_cursor to resume iteration.  The
+ * number of xfs_parent_ptr returned will be stored in gp_ptrs_used.
  *
  * Returns 0 on success or non-zero on failure
  */
@@ -1693,7 +1693,7 @@ xfs_ioc_get_parent_pointer(
 	struct file			*filp,
 	void				__user *arg)
 {
-	struct xfs_pptr_info		*ppi = NULL;
+	struct xfs_getparents		*ppi = NULL;
 	int				error = 0;
 	struct xfs_inode		*file_ip = XFS_I(file_inode(filp));
 	struct xfs_inode		*call_ip = file_ip;
@@ -1702,42 +1702,42 @@ xfs_ioc_get_parent_pointer(
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	/* Allocate an xfs_pptr_info to put the user data */
-	ppi = kvmalloc(sizeof(struct xfs_pptr_info), GFP_KERNEL);
+	/* Allocate an xfs_getparents to put the user data */
+	ppi = kvmalloc(sizeof(struct xfs_getparents), GFP_KERNEL);
 	if (!ppi)
 		return -ENOMEM;
 
 	/* Copy the data from the user */
-	error = copy_from_user(ppi, arg, sizeof(struct xfs_pptr_info));
+	error = copy_from_user(ppi, arg, sizeof(struct xfs_getparents));
 	if (error) {
 		error = -EFAULT;
 		goto out;
 	}
 
 	/* Check size of buffer requested by user */
-	if (xfs_pptr_info_sizeof(ppi->pi_ptrs_size) > XFS_XATTR_LIST_MAX) {
+	if (xfs_getparents_sizeof(ppi->gp_ptrs_size) > XFS_XATTR_LIST_MAX) {
 		error = -ENOMEM;
 		goto out;
 	}
 
-	if (ppi->pi_flags & ~XFS_PPTR_FLAG_ALL) {
+	if (ppi->gp_flags & ~XFS_GETPARENTS_FLAG_ALL) {
 		error = -EINVAL;
 		goto out;
 	}
-	ppi->pi_flags &= ~(XFS_PPTR_OFLAG_ROOT | XFS_PPTR_OFLAG_DONE);
+	ppi->gp_flags &= ~(XFS_GETPARENTS_OFLAG_ROOT | XFS_GETPARENTS_OFLAG_DONE);
 
 	/*
 	 * Now that we know how big the trailing buffer is, expand
-	 * our kernel xfs_pptr_info to be the same size
+	 * our kernel xfs_getparents to be the same size
 	 */
-	ppi = kvrealloc(ppi, sizeof(struct xfs_pptr_info),
-			xfs_pptr_info_sizeof(ppi->pi_ptrs_size),
+	ppi = kvrealloc(ppi, sizeof(struct xfs_getparents),
+			xfs_getparents_sizeof(ppi->gp_ptrs_size),
 			GFP_KERNEL | __GFP_ZERO);
 	if (!ppi)
 		return -ENOMEM;
 
-	if (ppi->pi_flags & XFS_PPTR_IFLAG_HANDLE) {
-		struct xfs_handle	*hanp = &ppi->pi_handle;
+	if (ppi->gp_flags & XFS_GETPARENTS_IFLAG_HANDLE) {
+		struct xfs_handle	*hanp = &ppi->gp_handle;
 
 		if (memcmp(&hanp->ha_fsid, mp->m_fixedfsid,
 							sizeof(xfs_fsid_t))) {
@@ -1765,7 +1765,7 @@ xfs_ioc_get_parent_pointer(
 
 	/* Copy the parent pointers back to the user */
 	error = copy_to_user(arg, ppi,
-			xfs_pptr_info_sizeof(ppi->pi_ptrs_size));
+			xfs_getparents_sizeof(ppi->gp_ptrs_size));
 	if (error) {
 		error = -EFAULT;
 		goto out;

@@ -752,19 +752,20 @@ struct xfs_scrub_metadata {
 				 XFS_SCRUB_OFLAG_NO_REPAIR_NEEDED)
 #define XFS_SCRUB_FLAGS_ALL	(XFS_SCRUB_FLAGS_IN | XFS_SCRUB_FLAGS_OUT)
 
-#define XFS_PPTR_MAXNAMELEN				256
+#define XFS_GETPARENTS_MAXNAMELEN	256
 
 /* return parents of the handle, not the open fd */
-#define XFS_PPTR_IFLAG_HANDLE  (1U << 0)
+#define XFS_GETPARENTS_IFLAG_HANDLE	(1U << 0)
 
 /* target was the root directory */
-#define XFS_PPTR_OFLAG_ROOT    (1U << 1)
+#define XFS_GETPARENTS_OFLAG_ROOT	(1U << 1)
 
 /* Cursor is done iterating pptrs */
-#define XFS_PPTR_OFLAG_DONE    (1U << 2)
+#define XFS_GETPARENTS_OFLAG_DONE	(1U << 2)
 
- #define XFS_PPTR_FLAG_ALL     (XFS_PPTR_IFLAG_HANDLE | XFS_PPTR_OFLAG_ROOT | \
-				XFS_PPTR_OFLAG_DONE)
+#define XFS_GETPARENTS_FLAG_ALL		(XFS_GETPARENTS_IFLAG_HANDLE | \
+					 XFS_GETPARENTS_OFLAG_ROOT | \
+					 XFS_GETPARENTS_OFLAG_DONE)
 
 /* Get an inode parent pointer through ioctl */
 struct xfs_parent_ptr {
@@ -772,57 +773,57 @@ struct xfs_parent_ptr {
 	__u32		xpp_gen;			/* Inode generation */
 	__u32		xpp_rsvd;			/* Reserved */
 	__u64		xpp_rsvd2;			/* Reserved */
-	__u8		xpp_name[XFS_PPTR_MAXNAMELEN];	/* File name */
+	__u8		xpp_name[XFS_GETPARENTS_MAXNAMELEN];	/* File name */
 };
 
 /* Iterate through an inodes parent pointers */
-struct xfs_pptr_info {
-	/* File handle, if XFS_PPTR_IFLAG_HANDLE is set */
-	struct xfs_handle		pi_handle;
+struct xfs_getparents {
+	/* File handle, if XFS_GETPARENTS_IFLAG_HANDLE is set */
+	struct xfs_handle		gp_handle;
 
 	/*
 	 * Structure to track progress in iterating the parent pointers.
 	 * Must be initialized to zeroes before the first ioctl call, and
 	 * not touched by callers after that.
 	 */
-	struct xfs_attrlist_cursor	pi_cursor;
+	struct xfs_attrlist_cursor	gp_cursor;
 
-	/* Operational flags: XFS_PPTR_*FLAG* */
-	__u32				pi_flags;
+	/* Operational flags: XFS_GETPARENTS_*FLAG* */
+	__u32				gp_flags;
 
 	/* Must be set to zero */
-	__u32				pi_reserved;
+	__u32				gp_reserved;
 
 	/* # of entries in array */
-	__u32				pi_ptrs_size;
+	__u32				gp_ptrs_size;
 
 	/* # of entries filled in (output) */
-	__u32				pi_ptrs_used;
+	__u32				gp_ptrs_used;
 
 	/* Must be set to zero */
-	__u64				pi_reserved2[6];
+	__u64				gp_reserved2[6];
 
 	/*
 	 * An array of struct xfs_parent_ptr follows the header
-	 * information. Use xfs_ppinfo_to_pp() to access the
+	 * information. Use xfs_getparents_rec() to access the
 	 * parent pointer array entries.
 	 */
-	struct xfs_parent_ptr		pi_parents[];
+	struct xfs_parent_ptr		gp_parents[];
 };
 
 static inline size_t
-xfs_pptr_info_sizeof(int nr_ptrs)
+xfs_getparents_sizeof(int nr_ptrs)
 {
-	return sizeof(struct xfs_pptr_info) +
+	return sizeof(struct xfs_getparents) +
 	       (nr_ptrs * sizeof(struct xfs_parent_ptr));
 }
 
 static inline struct xfs_parent_ptr*
-xfs_ppinfo_to_pp(
-	struct xfs_pptr_info	*info,
-	int			idx)
+xfs_getparents_rec(
+	struct xfs_getparents	*info,
+	unsigned int		idx)
 {
-	return &info->pi_parents[idx];
+	return &info->gp_parents[idx];
 }
 
 /*
