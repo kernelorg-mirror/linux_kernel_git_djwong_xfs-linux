@@ -576,4 +576,39 @@ int xfs_ilock2_io_mmap(struct xfs_inode *ip1, struct xfs_inode *ip2);
 void xfs_iunlock2_io_mmap(struct xfs_inode *ip1, struct xfs_inode *ip2);
 void xfs_lock_inodes(struct xfs_inode **ips, int inodes, uint lock_mode);
 
+/*
+ * Parameters for tracking bumplink and droplink operations.  The hook
+ * function arg parameter is one of these.
+ */
+enum xfs_dirent_update_type {
+	XFS_DIRENT_CHILD_DELTA,		/* parent pointing to child */
+	XFS_DIRENT_BACKREF_DELTA,		/* dotdot entries */
+	XFS_DIRENT_SELF_DELTA,		/* dot entries */
+};
+
+struct xfs_dirent_update_params {
+	const struct xfs_inode	*dp;
+	const struct xfs_inode	*ip;
+	const struct xfs_name	*name;
+	int			delta;
+};
+
+#ifdef CONFIG_XFS_LIVE_HOOKS
+void xfs_dirent_child_delta(struct xfs_inode *dp, struct xfs_inode *ip,
+		int delta, struct xfs_name *name);
+
+struct xfs_dirent_hook {
+	struct xfs_hook		delta_hook;
+};
+
+void xfs_dirent_hook_disable(void);
+void xfs_dirent_hook_enable(void);
+
+int xfs_dirent_hook_add(struct xfs_mount *mp, struct xfs_dirent_hook *hook);
+void xfs_dirent_hook_del(struct xfs_mount *mp, struct xfs_dirent_hook *hook);
+
+#else
+# define xfs_dirent_child_delta(dp, ip, delta, name)	((void)0)
+#endif /* CONFIG_XFS_LIVE_HOOKS */
+
 #endif	/* __XFS_INODE_H__ */
