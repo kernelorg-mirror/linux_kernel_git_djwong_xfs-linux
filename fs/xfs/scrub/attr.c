@@ -109,6 +109,7 @@ xchk_xattr_listent(
 	int				flags,
 	unsigned char			*name,
 	int				namelen,
+	void				*value,
 	int				valuelen)
 {
 	struct xchk_xattr		*sx;
@@ -133,6 +134,13 @@ xchk_xattr_listent(
 		xchk_fblock_set_corrupt(sx->sc, XFS_ATTR_FORK, args.blkno);
 		return;
 	}
+
+	/*
+	 * Shortform and local attrs don't require external lookups to retrieve
+	 * the value, so there's nothing else to check here.
+	 */
+	if (value)
+		return;
 
 	/*
 	 * Try to allocate enough memory to extrat the attr value.  If that
