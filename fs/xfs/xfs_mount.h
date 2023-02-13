@@ -244,6 +244,9 @@ typedef struct xfs_mount {
 #endif
 	/* Hook to feed file directory updates to an active online repair. */
 	struct xfs_hooks	m_dirent_update_hooks;
+
+	/* sha512 engine, if needed */
+	struct crypto_shash	*m_sha512;
 } xfs_mount_t;
 
 #define M_IGEO(mp)		(&(mp)->m_ino_geo)
