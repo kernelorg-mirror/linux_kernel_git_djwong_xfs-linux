@@ -842,21 +842,24 @@ xfs_failaddr_t xfs_da3_blkinfo_verify(struct xfs_buf *bp,
 struct xfs_parent_name_rec {
 	__be64  p_ino;
 	__be32  p_gen;
-	__u8	p_namehash[XFS_PARENT_NAME_HASH_SIZE];
+	__u8	p_namehash[];
 } __attribute__((packed));
+
+#define XFS_PARENT_NAME_MAX_SIZE \
+	(sizeof(struct xfs_parent_name_rec) + XFS_PARENT_NAME_HASH_SIZE)
 
 static inline unsigned int
 xfs_parent_name_rec_sizeof(
 	unsigned int		hashlen)
 {
-	return offsetof(struct xfs_parent_name_rec, p_namehash) + hashlen;
+	return sizeof(struct xfs_parent_name_rec) + hashlen;
 }
 
 static inline unsigned int
 xfs_parent_name_hashlen(
 	unsigned int		rec_sizeof)
 {
-	return rec_sizeof - offsetof(struct xfs_parent_name_rec, p_namehash);
+	return rec_sizeof - sizeof(struct xfs_parent_name_rec);
 }
 
 #endif /* __XFS_DA_FORMAT_H__ */
