@@ -29,6 +29,14 @@ struct xfs_getparent_ctx {
 	struct xfs_getparents		*ppi;
 };
 
+static inline unsigned int
+xfs_getparents_rec_sizeof(
+	const struct xfs_parent_name_irec	*irec)
+{
+	return round_up(sizeof(struct xfs_getparents_rec) + irec->p_namelen + 1,
+			sizeof(uint32_t));
+}
+
 static void
 xfs_getparent_listent(
 	struct xfs_attr_list_context	*context,
@@ -43,6 +51,7 @@ xfs_getparent_listent(
 	struct xfs_getparents_rec	*pptr;
 	struct xfs_parent_name_irec	*irec;
 	struct xfs_mount		*mp = context->dp->i_mount;
+	int				arraytop;
 
 	gp = container_of(context, struct xfs_getparent_ctx, context);
 	ppi = gp->ppi;
@@ -64,31 +73,34 @@ xfs_getparent_listent(
 		return;
 	}
 
+	xfs_parent_irec_from_disk(&gp->pptr_irec, (void *)name, namelen, value,
+			valuelen);
+
 	/*
 	 * We found a parent pointer, but we've filled up the buffer.  Signal
 	 * to the caller that we did /not/ reach the end of the parent pointer
 	 * recordset.
 	 */
-	if (ppi->gp_ptrs_used >= ppi->gp_ptrs_size) {
+	arraytop = xfs_getparents_arraytop(ppi, ppi->gp_count + 1);
+	context->firstu -= xfs_getparents_rec_sizeof(irec);
+	if (context->firstu < arraytop) {
 		context->seen_enough = 1;
 		return;
 	}
 
-	xfs_parent_irec_from_disk(&gp->pptr_irec, (void *)name, namelen, value,
-			valuelen);
-
 	trace_xfs_getparent_listent(context->dp, ppi, irec);
 
 	/* Format the parent pointer directly into the caller buffer. */
-	pptr = &ppi->gp_parents[ppi->gp_ptrs_used++];
+	ppi->gp_offsets[ppi->gp_count] = context->firstu;
+	pptr = xfs_getparents_rec(ppi, ppi->gp_count);
 	pptr->gpr_ino = irec->p_ino;
 	pptr->gpr_gen = irec->p_gen;
 	pptr->gpr_rsvd2 = 0;
 	pptr->gpr_rsvd = 0;
 
 	memcpy(pptr->gpr_name, irec->p_name, irec->p_namelen);
-	memset(pptr->gpr_name + irec->p_namelen, 0,
-			sizeof(pptr->gpr_name) - irec->p_namelen);
+	pptr->gpr_name[irec->p_namelen] = 0;
+	ppi->gp_count++;
 }
 
 /* Retrieve the parent pointers for a given inode. */
@@ -107,12 +119,13 @@ xfs_getparent_pointers(
 	gp->context.dp = ip;
 	gp->context.resynch = 1;
 	gp->context.put_listent = xfs_getparent_listent;
-	gp->context.bufsize = 1; /* always init cursor */
+	gp->context.bufsize = round_down(ppi->gp_bufsize, sizeof(uint32_t));
+	gp->context.firstu = gp->context.bufsize;
 
 	/* Copy the cursor provided by caller */
 	memcpy(&gp->context.cursor, &ppi->gp_cursor,
 			sizeof(struct xfs_attrlist_cursor));
-	ppi->gp_ptrs_used = 0;
+	ppi->gp_count = 0;
 
 	trace_xfs_getparent_pointers(ip, ppi, &gp->context.cursor);
 
