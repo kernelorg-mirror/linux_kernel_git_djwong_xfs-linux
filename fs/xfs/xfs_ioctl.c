@@ -1681,10 +1681,10 @@ xfs_ioc_scrub_metadata(
  * IOCTL routine to get the parent pointers of an inode and return it to user
  * space.  Caller must pass a buffer space containing a struct xfs_getparents,
  * followed by a region large enough to contain an array of struct
- * xfs_parent_ptr of a size specified in gp_ptrs_size.  If the inode contains
+ * xfs_getparents_rec of a size specified in gp_ptrs_size.  If the inode contains
  * more parent pointers than can fit in the buffer space, caller may re-call
  * the function using the returned gp_cursor to resume iteration.  The
- * number of xfs_parent_ptr returned will be stored in gp_ptrs_used.
+ * number of xfs_getparents_rec returned will be stored in gp_ptrs_used.
  *
  * Returns 0 on success or non-zero on failure
  */
