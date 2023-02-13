@@ -98,7 +98,7 @@ xfs_init_parent_name_rec(
 	rec->p_ino = cpu_to_be64(dp->i_ino);
 	rec->p_gen = cpu_to_be32(VFS_IC(dp)->i_generation);
 	return xfs_parent_namehash(ip, name, rec->p_namehash,
-			sizeof(rec->p_namehash));
+			XFS_PARENT_NAME_HASH_SIZE);
 }
 
 /*
@@ -197,7 +197,7 @@ __xfs_parent_init(
 	parent->args.attr_filter = XFS_ATTR_PARENT;
 	parent->args.op_flags = XFS_DA_OP_OKNOENT | XFS_DA_OP_LOGGED;
 	parent->args.name = (const uint8_t *)&parent->rec;
-	parent->args.namelen = sizeof(struct xfs_parent_name_rec);
+	parent->args.namelen = 0;
 
 	*parentp = parent;
 	return 0;
