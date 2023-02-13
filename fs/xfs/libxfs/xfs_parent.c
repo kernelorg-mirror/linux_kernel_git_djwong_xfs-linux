@@ -135,6 +135,10 @@ xfs_parent_irec_from_disk(
 	memset(&irec->p_name[valuelen], 0, sizeof(irec->p_name) - valuelen);
 }
 
+/*
+ * Allocate memory to control a logged parent pointer update as part of a
+ * dirent operation.
+ */
 int
 __xfs_parent_init(
 	struct xfs_mount		*mp,
@@ -170,12 +174,13 @@ __xfs_parent_init(
 	return 0;
 }
 
+/* Add a parent pointer to reflect a dirent addition. */
 int
-xfs_parent_defer_add(
+xfs_parent_add(
 	struct xfs_trans	*tp,
 	struct xfs_parent_defer	*parent,
 	struct xfs_inode	*dp,
-	struct xfs_name		*parent_name,
+	const struct xfs_name	*parent_name,
 	xfs_dir2_dataptr_t	diroffset,
 	struct xfs_inode	*child)
 {
@@ -194,8 +199,9 @@ xfs_parent_defer_add(
 	return xfs_attr_defer_add(args);
 }
 
+/* Remove a parent pointer to reflect a dirent removal. */
 int
-xfs_parent_defer_remove(
+xfs_parent_remove(
 	struct xfs_trans	*tp,
 	struct xfs_inode	*dp,
 	struct xfs_parent_defer	*parent,
@@ -211,14 +217,14 @@ xfs_parent_defer_remove(
 	return xfs_attr_defer_remove(args);
 }
 
-
+/* Replace one parent pointer with another to reflect a rename. */
 int
-xfs_parent_defer_replace(
+xfs_parent_replace(
 	struct xfs_trans	*tp,
 	struct xfs_parent_defer	*new_parent,
 	struct xfs_inode	*old_dp,
 	xfs_dir2_dataptr_t	old_diroffset,
-	struct xfs_name		*parent_name,
+	const struct xfs_name	*parent_name,
 	struct xfs_inode	*new_dp,
 	xfs_dir2_dataptr_t	new_diroffset,
 	struct xfs_inode	*child)
