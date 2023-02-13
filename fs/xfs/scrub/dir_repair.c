@@ -537,7 +537,7 @@ xrep_dir_scan_parent_pointer(
 
 	/* Does the ondisk parent pointer structure make sense? */
 	if (!xfs_parent_namecheck(sc->mp, rec, namelen, attr_flags) ||
-	    !xfs_parent_valuecheck(sc->mp, value, valuelen))
+	    !xfs_parent_valuecheck(sc->mp, namelen, value, valuelen))
 		return -EFSCORRUPTED;
 
 	xfs_parent_irec_from_disk(&rd->pptr, rec, namelen, value, valuelen);
