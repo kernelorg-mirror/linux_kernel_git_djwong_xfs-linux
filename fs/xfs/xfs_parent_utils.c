@@ -23,104 +23,122 @@
 #include "xfs_da_btree.h"
 #include "xfs_parent_utils.h"
 
-/*
- * Get the parent pointers for a given inode
- *
- * Returns 0 on success and non zero on error
- */
+struct xfs_getparent_ctx {
+	struct xfs_attr_list_context	context;
+	struct xfs_parent_name_irec	pptr_irec;
+	struct xfs_pptr_info		*ppi;
+};
+
+static void
+xfs_getparent_listent(
+	struct xfs_attr_list_context	*context,
+	int				flags,
+	unsigned char			*name,
+	int				namelen,
+	void				*value,
+	int				valuelen)
+{
+	struct xfs_getparent_ctx	*gp;
+	struct xfs_pptr_info		*ppi;
+	struct xfs_parent_ptr		*pptr;
+	struct xfs_parent_name_irec	*irec;
+	struct xfs_mount		*mp = context->dp->i_mount;
+
+	gp = container_of(context, struct xfs_getparent_ctx, context);
+	ppi = gp->ppi;
+	irec = &gp->pptr_irec;
+
+	/* Ignore non-parent xattrs */
+	if (!(flags & XFS_ATTR_PARENT))
+		return;
+
+	/*
+	 * Report corruption for xattrs with any other flag set, or for a
+	 * parent pointer that has a remote value.  The attr list functions
+	 * filtered any INCOMPLETE attrs for us.
+	 */
+	if (XFS_IS_CORRUPT(mp,
+			   hweight32(flags & XFS_ATTR_NSP_ONDISK_MASK) > 1) ||
+	    XFS_IS_CORRUPT(mp, value == NULL)) {
+		context->seen_enough = -EFSCORRUPTED;
+		return;
+	}
+
+	/*
+	 * We found a parent pointer, but we've filled up the buffer.  Signal
+	 * to the caller that we did /not/ reach the end of the parent pointer
+	 * recordset.
+	 */
+	if (ppi->pi_ptrs_used >= ppi->pi_ptrs_size) {
+		context->seen_enough = 1;
+		return;
+	}
+
+	xfs_parent_irec_from_disk(&gp->pptr_irec, (void *)name, value,
+			valuelen);
+
+	trace_xfs_getparent_listent(context->dp, ppi, irec);
+
+	/* Format the parent pointer directly into the caller buffer. */
+	pptr = &ppi->pi_parents[ppi->pi_ptrs_used++];
+	pptr->xpp_ino = irec->p_ino;
+	pptr->xpp_gen = irec->p_gen;
+	pptr->xpp_diroffset = irec->p_diroffset;
+	pptr->xpp_rsvd = 0;
+
+	memcpy(pptr->xpp_name, irec->p_name, irec->p_namelen);
+	memset(pptr->xpp_name + irec->p_namelen, 0,
+			sizeof(pptr->xpp_name) - irec->p_namelen);
+}
+
+/* Retrieve the parent pointers for a given inode. */
 int
-xfs_attr_get_parent_pointer(
+xfs_getparent_pointers(
 	struct xfs_inode		*ip,
 	struct xfs_pptr_info		*ppi)
 {
+	struct xfs_getparent_ctx	*gp;
+	int				error;
 
-	struct xfs_attrlist		*alist;
-	struct xfs_attrlist_ent		*aent;
-	struct xfs_parent_ptr		*xpp;
-	struct xfs_parent_name_rec	*xpnr;
-	char				*namebuf;
-	unsigned int			namebuf_size;
-	int				name_len, i, error = 0;
-	unsigned int			lock_mode, flags = XFS_ATTR_PARENT;
-	struct xfs_attr_list_context	context;
-
-	/* Allocate a buffer to store the attribute names */
-	namebuf_size = sizeof(struct xfs_attrlist) +
-		       (ppi->pi_ptrs_size) * sizeof(struct xfs_attrlist_ent);
-	namebuf = kvzalloc(namebuf_size, GFP_KERNEL);
-	if (!namebuf)
+	gp = kzalloc(sizeof(struct xfs_getparent_ctx), GFP_KERNEL);
+	if (!gp)
 		return -ENOMEM;
-
-	memset(&context, 0, sizeof(struct xfs_attr_list_context));
-	error = xfs_ioc_attr_list_context_init(ip, namebuf, namebuf_size, 0,
-			&context);
-	if (error)
-		goto out_kfree;
+	gp->ppi = ppi;
+	gp->context.dp = ip;
+	gp->context.resynch = 1;
+	gp->context.put_listent = xfs_getparent_listent;
+	gp->context.bufsize = 1; /* always init cursor */
 
 	/* Copy the cursor provided by caller */
-	memcpy(&context.cursor, &ppi->pi_cursor,
-		sizeof(struct xfs_attrlist_cursor));
-	context.attr_filter = XFS_ATTR_PARENT;
+	memcpy(&gp->context.cursor, &ppi->pi_cursor,
+			sizeof(struct xfs_attrlist_cursor));
+	ppi->pi_ptrs_used = 0;
 
-	lock_mode = xfs_ilock_attr_map_shared(ip);
+	trace_xfs_getparent_pointers(ip, ppi, &gp->context.cursor);
 
-	error = xfs_attr_list_ilocked(&context);
+	error = xfs_attr_list(&gp->context);
 	if (error)
-		goto out_unlock;
-
-	alist = (struct xfs_attrlist *)namebuf;
-	for (i = 0; i < alist->al_count; i++) {
-		struct xfs_da_args args = {
-			.geo = ip->i_mount->m_attr_geo,
-			.whichfork = XFS_ATTR_FORK,
-			.dp = ip,
-			.namelen = sizeof(struct xfs_parent_name_rec),
-			.attr_filter = flags,
-		};
-
-		xpp = xfs_ppinfo_to_pp(ppi, i);
-		memset(xpp, 0, sizeof(struct xfs_parent_ptr));
-		aent = (struct xfs_attrlist_ent *)
-			&namebuf[alist->al_offset[i]];
-		xpnr = (struct xfs_parent_name_rec *)(aent->a_name);
-
-		if (aent->a_valuelen > XFS_PPTR_MAXNAMELEN) {
-			error = -EFSCORRUPTED;
-			goto out_unlock;
-		}
-		name_len = aent->a_valuelen;
-
-		args.name = (char *)xpnr;
-		args.hashval = xfs_da_hashname(args.name, args.namelen),
-		args.value = (unsigned char *)(xpp->xpp_name);
-		args.valuelen = name_len;
-
-		error = xfs_attr_get_ilocked(&args);
-		error = (error == -EEXIST ? 0 : error);
-		if (error) {
-			error = -EFSCORRUPTED;
-			goto out_unlock;
-		}
-
-		xfs_init_parent_ptr(xpp, xpnr);
-		if (!xfs_verify_ino(args.dp->i_mount, xpp->xpp_ino)) {
-			error = -EFSCORRUPTED;
-			goto out_unlock;
-		}
+		goto out_free;
+	if (gp->context.seen_enough < 0) {
+		error = gp->context.seen_enough;
+		goto out_free;
 	}
-	ppi->pi_ptrs_used = alist->al_count;
-	if (!alist->al_more)
+
+	/* Is this the root directory? */
+	if (ip->i_ino == ip->i_mount->m_sb.sb_rootino)
+		ppi->pi_flags |= XFS_PPTR_OFLAG_ROOT;
+
+	/*
+	 * If we did not run out of buffer space, then we reached the end of
+	 * the pptr recordset, so set the DONE flag.
+	 */
+	if (gp->context.seen_enough == 0)
 		ppi->pi_flags |= XFS_PPTR_OFLAG_DONE;
 
 	/* Update the caller with the current cursor position */
-	memcpy(&ppi->pi_cursor, &context.cursor,
+	memcpy(&ppi->pi_cursor, &gp->context.cursor,
 			sizeof(struct xfs_attrlist_cursor));
-
-out_unlock:
-	xfs_iunlock(ip, lock_mode);
-out_kfree:
-	kvfree(namebuf);
-
+out_free:
+	kfree(gp);
 	return error;
 }
-
