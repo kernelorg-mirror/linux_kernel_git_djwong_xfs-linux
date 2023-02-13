@@ -929,6 +929,39 @@ TRACE_EVENT(xchk_parent_bad_dapos,
 		  __get_str(name))
 );
 
+DECLARE_EVENT_CLASS(xchk_pptr_class,
+	TP_PROTO(struct xfs_inode *ip, const unsigned char *name,
+		 unsigned int namelen, xfs_ino_t parent_ino),
+	TP_ARGS(ip, name, namelen, parent_ino),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, namelen)
+		__field(xfs_ino_t, parent_ino)
+	),
+	TP_fast_assign(
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->namelen = namelen;
+		memcpy(__get_str(name), name, namelen);
+		__entry->parent_ino = parent_ino;
+	),
+	TP_printk("dev %d:%d ino 0x%llx name '%.*s' parent_ino 0x%llx",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->namelen,
+		  __get_str(name),
+		  __entry->parent_ino)
+)
+#define DEFINE_XCHK_PPTR_CLASS(name) \
+DEFINE_EVENT(xchk_pptr_class, name, \
+	TP_PROTO(struct xfs_inode *ip, const unsigned char *name, \
+		 unsigned int namelen, xfs_ino_t parent_ino), \
+	TP_ARGS(ip, name, namelen, parent_ino))
+DEFINE_XCHK_PPTR_CLASS(xchk_parent_defer);
+DEFINE_XCHK_PPTR_CLASS(xchk_parent_slowpath);
+
 /* repair tracepoints */
 #if IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR)
 
