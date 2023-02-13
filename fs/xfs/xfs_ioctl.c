@@ -1694,8 +1694,9 @@ xfs_ioc_get_parent_pointer(
 {
 	struct xfs_pptr_info		*ppi = NULL;
 	int				error = 0;
-	struct xfs_inode		*ip = XFS_I(file_inode(filp));
-	struct xfs_mount		*mp = ip->i_mount;
+	struct xfs_inode		*file_ip = XFS_I(file_inode(filp));
+	struct xfs_inode		*call_ip = file_ip;
+	struct xfs_mount		*mp = file_ip->i_mount;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
@@ -1733,23 +1734,32 @@ xfs_ioc_get_parent_pointer(
 		return -ENOMEM;
 
 	if (ppi->pi_flags & XFS_PPTR_IFLAG_HANDLE) {
-		error = xfs_iget(mp, NULL, ppi->pi_handle.ha_fid.fid_ino,
-				0, 0, &ip);
-		if (error)
-			goto out;
+		struct xfs_handle	*hanp = &ppi->pi_handle;
 
-		if (VFS_I(ip)->i_generation != ppi->pi_handle.ha_fid.fid_gen) {
+		if (memcmp(&hanp->ha_fsid, mp->m_fixedfsid,
+							sizeof(xfs_fsid_t))) {
+			error = -EINVAL;
+			goto out;
+		}
+
+		if (hanp->ha_fid.fid_ino != file_ip->i_ino) {
+			error = xfs_iget(mp, NULL, hanp->ha_fid.fid_ino,
+					XFS_IGET_UNTRUSTED, 0, &call_ip);
+			if (error)
+				goto out;
+		}
+
+		if (VFS_I(call_ip)->i_generation != hanp->ha_fid.fid_gen) {
 			error = -EINVAL;
 			goto out;
 		}
 	}
 
-	if (ip->i_ino == mp->m_sb.sb_rootino)
+	if (call_ip->i_ino == mp->m_sb.sb_rootino)
 		ppi->pi_flags |= XFS_PPTR_OFLAG_ROOT;
 
 	/* Get the parent pointers */
-	error = xfs_attr_get_parent_pointer(ip, ppi);
-
+	error = xfs_attr_get_parent_pointer(call_ip, ppi);
 	if (error)
 		goto out;
 
@@ -1762,6 +1772,8 @@ xfs_ioc_get_parent_pointer(
 	}
 
 out:
+	if (call_ip != file_ip)
+		xfs_irele(call_ip);
 	kmem_free(ppi);
 	return error;
 }
