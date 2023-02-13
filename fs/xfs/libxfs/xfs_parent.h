@@ -12,8 +12,8 @@ extern struct kmem_cache	*xfs_parent_intent_cache;
 bool xfs_parent_namecheck(struct xfs_mount *mp,
 		const struct xfs_parent_name_rec *rec, size_t reclen,
 		unsigned int attr_flags);
-bool xfs_parent_valuecheck(struct xfs_mount *mp, const void *value,
-		size_t valuelen);
+bool xfs_parent_valuecheck(struct xfs_mount *mp, size_t namelen,
+		const void *value, size_t valuelen);
 
 /*
  * Incore version of a parent pointer, also contains dirent name so callers
@@ -24,7 +24,7 @@ struct xfs_parent_name_irec {
 	xfs_ino_t		p_ino;
 	uint32_t		p_gen;
 	uint8_t			hashlen;
-	uint8_t			p_namehash[XFS_PARENT_NAME_HASH_SIZE];
+	uint8_t			p_namehash[XFS_PARENT_NAME_MAX_HASH_SIZE];
 
 	/* Attributes of a parent pointer. */
 	uint8_t			p_namelen;

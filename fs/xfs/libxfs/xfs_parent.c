@@ -57,7 +57,7 @@ xfs_parent_namecheck(
 	xfs_ino_t				p_ino;
 
 	if (reclen <= xfs_parent_name_rec_sizeof(0) ||
-	    reclen > xfs_parent_name_rec_sizeof(XFS_PARENT_NAME_HASH_SIZE))
+	    reclen > xfs_parent_name_rec_sizeof(XFS_PARENT_NAME_MAX_HASH_SIZE))
 		return false;
 
 	/* Only one namespace bit allowed. */
@@ -75,10 +75,18 @@ xfs_parent_namecheck(
 bool
 xfs_parent_valuecheck(
 	struct xfs_mount		*mp,
+	size_t				namelen,
 	const void			*value,
 	size_t				valuelen)
 {
-	if (valuelen == 0 || valuelen >= MAXNAMELEN)
+	if (namelen > XFS_PARENT_NAME_MAX_SIZE)
+		return false;
+
+	if (namelen < XFS_PARENT_NAME_MAX_SIZE && valuelen != 0)
+		return false;
+
+	if (namelen == XFS_PARENT_NAME_MAX_SIZE &&
+	    valuelen >= MAXNAMELEN - XFS_PARENT_NAME_SHA512_OFFSET)
 		return false;
 
 	if (value == NULL)
@@ -98,7 +106,20 @@ xfs_init_parent_name_rec(
 	rec->p_ino = cpu_to_be64(dp->i_ino);
 	rec->p_gen = cpu_to_be32(VFS_IC(dp)->i_generation);
 	return xfs_parent_namehash(ip, name, rec->p_namehash,
-			XFS_PARENT_NAME_HASH_SIZE);
+			XFS_PARENT_NAME_MAX_HASH_SIZE);
+}
+
+/* Compute the number of name bytes that can be encoded in the namehash. */
+static inline unsigned int
+xfs_parent_valuelen_adj(
+	int			hashlen)
+{
+	ASSERT(hashlen > 0);
+
+	if (hashlen == XFS_PARENT_NAME_MAX_HASH_SIZE)
+		return XFS_PARENT_NAME_SHA512_OFFSET;
+
+	return hashlen;
 }
 
 /*
@@ -125,14 +146,29 @@ xfs_parent_irec_from_disk(
 		return;
 	}
 
-	ASSERT(valuelen > 0);
 	ASSERT(valuelen < MAXNAMELEN);
 
-	valuelen = min(valuelen, MAXNAMELEN);
+	if (irec->hashlen == XFS_PARENT_NAME_MAX_HASH_SIZE) {
+		ASSERT(valuelen > 0);
+		ASSERT(valuelen <= MAXNAMELEN - XFS_PARENT_NAME_SHA512_OFFSET);
 
-	irec->p_namelen = valuelen;
-	memcpy(irec->p_name, value, valuelen);
-	memset(&irec->p_name[valuelen], 0, sizeof(irec->p_name) - valuelen);
+		valuelen = min_t(int, valuelen,
+				MAXNAMELEN - XFS_PARENT_NAME_SHA512_OFFSET);
+
+		memcpy(irec->p_name, irec->p_namehash,
+				XFS_PARENT_NAME_SHA512_OFFSET);
+		memcpy(&irec->p_name[XFS_PARENT_NAME_SHA512_OFFSET],
+				value, valuelen);
+		irec->p_namelen = XFS_PARENT_NAME_SHA512_OFFSET + valuelen;
+	} else {
+		ASSERT(valuelen == 0);
+
+		memcpy(irec->p_name, irec->p_namehash, irec->hashlen);
+		irec->p_namelen = irec->hashlen;
+	}
+
+	memset(&irec->p_name[irec->p_namelen], 0,
+			sizeof(irec->p_name) - irec->p_namelen);
 }
 
 /*
@@ -159,11 +195,15 @@ xfs_parent_irec_to_disk(
 		ASSERT(*valuelen >= irec->p_namelen);
 		ASSERT(*valuelen < MAXNAMELEN);
 
-		*valuelen = irec->p_namelen;
+		if (irec->hashlen == XFS_PARENT_NAME_MAX_HASH_SIZE)
+			*valuelen = irec->p_namelen - XFS_PARENT_NAME_SHA512_OFFSET;
+		else
+			*valuelen = 0;
 	}
 
-	if (value)
-		memcpy(value, irec->p_name, irec->p_namelen);
+	if (value && irec->hashlen == XFS_PARENT_NAME_MAX_HASH_SIZE)
+		memcpy(value, irec->p_name + XFS_PARENT_NAME_SHA512_OFFSET,
+			      irec->p_namelen - XFS_PARENT_NAME_SHA512_OFFSET);
 }
 
 int
@@ -211,6 +251,7 @@ xfs_parent_add(
 {
 	struct xfs_da_args	*args = &parent->args;
 	int			hashlen;
+	unsigned int		name_adj;
 
 	hashlen = xfs_init_parent_name_rec(&parent->rec, dp, parent_name,
 			child);
@@ -220,11 +261,13 @@ xfs_parent_add(
 	args->namelen = xfs_parent_name_rec_sizeof(hashlen);
 	args->hashval = xfs_da_hashname(args->name, args->namelen);
 
+	name_adj = xfs_parent_valuelen_adj(hashlen);
+
 	args->trans = tp;
 	args->dp = child;
 	if (parent_name) {
-		parent->args.value = (void *)parent_name->name;
-		parent->args.valuelen = parent_name->len;
+		parent->args.value = (void *)parent_name->name + name_adj;
+		parent->args.valuelen = parent_name->len - name_adj;
 	}
 
 	return xfs_attr_defer_add(args);
@@ -252,7 +295,6 @@ xfs_parent_remove(
 	return xfs_attr_defer_remove(args);
 }
 
-
 int
 xfs_parent_replace(
 	struct xfs_trans	*tp,
@@ -265,6 +307,7 @@ xfs_parent_replace(
 {
 	struct xfs_da_args	*args = &new_parent->args;
 	int			old_hashlen, new_hashlen;
+	int			new_name_adj;
 
 	old_hashlen = xfs_init_parent_name_rec(&new_parent->old_rec, old_dp,
 			old_name, child);
@@ -275,6 +318,8 @@ xfs_parent_replace(
 	if (new_hashlen < 0)
 		return new_hashlen;
 
+	new_name_adj = xfs_parent_valuelen_adj(new_hashlen);
+
 	new_parent->args.name = (const uint8_t *)&new_parent->old_rec;
 	new_parent->args.namelen = xfs_parent_name_rec_sizeof(old_hashlen);
 	new_parent->args.new_name = (const uint8_t *)&new_parent->rec;
@@ -282,8 +327,8 @@ xfs_parent_replace(
 	args->trans = tp;
 	args->dp = child;
 
-	new_parent->args.value = (void *)new_name->name;
-	new_parent->args.valuelen = new_name->len;
+	new_parent->args.value = (void *)new_name->name + new_name_adj;
+	new_parent->args.valuelen = new_name->len - new_name_adj;
 
 	args->hashval = xfs_da_hashname(args->name, args->namelen);
 	return xfs_attr_defer_replace(args);
@@ -327,9 +372,12 @@ xfs_parent_lookup(
 	struct xfs_parent_scratch	*scr)
 {
 	int				reclen;
+	int				name_adj;
 	int				error;
 
 	xfs_parent_irec_to_disk(&scr->rec, &reclen, NULL, NULL, pptr);
+
+	name_adj = xfs_parent_valuelen_adj(pptr->hashlen);
 
 	memset(&scr->args, 0, sizeof(struct xfs_da_args));
 	scr->args.attr_filter	= XFS_ATTR_PARENT;
@@ -339,8 +387,8 @@ xfs_parent_lookup(
 	scr->args.namelen	= reclen;
 	scr->args.op_flags	= XFS_DA_OP_OKNOENT;
 	scr->args.trans		= tp;
-	scr->args.valuelen	= namelen;
-	scr->args.value		= name;
+	scr->args.valuelen	= namelen - name_adj;
+	scr->args.value		= name + name_adj;
 	scr->args.whichfork	= XFS_ATTR_FORK;
 
 	scr->args.hashval = xfs_da_hashname(scr->args.name, scr->args.namelen);
@@ -349,7 +397,8 @@ xfs_parent_lookup(
 	if (error)
 		return error;
 
-	return scr->args.valuelen;
+	memcpy(name, pptr->p_namehash, name_adj);
+	return scr->args.valuelen + name_adj;
 }
 
 /*
@@ -365,8 +414,11 @@ xfs_parent_set(
 	struct xfs_parent_scratch	*scr)
 {
 	int				reclen;
+	int				name_adj;
 
 	xfs_parent_irec_to_disk(&scr->rec, &reclen, NULL, NULL, pptr);
+
+	name_adj = xfs_parent_valuelen_adj(pptr->hashlen);
 
 	memset(&scr->args, 0, sizeof(struct xfs_da_args));
 	scr->args.attr_filter	= XFS_ATTR_PARENT;
@@ -374,8 +426,8 @@ xfs_parent_set(
 	scr->args.geo		= ip->i_mount->m_attr_geo;
 	scr->args.name		= (const unsigned char *)&scr->rec;
 	scr->args.namelen	= reclen;
-	scr->args.valuelen	= pptr->p_namelen;
-	scr->args.value		= (void *)pptr->p_name;
+	scr->args.valuelen	= pptr->p_namelen - name_adj;
+	scr->args.value		= (void *)pptr->p_name + name_adj;
 	scr->args.whichfork	= XFS_ATTR_FORK;
 
 	return xfs_attr_set(&scr->args);
@@ -426,12 +478,16 @@ xfs_parent_namehash(
 	ASSERT(SHA512_DIGEST_SIZE ==
 			crypto_shash_digestsize(ip->i_mount->m_sha512));
 
-	if (namehash_len != SHA512_DIGEST_SIZE) {
+	if (namehash_len != XFS_PARENT_NAME_MAX_HASH_SIZE) {
 		ASSERT(0);
 		return -EINVAL;
 	}
 
-	if (name->len < namehash_len) {
+	if (name->len < XFS_PARENT_NAME_MAX_HASH_SIZE) {
+		/*
+		 * If the dirent name is shorter than the size of the namehash
+		 * field, write it directly into the namehash field.
+		 */
 		memcpy(namehash, name->name, name->len);
 		memset(namehash + name->len, 0, namehash_len - name->len);
 		return name->len;
@@ -449,11 +505,17 @@ xfs_parent_namehash(
 	if (error)
 		goto out;
 
-	error = sha512_done(&shash, namehash);
+	/*
+	 * The sha512 hash of the child gen and dirent name is placed at the
+	 * end of the namehash, and as many bytes as will fit are copied from
+	 * the dirent name to the start of the namehash.
+	 */
+	error = sha512_done(&shash, namehash + XFS_PARENT_NAME_SHA512_OFFSET);
 	if (error)
 		goto out;
 
-	error = SHA512_DIGEST_SIZE;
+	memcpy(namehash, name->name, XFS_PARENT_NAME_SHA512_OFFSET);
+	error = XFS_PARENT_NAME_MAX_HASH_SIZE;
 out:
 	sha512_erase(&shash);
 	return error;
