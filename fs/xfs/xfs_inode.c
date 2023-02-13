@@ -1202,7 +1202,7 @@ xfs_create(
 	 * the parent information now.
 	 */
 	if (parent) {
-		error = xfs_parent_defer_add(tp, parent, dp, name, diroffset,
+		error = xfs_parent_add(tp, parent, dp, name, diroffset,
 					     ip);
 		if (error)
 			goto out_trans_cancel;
@@ -1477,7 +1477,7 @@ xfs_link(
 	 * the parent to the inode.
 	 */
 	if (parent) {
-		error = xfs_parent_defer_add(tp, parent, tdp, target_name,
+		error = xfs_parent_add(tp, parent, tdp, target_name,
 					     diroffset, sip);
 		if (error)
 			goto error_return;
@@ -2750,7 +2750,7 @@ xfs_remove(
 	}
 
 	if (parent) {
-		error = xfs_parent_defer_remove(tp, dp, parent, dir_offset, ip);
+		error = xfs_parent_remove(tp, dp, parent, dir_offset, ip);
 		if (error)
 			goto out_trans_cancel;
 	}
@@ -3061,12 +3061,12 @@ xfs_cross_rename(
 	}
 
 	if (xfs_has_parent(mp)) {
-		error = xfs_parent_defer_replace(tp, ip1_pptr, dp1,
+		error = xfs_parent_replace(tp, ip1_pptr, dp1,
 				old_diroffset, name2, dp2, new_diroffset, ip1);
 		if (error)
 			goto out_trans_abort;
 
-		error = xfs_parent_defer_replace(tp, ip2_pptr, dp2,
+		error = xfs_parent_replace(tp, ip2_pptr, dp2,
 				new_diroffset, name1, dp1, old_diroffset, ip2);
 		if (error)
 			goto out_trans_abort;
@@ -3540,7 +3540,7 @@ retry:
 		goto out_trans_cancel;
 
 	if (wip_pptr) {
-		error = xfs_parent_defer_add(tp, wip_pptr,
+		error = xfs_parent_add(tp, wip_pptr,
 					     src_dp, src_name,
 					     old_diroffset, wip);
 		if (error)
@@ -3548,7 +3548,7 @@ retry:
 	}
 
 	if (src_ip_pptr) {
-		error = xfs_parent_defer_replace(tp, src_ip_pptr, src_dp,
+		error = xfs_parent_replace(tp, src_ip_pptr, src_dp,
 				old_diroffset, target_name, target_dp,
 				new_diroffset, src_ip);
 		if (error)
@@ -3556,7 +3556,7 @@ retry:
 	}
 
 	if (tgt_ip_pptr) {
-		error = xfs_parent_defer_remove(tp, target_dp,
+		error = xfs_parent_remove(tp, target_dp,
 						tgt_ip_pptr,
 						new_diroffset, target_ip);
 		if (error)
