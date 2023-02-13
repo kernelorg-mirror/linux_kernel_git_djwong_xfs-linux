@@ -43,8 +43,14 @@ void xfs_parent_irec_to_disk(struct xfs_parent_name_rec *rec, int *reclen,
  * the defer ops machinery
  */
 struct xfs_parent_defer {
-	struct xfs_parent_name_rec	rec;
-	struct xfs_parent_name_rec	old_rec;
+	union {
+		struct xfs_parent_name_rec	rec;
+		__u8			dummy1[XFS_PARENT_NAME_MAX_SIZE];
+	};
+	union {
+		struct xfs_parent_name_rec	old_rec;
+		__u8			dummy2[XFS_PARENT_NAME_MAX_SIZE];
+	};
 	struct xfs_da_args		args;
 	bool				have_log;
 };
@@ -112,7 +118,10 @@ unsigned int xfs_pptr_calc_space_res(struct xfs_mount *mp,
 
 /* Scratchpad memory so that raw parent operations don't burn stack space. */
 struct xfs_parent_scratch {
-	struct xfs_parent_name_rec	rec;
+	union {
+		struct xfs_parent_name_rec	rec;
+		__u8			dummy1[XFS_PARENT_NAME_MAX_SIZE];
+	};
 	struct xfs_da_args		args;
 };
 

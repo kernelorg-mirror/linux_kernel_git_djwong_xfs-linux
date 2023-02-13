@@ -116,7 +116,7 @@ xfs_check_ondisk_structs(void)
 	XFS_CHECK_OFFSET(xfs_dir2_sf_entry_t, offset,		1);
 	XFS_CHECK_OFFSET(xfs_dir2_sf_entry_t, name,		3);
 	XFS_CHECK_STRUCT_SIZE(xfs_dir2_sf_hdr_t,		10);
-	XFS_CHECK_STRUCT_SIZE(struct xfs_parent_name_rec,	76);
+	XFS_CHECK_STRUCT_SIZE(struct xfs_parent_name_rec,	12);
 	BUILD_BUG_ON(XFS_PARENT_NAME_HASH_SIZE != SHA512_DIGEST_SIZE);
 
 	/* log structures */
