@@ -1684,7 +1684,7 @@ xfs_ioc_scrub_metadata(
  * xfs_getparents_rec of a size specified in gp_ptrs_size.  If the inode contains
  * more parent pointers than can fit in the buffer space, caller may re-call
  * the function using the returned gp_cursor to resume iteration.  The
- * number of xfs_getparents_rec returned will be stored in gp_ptrs_used.
+ * number of xfs_getparents_rec returned will be stored in gp_count.
  *
  * Returns 0 on success or non-zero on failure
  */
@@ -1698,6 +1698,9 @@ xfs_ioc_get_parent_pointer(
 	struct xfs_inode		*file_ip = XFS_I(file_inode(filp));
 	struct xfs_inode		*call_ip = file_ip;
 	struct xfs_mount		*mp = file_ip->i_mount;
+	void				__user *o_pptr;
+	struct xfs_getparents_rec	*i_pptr;
+	unsigned int			bytes;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
@@ -1715,8 +1718,12 @@ xfs_ioc_get_parent_pointer(
 	}
 
 	/* Check size of buffer requested by user */
-	if (xfs_getparents_sizeof(ppi->gp_ptrs_size) > XFS_XATTR_LIST_MAX) {
+	if (ppi->gp_bufsize > XFS_XATTR_LIST_MAX) {
 		error = -ENOMEM;
+		goto out;
+	}
+	if (ppi->gp_bufsize < sizeof(struct xfs_getparents)) {
+		error = -EINVAL;
 		goto out;
 	}
 
@@ -1730,8 +1737,7 @@ xfs_ioc_get_parent_pointer(
 	 * Now that we know how big the trailing buffer is, expand
 	 * our kernel xfs_getparents to be the same size
 	 */
-	ppi = kvrealloc(ppi, sizeof(struct xfs_getparents),
-			xfs_getparents_sizeof(ppi->gp_ptrs_size),
+	ppi = kvrealloc(ppi, sizeof(struct xfs_getparents), ppi->gp_bufsize,
 			GFP_KERNEL | __GFP_ZERO);
 	if (!ppi)
 		return -ENOMEM;
@@ -1763,9 +1769,32 @@ xfs_ioc_get_parent_pointer(
 	if (error)
 		goto out;
 
-	/* Copy the parent pointers back to the user */
-	error = copy_to_user(arg, ppi,
-			xfs_getparents_sizeof(ppi->gp_ptrs_size));
+	/*
+	 * If we ran out of buffer space before copying any parent pointers at
+	 * all, the caller's buffer was too short.  Tell userspace that, erm,
+	 * the message is too long.
+	 */
+	if (ppi->gp_count == 0 && !(ppi->gp_flags & XFS_GETPARENTS_OFLAG_DONE)) {
+		error = -EMSGSIZE;
+		goto out;
+	}
+
+	/* Copy the parent pointer head back to the user */
+	bytes = xfs_getparents_arraytop(ppi, ppi->gp_count);
+	error = copy_to_user(arg, ppi, bytes);
+	if (error) {
+		error = -EFAULT;
+		goto out;
+	}
+
+	if (ppi->gp_count == 0)
+		goto out;
+
+	/* Copy the parent pointer records back to the user. */
+	o_pptr = (__user char*)arg + ppi->gp_offsets[ppi->gp_count - 1];
+	i_pptr = xfs_getparents_rec(ppi, ppi->gp_count - 1);
+	bytes = ((char *)ppi + ppi->gp_bufsize) - (char *)i_pptr;
+	error = copy_to_user(o_pptr, i_pptr, bytes);
 	if (error) {
 		error = -EFAULT;
 		goto out;

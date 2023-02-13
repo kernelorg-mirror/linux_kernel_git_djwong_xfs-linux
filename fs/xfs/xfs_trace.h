@@ -4327,8 +4327,8 @@ TRACE_EVENT(xfs_getparent_listent,
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_ino_t, ino)
-		__field(unsigned int, pused)
-		__field(unsigned int, psize)
+		__field(unsigned int, count)
+		__field(unsigned int, bufsize)
 		__field(xfs_ino_t, parent_ino)
 		__field(unsigned int, parent_gen)
 		__field(unsigned int, namelen)
@@ -4337,18 +4337,18 @@ TRACE_EVENT(xfs_getparent_listent,
 	TP_fast_assign(
 		__entry->dev = ip->i_mount->m_super->s_dev;
 		__entry->ino = ip->i_ino;
-		__entry->pused = ppi->gp_ptrs_used;
-		__entry->psize = ppi->gp_ptrs_size;
+		__entry->count = ppi->gp_count;
+		__entry->bufsize = ppi->gp_bufsize;
 		__entry->parent_ino = irec->p_ino;
 		__entry->parent_gen = irec->p_gen;
 		__entry->namelen = irec->p_namelen;
 		memcpy(__get_str(name), irec->p_name, irec->p_namelen);
 	),
-	TP_printk("dev %d:%d ino 0x%llx pptr %u/%u: parent_ino 0x%llx parent_gen 0x%x name '%.*s'",
+	TP_printk("dev %d:%d ino 0x%llx bufsize %u count %u: parent_ino 0x%llx parent_gen 0x%x name '%.*s'",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ino,
-		  __entry->pused,
-		  __entry->psize,
+		  __entry->bufsize,
+		  __entry->count,
 		  __entry->parent_ino,
 		  __entry->parent_gen,
 		  __entry->namelen,
@@ -4363,7 +4363,7 @@ TRACE_EVENT(xfs_getparent_pointers,
 		__field(dev_t, dev)
 		__field(xfs_ino_t, ino)
 		__field(unsigned int, flags)
-		__field(unsigned int, psize)
+		__field(unsigned int, bufsize)
 		__field(unsigned int, hashval)
 		__field(unsigned int, blkno)
 		__field(unsigned int, offset)
@@ -4373,17 +4373,17 @@ TRACE_EVENT(xfs_getparent_pointers,
 		__entry->dev = ip->i_mount->m_super->s_dev;
 		__entry->ino = ip->i_ino;
 		__entry->flags = ppi->gp_flags;
-		__entry->psize = ppi->gp_ptrs_size;
+		__entry->bufsize = ppi->gp_bufsize;
 		__entry->hashval = cur->hashval;
 		__entry->blkno = cur->blkno;
 		__entry->offset = cur->offset;
 		__entry->initted = cur->initted;
 	),
-	TP_printk("dev %d:%d ino 0x%llx flags 0x%x psize %u cur_init? %d hashval 0x%x blkno %u offset %u",
+	TP_printk("dev %d:%d ino 0x%llx flags 0x%x bufsize %u cur_init? %d hashval 0x%x blkno %u offset %u",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ino,
 		  __entry->flags,
-		  __entry->psize,
+		  __entry->bufsize,
 		  __entry->initted,
 		  __entry->hashval,
 		  __entry->blkno,
