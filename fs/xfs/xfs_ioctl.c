@@ -1702,7 +1702,7 @@ xfs_ioc_get_parent_pointer(
 		return -EPERM;
 
 	/* Allocate an xfs_pptr_info to put the user data */
-	ppi = kmalloc(sizeof(struct xfs_pptr_info), 0);
+	ppi = kvmalloc(sizeof(struct xfs_pptr_info), GFP_KERNEL);
 	if (!ppi)
 		return -ENOMEM;
 
@@ -1729,7 +1729,9 @@ xfs_ioc_get_parent_pointer(
 	 * Now that we know how big the trailing buffer is, expand
 	 * our kernel xfs_pptr_info to be the same size
 	 */
-	ppi = krealloc(ppi, xfs_pptr_info_sizeof(ppi->pi_ptrs_size), 0);
+	ppi = kvrealloc(ppi, sizeof(struct xfs_pptr_info),
+			xfs_pptr_info_sizeof(ppi->pi_ptrs_size),
+			GFP_KERNEL | __GFP_ZERO);
 	if (!ppi)
 		return -ENOMEM;
 
@@ -1774,7 +1776,7 @@ xfs_ioc_get_parent_pointer(
 out:
 	if (call_ip != file_ip)
 		xfs_irele(call_ip);
-	kmem_free(ppi);
+	kvfree(ppi);
 	return error;
 }
 
