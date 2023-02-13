@@ -23,6 +23,7 @@ struct xfs_parent_name_irec {
 	/* Key fields for looking up a particular parent pointer. */
 	xfs_ino_t		p_ino;
 	uint32_t		p_gen;
+	uint8_t			hashlen;
 	uint8_t			p_namehash[XFS_PARENT_NAME_HASH_SIZE];
 
 	/* Attributes of a parent pointer. */
@@ -31,10 +32,11 @@ struct xfs_parent_name_irec {
 };
 
 void xfs_parent_irec_from_disk(struct xfs_parent_name_irec *irec,
-		const struct xfs_parent_name_rec *rec,
+		const struct xfs_parent_name_rec *rec, int reclen,
 		const void *value, int valuelen);
-void xfs_parent_irec_to_disk(struct xfs_parent_name_rec *rec, void *value,
-		int *valuelen, const struct xfs_parent_name_irec *irec);
+void xfs_parent_irec_to_disk(struct xfs_parent_name_rec *rec, int *reclen,
+		void *value, int *valuelen,
+		const struct xfs_parent_name_irec *irec);
 
 /*
  * Dynamically allocd structure used to wrap the needed data to pass around

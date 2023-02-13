@@ -831,8 +831,11 @@ xfs_failaddr_t xfs_da3_blkinfo_verify(struct xfs_buf *bp,
  * Parent pointer attribute format definition
  *
  * The EA name encodes the parent inode number, generation and a collision
- * resistant hash computed from the dirent name.  The hash is defined to be the
- * sha512 of the child inode generation and the dirent name.
+ * resistant hash computed from the dirent name.  The hash is defined to be:
+ *
+ * - The dirent name if it fits within the EA name.
+ *
+ * - The sha512 of the child inode generation and the dirent name.
  *
  * The EA value contains the same name as the dirent in the parent directory.
  */
@@ -841,5 +844,19 @@ struct xfs_parent_name_rec {
 	__be32  p_gen;
 	__u8	p_namehash[XFS_PARENT_NAME_HASH_SIZE];
 } __attribute__((packed));
+
+static inline unsigned int
+xfs_parent_name_rec_sizeof(
+	unsigned int		hashlen)
+{
+	return offsetof(struct xfs_parent_name_rec, p_namehash) + hashlen;
+}
+
+static inline unsigned int
+xfs_parent_name_hashlen(
+	unsigned int		rec_sizeof)
+{
+	return rec_sizeof - offsetof(struct xfs_parent_name_rec, p_namehash);
+}
 
 #endif /* __XFS_DA_FORMAT_H__ */

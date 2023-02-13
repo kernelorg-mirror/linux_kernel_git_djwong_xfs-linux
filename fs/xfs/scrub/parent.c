@@ -531,6 +531,7 @@ xchk_parent_scan_attr(
 	struct xfs_inode	*dp = NULL;
 	const struct xfs_parent_name_rec *rec = (const void *)name;
 	unsigned int		lockmode;
+	int			hashlen;
 	int			error;
 
 	/* Ignore incomplete xattrs */
@@ -552,7 +553,7 @@ xchk_parent_scan_attr(
 		return -ECANCELED;
 	}
 
-	xfs_parent_irec_from_disk(&pp->pptr, rec, value, valuelen);
+	xfs_parent_irec_from_disk(&pp->pptr, rec, namelen, value, valuelen);
 
 	xname.name = pp->pptr.p_name;
 	xname.len = pp->pptr.p_namelen;
@@ -561,13 +562,16 @@ xchk_parent_scan_attr(
 	 * Does the namehash in the parent pointer match the actual name?
 	 * If not, there's no point in checking further.
 	 */
-	error = xfs_parent_namehash(sc->ip, &xname, pp->child_namehash,
+	hashlen = xfs_parent_namehash(sc->ip, &xname, pp->child_namehash,
 			sizeof(pp->child_namehash));
-	if (!xchk_fblock_xref_process_error(sc, XFS_ATTR_FORK, 0, &error))
-		return error;
+	if (hashlen < 0) {
+		xchk_fblock_xref_process_error(sc, XFS_ATTR_FORK, 0, &hashlen);
+		return hashlen;
+	}
 
-	if (memcmp(pp->pptr.p_namehash, pp->child_namehash,
-				sizeof(pp->pptr.p_namehash))) {
+	if (hashlen != pp->pptr.hashlen ||
+	    memcmp(pp->pptr.p_namehash, pp->child_namehash,
+				pp->pptr.hashlen)) {
 		trace_xchk_parent_bad_namehash(sc->ip, pp->pptr.p_ino,
 				xname.name, xname.len);
 		xchk_fblock_xref_set_corrupt(sc, XFS_ATTR_FORK, 0);

@@ -540,7 +540,7 @@ xrep_dir_scan_parent_pointer(
 	    !xfs_parent_valuecheck(sc->mp, value, valuelen))
 		return -EFSCORRUPTED;
 
-	xfs_parent_irec_from_disk(&rd->pptr, rec, value, valuelen);
+	xfs_parent_irec_from_disk(&rd->pptr, rec, namelen, value, valuelen);
 
 	/* Ignore parent pointers that point back to a different dir. */
 	if (rd->pptr.p_ino != sc->ip->i_ino ||
