@@ -1758,11 +1758,8 @@ xfs_ioc_get_parent_pointer(
 		}
 	}
 
-	if (call_ip->i_ino == mp->m_sb.sb_rootino)
-		ppi->pi_flags |= XFS_PPTR_OFLAG_ROOT;
-
 	/* Get the parent pointers */
-	error = xfs_attr_get_parent_pointer(call_ip, ppi);
+	error = xfs_getparent_pointers(call_ip, ppi);
 	if (error)
 		goto out;
 
