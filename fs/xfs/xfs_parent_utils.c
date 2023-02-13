@@ -83,7 +83,7 @@ xfs_getparent_listent(
 	pptr = &ppi->pi_parents[ppi->pi_ptrs_used++];
 	pptr->xpp_ino = irec->p_ino;
 	pptr->xpp_gen = irec->p_gen;
-	pptr->xpp_diroffset = irec->p_diroffset;
+	pptr->xpp_rsvd2 = 0;
 	pptr->xpp_rsvd = 0;
 
 	memcpy(pptr->xpp_name, irec->p_name, irec->p_namelen);
