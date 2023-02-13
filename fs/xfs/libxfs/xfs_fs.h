@@ -769,11 +769,11 @@ struct xfs_scrub_metadata {
 
 /* Get an inode parent pointer through ioctl */
 struct xfs_getparents_rec {
-	__u64		gpr_ino;			/* Inode */
-	__u32		gpr_gen;			/* Inode generation */
-	__u32		gpr_rsvd;			/* Reserved */
-	__u64		gpr_rsvd2;			/* Reserved */
-	__u8		gpr_name[XFS_GETPARENTS_MAXNAMELEN];	/* File name */
+	__u64		gpr_ino;	/* Inode */
+	__u32		gpr_gen;	/* Inode generation */
+	__u32		gpr_rsvd;	/* Reserved */
+	__u64		gpr_rsvd2;	/* Reserved */
+	__u8		gpr_name[];	/* File name and null terminator */
 };
 
 /* Iterate through an inodes parent pointers */
@@ -794,36 +794,26 @@ struct xfs_getparents {
 	/* Must be set to zero */
 	__u32				gp_reserved;
 
-	/* # of entries in array */
-	__u32				gp_ptrs_size;
+	/* size of the memory buffer in bytes, including this header */
+	__u32				gp_bufsize;
 
 	/* # of entries filled in (output) */
-	__u32				gp_ptrs_used;
+	__u32				gp_count;
 
 	/* Must be set to zero */
-	__u64				gp_reserved2[6];
+	__u64				gp_reserved2[5];
 
-	/*
-	 * An array of struct xfs_getparents_rec follows the header
-	 * information. Use xfs_getparents_rec() to access the
-	 * parent pointer array entries.
-	 */
-	struct xfs_getparents_rec		gp_parents[];
+	/* Byte offset of each xfs_getparents_rec object within the buffer. */
+	__u32				gp_offsets[];
 };
-
-static inline size_t
-xfs_getparents_sizeof(int nr_ptrs)
-{
-	return sizeof(struct xfs_getparents) +
-	       (nr_ptrs * sizeof(struct xfs_getparents_rec));
-}
 
 static inline struct xfs_getparents_rec*
 xfs_getparents_rec(
 	struct xfs_getparents	*info,
 	unsigned int		idx)
 {
-	return &info->gp_parents[idx];
+	return (struct xfs_getparents_rec *)((char *)info +
+					     info->gp_offsets[idx]);
 }
 
 /*
@@ -871,7 +861,7 @@ xfs_getparents_rec(
 /*	XFS_IOC_GETFSMAP ------ hoisted 59         */
 #define XFS_IOC_SCRUB_METADATA	_IOWR('X', 60, struct xfs_scrub_metadata)
 #define XFS_IOC_AG_GEOMETRY	_IOWR('X', 61, struct xfs_ag_geometry)
-#define XFS_IOC_GETPARENTS	_IOWR('X', 62, struct xfs_getparents_rec)
+#define XFS_IOC_GETPARENTS	_IOWR('X', 62, struct xfs_getparents)
 
 /*
  * ioctl commands that replace IRIX syssgi()'s
