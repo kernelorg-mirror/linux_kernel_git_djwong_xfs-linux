@@ -74,7 +74,7 @@ xfs_getparent_listent(
 		return;
 	}
 
-	xfs_parent_irec_from_disk(&gp->pptr_irec, (void *)name, value,
+	xfs_parent_irec_from_disk(&gp->pptr_irec, (void *)name, namelen, value,
 			valuelen);
 
 	trace_xfs_getparent_listent(context->dp, ppi, irec);

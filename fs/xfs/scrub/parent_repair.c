@@ -522,7 +522,7 @@ xrep_pptr_dump_tempptr(
 	else
 		return -EFSCORRUPTED;
 
-	xfs_parent_irec_from_disk(&rp->pptr, rec, value, valuelen);
+	xfs_parent_irec_from_disk(&rp->pptr, rec, namelen, value, valuelen);
 
 	trace_xrep_pptr_dumpname(sc->tempip, &rp->pptr);
 

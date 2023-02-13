@@ -144,15 +144,19 @@ xchk_dir_parent_pointer(
 {
 	struct xfs_scrub	*sc = sd->sc;
 	int			pptr_namelen;
-	int			error;
+	int			hashlen;
 
 	sd->pptr.p_ino = sc->ip->i_ino;
 	sd->pptr.p_gen = VFS_I(sc->ip)->i_generation;
 
-	error = xfs_parent_namehash(ip, name, &sd->pptr.p_namehash,
+	hashlen = xfs_parent_namehash(ip, name, &sd->pptr.p_namehash,
 			sizeof(sd->pptr.p_namehash));
-	if (error)
-		return error;
+	if (hashlen < 0) {
+		xchk_fblock_xref_process_error(sc, XFS_DATA_FORK, 0,
+				&hashlen);
+		return hashlen;
+	}
+	sd->pptr.hashlen = hashlen;
 
 	pptr_namelen = xfs_parent_lookup(sc->tp, ip, &sd->pptr, sd->namebuf,
 			MAXNAMELEN, &sd->pptr_scratch);
