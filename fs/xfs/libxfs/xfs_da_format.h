@@ -824,17 +824,22 @@ static inline unsigned int xfs_dir2_dirblock_bytes(struct xfs_sb *sbp)
 xfs_failaddr_t xfs_da3_blkinfo_verify(struct xfs_buf *bp,
 				      struct xfs_da3_blkinfo *hdr3);
 
+/* We use sha512 for the parent pointer name hash. */
+#define XFS_PARENT_NAME_HASH_SIZE	(64)
+
 /*
  * Parent pointer attribute format definition
  *
- * EA name encodes the parent inode number, generation and the offset of
- * the dirent that points to the child inode. The EA value contains the
- * same name as the dirent in the parent directory.
+ * The EA name encodes the parent inode number, generation and a collision
+ * resistant hash computed from the dirent name.  The hash is defined to be the
+ * sha512 of the child inode generation and the dirent name.
+ *
+ * The EA value contains the same name as the dirent in the parent directory.
  */
 struct xfs_parent_name_rec {
 	__be64  p_ino;
 	__be32  p_gen;
-	__be32  p_diroffset;
-};
+	__u8	p_namehash[XFS_PARENT_NAME_HASH_SIZE];
+} __attribute__((packed));
 
 #endif /* __XFS_DA_FORMAT_H__ */

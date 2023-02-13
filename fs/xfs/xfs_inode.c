@@ -1202,8 +1202,7 @@ xfs_create(
 	 * the parent information now.
 	 */
 	if (parent) {
-		error = xfs_parent_add(tp, parent, dp, name, diroffset,
-					     ip);
+		error = xfs_parent_add(tp, parent, dp, name, ip);
 		if (error)
 			goto out_trans_cancel;
 	}
@@ -1477,8 +1476,7 @@ xfs_link(
 	 * the parent to the inode.
 	 */
 	if (parent) {
-		error = xfs_parent_add(tp, parent, tdp, target_name,
-					     diroffset, sip);
+		error = xfs_parent_add(tp, parent, tdp, target_name, sip);
 		if (error)
 			goto error_return;
 	}
@@ -2750,7 +2748,7 @@ xfs_remove(
 	}
 
 	if (parent) {
-		error = xfs_parent_remove(tp, dp, parent, dir_offset, ip);
+		error = xfs_parent_remove(tp, parent, dp, name, ip);
 		if (error)
 			goto out_trans_cancel;
 	}
@@ -3061,13 +3059,13 @@ xfs_cross_rename(
 	}
 
 	if (xfs_has_parent(mp)) {
-		error = xfs_parent_replace(tp, ip1_pptr, dp1,
-				old_diroffset, name2, dp2, new_diroffset, ip1);
+		error = xfs_parent_replace(tp, ip1_pptr, dp1, name1, dp2,
+				name2, ip1);
 		if (error)
 			goto out_trans_abort;
 
-		error = xfs_parent_replace(tp, ip2_pptr, dp2,
-				new_diroffset, name1, dp1, old_diroffset, ip2);
+		error = xfs_parent_replace(tp, ip2_pptr, dp2, name2, dp1,
+				name1, ip2);
 		if (error)
 			goto out_trans_abort;
 	}
@@ -3540,25 +3538,21 @@ retry:
 		goto out_trans_cancel;
 
 	if (wip_pptr) {
-		error = xfs_parent_add(tp, wip_pptr,
-					     src_dp, src_name,
-					     old_diroffset, wip);
+		error = xfs_parent_add(tp, wip_pptr, src_dp, src_name, wip);
 		if (error)
 			goto out_trans_cancel;
 	}
 
 	if (src_ip_pptr) {
-		error = xfs_parent_replace(tp, src_ip_pptr, src_dp,
-				old_diroffset, target_name, target_dp,
-				new_diroffset, src_ip);
+		error = xfs_parent_replace(tp, src_ip_pptr, src_dp, src_name,
+				target_dp, target_name, src_ip);
 		if (error)
 			goto out_trans_cancel;
 	}
 
 	if (tgt_ip_pptr) {
-		error = xfs_parent_remove(tp, target_dp,
-						tgt_ip_pptr,
-						new_diroffset, target_ip);
+		error = xfs_parent_remove(tp, tgt_ip_pptr, target_dp,
+				target_name, target_ip);
 		if (error)
 			goto out_trans_cancel;
 	}

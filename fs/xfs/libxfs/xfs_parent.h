@@ -23,7 +23,7 @@ struct xfs_parent_name_irec {
 	/* Key fields for looking up a particular parent pointer. */
 	xfs_ino_t		p_ino;
 	uint32_t		p_gen;
-	xfs_dir2_dataptr_t	p_diroffset;
+	uint8_t			p_namehash[XFS_PARENT_NAME_HASH_SIZE];
 
 	/* Attributes of a parent pointer. */
 	uint8_t			p_namelen;
@@ -79,15 +79,14 @@ xfs_parent_start_locked(
 
 int xfs_parent_add(struct xfs_trans *tp, struct xfs_parent_defer *parent,
 		struct xfs_inode *dp, const struct xfs_name *parent_name,
-		xfs_dir2_dataptr_t diroffset, struct xfs_inode *child);
+		struct xfs_inode *child);
 int xfs_parent_replace(struct xfs_trans *tp,
 		struct xfs_parent_defer *new_parent, struct xfs_inode *old_dp,
-		xfs_dir2_dataptr_t old_diroffset,
-		const struct xfs_name *parent_name, struct xfs_inode *new_ip,
-		xfs_dir2_dataptr_t new_diroffset, struct xfs_inode *child);
-int xfs_parent_remove(struct xfs_trans *tp, struct xfs_inode *dp,
-		struct xfs_parent_defer *parent, xfs_dir2_dataptr_t diroffset,
-		struct xfs_inode *child);
+		const struct xfs_name *old_name, struct xfs_inode *new_ip,
+		const struct xfs_name *new_name, struct xfs_inode *child);
+int xfs_parent_remove(struct xfs_trans *tp,
+		struct xfs_parent_defer *parent, struct xfs_inode *dp,
+		const struct xfs_name *name, struct xfs_inode *child);
 
 void __xfs_parent_cancel(struct xfs_mount *mp, struct xfs_parent_defer *parent);
 
@@ -99,6 +98,12 @@ xfs_parent_finish(
 	if (p)
 		__xfs_parent_cancel(mp, p);
 }
+
+int xfs_parent_namehash(struct xfs_inode *ip, const struct xfs_name *name,
+		void *namehash, unsigned int namehash_len);
+
+int xfs_parent_irec_hash(struct xfs_inode *ip,
+		struct xfs_parent_name_irec *pptr);
 
 unsigned int xfs_pptr_calc_space_res(struct xfs_mount *mp,
 				     unsigned int namelen);

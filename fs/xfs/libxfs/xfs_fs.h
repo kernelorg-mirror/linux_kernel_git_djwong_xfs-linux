@@ -770,8 +770,8 @@ struct xfs_scrub_metadata {
 struct xfs_parent_ptr {
 	__u64		xpp_ino;			/* Inode */
 	__u32		xpp_gen;			/* Inode generation */
-	__u32		xpp_diroffset;			/* Directory offset */
-	__u64		xpp_rsvd;			/* Reserved */
+	__u32		xpp_rsvd;			/* Reserved */
+	__u64		xpp_rsvd2;			/* Reserved */
 	__u8		xpp_name[XFS_PPTR_MAXNAMELEN];	/* File name */
 };
 
