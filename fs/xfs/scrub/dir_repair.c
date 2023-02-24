@@ -926,12 +926,33 @@ xrep_dir_rebuild_tree(
 		return error;
 
 	/*
-	 * Abort the inode scan so that the live hooks won't stash any more
-	 * directory updates.
+	 * Replay stashed updates and take the ILOCKs of both directories
+	 * before we simulate committing the new directory structure.
+	 *
+	 * As of Linux 6.2, if /a, /a/b, and /c are all directories, the VFS
+	 * does not take i_rwsem on /a/b for a "mv /a/b /c/" operation.  This
+	 * means that only b's ILOCK protects b's dotdot update.  b's IOLOCK
+	 * is not held, unlike every other dotdot update.  To stabilize sc->ip
+	 * to simulate the repair commit, we must hold the ILOCK of the
+	 * directory being repaired /and/ there must not be any pending live
+	 * updates.
 	 */
-	xchk_iscan_abort(&rd->iscan);
+	do {
+		error = xrep_dir_replay_updates(rd);
+		if (error)
+			return error;
 
-	error = xrep_dir_replay_updates(rd);
+		error = xchk_trans_alloc_empty(sc);
+		if (error)
+			return error;
+
+		xchk_ilock(sc, XFS_ILOCK_EXCL);
+		if (xfarray_length(rd->dir_entries) == 0)
+			break;
+
+		xchk_iunlock(sc, XFS_ILOCK_EXCL);
+		xchk_trans_cancel(sc);
+	} while (!xchk_should_terminate(sc, &error));
 	if (error)
 		return error;
 
@@ -948,6 +969,8 @@ xrep_dir_rebuild_tree(
 		rd->parent_ino = rd->sc->mp->m_sb.sb_rootino;
 	}
 
+	trace_xrep_dir_rebuild_tree(sc->ip, rd->parent_ino);
+
 	/*
 	 * At this point, we've quiesced both directories and should be ready
 	 * to commit the new contents.
@@ -957,13 +980,6 @@ xrep_dir_rebuild_tree(
 	 * stashing mechanism to schedule deletion of every dirent in the
 	 * temporary directory to avoid leaking directory blocks.
 	 */
-	error = xchk_trans_alloc_empty(sc);
-	if (error)
-		return error;
-
-	trace_xrep_dir_rebuild_tree(sc->ip, rd->parent_ino);
-
-	xchk_ilock(sc, XFS_ILOCK_EXCL);
 	error = xrep_tempfile_ilock_polled(sc);
 	if (error)
 		return error;
