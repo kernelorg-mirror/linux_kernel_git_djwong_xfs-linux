@@ -348,12 +348,6 @@ struct xchk_pptrs {
 
 	/* xattr key and da args for parent pointer revalidation. */
 	struct xfs_parent_scratch pptr_scratch;
-
-	/* Name hashes */
-	uint8_t			child_namehash[XFS_PARENT_NAME_MAX_HASH_SIZE];
-
-	/* Name buffer for revalidation. */
-	uint8_t			namebuf[MAXNAMELEN];
 };
 
 /* Look up the dotdot entry so that we can check it as we walk the pptrs. */
@@ -526,12 +520,10 @@ xchk_parent_scan_attr(
 	unsigned int		valuelen,
 	void			*priv)
 {
-	struct xfs_name		xname = { };
 	struct xchk_pptrs	*pp = priv;
 	struct xfs_inode	*dp = NULL;
 	const struct xfs_parent_name_rec *rec = (const void *)name;
 	unsigned int		lockmode;
-	int			hashlen;
 	int			error;
 
 	/* Ignore incomplete xattrs */
@@ -554,29 +546,6 @@ xchk_parent_scan_attr(
 	}
 
 	xfs_parent_irec_from_disk(&pp->pptr, rec, namelen, value, valuelen);
-
-	xname.name = pp->pptr.p_name;
-	xname.len = pp->pptr.p_namelen;
-
-	/*
-	 * Does the namehash in the parent pointer match the actual name?
-	 * If not, there's no point in checking further.
-	 */
-	hashlen = xfs_parent_namehash(sc->ip, &xname, pp->child_namehash,
-			sizeof(pp->child_namehash));
-	if (hashlen < 0) {
-		xchk_fblock_xref_process_error(sc, XFS_ATTR_FORK, 0, &hashlen);
-		return hashlen;
-	}
-
-	if (hashlen != pp->pptr.hashlen ||
-	    memcmp(pp->pptr.p_namehash, pp->child_namehash,
-				pp->pptr.hashlen)) {
-		trace_xchk_parent_bad_namehash(sc->ip, pp->pptr.p_ino,
-				xname.name, xname.len);
-		xchk_fblock_xref_set_corrupt(sc, XFS_ATTR_FORK, 0);
-		return 0;
-	}
 
 	error = xchk_parent_iget(pp, &dp);
 	if (error)
@@ -630,28 +599,16 @@ xchk_parent_revalidate_pptr(
 	struct xchk_pptrs	*pp)
 {
 	struct xfs_scrub	*sc = pp->sc;
-	int			namelen;
+	int			error;
 
-	namelen = xfs_parent_lookup(sc->tp, sc->ip, &pp->pptr, pp->namebuf,
-			MAXNAMELEN, &pp->pptr_scratch);
-	if (namelen == -ENOATTR) {
-		/*  Parent pointer went away, nothing to revalidate. */
+	error = xfs_parent_lookup(sc->tp, sc->ip, &pp->pptr,
+			&pp->pptr_scratch);
+	if (error == -ENOATTR) {
+		/* Parent pointer went away, nothing to revalidate. */
 		return -ENOENT;
 	}
-	if (namelen < 0 && namelen != -EEXIST)
-		return namelen;
 
-	/*
-	 * The dirent name changed length while we were unlocked.  No need
-	 * to revalidate this.
-	 */
-	if (namelen != pp->pptr.p_namelen)
-		return -ENOENT;
-
-	/* The dirent name itself changed; there's nothing to revalidate. */
-	if (memcmp(pp->namebuf, pp->pptr.p_name, pp->pptr.p_namelen))
-		return -ENOENT;
-	return 0;
+	return error;
 }
 
 /*
@@ -678,10 +635,6 @@ xchk_parent_slow_pptr(
 		return error;
 	pp->pptr.p_name[MAXNAMELEN - 1] = 0;
 	pp->pptr.p_namelen = pptr->namelen;
-
-	error = xfs_parent_irec_hash(sc->ip, &pp->pptr);
-	if (error)
-		return error;
 
 	/* Check that the deferred parent pointer still exists. */
 	if (pp->need_revalidate) {
@@ -714,7 +667,7 @@ xchk_parent_slow_pptr(
 	xchk_iunlock(sc, sc->ilock_flags);
 	pp->need_revalidate = true;
 
-	trace_xchk_parent_slowpath(sc->ip, pp->namebuf, pptr->namelen,
+	trace_xchk_parent_slowpath(sc->ip, pp->pptr.p_name, pptr->namelen,
 			dp->i_ino);
 
 	while (true) {

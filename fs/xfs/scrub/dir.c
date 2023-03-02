@@ -78,7 +78,7 @@ struct xchk_dir {
 	/* If we've cycled the ILOCK, we must revalidate deferred dirents. */
 	bool			need_revalidate;
 
-	/* Name buffer for pptr validation and dirent revalidation. */
+	/* Name buffer for dirent revalidation. */
 	uint8_t			namebuf[MAXNAMELEN];
 
 };
@@ -143,42 +143,16 @@ xchk_dir_parent_pointer(
 	struct xfs_inode	*ip)
 {
 	struct xfs_scrub	*sc = sd->sc;
-	int			pptr_namelen;
-	int			hashlen;
+	int			error;
 
 	sd->pptr.p_ino = sc->ip->i_ino;
 	sd->pptr.p_gen = VFS_I(sc->ip)->i_generation;
+	sd->pptr.p_namelen = name->len;
+	memcpy(sd->pptr.p_name, name->name, name->len);
 
-	hashlen = xfs_parent_namehash(ip, name, &sd->pptr.p_namehash,
-			sizeof(sd->pptr.p_namehash));
-	if (hashlen < 0) {
-		xchk_fblock_xref_process_error(sc, XFS_DATA_FORK, 0,
-				&hashlen);
-		return hashlen;
-	}
-	sd->pptr.hashlen = hashlen;
-
-	pptr_namelen = xfs_parent_lookup(sc->tp, ip, &sd->pptr, sd->namebuf,
-			MAXNAMELEN, &sd->pptr_scratch);
-	if (pptr_namelen == -ENOATTR) {
+	error = xfs_parent_lookup(sc->tp, ip, &sd->pptr, &sd->pptr_scratch);
+	if (error == -ENOATTR)
 		xchk_fblock_xref_set_corrupt(sc, XFS_DATA_FORK, 0);
-		return 0;
-	}
-	if (pptr_namelen < 0) {
-		xchk_fblock_xref_process_error(sc, XFS_DATA_FORK, 0,
-				&pptr_namelen);
-		return pptr_namelen;
-	}
-
-	if (pptr_namelen != name->len) {
-		xchk_fblock_xref_set_corrupt(sc, XFS_DATA_FORK, 0);
-		return 0;
-	}
-
-	if (memcmp(sd->namebuf, name->name, name->len)) {
-		xchk_fblock_xref_set_corrupt(sc, XFS_DATA_FORK, 0);
-		return 0;
-	}
 
 	return 0;
 }

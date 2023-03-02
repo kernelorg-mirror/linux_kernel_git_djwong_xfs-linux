@@ -824,22 +824,12 @@ static inline unsigned int xfs_dir2_dirblock_bytes(struct xfs_sb *sbp)
 xfs_failaddr_t xfs_da3_blkinfo_verify(struct xfs_buf *bp,
 				      struct xfs_da3_blkinfo *hdr3);
 
-/* We use sha512 for the parent pointer name hash. */
-#define XFS_PARENT_NAME_SHA512_SIZE	(64)
-
 /*
  * Parent pointer attribute format definition
  *
- * The EA name encodes the parent inode number, generation and a collision
- * resistant hash computed from the dirent name.  The hash is defined to be
- * one of the following:
- *
- * - The dirent name, as long as it does not use the last possible byte of the
- *   EA name space.
- *
- * - The truncated dirent name, with the sha512 hash of the child inode
- *   generation number and dirent name.  The hash is written at the end of the
- *   EA name.
+ * The EA name encodes the parent inode number, generation and as much of the
+ * dirent name as fits.  In other words, it contains up to 243 bytes of the
+ * dirent name.
  *
  * The EA value contains however much of the dirent name that does not fit in
  * the EA name.
@@ -847,30 +837,30 @@ xfs_failaddr_t xfs_da3_blkinfo_verify(struct xfs_buf *bp,
 struct xfs_parent_name_rec {
 	__be64  p_ino;
 	__be32  p_gen;
-	__u8	p_namehash[];
+	__u8	p_dname[];
 } __attribute__((packed));
 
 /* Maximum size of a parent pointer EA name. */
 #define XFS_PARENT_NAME_MAX_SIZE \
 	(MAXNAMELEN - 1)
 
-/* Maximum size of a parent pointer name hash. */
-#define XFS_PARENT_NAME_MAX_HASH_SIZE \
+/* Maximum number of dirent name bytes stored in p_dname. */
+#define XFS_PARENT_MAX_DNAME_SIZE \
 	(XFS_PARENT_NAME_MAX_SIZE - sizeof(struct xfs_parent_name_rec))
 
-/* Offset of the sha512 hash, if used. */
-#define XFS_PARENT_NAME_SHA512_OFFSET \
-	(XFS_PARENT_NAME_MAX_HASH_SIZE - XFS_PARENT_NAME_SHA512_SIZE)
+/* Maximum number of dirent name bytes stored in the xattr value. */
+#define XFS_PARENT_MAX_DNAME_VALUELEN \
+	sizeof(struct xfs_parent_name_rec)
 
 static inline unsigned int
 xfs_parent_name_rec_sizeof(
-	unsigned int		hashlen)
+	unsigned int		dnamelen)
 {
-	return sizeof(struct xfs_parent_name_rec) + hashlen;
+	return sizeof(struct xfs_parent_name_rec) + dnamelen;
 }
 
 static inline unsigned int
-xfs_parent_name_hashlen(
+xfs_parent_name_dnamelen(
 	unsigned int		rec_sizeof)
 {
 	return rec_sizeof - sizeof(struct xfs_parent_name_rec);

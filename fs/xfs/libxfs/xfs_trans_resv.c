@@ -439,6 +439,7 @@ static inline unsigned int xfs_calc_pptr_replace_overhead(void)
 	return sizeof(struct xfs_attri_log_format) +
 			xlog_calc_iovec_len(XATTR_NAME_MAX) +
 			xlog_calc_iovec_len(XATTR_NAME_MAX) +
+			xlog_calc_iovec_len(XFS_PARENT_NAME_MAX_SIZE) +
 			xlog_calc_iovec_len(XFS_PARENT_NAME_MAX_SIZE);
 }
 

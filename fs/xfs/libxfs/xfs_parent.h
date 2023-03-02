@@ -23,10 +23,6 @@ struct xfs_parent_name_irec {
 	/* Key fields for looking up a particular parent pointer. */
 	xfs_ino_t		p_ino;
 	uint32_t		p_gen;
-	uint8_t			hashlen;
-	uint8_t			p_namehash[XFS_PARENT_NAME_MAX_HASH_SIZE];
-
-	/* Attributes of a parent pointer. */
 	uint8_t			p_namelen;
 	unsigned char		p_name[MAXNAMELEN];
 };
@@ -34,7 +30,7 @@ struct xfs_parent_name_irec {
 void xfs_parent_irec_from_disk(struct xfs_parent_name_irec *irec,
 		const struct xfs_parent_name_rec *rec, int reclen,
 		const void *value, int valuelen);
-void xfs_parent_irec_to_disk(struct xfs_parent_name_rec *rec, int *reclen,
+int xfs_parent_irec_to_disk(struct xfs_parent_name_rec *rec, int *reclen,
 		void *value, int *valuelen,
 		const struct xfs_parent_name_irec *irec);
 
@@ -107,12 +103,6 @@ xfs_parent_finish(
 		__xfs_parent_cancel(mp, p);
 }
 
-int xfs_parent_namehash(struct xfs_inode *ip, const struct xfs_name *name,
-		void *namehash, unsigned int namehash_len);
-
-int xfs_parent_irec_hash(struct xfs_inode *ip,
-		struct xfs_parent_name_irec *pptr);
-
 unsigned int xfs_pptr_calc_space_res(struct xfs_mount *mp,
 				     unsigned int namelen);
 
@@ -126,8 +116,8 @@ struct xfs_parent_scratch {
 };
 
 int xfs_parent_lookup(struct xfs_trans *tp, struct xfs_inode *ip,
-		const struct xfs_parent_name_irec *pptr, unsigned char *name,
-		unsigned int namelen, struct xfs_parent_scratch *scratch);
+		const struct xfs_parent_name_irec *pptr,
+		struct xfs_parent_scratch *scratch);
 
 int xfs_parent_set(struct xfs_inode *ip,
 		const struct xfs_parent_name_irec *pptr,
