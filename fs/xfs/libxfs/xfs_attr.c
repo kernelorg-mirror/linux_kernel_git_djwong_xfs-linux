@@ -429,6 +429,8 @@ xfs_attr_complete_op(
 			args->namelen = args->new_namelen;
 			args->hashval = xfs_da_hashname(args->name,
 							args->namelen);
+			args->value = args->new_value;
+			args->valuelen = args->new_valuelen;
 		} else if (args->new_namelen > 0) {
 			args->name = args->new_name;
 			args->namelen = args->new_namelen;
