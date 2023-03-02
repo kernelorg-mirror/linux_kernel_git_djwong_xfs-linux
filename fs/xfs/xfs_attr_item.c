@@ -428,13 +428,10 @@ xfs_attr_log_item(
 	attrp->alfi_op_flags = attr->xattri_op_flags;
 	attrp->alfi_value_len = attr->xattri_nameval->value.i_len;
 
-	if (xfs_attr_log_item_op(attrp) == XFS_ATTRI_OP_FLAGS_NVREPLACEXXX) {
+	if (xfs_attr_log_item_op(attrp) == XFS_ATTRI_OP_FLAGS_NVREPLACE) {
 		attrp->alfi_oldname_len = attr->xattri_nameval->name.i_len;
 		attrp->alfi_newname_len = attr->xattri_nameval->newname.i_len;
 		attrp->alfi_newvalue_len = attr->xattri_nameval->newvalue.i_len;
-	} else if (xfs_attr_log_item_op(attrp) == XFS_ATTRI_OP_FLAGS_NVREPLACE) {
-		attrp->alfi_oldname_len = attr->xattri_nameval->name.i_len;
-		attrp->alfi_newname_len = attr->xattri_nameval->newname.i_len;
 	} else {
 		attrp->alfi_name_len = attr->xattri_nameval->name.i_len;
 	}
@@ -598,7 +595,6 @@ xfs_attri_validate(
 		if (attrp->alfi_newvalue_len != 0)
 			return false;
 		break;
-	case XFS_ATTRI_OP_FLAGS_NVREPLACEXXX:
 	case XFS_ATTRI_OP_FLAGS_NVREPLACE:
 		if (attrp->alfi_oldname_len == 0 ||
 		    attrp->alfi_oldname_len > XATTR_NAME_MAX)
@@ -685,7 +681,7 @@ xfs_attri_item_recover(
 	ASSERT(xfs_sb_version_haslogxattrs(&mp->m_sb));
 
 	switch (attr->xattri_op_flags) {
-	case XFS_ATTRI_OP_FLAGS_NVREPLACEXXX:
+	case XFS_ATTRI_OP_FLAGS_NVREPLACE:
 		args->new_value = nv->newvalue.i_addr;
 		args->new_valuelen = nv->newvalue.i_len;
 		fallthrough;
@@ -694,7 +690,6 @@ xfs_attri_item_recover(
 		fallthrough;
 	case XFS_ATTRI_OP_FLAGS_SET:
 	case XFS_ATTRI_OP_FLAGS_REPLACE:
-	case XFS_ATTRI_OP_FLAGS_NVREPLACE:
 		args->value = nv->value.i_addr;
 		args->valuelen = nv->value.i_len;
 		args->total = xfs_attr_calc_size(args, &local);
@@ -788,13 +783,10 @@ xfs_attri_item_relog(
 	new_attrp->alfi_ino = old_attrp->alfi_ino;
 	new_attrp->alfi_op_flags = old_attrp->alfi_op_flags;
 	new_attrp->alfi_value_len = old_attrp->alfi_value_len;
-	if (xfs_attr_log_item_op(old_attrp) == XFS_ATTRI_OP_FLAGS_NVREPLACEXXX) {
+	if (xfs_attr_log_item_op(old_attrp) == XFS_ATTRI_OP_FLAGS_NVREPLACE) {
 		new_attrp->alfi_newname_len = old_attrp->alfi_newname_len;
 		new_attrp->alfi_oldname_len = old_attrp->alfi_oldname_len;
 		new_attrp->alfi_newvalue_len = old_attrp->alfi_newvalue_len;
-	} else if (xfs_attr_log_item_op(old_attrp) == XFS_ATTRI_OP_FLAGS_NVREPLACE) {
-		new_attrp->alfi_newname_len = old_attrp->alfi_newname_len;
-		new_attrp->alfi_oldname_len = old_attrp->alfi_oldname_len;
 	} else {
 		new_attrp->alfi_name_len = old_attrp->alfi_name_len;
 	}
@@ -864,7 +856,6 @@ xlog_recover_attri_commit_pass2(
 		name_len = attri_formatp->alfi_name_len;
 		value_len = attri_formatp->alfi_value_len;
 		break;
-	case XFS_ATTRI_OP_FLAGS_NVREPLACEXXX:
 	case XFS_ATTRI_OP_FLAGS_NVREPLACE:
 		if (item->ri_total < 3 || item->ri_total > 5) {
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,

@@ -431,11 +431,6 @@ xfs_attr_complete_op(
 							args->namelen);
 			args->value = args->new_value;
 			args->valuelen = args->new_valuelen;
-		} else if (args->new_namelen > 0) {
-			args->name = args->new_name;
-			args->namelen = args->new_namelen;
-			args->hashval = xfs_da_hashname(args->name,
-							args->namelen);
 		}
 		return replace_state;
 	}
@@ -944,8 +939,6 @@ xfs_attr_defer_replace(
 	int			error = 0;
 
 	if (args->op_flags & XFS_DA_OP_VLOOKUP)
-		op_flag = XFS_ATTRI_OP_FLAGS_NVREPLACEXXX;
-	else if (args->new_namelen > 0)
 		op_flag = XFS_ATTRI_OP_FLAGS_NVREPLACE;
 
 	error = xfs_attr_intent_init(args, op_flag, &new);
