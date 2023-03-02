@@ -738,8 +738,6 @@ xfs_mount_free(
 {
 	kfree(mp->m_rtname);
 	kfree(mp->m_logname);
-	if (mp->m_sha512)
-		crypto_free_shash(mp->m_sha512);
 	kmem_free(mp);
 }
 
@@ -1963,7 +1961,6 @@ static int xfs_init_fs_context(
 	if (fc->sb_flags & SB_SYNCHRONOUS)
 		mp->m_features |= XFS_FEAT_WSYNC;
 
-	mp->m_sha512 = NULL;
 	fc->s_fs_info = mp;
 	fc->ops = &xfs_context_ops;
 

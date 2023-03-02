@@ -983,19 +983,6 @@ xfs_mountfs(
 			goto out_agresv;
 	}
 
-	if (xfs_has_parent(mp)) {
-		struct crypto_shash	*tfm;
-
-		tfm = crypto_alloc_shash("sha512", 0, 0);
-		if (IS_ERR(tfm)) {
-			error = PTR_ERR(tfm);
-			goto out_agresv;
-		}
-		xfs_info(mp, "parent pointer hash %s",
-				crypto_shash_driver_name(tfm));
-		mp->m_sha512 = tfm;
-	}
-
 	return 0;
 
  out_agresv:
