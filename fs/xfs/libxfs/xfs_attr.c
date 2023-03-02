@@ -424,7 +424,12 @@ xfs_attr_complete_op(
 	args->op_flags &= ~XFS_DA_OP_REPLACE;
 	if (do_replace) {
 		args->attr_filter &= ~XFS_ATTR_INCOMPLETE;
-		if (args->new_namelen > 0) {
+		if (args->op_flags & XFS_DA_OP_VLOOKUP) {
+			args->name = args->new_name;
+			args->namelen = args->new_namelen;
+			args->hashval = xfs_da_hashname(args->name,
+							args->namelen);
+		} else if (args->new_namelen > 0) {
 			args->name = args->new_name;
 			args->namelen = args->new_namelen;
 			args->hashval = xfs_da_hashname(args->name,
@@ -933,11 +938,13 @@ xfs_attr_defer_replace(
 	struct xfs_da_args	*args)
 {
 	struct xfs_attr_intent	*new;
-	int			op_flag;
+	int			op_flag = XFS_ATTRI_OP_FLAGS_REPLACE;
 	int			error = 0;
 
-	op_flag = args->new_namelen == 0 ? XFS_ATTRI_OP_FLAGS_REPLACE :
-		  XFS_ATTRI_OP_FLAGS_NVREPLACE;
+	if (args->op_flags & XFS_DA_OP_VLOOKUP)
+		op_flag = XFS_ATTRI_OP_FLAGS_NVREPLACEXXX;
+	else if (args->new_namelen > 0)
+		op_flag = XFS_ATTRI_OP_FLAGS_NVREPLACE;
 
 	error = xfs_attr_intent_init(args, op_flag, &new);
 	if (error)
