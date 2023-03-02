@@ -75,8 +75,8 @@ static inline struct xfs_attri_log_nameval *
 xfs_attri_log_nameval_alloc(
 	const void			*name,
 	unsigned int			name_len,
-	const void			*nname,
-	unsigned int			nname_len,
+	const void			*newname,
+	unsigned int			newname_len,
 	const void			*value,
 	unsigned int			value_len)
 {
@@ -87,25 +87,25 @@ xfs_attri_log_nameval_alloc(
 	 * this. But kvmalloc() utterly sucks, so we use our own version.
 	 */
 	nv = xlog_kvmalloc(sizeof(struct xfs_attri_log_nameval) +
-					name_len + nname_len + value_len);
+					name_len + newname_len + value_len);
 
 	nv->name.i_addr = nv + 1;
 	nv->name.i_len = name_len;
 	nv->name.i_type = XLOG_REG_TYPE_ATTR_NAME;
 	memcpy(nv->name.i_addr, name, name_len);
 
-	if (nname_len) {
-		nv->nname.i_addr = nv->name.i_addr + name_len;
-		nv->nname.i_len = nname_len;
-		memcpy(nv->nname.i_addr, nname, nname_len);
+	if (newname_len) {
+		nv->newname.i_addr = nv->name.i_addr + name_len;
+		nv->newname.i_len = newname_len;
+		memcpy(nv->newname.i_addr, newname, newname_len);
 	} else {
-		nv->nname.i_addr = NULL;
-		nv->nname.i_len = 0;
+		nv->newname.i_addr = NULL;
+		nv->newname.i_len = 0;
 	}
-	nv->nname.i_type = XLOG_REG_TYPE_ATTR_NNAME;
+	nv->newname.i_type = XLOG_REG_TYPE_ATTR_NEWNAME;
 
 	if (value_len) {
-		nv->value.i_addr = nv->name.i_addr + nname_len + name_len;
+		nv->value.i_addr = nv->name.i_addr + newname_len + name_len;
 		nv->value.i_len = value_len;
 		memcpy(nv->value.i_addr, value, value_len);
 	} else {
@@ -159,9 +159,9 @@ xfs_attri_item_size(
 	*nbytes += sizeof(struct xfs_attri_log_format) +
 			xlog_calc_iovec_len(nv->name.i_len);
 
-	if (nv->nname.i_len) {
+	if (nv->newname.i_len) {
 		*nvecs += 1;
-		*nbytes += xlog_calc_iovec_len(nv->nname.i_len);
+		*nbytes += xlog_calc_iovec_len(nv->newname.i_len);
 	}
 
 	if (nv->value.i_len) {
@@ -197,7 +197,7 @@ xfs_attri_item_format(
 	ASSERT(nv->name.i_len > 0);
 	attrip->attri_format.alfi_size++;
 
-	if (nv->nname.i_len > 0)
+	if (nv->newname.i_len > 0)
 		attrip->attri_format.alfi_size++;
 
 	if (nv->value.i_len > 0)
@@ -208,8 +208,8 @@ xfs_attri_item_format(
 			sizeof(struct xfs_attri_log_format));
 	xlog_copy_from_iovec(lv, &vecp, &nv->name);
 
-	if (nv->nname.i_len > 0)
-		xlog_copy_from_iovec(lv, &vecp, &nv->nname);
+	if (nv->newname.i_len > 0)
+		xlog_copy_from_iovec(lv, &vecp, &nv->newname);
 
 	if (nv->value.i_len > 0)
 		xlog_copy_from_iovec(lv, &vecp, &nv->value);
@@ -405,7 +405,7 @@ xfs_attr_log_item(
 
 	if (xfs_attr_log_item_op(attrp) == XFS_ATTRI_OP_FLAGS_NVREPLACE) {
 		attrp->alfi_oldname_len = attr->xattri_nameval->name.i_len;
-		attrp->alfi_newname_len = attr->xattri_nameval->nname.i_len;
+		attrp->alfi_newname_len = attr->xattri_nameval->newname.i_len;
 	} else {
 		attrp->alfi_name_len = attr->xattri_nameval->name.i_len;
 	}
@@ -638,8 +638,8 @@ xfs_attri_item_recover(
 	args->whichfork = XFS_ATTR_FORK;
 	args->name = nv->name.i_addr;
 	args->namelen = nv->name.i_len;
-	args->new_name = nv->nname.i_addr;
-	args->new_namelen = nv->nname.i_len;
+	args->new_name = nv->newname.i_addr;
+	args->new_namelen = nv->newname.i_len;
 	args->hashval = xfs_da_hashname(args->name, args->namelen);
 	args->attr_filter = attrp->alfi_attr_filter & XFS_ATTRI_FILTER_MASK;
 	args->op_flags = XFS_DA_OP_RECOVERY | XFS_DA_OP_OKNOENT |
@@ -775,7 +775,7 @@ xlog_recover_attri_commit_pass2(
 	const void			*attr_value = NULL;
 	const void			*attr_name;
 	size_t				len;
-	const void			*attr_nname = NULL;
+	const void			*attr_newname = NULL;
 	unsigned int			name_len = 0, newname_len = 0;
 	int				op, i = 0;
 
@@ -848,7 +848,7 @@ xlog_recover_attri_commit_pass2(
 
 	i++;
 	if (newname_len > 0) {
-		/* Validate the attr nname */
+		/* Validate the attr newname */
 		if (item->ri_buf[i].i_len != xlog_calc_iovec_len(newname_len)) {
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 					item->ri_buf[i].i_addr,
@@ -856,8 +856,8 @@ xlog_recover_attri_commit_pass2(
 			return -EFSCORRUPTED;
 		}
 
-		attr_nname = item->ri_buf[i].i_addr;
-		if (!xfs_attr_namecheck(mp, attr_nname, newname_len,
+		attr_newname = item->ri_buf[i].i_addr;
+		if (!xfs_attr_namecheck(mp, attr_newname, newname_len,
 				attri_formatp->alfi_attr_filter)) {
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 					item->ri_buf[i].i_addr,
@@ -884,7 +884,7 @@ xlog_recover_attri_commit_pass2(
 	 * name/value buffer to the recovered incore log item and drop our
 	 * reference.
 	 */
-	nv = xfs_attri_log_nameval_alloc(attr_name, name_len, attr_nname,
+	nv = xfs_attri_log_nameval_alloc(attr_name, name_len, attr_newname,
 			newname_len, attr_value,
 			attri_formatp->alfi_value_len);
 
