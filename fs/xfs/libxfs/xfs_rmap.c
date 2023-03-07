@@ -264,7 +264,7 @@ xfs_rmap_check_perag_irec(
 	return NULL;
 }
 
-static inline xfs_failaddr_t
+inline xfs_failaddr_t
 xfs_rmap_check_rtgroup_irec(
 	struct xfs_rtgroup		*rtg,
 	const struct xfs_rmap_irec	*irec)
