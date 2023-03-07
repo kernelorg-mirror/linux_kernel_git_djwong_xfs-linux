@@ -634,6 +634,14 @@ xfs_fs_unreserve_ag_blocks(
 	if (xfs_has_realtime(mp))
 		xfs_rt_resv_free(mp);
 
-	for_each_perag(mp, agno, pag)
+	for_each_perag(mp, agno, pag) {
+		/*
+		 * Bring the AG back online because our AG hiding only exists
+		 * in-core and we need the superblock to be written out with
+		 * the super fdblocks reflecting the AGF freeblks.  Do this
+		 * before adding the per-AG reservations back to fdblocks.
+		 */
+		xfs_ag_clear_noalloc(pag);
 		xfs_ag_resv_free(pag);
+	}
 }
