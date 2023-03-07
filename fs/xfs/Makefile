@@ -138,6 +138,7 @@ endif
 
 xfs-$(CONFIG_XFS_DRAIN_INTENTS)	+= xfs_drain.o
 xfs-$(CONFIG_XFS_LIVE_HOOKS)	+= xfs_hooks.o
+xfs-$(CONFIG_XFS_IN_MEMORY_FILE)	+= xfs_buf_xfile.o
 
 # online scrub/repair
 ifeq ($(CONFIG_XFS_ONLINE_SCRUB),y)
