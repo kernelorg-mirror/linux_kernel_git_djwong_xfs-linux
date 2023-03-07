@@ -17,6 +17,7 @@
 #include "xfs_scrub.h"
 #include "xfs_btree.h"
 #include "xfs_btree_staging.h"
+#include "xfs_buf_xfile.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -191,6 +192,10 @@ xchk_teardown(
 	if (sc->flags & XCHK_HAVE_FREEZE_PROT) {
 		sc->flags &= ~XCHK_HAVE_FREEZE_PROT;
 		mnt_drop_write_file(sc->file);
+	}
+	if (sc->xfile_buftarg) {
+		xfile_free_buftarg(sc->xfile_buftarg);
+		sc->xfile_buftarg = NULL;
 	}
 	if (sc->xfile) {
 		xfile_destroy(sc->xfile);
