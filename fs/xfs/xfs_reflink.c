@@ -1693,6 +1693,25 @@ xfs_reflink_remap_prep(
 		goto out_unlock;
 
 	/*
+	 * Now that we've marked both inodes for reflink, make sure that all
+	 * allocation units (AU) mapped into either files' ranges are either
+	 * wholly written, wholly unwritten, or holes.  The bmap code requires
+	 * that we align all unmap and remap requests to an AU.  We've already
+	 * flushed the page cache and finished directio for the range that's
+	 * being remapped, so we can convert the mappings directly.
+	 */
+	if (xfs_inode_has_bigallocunit(src)) {
+		ret = xfs_convert_bigalloc_file_space(src, pos_in, *len);
+		if (ret)
+			goto out_unlock;
+	}
+	if (xfs_inode_has_bigallocunit(dest)) {
+		ret = xfs_convert_bigalloc_file_space(dest, pos_out, *len);
+		if (ret)
+			goto out_unlock;
+	}
+
+	/*
 	 * If pos_out > EOF, we may have dirtied blocks between EOF and
 	 * pos_out. In that case, we need to extend the flush and unmap to cover
 	 * from EOF to the end of the copy length.
