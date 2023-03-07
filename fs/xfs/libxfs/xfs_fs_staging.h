@@ -234,4 +234,7 @@ xfs_getfsrefs_advance(
 /* XXX stealing XFS_IOC_GETBIOSIZE */
 #define XFS_IOC_GETFSREFCOUNTS		_IOWR('X', 47, struct xfs_getfsrefs_head)
 
+/* Add features to mounted filesystems. */
+#define XFS_IOC_ADDFEATURE		_IOR ('X', 46, __u64)
+
 #endif /* __XFS_FS_STAGING_H__ */
