@@ -41,6 +41,7 @@ xchk_setup_rtsummary(
 	struct xfs_mount	*mp = sc->mp;
 	char			*descr;
 	size_t			bufsize = mp->m_sb.sb_blocksize;
+	unsigned int		wordcnt;
 	unsigned int		resblks = 0;
 	int			error;
 
@@ -54,8 +55,10 @@ xchk_setup_rtsummary(
 	 * Create an xfile to construct a new rtsummary file.  The xfile allows
 	 * us to avoid pinning kernel memory for this purpose.
 	 */
+	wordcnt = xfs_rtsummary_wordcount(mp, mp->m_rsumlevels,
+			mp->m_sb.sb_rbmblocks);
 	descr = xchk_xfile_descr(sc, "realtime summary file");
-	error = xfile_create(descr, mp->m_rsumsize, &sc->xfile);
+	error = xfile_create(descr, wordcnt << XFS_WORDLOG, &sc->xfile);
 	kfree(descr);
 	if (error)
 		return error;
