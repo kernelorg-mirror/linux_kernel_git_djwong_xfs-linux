@@ -123,6 +123,7 @@ struct xfs_scrub {
 #define XCHK_NEED_DRAIN		(1 << 3)  /* scrub needs to drain defer ops */
 #define XCHK_FSGATES_QUOTA	(1 << 4)  /* quota live update enabled */
 #define XCHK_FSGATES_DIRENTS	(1 << 5)  /* directory live update enabled */
+#define XCHK_HAVE_FREEZE_PROT	(1 << 6)  /* do we have freeze protection? */
 #define XREP_RESET_PERAG_RESV	(1 << 30) /* must reset AG space reservation */
 #define XREP_ALREADY_FIXED	(1 << 31) /* checking our repair work */
 
