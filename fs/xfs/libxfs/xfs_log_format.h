@@ -809,7 +809,10 @@ struct xfs_phys_extent {
 /* Type codes are taken directly from enum xfs_refcount_intent_type. */
 #define XFS_REFCOUNT_EXTENT_TYPE_MASK	0xFF
 
-#define XFS_REFCOUNT_EXTENT_FLAGS	(XFS_REFCOUNT_EXTENT_TYPE_MASK)
+#define XFS_REFCOUNT_EXTENT_REALTIME	(1U << 31)
+
+#define XFS_REFCOUNT_EXTENT_FLAGS	(XFS_REFCOUNT_EXTENT_TYPE_MASK | \
+					 XFS_REFCOUNT_EXTENT_REALTIME)
 
 /*
  * This is the structure used to lay out a cui log item in the
