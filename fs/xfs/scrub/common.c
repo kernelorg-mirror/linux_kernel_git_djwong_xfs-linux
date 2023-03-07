@@ -35,6 +35,7 @@
 #include "xfs_quota.h"
 #include "xfs_swapext.h"
 #include "xfs_rtbitmap.h"
+#include "xfs_rtgroup.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -123,6 +124,17 @@ xchk_process_error(
 }
 
 bool
+xchk_process_rt_error(
+	struct xfs_scrub	*sc,
+	xfs_rgnumber_t		rgno,
+	xfs_rgblock_t		rgbno,
+	int			*error)
+{
+	return __xchk_process_error(sc, rgno, rgbno, error,
+			XFS_SCRUB_OFLAG_CORRUPT, __return_address);
+}
+
+bool
 xchk_xref_process_error(
 	struct xfs_scrub	*sc,
 	xfs_agnumber_t		agno,
@@ -130,6 +142,17 @@ xchk_xref_process_error(
 	int			*error)
 {
 	return __xchk_process_error(sc, agno, bno, error,
+			XFS_SCRUB_OFLAG_XFAIL, __return_address);
+}
+
+bool
+xchk_xref_process_rt_error(
+	struct xfs_scrub	*sc,
+	xfs_rgnumber_t		rgno,
+	xfs_rgblock_t		rgbno,
+	int			*error)
+{
+	return __xchk_process_error(sc, rgno, rgbno, error,
 			XFS_SCRUB_OFLAG_XFAIL, __return_address);
 }
 
@@ -700,6 +723,7 @@ xchk_rt_init(
 					 XCHK_RTLOCK_BITMAP_SHARED)) < 2);
 	ASSERT(hweight32(rtlock_flags & (XCHK_RTLOCK_SUMMARY |
 					 XCHK_RTLOCK_SUMMARY_SHARED)) < 2);
+	ASSERT(sr->rtg == NULL);
 
 	if (rtlock_flags & XCHK_RTLOCK_BITMAP)
 		xfs_ilock(sc->mp->m_rbmip, XFS_ILOCK_EXCL);
@@ -723,6 +747,8 @@ xchk_rt_unlock(
 	struct xfs_scrub	*sc,
 	struct xchk_rt		*sr)
 {
+	ASSERT(sr->rtg == NULL);
+
 	if (!sr->rtlock_flags)
 		return;
 
@@ -749,6 +775,68 @@ xchk_rt_unlock_rtbitmap(
 	xfs_iunlock(sc->mp->m_rbmip, XFS_ILOCK_SHARED);
 	sc->sr.rtlock_flags &= ~XCHK_RTLOCK_BITMAP_SHARED;
 }
+
+#ifdef CONFIG_XFS_RT
+/*
+ * For scrubbing a realtime group, grab all the in-core resources we'll need to
+ * check the metadata, which means taking the ILOCK of the realtime group's
+ * metadata inodes.  Callers must not join these inodes to the transaction with
+ * non-zero lockflags or concurrency problems will result.  The @rtglock_flags
+ * argument takes XFS_RTGLOCK_* flags.
+ */
+int
+xchk_rtgroup_init(
+	struct xfs_scrub	*sc,
+	xfs_rgnumber_t		rgno,
+	struct xchk_rt		*sr,
+	unsigned int		rtglock_flags)
+{
+	ASSERT(sr->rtg == NULL);
+	ASSERT(sr->rtlock_flags == 0);
+
+	sr->rtg = xfs_rtgroup_get(sc->mp, rgno);
+	if (!sr->rtg)
+		return -ENOENT;
+
+	xfs_rtgroup_lock(NULL, sr->rtg, rtglock_flags);
+	sr->rtlock_flags = rtglock_flags;
+	return 0;
+}
+
+/*
+ * Unlock the realtime group.  This must be done /after/ committing (or
+ * cancelling) the scrub transaction.
+ */
+void
+xchk_rtgroup_unlock(
+	struct xfs_scrub	*sc,
+	struct xchk_rt		*sr)
+{
+	ASSERT(sr->rtg != NULL);
+
+	if (sr->rtlock_flags) {
+		xfs_rtgroup_unlock(sr->rtg, sr->rtlock_flags);
+		sr->rtlock_flags = 0;
+	}
+}
+
+/*
+ * Unlock the realtime group and release its resources.  This must be done
+ * /after/ committing (or cancelling) the scrub transaction.
+ */
+void
+xchk_rtgroup_free(
+	struct xfs_scrub	*sc,
+	struct xchk_rt		*sr)
+{
+	ASSERT(sr->rtg != NULL);
+
+	xchk_rtgroup_unlock(sc, sr);
+
+	xfs_rtgroup_put(sr->rtg);
+	sr->rtg = NULL;
+}
+#endif /* CONFIG_XFS_RT */
 
 /* Per-scrubber setup functions */
 
