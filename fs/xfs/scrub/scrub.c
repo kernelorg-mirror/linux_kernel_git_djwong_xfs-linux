@@ -203,7 +203,10 @@ xchk_teardown(
 			xfs_trans_cancel(sc->tp);
 		sc->tp = NULL;
 	}
-	xchk_rt_unlock(sc, &sc->sr);
+	if (sc->sr.rtg)
+		xchk_rtgroup_free(sc, &sc->sr);
+	else
+		xchk_rt_unlock(sc, &sc->sr);
 	if (sc->ip) {
 		if (sc->ilock_flags)
 			xchk_iunlock(sc, sc->ilock_flags);
@@ -423,6 +426,13 @@ static const struct xchk_meta_ops meta_scrub_ops[] = {
 		.has	= xfs_has_parent,
 		.repair	= xrep_dirtree,
 	},
+	[XFS_SCRUB_TYPE_RGSUPER] = {	/* realtime group superblock */
+		.type	= ST_RTGROUP,
+		.setup	= xchk_setup_rgsuperblock,
+		.scrub	= xchk_rgsuperblock,
+		.has	= xfs_has_rtgroups,
+		.repair = xrep_notsupported,
+	},
 };
 
 static int
@@ -468,6 +478,14 @@ xchk_validate_inputs(
 		break;
 	case ST_INODE:
 		if (sm->sm_agno || (sm->sm_gen && !sm->sm_ino))
+			goto out;
+		break;
+	case ST_RTGROUP:
+		if (sm->sm_ino || sm->sm_gen)
+			goto out;
+		if (!xfs_has_rtgroups(mp) && sm->sm_agno != 0)
+			goto out;
+		if (xfs_has_rtgroups(mp) && sm->sm_agno >= mp->m_sb.sb_rgcount)
 			goto out;
 		break;
 	default:
