@@ -32,6 +32,8 @@
 #include "scrub/iscan.h"
 #include "scrub/findparent.h"
 #include "scrub/readdir.h"
+#include "scrub/tempfile.h"
+#include "scrub/orphanage.h"
 
 /*
  * Repairing The Directory Parent Pointer
@@ -53,6 +55,12 @@ struct xrep_parent {
 	 * the directory.
 	 */
 	struct xrep_parent_scan_info pscan;
+
+	/* Orphanage reparinting request. */
+	struct xrep_orphanage_req adoption;
+
+	/* Directory entry name, plus the trailing null. */
+	unsigned char		namebuf[MAXNAMELEN];
 };
 
 /* Tear down all the incore stuff we created. */
@@ -78,7 +86,7 @@ xrep_setup_parent(
 	rp->sc = sc;
 	sc->buf = rp;
 
-	return 0;
+	return xrep_orphanage_try_create(sc);
 }
 
 /* Scan all files in the filesystem for parent pointers. */
@@ -156,6 +164,7 @@ xrep_parent_reset_dir(
 			spaceres);
 }
 
+
 /* Reset a directory's dotdot entry. */
 STATIC int
 xrep_parent_reset(
@@ -176,6 +185,77 @@ xrep_parent_reset(
 }
 
 /*
+ * Move the current file to the orphanage.
+ *
+ * Caller must hold IOLOCK_EXCL on @sc->ip, and no other inode locks.  Upon
+ * successful return, the scrub transaction will have enough extra reservation
+ * to make the move; it will hold IOLOCK_EXCL and ILOCK_EXCL of @sc->ip and the
+ * orphanage; and both inodes will be ijoined.
+ */
+STATIC int
+xrep_parent_move_to_orphanage(
+	struct xrep_parent	*rp)
+{
+	struct xfs_scrub	*sc = rp->sc;
+	xfs_ino_t		orig_parent, new_parent;
+	int			error;
+
+	/* No orphanage?  We can't fix this. */
+	if (!sc->orphanage)
+		return -EFSCORRUPTED;
+
+	/*
+	 * We are about to drop the ILOCK on sc->ip to lock the orphanage and
+	 * prepare for the adoption.  Therefore, look up the old dotdot entry
+	 * for sc->ip so that we can compare it after we re-lock sc->ip.
+	 */
+	error = xchk_dir_lookup(sc, sc->ip, &xfs_name_dotdot, &orig_parent);
+	if (error)
+		return error;
+
+	/*
+	 * Because the orphanage is just another directory in the filesystem,
+	 * we must take its IOLOCK to coordinate with the VFS.  We cannot take
+	 * an IOLOCK while holding an ILOCK, so we must drop the ILOCK.  We
+	 * may have to drop the IOLOCK as well.
+	 */
+	xchk_iunlock(sc, XFS_ILOCK_EXCL);
+
+	/* If we can take the orphanage's iolock then we're ready to move. */
+	if (!xrep_orphanage_ilock_nowait(sc, XFS_IOLOCK_EXCL)) {
+		xchk_iunlock(sc, sc->ilock_flags);
+		error = xrep_orphanage_iolock_two(sc);
+		if (error)
+			return error;
+	}
+
+	/* Prepare for the adoption and lock both down. */
+	xrep_orphanage_compute_blkres(sc, &rp->adoption);
+
+	error = xrep_orphanage_compute_name(&rp->adoption, rp->namebuf);
+	if (error)
+		return error;
+
+	error = xrep_orphanage_adoption_prep(&rp->adoption);
+	if (error)
+		return error;
+
+	/*
+	 * Now that we've reacquired the ILOCK on sc->ip, look up the dotdot
+	 * entry again.  If the parent changed or the child was unlinked while
+	 * the child directory was unlocked, we don't need to move the child to
+	 * the orphanage after all.
+	 */
+	error = xchk_dir_lookup(sc, sc->ip, &xfs_name_dotdot, &new_parent);
+	if (error)
+		return error;
+	if (orig_parent != new_parent || VFS_I(sc->ip)->i_nlink == 0)
+		return 0;
+
+	return xrep_orphanage_adopt(&rp->adoption);
+}
+
+/*
  * Commit the new parent pointer structure (currently only the dotdot entry) to
  * the file that we're repairing.
  */
@@ -183,10 +263,8 @@ STATIC int
 xrep_parent_rebuild_tree(
 	struct xrep_parent	*rp)
 {
-	if (rp->pscan.parent_ino == NULLFSINO) {
-		/* Cannot fix orphaned directories yet. */
-		return -EFSCORRUPTED;
-	}
+	if (rp->pscan.parent_ino == NULLFSINO)
+		return xrep_parent_move_to_orphanage(rp);
 
 	return xrep_parent_reset(rp);
 }
