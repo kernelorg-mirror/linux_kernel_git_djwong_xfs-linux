@@ -186,11 +186,9 @@ xfs_symlink(
 	/*
 	 * Create the directory entry for the symlink.
 	 */
-	error = xfs_dir_createname(tp, dp, link_name, ip->i_ino, resblks);
+	error = xfs_dir_create_child(tp, resblks, dp, link_name, ip);
 	if (error)
 		goto out_trans_cancel;
-	xfs_trans_ichgtime(tp, dp, XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
-	xfs_trans_log_inode(tp, dp, XFS_ILOG_CORE);
 	xfs_dir_update_hook(dp, ip, 1, link_name);
 
 	/*
