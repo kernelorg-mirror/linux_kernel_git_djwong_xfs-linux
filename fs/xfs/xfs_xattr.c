@@ -122,6 +122,7 @@ xfs_xattr_get(const struct xattr_handler *handler, struct dentry *unused,
 		.namelen	= strlen(name),
 		.value		= value,
 		.valuelen	= size,
+		.owner		= XFS_I(inode)->i_ino,
 	};
 	int			error;
 
@@ -145,6 +146,7 @@ xfs_xattr_set(const struct xattr_handler *handler,
 		.namelen	= strlen(name),
 		.value		= (void *)value,
 		.valuelen	= size,
+		.owner		= XFS_I(inode)->i_ino,
 	};
 	int			error;
 
