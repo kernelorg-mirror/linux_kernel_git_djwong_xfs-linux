@@ -16,10 +16,14 @@
 #include "xfs_rtalloc.h"
 #include "xfs_bit.h"
 #include "xfs_bmap.h"
+#include "xfs_swapext.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
 #include "scrub/xfile.h"
+#include "scrub/repair.h"
+#include "scrub/tempswap.h"
+#include "scrub/rtsummary.h"
 
 /*
  * Realtime Summary
@@ -30,16 +34,6 @@
  * the ondisk version.  We use the 'xfile' functionality to store this
  * (potentially large) amount of data in pageable memory.
  */
-
-struct xchk_rtsummary {
-	uint64_t		rextents;
-	uint64_t		rbmblocks;
-	uint64_t		rsumsize;
-	unsigned int		rsumlevels;
-
-	/* Memory buffer for the summary comparison. */
-	xfs_suminfo_t		words[];
-};
 
 /* Set us up to check the rtsummary file. */
 int
@@ -58,6 +52,12 @@ xchk_setup_rtsummary(
 		return -ENOMEM;
 	sc->buf = rts;
 
+	if (xchk_could_repair(sc)) {
+		error = xrep_setup_rtsummary(sc, rts);
+		if (error)
+			return error;
+	}
+
 	/*
 	 * Create an xfile to construct a new rtsummary file.  The xfile allows
 	 * us to avoid pinning kernel memory for this purpose.
@@ -68,7 +68,7 @@ xchk_setup_rtsummary(
 	if (error)
 		return error;
 
-	error = xchk_trans_alloc(sc, 0);
+	error = xchk_trans_alloc(sc, rts->resblks);
 	if (error)
 		return error;
 
@@ -105,8 +105,6 @@ xchk_setup_rtsummary(
 
 /* Helper functions to record suminfo words in an xfile. */
 
-typedef unsigned int xchk_rtsumoff_t;
-
 static inline int
 xfsum_load(
 	struct xfs_scrub	*sc,
@@ -127,7 +125,7 @@ xfsum_store(
 			sumoff << XFS_WORDLOG);
 }
 
-static inline int
+inline int
 xfsum_copyout(
 	struct xfs_scrub	*sc,
 	xchk_rtsumoff_t		sumoff,
@@ -336,7 +334,12 @@ xchk_rtsummary(
 	error = xchk_rtsum_compare(sc);
 
 out_rbm:
-	/* Unlock the rtbitmap since we're done with it. */
+	/*
+	 * Unlock the rtbitmap since we're done with it.  All other writers of
+	 * the rt free space metadata grab the bitmap and summary ILOCKs in
+	 * that order, so we're still protected against allocation activities
+	 * even if we continue on to the repair function.
+	 */
 	xfs_iunlock(mp->m_rbmip, XFS_ILOCK_SHARED | XFS_ILOCK_RTBITMAP);
 	return error;
 }
