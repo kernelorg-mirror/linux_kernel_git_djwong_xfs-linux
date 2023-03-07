@@ -28,6 +28,7 @@
 #include "xfs_icache.h"
 #include "xfs_log.h"
 #include "xfs_bmap_util.h"
+#include "xfs_rtbitmap.h"
 #include <linux/fsnotify.h>
 
 /*
@@ -1236,8 +1237,7 @@ xfs_xchg_range(
 	 * length in @fxr are safe to round up.
 	 */
 	if (xfs_inode_has_bigallocunit(ip2))
-		req.blockcount = roundup_64(req.blockcount,
-					    mp->m_sb.sb_rextsize);
+		req.blockcount = xfs_rtb_roundup_rtx(mp, req.blockcount);
 
 	error = xfs_xchg_range_estimate(&req);
 	if (error)
