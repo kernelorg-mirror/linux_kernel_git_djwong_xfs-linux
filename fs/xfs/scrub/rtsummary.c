@@ -43,7 +43,7 @@ xchk_setup_rtsummary(
 	struct xfs_mount	*mp = sc->mp;
 	char			*descr;
 	struct xchk_rtsummary	*rts;
-	uint64_t		rsumbytes;
+	xfs_filblks_t		rsumblocks;
 	int			error;
 
 	rts = kvzalloc(struct_size(rts, words, mp->m_blockwsize),
@@ -97,8 +97,9 @@ xchk_setup_rtsummary(
 	rts->rextents = xfs_rtb_to_rtx(mp, mp->m_sb.sb_rblocks);
 	rts->rbmblocks = xfs_rtbitmap_blockcount(mp, rts->rextents);
 	rts->rsumlevels = rts->rextents ? xfs_highbit32(rts->rextents) + 1 : 0;
-	rsumbytes = sizeof(xfs_suminfo_t) * rts->rsumlevels * rts->rbmblocks;
-	rts->rsumsize = roundup_64(rsumbytes, mp->m_sb.sb_blocksize);
+	rsumblocks = xfs_rtsummary_blockcount(mp, rts->rsumlevels,
+			rts->rbmblocks);
+	rts->rsumsize = XFS_FSB_TO_B(mp, rsumblocks);
 	return 0;
 }
 
