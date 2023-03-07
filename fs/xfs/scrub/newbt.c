@@ -501,7 +501,8 @@ xrep_newbt_free_extent(
 	}
 
 	if (xnr->resv == XFS_AG_RESV_RMAPBT ||
-	    xnr->resv == XFS_AG_RESV_METADATA) {
+	    xnr->resv == XFS_AG_RESV_METADATA ||
+	    xnr->resv == XFS_AG_RESV_IMETA) {
 		/*
 		 * Metadata blocks taken from a per-AG reservation must be put
 		 * back into that reservation immediately because EFIs cannot
