@@ -661,49 +661,6 @@ xfs_icreate_args_rootfile(
 		args->flags |= XFS_ICREATE_ARGS_INIT_XATTRS;
 }
 
-/*
- * Decrement the link count on an inode & log the change.  If this causes the
- * link count to go to zero, move the inode to AGI unlinked list so that it can
- * be freed when the last active reference goes away via xfs_inactive().
- */
-int
-xfs_droplink(
-	struct xfs_trans	*tp,
-	struct xfs_inode	*ip)
-{
-	struct inode		*inode = VFS_I(ip);
-
-	xfs_trans_ichgtime(tp, ip, XFS_ICHGTIME_CHG);
-
-	if (inode->i_nlink != XFS_NLINK_PINNED)
-		drop_nlink(VFS_I(ip));
-
-	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
-
-	if (VFS_I(ip)->i_nlink)
-		return 0;
-
-	return xfs_iunlink(tp, ip);
-}
-
-/*
- * Increment the link count on an inode & log the change.
- */
-void
-xfs_bumplink(
-	struct xfs_trans	*tp,
-	struct xfs_inode	*ip)
-{
-	struct inode		*inode = VFS_I(ip);
-
-	xfs_trans_ichgtime(tp, ip, XFS_ICHGTIME_CHG);
-
-	if (inode->i_nlink != XFS_NLINK_PINNED)
-		inc_nlink(VFS_I(ip));
-
-	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
-}
-
 #ifdef CONFIG_XFS_LIVE_HOOKS
 /*
  * Use a static key here to reduce the overhead of directory live update hooks.
