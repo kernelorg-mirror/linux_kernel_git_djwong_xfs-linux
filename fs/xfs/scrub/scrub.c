@@ -19,6 +19,7 @@
 #include "xfs_btree_staging.h"
 #include "xfs_buf_xfile.h"
 #include "xfs_rmap.h"
+#include "xfs_xchgrange.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -26,6 +27,7 @@
 #include "scrub/health.h"
 #include "scrub/stats.h"
 #include "scrub/xfile.h"
+#include "scrub/tempfile.h"
 
 /*
  * Online Scrub and Repair
@@ -213,6 +215,7 @@ xchk_teardown(
 		sc->buf = NULL;
 	}
 
+	xrep_tempfile_rele(sc);
 	xchk_fsgates_disable(sc);
 	return error;
 }
