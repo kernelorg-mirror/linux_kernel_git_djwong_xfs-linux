@@ -1240,6 +1240,83 @@ out_unlock:
 	return error;
 }
 
+int
+xfs_file_map_freesp(
+	struct file		*file,
+	const struct xfs_map_freesp *mf)
+{
+	struct inode		*inode = file_inode(file);
+	struct xfs_inode	*ip = XFS_I(inode);
+	struct xfs_mount	*mp = ip->i_mount;
+	xfs_off_t		device_size;
+	uint			iolock = XFS_IOLOCK_EXCL | XFS_MMAPLOCK_EXCL;
+	loff_t			new_size = 0;
+	int			error;
+
+	xfs_ilock(ip, iolock);
+	error = xfs_break_layouts(inode, &iolock, BREAK_UNMAP);
+	if (error)
+		goto out_unlock;
+
+	/*
+	 * Must wait for all AIO to complete before we continue as AIO can
+	 * change the file size on completion without holding any locks we
+	 * currently hold. We must do this first because AIO can update both
+	 * the on disk and in memory inode sizes, and the operations that follow
+	 * require the in-memory size to be fully up-to-date.
+	 */
+	inode_dio_wait(inode);
+
+	error = file_modified(file);
+	if (error)
+		goto out_unlock;
+
+	if (XFS_IS_REALTIME_INODE(ip))
+		device_size = XFS_FSB_TO_B(mp, mp->m_sb.sb_rblocks);
+	else
+		device_size = XFS_FSB_TO_B(mp, mp->m_sb.sb_dblocks);
+
+	/*
+	 * Bail out now if we aren't allowed to make the file size the
+	 * same length as the device.
+	 */
+	if (device_size > i_size_read(inode)) {
+		new_size = device_size;
+		error = inode_newsize_ok(inode, new_size);
+		if (error)
+			goto out_unlock;
+	}
+
+	if (XFS_IS_REALTIME_INODE(ip))
+		error = xfs_map_free_rt_space(ip, mf->offset, mf->len);
+	else
+		error = xfs_map_free_space(ip, mf->offset, mf->len);
+	if (error) {
+		if (error == -ECANCELED)
+			error = 0;
+		goto out_unlock;
+	}
+
+	/* Change file size if needed */
+	if (new_size) {
+		struct iattr iattr;
+
+		iattr.ia_valid = ATTR_SIZE;
+		iattr.ia_size = new_size;
+		error = xfs_vn_setattr_size(file_mnt_idmap(file),
+					    file_dentry(file), &iattr);
+		if (error)
+			goto out_unlock;
+	}
+
+	if (xfs_file_sync_writes(file))
+		error = xfs_log_force_inode(ip);
+
+out_unlock:
+	xfs_iunlock(ip, iolock);
+	return error;
+}
+
 STATIC int
 xfs_file_fadvise(
 	struct file	*file,
