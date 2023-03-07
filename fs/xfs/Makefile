@@ -200,6 +200,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   reap.o \
 				   refcount_repair.o \
 				   repair.o \
+				   rmap_repair.o \
 				   xfbtree.o \
 				   )
 
