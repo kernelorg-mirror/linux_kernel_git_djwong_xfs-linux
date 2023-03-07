@@ -508,6 +508,9 @@ xfs_btree_mark_sick(
 {
 	unsigned int			mask;
 
+	if (cur->bc_flags & XFS_BTREE_IN_XFILE)
+		return;
+
 	switch (cur->bc_btnum) {
 	case XFS_BTNUM_BMAP:
 		xfs_bmap_mark_sick(cur->bc_ino.ip, cur->bc_ino.whichfork);
