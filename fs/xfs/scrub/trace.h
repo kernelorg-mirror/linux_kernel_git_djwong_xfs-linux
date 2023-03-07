@@ -2171,8 +2171,7 @@ TRACE_EVENT(xfbtree_create,
 		 struct xfbtree *xfbt),
 	TP_ARGS(mp, cfg, xfbt),
 	TP_STRUCT__entry(
-		__field(xfs_btnum_t, btnum)
-		__field(unsigned int, xfbtree_flags)
+		__field(const void *, btree_ops)
 		__field(unsigned long, xfino)
 		__field(unsigned int, leaf_mxr)
 		__field(unsigned int, leaf_mnr)
@@ -2181,8 +2180,7 @@ TRACE_EVENT(xfbtree_create,
 		__field(unsigned long long, owner)
 	),
 	TP_fast_assign(
-		__entry->btnum = cfg->btnum;
-		__entry->xfbtree_flags = cfg->flags;
+		__entry->btree_ops = cfg->btree_ops;
 		__entry->xfino = xfbtree_ino(xfbt);
 		__entry->leaf_mxr = xfbt->maxrecs[0];
 		__entry->node_mxr = xfbt->maxrecs[1];
@@ -2190,9 +2188,9 @@ TRACE_EVENT(xfbtree_create,
 		__entry->node_mnr = xfbt->minrecs[1];
 		__entry->owner = cfg->owner;
 	),
-	TP_printk("xfino 0x%lx btnum %s owner 0x%llx leaf_mxr %u leaf_mnr %u node_mxr %u node_mnr %u",
+	TP_printk("xfino 0x%lx btree_ops %pS owner 0x%llx leaf_mxr %u leaf_mnr %u node_mxr %u node_mnr %u",
 		  __entry->xfino,
-		  __print_symbolic(__entry->btnum, XFS_BTNUM_STRINGS),
+		  __entry->btree_ops,
 		  __entry->owner,
 		  __entry->leaf_mxr,
 		  __entry->leaf_mnr,
