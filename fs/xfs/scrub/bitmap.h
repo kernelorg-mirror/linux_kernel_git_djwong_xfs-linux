@@ -169,4 +169,46 @@ static inline int xfo_bitmap_walk(struct xfo_bitmap *bitmap,
 	return xbitmap_walk(&bitmap->fobitmap, fn, priv);
 }
 
+/* Bitmaps, but for type-checked for xfs_dablk_t */
+
+struct xdab_bitmap {
+	struct xbitmap	dabitmap;
+};
+
+static inline void xdab_bitmap_init(struct xdab_bitmap *bitmap)
+{
+	xbitmap_init(&bitmap->dabitmap);
+}
+
+static inline void xdab_bitmap_destroy(struct xdab_bitmap *bitmap)
+{
+	xbitmap_destroy(&bitmap->dabitmap);
+}
+
+static inline int xdab_bitmap_set(struct xdab_bitmap *bitmap,
+		xfs_dablk_t dabno, xfs_extlen_t len)
+{
+	return xbitmap_set(&bitmap->dabitmap, dabno, len);
+}
+
+static inline bool
+xdab_bitmap_test(
+	struct xdab_bitmap	*bitmap,
+	xfs_dablk_t		dabno,
+	xfs_extlen_t		*len)
+{
+	uint64_t		biglen = *len;
+	bool			ret;
+
+	ret = xbitmap_test(&bitmap->dabitmap, dabno, &biglen);
+
+	if (dabno + biglen >= UINT_MAX) {
+		ASSERT(0);
+		biglen = UINT_MAX - dabno;
+	}
+
+	*len = biglen;
+	return ret;
+}
+
 #endif	/* __XFS_SCRUB_BITMAP_H__ */
