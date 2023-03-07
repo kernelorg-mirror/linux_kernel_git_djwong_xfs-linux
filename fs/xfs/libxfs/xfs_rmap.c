@@ -906,6 +906,7 @@ static inline void
 xfs_rmap_update_hook(
 	struct xfs_trans		*tp,
 	struct xfs_perag		*pag,
+	struct xfs_rtgroup		*rtg,
 	enum xfs_rmap_intent_type	op,
 	xfs_agblock_t			startblock,
 	xfs_extlen_t			blockcount,
@@ -922,6 +923,8 @@ xfs_rmap_update_hook(
 
 		if (pag)
 			xfs_hooks_call(&pag->pag_rmap_update_hooks, op, &p);
+		else if (rtg)
+			xfs_hooks_call(&rtg->rtg_rmap_update_hooks, op, &p);
 	}
 }
 
@@ -942,8 +945,28 @@ xfs_rmap_hook_del(
 {
 	xfs_hooks_del(&pag->pag_rmap_update_hooks, &hook->update_hook);
 }
+
+# ifdef CONFIG_XFS_RT
+/* Call the specified function during a rt reverse mapping update. */
+int
+xfs_rtrmap_hook_add(
+	struct xfs_rtgroup	*rtg,
+	struct xfs_rmap_hook	*hook)
+{
+	return xfs_hooks_add(&rtg->rtg_rmap_update_hooks, &hook->update_hook);
+}
+
+/* Stop calling the specified function during a rt reverse mapping update. */
+void
+xfs_rtrmap_hook_del(
+	struct xfs_rtgroup	*rtg,
+	struct xfs_rmap_hook	*hook)
+{
+	xfs_hooks_del(&rtg->rtg_rmap_update_hooks, &hook->update_hook);
+}
+# endif /* CONFIG_XFS_RT */
 #else
-# define xfs_rmap_update_hook(t, p, o, s, b, u, oi)	do { } while (0)
+# define xfs_rmap_update_hook(t, p, r, o, s, b, u, oi)	do { } while (0)
 #endif /* CONFIG_XFS_LIVE_HOOKS */
 
 /*
@@ -966,7 +989,8 @@ xfs_rmap_free(
 		return 0;
 
 	cur = xfs_rmapbt_init_cursor(mp, tp, agbp, pag);
-	xfs_rmap_update_hook(tp, pag, XFS_RMAP_UNMAP, bno, len, false, oinfo);
+	xfs_rmap_update_hook(tp, pag, NULL, XFS_RMAP_UNMAP, bno, len, false,
+			oinfo);
 	error = xfs_rmap_unmap(cur, bno, len, false, oinfo);
 
 	xfs_btree_del_cursor(cur, error);
@@ -1210,7 +1234,8 @@ xfs_rmap_alloc(
 		return 0;
 
 	cur = xfs_rmapbt_init_cursor(mp, tp, agbp, pag);
-	xfs_rmap_update_hook(tp, pag, XFS_RMAP_MAP, bno, len, false, oinfo);
+	xfs_rmap_update_hook(tp, pag, NULL, XFS_RMAP_MAP, bno, len, false,
+			oinfo);
 	error = xfs_rmap_map(cur, bno, len, false, oinfo);
 
 	xfs_btree_del_cursor(cur, error);
@@ -2727,8 +2752,12 @@ xfs_rmap_finish_one(
 	if (error)
 		return error;
 
-	xfs_rmap_update_hook(tp, ri->ri_pag, ri->ri_type, bno,
-			ri->ri_bmap.br_blockcount, unwritten, &oinfo);
+	if (ri->ri_realtime)
+		xfs_rmap_update_hook(tp, NULL, ri->ri_rtg, ri->ri_type, bno,
+				ri->ri_bmap.br_blockcount, unwritten, &oinfo);
+	else
+		xfs_rmap_update_hook(tp, ri->ri_pag, NULL, ri->ri_type, bno,
+				ri->ri_bmap.br_blockcount, unwritten, &oinfo);
 	return 0;
 }
 
