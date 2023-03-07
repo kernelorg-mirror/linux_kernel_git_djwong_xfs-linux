@@ -44,6 +44,7 @@
 #include "xfs_dahash_test.h"
 #include "scrub/rcbag_btree.h"
 #include "xfs_swapext_item.h"
+#include "xfs_rtbitmap.h"
 
 #include <linux/magic.h>
 #include <linux/fs_context.h>
@@ -874,7 +875,7 @@ xfs_fs_statfs(
 
 		statp->f_blocks = sbp->sb_rblocks;
 		freertx = percpu_counter_sum_positive(&mp->m_frextents);
-		statp->f_bavail = statp->f_bfree = freertx * sbp->sb_rextsize;
+		statp->f_bavail = statp->f_bfree = xfs_rtx_to_rtb(mp, freertx);
 	}
 
 	return 0;
