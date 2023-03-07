@@ -601,6 +601,13 @@ typedef struct xfs_extent {
 } xfs_extent_t;
 
 /*
+ * This EFI extent describes a realtime extent.  We can never free more than
+ * XFS_MAX_BMBT_EXTLEN (2^21) blocks at a time, so we know that the upper bits
+ * of ext_len cannot be used.
+ */
+#define XFS_EFI_EXTLEN_REALTIME_EXT	(1U << 31)
+
+/*
  * Since an xfs_extent_t has types (start:64, len: 32)
  * there are different alignments on 32 bit and 64 bit kernels.
  * So we provide the different variants for use by a
