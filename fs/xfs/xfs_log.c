@@ -1467,10 +1467,16 @@ xlog_clear_incompat(
 	if (down_write_trylock(&log->l_incompat_xattrs))
 		incompat_mask |= XFS_SB_FEAT_INCOMPAT_LOG_XATTRS;
 
+	if (down_write_trylock(&log->l_incompat_swapext))
+		incompat_mask |= XFS_SB_FEAT_INCOMPAT_LOG_SWAPEXT;
+
 	if (!incompat_mask)
 		return;
 
 	xfs_clear_incompat_log_features(mp, incompat_mask);
+
+	if (incompat_mask & XFS_SB_FEAT_INCOMPAT_LOG_SWAPEXT)
+		up_write(&log->l_incompat_swapext);
 
 	if (incompat_mask & XFS_SB_FEAT_INCOMPAT_LOG_XATTRS)
 		up_write(&log->l_incompat_xattrs);
@@ -1591,6 +1597,7 @@ xlog_alloc_log(
 	log->l_sectBBsize = 1 << log2_size;
 
 	init_rwsem(&log->l_incompat_xattrs);
+	init_rwsem(&log->l_incompat_swapext);
 
 	xlog_get_iclog_buffer_size(mp, log);
 
@@ -3888,6 +3895,9 @@ xlog_use_incompat_feat(
 	case XLOG_INCOMPAT_FEAT_XATTRS:
 		down_read(&log->l_incompat_xattrs);
 		break;
+	case XLOG_INCOMPAT_FEAT_SWAPEXT:
+		down_read(&log->l_incompat_swapext);
+		break;
 	}
 }
 
@@ -3900,6 +3910,9 @@ xlog_drop_incompat_feat(
 	switch (what) {
 	case XLOG_INCOMPAT_FEAT_XATTRS:
 		up_read(&log->l_incompat_xattrs);
+		break;
+	case XLOG_INCOMPAT_FEAT_SWAPEXT:
+		up_read(&log->l_incompat_swapext);
 		break;
 	}
 }
