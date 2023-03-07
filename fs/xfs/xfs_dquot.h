@@ -242,4 +242,7 @@ int xfs_qm_dqiterate(struct xfs_mount *mp, xfs_dqtype_t type,
 time64_t xfs_dquot_set_timeout(struct xfs_mount *mp, time64_t timeout);
 time64_t xfs_dquot_set_grace_period(time64_t grace);
 
+void xfs_qm_init_dquot_blk(struct xfs_trans *tp, xfs_dqid_t id, xfs_dqtype_t
+		type, struct xfs_buf *bp);
+
 #endif /* __XFS_DQUOT_H__ */
