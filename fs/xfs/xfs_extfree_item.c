@@ -468,11 +468,8 @@ xfs_extent_free_defer_add(
 	trace_xfs_extent_free_defer(mp, xefi);
 
 	if (xfs_efi_is_realtime(xefi)) {
-		xfs_rgnumber_t		rgno;
-
-		rgno = xfs_rtb_to_rgno(mp, xefi->xefi_startblock);
-		xefi->xefi_rtg = xfs_rtgroup_get(mp, rgno);
-
+		xefi->xefi_rtg = xfs_rtgroup_intent_get(mp,
+						xefi->xefi_startblock);
 		*dfpp = xfs_defer_add(tp, &xefi->xefi_list,
 				&xfs_rtextent_free_defer_type);
 		return;
@@ -615,11 +612,8 @@ xfs_efi_recover_work(
 	xefi->xefi_agresv = XFS_AG_RESV_NONE;
 	xefi->xefi_owner = XFS_RMAP_OWN_UNKNOWN;
 	if (isrt) {
-		xfs_rgnumber_t		rgno;
-
 		xefi->xefi_flags |= XFS_EFI_REALTIME;
-		rgno = xfs_rtb_to_rgno(mp, extp->ext_start);
-		xefi->xefi_rtg = xfs_rtgroup_get(mp, rgno);
+		xefi->xefi_rtg = xfs_rtgroup_intent_get(mp, extp->ext_start);
 	} else {
 		xefi->xefi_pag = xfs_perag_intent_get(mp, extp->ext_start);
 	}
@@ -778,7 +772,7 @@ xfs_rtextent_free_cancel_item(
 {
 	struct xfs_extent_free_item	*xefi = xefi_entry(item);
 
-	xfs_rtgroup_put(xefi->xefi_rtg);
+	xfs_rtgroup_intent_put(xefi->xefi_rtg);
 	kmem_cache_free(xfs_extfree_item_cache, xefi);
 }
 
