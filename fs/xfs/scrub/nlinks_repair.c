@@ -24,6 +24,7 @@
 #include "scrub/xfile.h"
 #include "scrub/xfarray.h"
 #include "scrub/iscan.h"
+#include "scrub/orphanage.h"
 #include "scrub/nlinks.h"
 #include "scrub/trace.h"
 #include "scrub/tempfile.h"
@@ -37,6 +38,59 @@
  * the live data and hooks active, so this is safe so long as we make sure the
  * inode is locked.
  */
+
+/* Set up to repair inode link counts. */
+int
+xrep_setup_nlinks(
+	struct xfs_scrub	*sc)
+{
+	return xrep_orphanage_try_create(sc);
+}
+
+/*
+ * Inodes that aren't the root directory or the orphanage, have a nonzero link
+ * count, and no observed parents should be moved to the orphanage.
+ */
+static inline bool
+xrep_nlinks_is_orphaned(
+	struct xfs_scrub	*sc,
+	struct xfs_inode	*ip,
+	unsigned int		actual_nlink,
+	const struct xchk_nlink	*obs)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+
+	if (obs->parents != 0)
+		return false;
+	if (ip == mp->m_rootip || ip == sc->orphanage)
+		return false;
+	return actual_nlink != 0;
+}
+
+/*
+ * Reattach this file to the directory tree by moving it to /lost+found per the
+ * adoption parameters that we already computed.  Returns 0 for success,
+ * -EMLINK if we cannot complete the adoption because doing so would cause a
+ * link count overflow, or the usual negative errno.
+ */
+STATIC int
+xrep_nlinks_adopt(
+	struct xchk_nlink_ctrs	*xnc)
+{
+	int			error;
+
+	/* Figure out what name we're going to use here. */
+	error = xrep_adoption_compute_name(&xnc->adoption, xnc->namebuf);
+	if (error)
+		return error;
+
+	/*
+	 * Create the new name in the orphanage, and bump the link
+	 * count of the orphanage if we just added a directory.  Then
+	 * we can set the correct nlink.
+	 */
+	return xrep_adoption_commit(&xnc->adoption);
+}
 
 /* Remove an inode from the unlinked list. */
 STATIC int
@@ -66,6 +120,8 @@ xrep_nlinks_repair_inode(
 	struct xfs_inode	*ip = sc->ip;
 	uint64_t		total_links;
 	uint64_t		actual_nlink;
+	bool			orphanage_available = false;
+	bool			adoption_performed = false;
 	bool			dirty = false;
 	int			error;
 
@@ -77,14 +133,38 @@ xrep_nlinks_repair_inode(
 	if (xrep_is_tempfile(ip))
 		return 0;
 
-	xchk_ilock(sc, XFS_IOLOCK_EXCL);
+	if (sc->orphanage && sc->ip != sc->orphanage) {
+		/*
+		 * Allocate a transaction for the adoption.  We'll reserve
+		 * space for the transaction in the adoption preparation step.
+		 */
+		error = xrep_adoption_init(sc, &xnc->adoption);
+		if (!error) {
+			orphanage_available = true;
+
+			/* Take IOLOCK of the orphanage and the child. */
+			error = xrep_orphanage_iolock_two(sc);
+			if (error)
+				return error;
+		}
+	}
+	if (!orphanage_available)
+		xchk_ilock(sc, XFS_IOLOCK_EXCL);
 
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_link, 0, 0, 0, &sc->tp);
 	if (error)
 		goto out_iolock;
 
-	xchk_ilock(sc, XFS_ILOCK_EXCL);
-	xfs_trans_ijoin(sc->tp, ip, 0);
+	if (orphanage_available) {
+		error = xrep_adoption_prep(&xnc->adoption);
+		if (error) {
+			xchk_trans_cancel(sc);
+			goto out_iolock;
+		}
+	} else {
+		xchk_ilock(sc, XFS_ILOCK_EXCL);
+		xfs_trans_ijoin(sc->tp, ip, 0);
+	}
 
 	mutex_lock(&xnc->lock);
 
@@ -120,6 +200,29 @@ xrep_nlinks_repair_inode(
 		trace_xrep_nlinks_unfixable_inode(mp, ip, &obs);
 		error = 0;
 		goto out_trans;
+	}
+
+	/*
+	 * Decide if we're going to move this file to the orphanage, and fix
+	 * up the incore link counts if we are.
+	 */
+	if (orphanage_available &&
+	    xrep_nlinks_is_orphaned(sc, ip, actual_nlink, &obs)) {
+		error = xrep_nlinks_adopt(xnc);
+		if (error)
+			goto out_trans;
+		adoption_performed = true;
+
+		/* Re-read the link counts. */
+		mutex_lock(&xnc->lock);
+		error = xfarray_load_sparse(xnc->nlinks, ip->i_ino, &obs);
+		mutex_unlock(&xnc->lock);
+		if (error)
+			goto out_trans;
+
+		total_links = xchk_nlink_total(ip, &obs);
+		actual_nlink = VFS_I(ip)->i_nlink;
+		dirty = true;
 	}
 
 	/*
@@ -167,6 +270,11 @@ xrep_nlinks_repair_inode(
 		goto out_ilock;
 
 	xchk_iunlock(sc, XFS_ILOCK_EXCL | XFS_IOLOCK_EXCL);
+	if (orphanage_available) {
+		xrep_orphanage_iunlock(sc, XFS_ILOCK_EXCL | XFS_IOLOCK_EXCL);
+		if (!adoption_performed)
+			xrep_adoption_cancel(&xnc->adoption, 0);
+	}
 	return 0;
 
 out_scanlock:
@@ -175,8 +283,15 @@ out_trans:
 	xchk_trans_cancel(sc);
 out_ilock:
 	xchk_iunlock(sc, XFS_ILOCK_EXCL);
+	if (orphanage_available && (sc->orphanage_ilock_flags & XFS_ILOCK_EXCL))
+		xrep_orphanage_iunlock(sc, XFS_ILOCK_EXCL);
 out_iolock:
 	xchk_iunlock(sc, XFS_IOLOCK_EXCL);
+	if (orphanage_available) {
+		xrep_orphanage_iunlock(sc, XFS_IOLOCK_EXCL);
+		if (!adoption_performed)
+			xrep_adoption_cancel(&xnc->adoption, error);
+	}
 	return error;
 }
 
@@ -209,10 +324,10 @@ xrep_nlinks(
 	/*
 	 * We need ftype for an accurate count of the number of child
 	 * subdirectory links.  Child subdirectories with a back link (dotdot
-	 * entry) but no forward link are unfixable, so we cannot repair the
-	 * link count of the parent directory based on the back link count
-	 * alone.  Filesystems without ftype support are rare (old V4) so we
-	 * just skip out here.
+	 * entry) but no forward link are moved to the orphanage, so we cannot
+	 * repair the link count of the parent directory based on the back link
+	 * count alone.  Filesystems without ftype support are rare (old V4) so
+	 * we just skip out here.
 	 */
 	if (!xfs_has_ftype(sc->mp))
 		return -EOPNOTSUPP;
