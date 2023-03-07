@@ -37,7 +37,7 @@ xfs_attr_grab_log_assist(
 	 * Protect ourselves from an idle log clearing the logged xattrs log
 	 * incompat feature bit.
 	 */
-	xlog_use_incompat_feat(mp->m_log);
+	xlog_use_incompat_feat(mp->m_log, XLOG_INCOMPAT_FEAT_XATTRS);
 
 	/*
 	 * If log-assisted xattrs are already enabled, the caller can use the
@@ -68,7 +68,7 @@ xfs_attr_grab_log_assist(
 
 	return 0;
 drop_incompat:
-	xlog_drop_incompat_feat(mp->m_log);
+	xlog_drop_incompat_feat(mp->m_log, XLOG_INCOMPAT_FEAT_XATTRS);
 	return error;
 }
 
@@ -76,7 +76,7 @@ static inline void
 xfs_attr_rele_log_assist(
 	struct xfs_mount	*mp)
 {
-	xlog_drop_incompat_feat(mp->m_log);
+	xlog_drop_incompat_feat(mp->m_log, XLOG_INCOMPAT_FEAT_XATTRS);
 }
 
 static inline bool
