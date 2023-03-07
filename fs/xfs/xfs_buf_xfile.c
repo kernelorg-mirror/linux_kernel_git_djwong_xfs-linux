@@ -72,3 +72,11 @@ xfile_free_buftarg(
 	xfs_free_buftarg(btp);
 	xfs_buf_cache_destroy(&xfile->bcache);
 }
+
+/* Sector count for this xfile buftarg. */
+xfs_daddr_t
+xfile_buftarg_nr_sectors(
+	struct xfs_buftarg	*btp)
+{
+	return xfile_size(btp->bt_xfile) >> SECTOR_SHIFT;
+}
