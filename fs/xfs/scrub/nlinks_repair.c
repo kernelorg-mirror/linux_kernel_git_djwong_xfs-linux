@@ -24,6 +24,7 @@
 #include "scrub/xfile.h"
 #include "scrub/xfarray.h"
 #include "scrub/iscan.h"
+#include "scrub/orphanage.h"
 #include "scrub/nlinks.h"
 #include "scrub/trace.h"
 #include "scrub/tempfile.h"
@@ -37,6 +38,121 @@
  * the live data and hooks active, so this is safe so long as we make sure the
  * inode is locked.
  */
+
+/* Set up to repair inode link counts. */
+int
+xrep_setup_nlinks(
+	struct xfs_scrub	*sc)
+{
+	return xrep_orphanage_try_create(sc);
+}
+
+/* Update incore link count information.  Caller must hold the xnc lock. */
+STATIC int
+xrep_nlinks_set_record(
+	struct xchk_nlink_ctrs	*xnc,
+	xfs_ino_t		ino,
+	const struct xchk_nlink	*nl)
+{
+	int			error;
+
+	trace_xrep_nlinks_set_record(xnc->sc->mp, ino, nl);
+
+	error = xfarray_store(xnc->nlinks, ino, nl);
+	if (error == -EFBIG) {
+		/*
+		 * EFBIG means we tried to store data at too high a byte offset
+		 * in the sparse array.  This should be impossible since we
+		 * presumably already stored an nlink count, but we still need
+		 * to fail gracefully.
+		 */
+		return -ECANCELED;
+	}
+
+	return error;
+}
+
+/*
+ * Inodes that aren't the root directory or the orphanage, have a nonzero link
+ * count, and no observed parents should be moved to the orphanage.
+ */
+static inline bool
+xrep_nlinks_is_orphaned(
+	struct xfs_scrub	*sc,
+	struct xfs_inode	*ip,
+	unsigned int		actual_nlink,
+	const struct xchk_nlink	*obs)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+
+	if (obs->parents != 0)
+		return false;
+	if (ip == mp->m_rootip || ip == sc->orphanage)
+		return false;
+	return actual_nlink != 0;
+}
+
+/*
+ * Reattach this file to the directory tree by moving it to /lost+found per the
+ * adoption parameters that we already computed.
+ */
+STATIC int
+xrep_nlinks_adopt(
+	struct xchk_nlink_ctrs	*xnc,
+	uint64_t		*total_links,
+	struct xchk_nlink	*obs)
+{
+	struct xfs_scrub	*sc = xnc->sc;
+	struct xfs_inode	*ip = sc->ip;
+	int			error;
+
+	/* Figure out what name we're going to use here. */
+	error = xrep_adoption_compute_name(&xnc->adoption, xnc->namebuf);
+	if (error)
+		return error;
+
+	mutex_lock(&xnc->lock);
+
+	/* Add one link count from lost+found to our file. */
+	obs->parents++;
+	(*total_links)++;
+
+	error = xrep_nlinks_set_record(xnc, ip->i_ino, obs);
+	if (error)
+		goto out_unlock;
+
+	/*
+	 * Create the new name in the orphanage, and bump the link
+	 * count of the orphanage if we just added a directory.  Then
+	 * we can set the correct nlink.
+	 */
+	error = xrep_adoption_commit(&xnc->adoption);
+	if (error)
+		goto out_unlock;
+
+	/*
+	 * If the child is a directory, we need to bump the incore link
+	 * count of the orphanage to account for the new orphan's
+	 * child subdirectory entry.
+	 */
+	if (S_ISDIR(VFS_I(ip)->i_mode)) {
+		error = xfarray_load_sparse(xnc->nlinks, sc->orphanage->i_ino,
+				obs);
+		if (error)
+			goto out_unlock;
+
+		obs->flags |= XCHK_NLINK_WRITTEN;
+		obs->children++;
+
+		error = xrep_nlinks_set_record(xnc, sc->orphanage->i_ino, obs);
+		if (error)
+			goto out_unlock;
+	}
+
+out_unlock:
+	mutex_unlock(&xnc->lock);
+	return error;
+}
 
 /* Remove an inode from the unlinked list. */
 STATIC int
@@ -66,6 +182,7 @@ xrep_nlinks_repair_inode(
 	struct xfs_inode	*ip = sc->ip;
 	uint64_t		total_links;
 	uint64_t		actual_nlink;
+	bool			use_orphanage = false;
 	bool			dirty = false;
 	int			error;
 
@@ -77,14 +194,35 @@ xrep_nlinks_repair_inode(
 	if (xrep_is_tempfile(ip))
 		return 0;
 
-	xchk_ilock(sc, XFS_IOLOCK_EXCL);
+	if (sc->orphanage && sc->ip != sc->orphanage) {
+		use_orphanage = true;
+
+		/* Grab the IOLOCK of the orphanage and the child directory. */
+		error = xrep_orphanage_iolock_two(sc);
+		if (error)
+			return error;
+
+		/*
+		 * Allocate a transaction for the adoption.  We'll reserve
+		 * space for the transaction in the adoption preparation step.
+		 */
+		xrep_adoption_compute_blkres(sc, &xnc->adoption);
+	} else {
+		xchk_ilock(sc, XFS_IOLOCK_EXCL);
+	}
 
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_link, 0, 0, 0, &sc->tp);
 	if (error)
 		goto out_iolock;
 
-	xchk_ilock(sc, XFS_ILOCK_EXCL);
-	xfs_trans_ijoin(sc->tp, ip, 0);
+	if (use_orphanage) {
+		error = xrep_adoption_prep(&xnc->adoption);
+		if (error)
+			goto out_trans;
+	} else {
+		xchk_ilock(sc, XFS_ILOCK_EXCL);
+		xfs_trans_ijoin(sc->tp, ip, 0);
+	}
 
 	mutex_lock(&xnc->lock);
 
@@ -132,6 +270,18 @@ xrep_nlinks_repair_inode(
 	}
 
 	/*
+	 * Decide if we're going to move this file to the orphanage, and fix
+	 * up the incore link counts if we are.
+	 */
+	if (use_orphanage &&
+	    xrep_nlinks_is_orphaned(sc, ip, actual_nlink, &obs)) {
+		error = xrep_nlinks_adopt(xnc, &total_links, &obs);
+		if (error)
+			goto out_trans;
+		dirty = true;
+	}
+
+	/*
 	 * If this inode is linked from the directory tree and on the unlinked
 	 * list, remove it from the unlinked list.
 	 */
@@ -170,6 +320,8 @@ xrep_nlinks_repair_inode(
 		goto out_ilock;
 
 	xchk_iunlock(sc, XFS_ILOCK_EXCL | XFS_IOLOCK_EXCL);
+	if (use_orphanage)
+		xrep_orphanage_iunlock(sc, XFS_ILOCK_EXCL | XFS_IOLOCK_EXCL);
 	return 0;
 
 out_scanlock:
@@ -178,8 +330,12 @@ out_trans:
 	xchk_trans_cancel(sc);
 out_ilock:
 	xchk_iunlock(sc, XFS_ILOCK_EXCL);
+	if (use_orphanage && (sc->orphanage_ilock_flags & XFS_ILOCK_EXCL))
+		xrep_orphanage_iunlock(sc, XFS_ILOCK_EXCL);
 out_iolock:
 	xchk_iunlock(sc, XFS_IOLOCK_EXCL);
+	if (use_orphanage)
+		xrep_orphanage_iunlock(sc, XFS_IOLOCK_EXCL);
 	return error;
 }
 
@@ -212,10 +368,10 @@ xrep_nlinks(
 	/*
 	 * We need ftype for an accurate count of the number of child
 	 * subdirectory links.  Child subdirectories with a back link (dotdot
-	 * entry) but no forward link are unfixable, so we cannot repair the
-	 * link count of the parent directory based on the back link count
-	 * alone.  Filesystems without ftype support are rare (old V4) so we
-	 * just skip out here.
+	 * entry) but no forward link are moved to the orphanage, so we cannot
+	 * repair the link count of the parent directory based on the back link
+	 * count alone.  Filesystems without ftype support are rare (old V4) so
+	 * we just skip out here.
 	 */
 	if (!xfs_has_ftype(sc->mp))
 		return -EOPNOTSUPP;
