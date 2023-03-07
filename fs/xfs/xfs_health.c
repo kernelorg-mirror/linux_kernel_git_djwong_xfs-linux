@@ -532,6 +532,7 @@ xfs_ag_geom_health(
 static const struct ioctl_sick_map rtgroup_map[] = {
 	{ XFS_SICK_RT_SUPER,	XFS_RTGROUP_GEOM_SICK_SUPER },
 	{ XFS_SICK_RT_BITMAP,	XFS_RTGROUP_GEOM_SICK_BITMAP },
+	{ XFS_SICK_RT_RMAPBT,	XFS_RTGROUP_GEOM_SICK_RMAPBT },
 	{ 0, 0 },
 };
 
@@ -631,6 +632,9 @@ xfs_btree_mark_sick(
 	switch (cur->bc_btnum) {
 	case XFS_BTNUM_BMAP:
 		xfs_bmap_mark_sick(cur->bc_ino.ip, cur->bc_ino.whichfork);
+		return;
+	case XFS_BTNUM_RTRMAP:
+		xfs_rtgroup_mark_sick(cur->bc_ino.rtg, XFS_SICK_RT_RMAPBT);
 		return;
 	case XFS_BTNUM_BNO:
 		mask = XFS_SICK_AG_BNOBT;
