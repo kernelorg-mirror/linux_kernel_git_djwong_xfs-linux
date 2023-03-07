@@ -201,15 +201,11 @@ xfs_symlink_local_to_remote(
  * does not do on-disk format checks.
  */
 xfs_failaddr_t
-xfs_symlink_shortform_verify(
-	struct xfs_inode	*ip)
+xfs_symlink_sf_verify_struct(
+	void			*sfp,
+	int64_t			size)
 {
-	struct xfs_ifork	*ifp = xfs_ifork_ptr(ip, XFS_DATA_FORK);
-	char			*sfp = (char *)ifp->if_u1.if_data;
-	int			size = ifp->if_bytes;
 	char			*endp = sfp + size;
-
-	ASSERT(ifp->if_format == XFS_DINODE_FMT_LOCAL);
 
 	/*
 	 * Zero length symlinks should never occur in memory as they are
@@ -230,4 +226,15 @@ xfs_symlink_shortform_verify(
 	if (*endp != 0)
 		return __this_address;
 	return NULL;
+}
+
+xfs_failaddr_t
+xfs_symlink_shortform_verify(
+	struct xfs_inode	*ip)
+{
+	struct xfs_ifork	*ifp = xfs_ifork_ptr(ip, XFS_DATA_FORK);
+
+	ASSERT(ifp->if_format == XFS_DINODE_FMT_LOCAL);
+
+	return xfs_symlink_sf_verify_struct(ifp->if_u1.if_data, ifp->if_bytes);
 }
