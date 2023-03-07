@@ -66,6 +66,15 @@ xfs_rmapbt_crack_agno_opdev(
 	}
 }
 
+static inline void
+xfs_refcountbt_crack_agno_opdev(
+	struct xfs_btree_cur	*cur,
+	xfs_agnumber_t		*agno,
+	dev_t			*opdev)
+{
+	return xfs_rmapbt_crack_agno_opdev(cur, agno, opdev);
+}
+
 /*
  * We include this last to have the helpers above available for the trace
  * event implementations.
