@@ -22,6 +22,7 @@
 #include "xfs_swapext.h"
 #include "xfs_rtbitmap.h"
 #include "xfs_rtgroup.h"
+#include "xfs_refcount.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -447,6 +448,7 @@ xrep_rgbitmap_mark_free(
 	unsigned int		bufwsize;
 	xfs_extlen_t		mod;
 	xfs_rtword_t		mask;
+	enum xbtree_recpacking	outcome;
 	int			error;
 
 	if (!xfs_verify_rgbext(rtg, rb->next_rgbno, rgbno - rb->next_rgbno))
@@ -465,6 +467,25 @@ xrep_rgbitmap_mark_free(
 	nextrtx = xfs_rtb_to_rtx(mp, rtbno, &mod) + 1;
 	if (mod != mp->m_sb.sb_rextsize - 1)
 		return -EFSCORRUPTED;
+
+	/* Must not be shared or CoW staging. */
+	if (rb->sc->sr.refc_cur) {
+		error = xfs_refcount_has_records(rb->sc->sr.refc_cur,
+				XFS_REFC_DOMAIN_SHARED, rb->next_rgbno,
+				rgbno - rb->next_rgbno, &outcome);
+		if (error)
+			return error;
+		if (outcome != XBTREE_RECPACKING_EMPTY)
+			return -EFSCORRUPTED;
+
+		error = xfs_refcount_has_records(rb->sc->sr.refc_cur,
+				XFS_REFC_DOMAIN_COW, rb->next_rgbno,
+				rgbno - rb->next_rgbno, &outcome);
+		if (error)
+			return error;
+		if (outcome != XBTREE_RECPACKING_EMPTY)
+			return -EFSCORRUPTED;
+	}
 
 	trace_xrep_rgbitmap_record_free(mp, startrtx, nextrtx - 1);
 
