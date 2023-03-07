@@ -680,6 +680,75 @@ xchk_ag_init(
 	return 0;
 }
 
+/*
+ * For scrubbing a realtime file, grab all the in-core resources we'll need to
+ * check the realtime metadata, which means taking the ILOCK of the realtime
+ * metadata inodes.  Callers must not join these inodes to the transaction
+ * with non-zero lockflags or concurrency problems will result.  The
+ * @rtlock_flags argument takes XCHK_RTLOCK_* flags because scrub has somewhat
+ * unusual locking requirements.
+ */
+void
+xchk_rt_init(
+	struct xfs_scrub	*sc,
+	struct xchk_rt		*sr,
+	unsigned int		rtlock_flags)
+{
+	ASSERT(!(rtlock_flags & ~XCHK_RTLOCK_ALL));
+	ASSERT(hweight32(rtlock_flags & (XCHK_RTLOCK_BITMAP |
+					 XCHK_RTLOCK_BITMAP_SHARED)) < 2);
+	ASSERT(hweight32(rtlock_flags & (XCHK_RTLOCK_SUMMARY |
+					 XCHK_RTLOCK_SUMMARY_SHARED)) < 2);
+
+	if (rtlock_flags & XCHK_RTLOCK_BITMAP)
+		xfs_ilock(sc->mp->m_rbmip, XFS_ILOCK_EXCL | XFS_ILOCK_RTBITMAP);
+	else if (rtlock_flags & XCHK_RTLOCK_BITMAP_SHARED)
+		xfs_ilock(sc->mp->m_rbmip, XFS_ILOCK_SHARED | XFS_ILOCK_RTBITMAP);
+
+	if (rtlock_flags & XCHK_RTLOCK_SUMMARY)
+		xfs_ilock(sc->mp->m_rsumip, XFS_ILOCK_EXCL | XFS_ILOCK_RTSUM);
+	else if (rtlock_flags & XCHK_RTLOCK_SUMMARY_SHARED)
+		xfs_ilock(sc->mp->m_rsumip, XFS_ILOCK_SHARED | XFS_ILOCK_RTSUM);
+
+	sr->rtlock_flags = rtlock_flags;
+}
+
+/*
+ * Unlock the realtime metadata inodes.  This must be done /after/ committing
+ * (or cancelling) the scrub transaction.
+ */
+void
+xchk_rt_unlock(
+	struct xfs_scrub	*sc,
+	struct xchk_rt		*sr)
+{
+	if (!sr->rtlock_flags)
+		return;
+
+	if (sr->rtlock_flags & XCHK_RTLOCK_SUMMARY)
+		xfs_iunlock(sc->mp->m_rsumip, XFS_ILOCK_EXCL);
+	else if (sr->rtlock_flags & XCHK_RTLOCK_SUMMARY_SHARED)
+		xfs_iunlock(sc->mp->m_rsumip, XFS_ILOCK_SHARED);
+
+	if (sr->rtlock_flags & XCHK_RTLOCK_BITMAP)
+		xfs_iunlock(sc->mp->m_rbmip, XFS_ILOCK_EXCL);
+	else if (sr->rtlock_flags & XCHK_RTLOCK_BITMAP_SHARED)
+		xfs_iunlock(sc->mp->m_rbmip, XFS_ILOCK_SHARED);
+
+	sr->rtlock_flags = 0;
+}
+
+/* Drop only the shared rt bitmap lock. */
+void
+xchk_rt_unlock_rtbitmap(
+	struct xfs_scrub	*sc)
+{
+	ASSERT(sc->sr.rtlock_flags & XCHK_RTLOCK_BITMAP_SHARED);
+
+	xfs_iunlock(sc->mp->m_rbmip, XFS_ILOCK_SHARED | XFS_ILOCK_RTBITMAP);
+	sc->sr.rtlock_flags &= ~XCHK_RTLOCK_BITMAP_SHARED;
+}
+
 /* Per-scrubber setup functions */
 
 void
