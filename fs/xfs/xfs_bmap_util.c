@@ -710,12 +710,15 @@ xfs_can_free_eofblocks(
 		return false;
 
 	/*
-	 * Do not free real preallocated or append-only files unless the file
-	 * has delalloc blocks and we are forced to remove them.
+	 * Do not free extent size hints, real preallocated or append-only files
+	 * unless the file has delalloc blocks and we are forced to remove
+	 * them.
 	 */
-	if (ip->i_diflags & (XFS_DIFLAG_PREALLOC | XFS_DIFLAG_APPEND))
+	if (xfs_get_extsz_hint(ip) ||
+	    (ip->i_diflags & (XFS_DIFLAG_PREALLOC | XFS_DIFLAG_APPEND))) {
 		if (!force || ip->i_delayed_blks == 0)
 			return false;
+	}
 
 	/*
 	 * Do not try to free post-EOF blocks if EOF is beyond the end of the
