@@ -68,3 +68,25 @@ xfbtree_ino(
  */
 #define CREATE_TRACE_POINTS
 #include "scrub/trace.h"
+
+/* xchk_whine stuff */
+struct xchk_tstr {
+	unsigned int	type;
+	const char	*tag;
+};
+
+static const struct xchk_tstr xchk_tstr_tags[] = { XFS_SCRUB_TYPE_STRINGS };
+
+const char *
+xchk_type_string(
+	unsigned int	type)
+{
+	unsigned int	i;
+
+	for (i = 0; i < ARRAY_SIZE(xchk_tstr_tags); i++) {
+		if (xchk_tstr_tags[i].type == type)
+			return xchk_tstr_tags[i].tag;
+	}
+
+	return "???";
+}
