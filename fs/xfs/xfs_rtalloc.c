@@ -32,6 +32,7 @@
 #include "xfs_btree.h"
 #include "xfs_rmap.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_rtrefcount_btree.h"
 
 /*
  * Realtime metadata files are not quite regular files because userspace can't
@@ -43,6 +44,7 @@
 static struct lock_class_key xfs_rbmip_key;
 static struct lock_class_key xfs_rsumip_key;
 static struct lock_class_key xfs_rrmapip_key;
+static struct lock_class_key xfs_rrefcountip_key;
 
 /*
  * Read and return the summary information for a given extent size,
@@ -1853,6 +1855,53 @@ out_unlock:
 	return error;
 }
 
+/* Load realtime refcount btree inode. */
+STATIC int
+xfs_rtmount_refcountbt(
+	struct xfs_rtgroup	*rtg)
+{
+	struct xfs_mount	*mp = rtg->rtg_mount;
+	struct xfs_imeta_path	*path;
+	struct xfs_inode	*ip;
+	xfs_ino_t		ino;
+	int			error;
+
+	if (!xfs_has_rtreflink(mp))
+		return 0;
+
+	error = xfs_rtrefcountbt_create_path(mp, rtg->rtg_rgno, &path);
+	if (error)
+		return error;
+
+	error = xfs_imeta_lookup(mp, path, &ino);
+	if (error)
+		goto out_path;
+
+	if (ino == NULLFSINO) {
+		xfs_rtgroup_mark_sick(rtg, XFS_SICK_RT_REFCNTBT);
+		error = -EFSCORRUPTED;
+		goto out_path;
+	}
+
+	error = xfs_rt_iget(mp, ino, &xfs_rrefcountip_key, &ip);
+	if (error)
+		goto out_path;
+
+	if (XFS_IS_CORRUPT(mp, ip->i_df.if_format != XFS_DINODE_FMT_REFCOUNT)) {
+		error = -EFSCORRUPTED;
+		goto out_rele;
+	}
+
+	rtg->rtg_refcountip = ip;
+	ip = NULL;
+out_rele:
+	if (ip)
+		xfs_imeta_irele(ip);
+out_path:
+	xfs_imeta_free_path(path);
+	return error;
+}
+
 /*
  * Get the bitmap and summary inodes and the summary cache into the mount
  * structure at mount time.
@@ -1900,6 +1949,12 @@ xfs_rtmount_inodes(
 			xfs_rtgroup_rele(rtg);
 			goto out_rele_rtgroup;
 		}
+
+		error = xfs_rtmount_refcountbt(rtg);
+		if (error) {
+			xfs_rtgroup_rele(rtg);
+			goto out_rele_rtgroup;
+		}
 	}
 
 	xfs_alloc_rsum_cache(mp, sbp->sb_rbmblocks);
@@ -1907,6 +1962,10 @@ xfs_rtmount_inodes(
 
 out_rele_rtgroup:
 	for_each_rtgroup(mp, rgno, rtg) {
+		if (rtg->rtg_refcountip)
+			xfs_imeta_irele(rtg->rtg_refcountip);
+		rtg->rtg_refcountip = NULL;
+
 		if (rtg->rtg_rmapip)
 			xfs_imeta_irele(rtg->rtg_rmapip);
 		rtg->rtg_rmapip = NULL;
@@ -1943,6 +2002,14 @@ xfs_rtmount_dqattach(
 				return error;
 			}
 		}
+
+		if (rtg->rtg_refcountip) {
+			error = xfs_qm_dqattach(rtg->rtg_refcountip);
+			if (error) {
+				xfs_rtgroup_rele(rtg);
+				return error;
+			}
+		}
 	}
 
 	return 0;
@@ -1958,6 +2025,10 @@ xfs_rtunmount_inodes(
 	kmem_free(mp->m_rsum_cache);
 
 	for_each_rtgroup(mp, rgno, rtg) {
+		if (rtg->rtg_refcountip)
+			xfs_imeta_irele(rtg->rtg_refcountip);
+		rtg->rtg_refcountip = NULL;
+
 		if (rtg->rtg_rmapip)
 			xfs_imeta_irele(rtg->rtg_rmapip);
 		rtg->rtg_rmapip = NULL;
