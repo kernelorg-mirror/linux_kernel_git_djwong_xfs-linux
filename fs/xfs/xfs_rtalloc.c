@@ -1253,7 +1253,8 @@ xfs_growfs_rt(
 		return -EOPNOTSUPP;
 	if (xfs_has_quota(mp))
 		return -EOPNOTSUPP;
-	if (xfs_has_reflink(mp) && !is_power_of_2(mp->m_sb.sb_rextsize))
+	if (xfs_has_reflink(mp) && !is_power_of_2(mp->m_sb.sb_rextsize) &&
+	    (XFS_FSB_TO_B(mp, mp->m_sb.sb_rextsize) & ~PAGE_MASK))
 		return -EOPNOTSUPP;
 
 	nrblocks = in->newblocks;

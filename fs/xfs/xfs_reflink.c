@@ -1665,6 +1665,83 @@ xfs_reflink_adjust_bigalloc_len(
 #endif /* CONFIG_XFS_RT */
 
 /*
+ * Check the alignment of a remap request when the allocation unit size isn't a
+ * power of two.  The VFS helpers use (fast) bitmask-based alignment checks,
+ * but here we have to use slow long division.
+ */
+static int
+xfs_reflink_remap_check_rtalign(
+	struct xfs_inode		*ip_in,
+	loff_t				pos_in,
+	struct xfs_inode		*ip_out,
+	loff_t				pos_out,
+	loff_t				*req_len,
+	unsigned int			remap_flags)
+{
+	struct xfs_mount		*mp = ip_in->i_mount;
+	uint32_t			rextbytes;
+	loff_t				in_size, out_size;
+	loff_t				new_length, length = *req_len;
+	loff_t				blen;
+
+	rextbytes = XFS_FSB_TO_B(mp, mp->m_sb.sb_rextsize);
+	in_size = i_size_read(VFS_I(ip_in));
+	out_size = i_size_read(VFS_I(ip_out));
+
+	/* The start of both ranges must be aligned to a rt extent. */
+	if (!isaligned_64(pos_in, rextbytes) ||
+	    !isaligned_64(pos_out, rextbytes))
+		return -EINVAL;
+
+	if (length == 0)
+		length = in_size - pos_in;
+
+	/*
+	 * If the user wanted us to exchange up to the infile's EOF, round up
+	 * to the next block boundary for this check.
+	 *
+	 * Otherwise, reject the range length if it's not extent aligned.  We
+	 * already confirmed the starting offsets' extent alignment.
+	 */
+	if (pos_in + length == in_size)
+		blen = roundup_64(in_size, rextbytes) - pos_in;
+	else
+		blen = rounddown_64(length, rextbytes);
+
+	/* Don't allow overlapped remappings within the same file. */
+	if (ip_in == ip_out &&
+	    pos_out + blen > pos_in &&
+	    pos_in + blen > pos_out)
+		return -EINVAL;
+
+	/*
+	 * Ensure that we don't exchange a partial EOF extent into the middle
+	 * of another file.
+	 */
+	if (isaligned_64(length, rextbytes))
+		return 0;
+
+	new_length = length;
+	if (pos_out + length < out_size)
+		new_length = rounddown_64(new_length, rextbytes);
+
+	if (new_length == length)
+		return 0;
+
+	/*
+	 * Return the shortened request if the caller permits it.  If the
+	 * request was shortened to zero rt extents, we know that the original
+	 * arguments weren't valid in the first place.
+	 */
+	if ((remap_flags & REMAP_FILE_CAN_SHORTEN) && new_length > 0) {
+		*req_len = new_length;
+		return 0;
+	}
+
+	return (remap_flags & REMAP_FILE_DEDUP) ? -EBADE : -EINVAL;
+}
+
+/*
  * Prepare two files for range cloning.  Upon a successful return both inodes
  * will have the iolock and mmaplock held, the page cache of the out file will
  * be truncated, and any leases on the out file will have been broken.  This
@@ -1707,6 +1784,7 @@ xfs_reflink_remap_prep(
 	struct inode		*inode_out = file_inode(file_out);
 	struct xfs_inode	*dest = XFS_I(inode_out);
 	const struct iomap_ops	*dax_read_ops = NULL;
+	unsigned int		alloc_unit = xfs_inode_alloc_unitsize(dest);
 	int			ret;
 
 	/* Lock both files against IO */
@@ -1724,14 +1802,22 @@ xfs_reflink_remap_prep(
 	if (IS_DAX(inode_in) != IS_DAX(inode_out))
 		goto out_unlock;
 
-	ASSERT(is_power_of_2(xfs_inode_alloc_unitsize(dest)));
+	/* Check non-power of two alignment issues, if necessary. */
+	if (XFS_IS_REALTIME_INODE(dest) && !is_power_of_2(alloc_unit)) {
+		ret = xfs_reflink_remap_check_rtalign(src, pos_in, dest,
+				pos_out, len, remap_flags);
+		if (ret)
+			goto out_unlock;
+
+		/* Do the VFS checks with the regular block alignment. */
+		alloc_unit = src->i_mount->m_sb.sb_blocksize;
+	}
 
 	if (IS_DAX(inode_in))
 		dax_read_ops = &xfs_read_iomap_ops;
 
 	ret = __generic_remap_file_range_prep(file_in, pos_in, file_out,
-			pos_out, len, remap_flags, dax_read_ops,
-			xfs_inode_alloc_unitsize(dest));
+			pos_out, len, remap_flags, dax_read_ops, alloc_unit);
 	if (ret || *len == 0)
 		goto out_unlock;
 

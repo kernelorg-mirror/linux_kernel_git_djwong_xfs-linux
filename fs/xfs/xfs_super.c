@@ -1728,17 +1728,17 @@ xfs_fs_fill_super(
 		 * state.  This means that we cannot dirty all the pages
 		 * backing an rt extent without dirtying the adjoining rt
 		 * extents.  If those rt extents are shared and extend into
-		 * other pages, this leads to crazy write amplification.  The
-		 * VFS remap_range checks assume power-of-two block sizes.
+		 * other pages, this leads to crazy write amplification.
 		 *
 		 * Hence we only support rt extent sizes that are an integer
-		 * power of two because we know those will align with the page
-		 * size.
+		 * power of two or an integer multiple of the page size because
+		 * we know those will align with the page size.
 		 */
 		if (xfs_has_realtime(mp) &&
-		    !is_power_of_2(mp->m_sb.sb_rextsize)) {
+		    !is_power_of_2(mp->m_sb.sb_rextsize) &&
+		    (XFS_FSB_TO_B(mp, mp->m_sb.sb_rextsize) & ~PAGE_MASK)) {
 			xfs_alert(mp,
-	"reflink not compatible with non-power-of-2 realtime extent size %u!",
+	"reflink not compatible with realtime extent size %u!",
 					mp->m_sb.sb_rextsize);
 			error = -EINVAL;
 			goto out_filestream_unmount;
