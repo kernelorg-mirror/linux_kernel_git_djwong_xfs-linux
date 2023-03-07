@@ -1406,9 +1406,10 @@ xfs_swap_change_owner(
 STATIC int
 xfs_swap_extent_forks(
 	struct xfs_trans	**tpp,
-	struct xfs_inode	*ip,
-	struct xfs_inode	*tip)
+	struct xfs_swapext_req	*req)
 {
+	struct xfs_inode	*ip = req->ip2;
+	struct xfs_inode	*tip = req->ip1;
 	xfs_filblks_t		aforkblks = 0;
 	xfs_filblks_t		taforkblks = 0;
 	xfs_extnum_t		junk;
@@ -1556,6 +1557,11 @@ xfs_swap_extents(
 	struct xfs_inode	*tip,	/* tmp inode */
 	struct xfs_swapext	*sxp)
 {
+	struct xfs_swapext_req	req = {
+		.ip1		= tip,
+		.ip2		= ip,
+		.whichfork	= XFS_DATA_FORK,
+	};
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_trans	*tp;
 	struct xfs_bstat	*sbp = &sxp->sx_stat;
@@ -1691,19 +1697,12 @@ xfs_swap_extents(
 	 * recovery is going to see the fork as owned by the swapped inode,
 	 * not the pre-swapped inodes.
 	 */
+	req.blockcount = XFS_B_TO_FSB(ip->i_mount, i_size_read(VFS_I(ip)));
 	if (xfs_has_rmapbt(mp)) {
-		struct xfs_swapext_req	req = {
-			.ip1		= tip,
-			.ip2		= ip,
-			.whichfork	= XFS_DATA_FORK,
-			.blockcount	= XFS_B_TO_FSB(ip->i_mount,
-						       i_size_read(VFS_I(ip))),
-		};
-
 		xfs_swapext(tp, &req);
 		error = xfs_defer_finish(&tp);
 	} else
-		error = xfs_swap_extent_forks(&tp, ip, tip);
+		error = xfs_swap_extent_forks(&tp, &req);
 	if (error) {
 		trace_xfs_swap_extent_error(ip, error, _THIS_IP_);
 		goto out_trans_cancel;
