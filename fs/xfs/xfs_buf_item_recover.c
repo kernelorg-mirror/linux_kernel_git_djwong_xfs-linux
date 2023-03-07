@@ -22,6 +22,7 @@
 #include "xfs_inode.h"
 #include "xfs_dir2.h"
 #include "xfs_quota.h"
+#include "xfs_rtgroup.h"
 
 /*
  * This is the number of entries in the l_buf_cancel_table used during
@@ -995,6 +996,23 @@ xlog_recover_buf_commit_pass2(
 		ASSERT(bp->b_mount == mp);
 		bp->b_flags |= _XBF_LOGRECOVERY;
 		xfs_buf_delwri_queue(bp, buffer_list);
+
+		/*
+		 * Update the primary rt super if we just recovered the primary
+		 * fs super.
+		 */
+		if (xfs_has_rtgroups(mp) && bp->b_ops == &xfs_sb_buf_ops) {
+			struct xfs_buf	*rtsb_bp = mp->m_rtsb_bp;
+
+			if (rtsb_bp) {
+				xfs_buf_lock(rtsb_bp);
+				xfs_buf_hold(rtsb_bp);
+				xfs_rtgroup_update_super(rtsb_bp, bp);
+				rtsb_bp->b_flags |= _XBF_LOGRECOVERY;
+				xfs_buf_delwri_queue(rtsb_bp, buffer_list);
+				xfs_buf_relse(rtsb_bp);
+			}
+		}
 	}
 
 out_release:
