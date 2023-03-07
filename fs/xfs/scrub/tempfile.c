@@ -477,6 +477,8 @@ STATIC int
 xrep_tempswap_prep_request(
 	struct xfs_scrub	*sc,
 	int			whichfork,
+	xfs_fileoff_t		off,
+	xfs_filblks_t		len,
 	struct xrep_tempswap	*tx)
 {
 	struct xfs_swapext_req	*req = &tx->req;
@@ -499,10 +501,10 @@ xrep_tempswap_prep_request(
 	/* Swap all mappings in both forks. */
 	req->ip1 = sc->tempip;
 	req->ip2 = sc->ip;
-	req->startoff1 = 0;
-	req->startoff2 = 0;
+	req->startoff1 = off;
+	req->startoff2 = off;
 	req->whichfork = whichfork;
-	req->blockcount = XFS_MAX_FILEOFF;
+	req->blockcount = len;
 	req->req_flags = XFS_SWAP_REQ_LOGGED;
 
 	/* Always swap sizes when we're swapping data fork mappings. */
@@ -655,6 +657,8 @@ int
 xrep_tempswap_trans_reserve(
 	struct xfs_scrub	*sc,
 	int			whichfork,
+	xfs_fileoff_t		off,
+	xfs_filblks_t		len,
 	struct xrep_tempswap	*tx)
 {
 	int			error;
@@ -663,7 +667,7 @@ xrep_tempswap_trans_reserve(
 	ASSERT(xfs_isilocked(sc->ip, XFS_ILOCK_EXCL));
 	ASSERT(xfs_isilocked(sc->tempip, XFS_ILOCK_EXCL));
 
-	error = xrep_tempswap_prep_request(sc, whichfork, tx);
+	error = xrep_tempswap_prep_request(sc, whichfork, off, len, tx);
 	if (error)
 		return error;
 
@@ -694,7 +698,8 @@ xrep_tempswap_trans_alloc(
 
 	ASSERT(sc->tp == NULL);
 
-	error = xrep_tempswap_prep_request(sc, whichfork, tx);
+	error = xrep_tempswap_prep_request(sc, whichfork, 0, XFS_MAX_FILEOFF,
+			tx);
 	if (error)
 		return error;
 
