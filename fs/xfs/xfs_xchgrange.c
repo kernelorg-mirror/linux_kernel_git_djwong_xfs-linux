@@ -711,6 +711,65 @@ xfs_xchg_range_rele_log_assist(
 		xlog_drop_incompat_feat(mp->m_log, XLOG_INCOMPAT_FEAT_SWAPEXT);
 }
 
+/*
+ * Can we use xfs_swapext() to perform the exchange?
+ *
+ * The swapext state tracking mechanism uses deferred bmap log intent (BUI)
+ * items to swap extents between file forks, and it /can/ track the overall
+ * operation status over a file range using swapext log intent (SXI) items.
+ */
+static inline bool
+xfs_xchg_use_swapext(
+	struct xfs_mount	*mp,
+	unsigned int		xchg_flags)
+{
+	/*
+	 * If the caller got permission from the log to use SXI items, we will
+	 * use xfs_swapext with both log items.
+	 */
+	if (xchg_flags & XFS_XCHG_RANGE_LOGGED)
+		return true;
+
+	/*
+	 * If the caller didn't get permission to use SXI items, then userspace
+	 * must have allowed non-atomic swap mode.  Use the state tracking in
+	 * xfs_swapext to log BUI log items if the fs supports rmap or reflink.
+	 */
+	return xfs_swapext_supports_nonatomic(mp);
+}
+
+/*
+ * Can we use the old data fork swapping to perform the exchange?
+ *
+ * Userspace must be asking for a full swap of two files with the same file
+ * size and cannot require atomic mode.
+ */
+static inline bool
+xfs_xchg_use_forkswap(
+	const struct xfs_exch_range	*fxr,
+	struct xfs_inode		*ip1,
+	struct xfs_inode		*ip2)
+{
+	if (!(fxr->flags & XFS_EXCH_RANGE_NONATOMIC))
+		return false;
+	if (!(fxr->flags & XFS_EXCH_RANGE_FULL_FILES))
+		return false;
+	if (fxr->flags & XFS_EXCH_RANGE_TO_EOF)
+		return false;
+	if (fxr->file1_offset != 0 || fxr->file2_offset != 0)
+		return false;
+	if (fxr->length != ip1->i_disk_size)
+		return false;
+	if (fxr->length != ip2->i_disk_size)
+		return false;
+	return true;
+}
+
+enum xchg_strategy {
+	SWAPEXT		= 1,	/* xfs_swapext() */
+	FORKSWAP	= 2,	/* exchange forks */
+};
+
 /* Exchange the contents of two files. */
 int
 xfs_xchg_range(
@@ -730,19 +789,12 @@ xfs_xchg_range(
 	};
 	struct xfs_trans		*tp;
 	unsigned int			qretry;
+	unsigned int			flags = 0;
 	bool				retried = false;
+	enum xchg_strategy		strategy;
 	int				error;
 
 	trace_xfs_xchg_range(ip1, fxr, ip2, xchg_flags);
-
-	/*
-	 * This function only supports using log intent items (SXI items if
-	 * atomic exchange is required, or BUI items if not) to exchange file
-	 * data.  The legacy whole-fork swap will be ported in a later patch.
-	 */
-	if (!(xchg_flags & XFS_XCHG_RANGE_LOGGED) &&
-	    !xfs_swapext_supports_nonatomic(mp))
-		return -EOPNOTSUPP;
 
 	if (fxr->flags & XFS_EXCH_RANGE_TO_EOF)
 		req.req_flags |= XFS_SWAP_REQ_SET_SIZES;
@@ -755,10 +807,25 @@ xfs_xchg_range(
 	if (error)
 		return error;
 
+	/*
+	 * We haven't decided which exchange strategy we want to use yet, but
+	 * here we must choose if we want freed blocks during the swap to be
+	 * added to the transaction block reservation (RES_FDBLKS) or freed
+	 * into the global fdblocks.  The legacy fork swap mechanism doesn't
+	 * free any blocks, so it doesn't require it.  It is also the only
+	 * option that works for older filesystems.
+	 *
+	 * The bmap log intent items that were added with rmap and reflink can
+	 * change the bmbt shape, so the intent-based swap strategies require
+	 * us to set RES_FDBLKS.
+	 */
+	if (xfs_has_lazysbcount(mp))
+		flags |= XFS_TRANS_RES_FDBLKS;
+
 retry:
 	/* Allocate the transaction, lock the inodes, and join them. */
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, req.resblks, 0,
-			XFS_TRANS_RES_FDBLKS, &tp);
+			flags, &tp);
 	if (error)
 		return error;
 
@@ -801,6 +868,30 @@ retry:
 	if (error)
 		goto out_trans_cancel;
 
+	if (xfs_xchg_use_swapext(mp, xchg_flags)) {
+		/* Exchange the file contents with our fancy state tracking. */
+		strategy = SWAPEXT;
+	} else if (xfs_xchg_use_forkswap(fxr, ip1, ip2)) {
+		/*
+		 * Exchange the file contents by using the old bmap fork
+		 * exchange code, if we're a defrag tool doing a full file
+		 * swap.
+		 */
+		strategy = FORKSWAP;
+
+		error = xfs_swap_extents_check_format(ip2, ip1);
+		if (error) {
+			xfs_notice(mp,
+		"%s: inode 0x%llx format is incompatible for exchanging.",
+					__func__, ip2->i_ino);
+			goto out_trans_cancel;
+		}
+	} else {
+		/* We cannot exchange the file contents. */
+		error = -EOPNOTSUPP;
+		goto out_trans_cancel;
+	}
+
 	/* If we got this far on a dry run, all parameters are ok. */
 	if (fxr->flags & XFS_EXCH_RANGE_DRY_RUN)
 		goto out_trans_cancel;
@@ -813,7 +904,17 @@ retry:
 		xfs_trans_ichgtime(tp, ip2,
 				XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
 
-	xfs_swapext(tp, &req);
+	switch (strategy) {
+	case SWAPEXT:
+		xfs_swapext(tp, &req);
+		error = 0;
+		break;
+	case FORKSWAP:
+		error = xfs_swap_extent_forks(&tp, &req);
+		break;
+	}
+	if (error)
+		goto out_trans_cancel;
 
 	/*
 	 * Force the log to persist metadata updates if the caller or the
