@@ -27,6 +27,7 @@
 #include "xfs_sb.h"
 #include "xfs_icache.h"
 #include "xfs_log.h"
+#include "xfs_bmap_util.h"
 #include <linux/fsnotify.h>
 
 /*
@@ -402,7 +403,7 @@ xfs_file_xchg_range(
 		priv_flags |= XFS_XCHG_RANGE_LOGGED;
 
 	/* Prepare and then exchange file contents. */
-	error = xfs_xchg_range_prep(file1, file2, fxr);
+	error = xfs_xchg_range_prep(file1, file2, fxr, priv_flags);
 	if (error)
 		goto out_drop_feat;
 
@@ -772,12 +773,46 @@ xfs_swap_extent_forks(
 	return 0;
 }
 
+/*
+ * Do we need to convert partially written extents before a swap?
+ *
+ * There may be partially written rt extents lurking in the ranges to be
+ * swapped.  According to the rules for realtime files with big rt extents, we
+ * must guarantee that a userspace observer (an IO thread, realistically) never
+ * sees multiple physical rt extents mapped to the same logical file rt extent.
+ */
+static bool
+xfs_xchg_range_need_convert_bigalloc(
+	struct xfs_inode		*ip,
+	unsigned int			xchg_flags)
+{
+	/*
+	 * Extent swap log intent (SXI) items take care of this by ensuring
+	 * that we always complete the entire swap operation.  If the caller
+	 * obtained permission to use these log items, no conversion work is
+	 * needed.
+	 */
+	if (xchg_flags & XFS_XCHG_RANGE_LOGGED)
+		return false;
+
+	/*
+	 * If the caller did not get SXI permission but the filesystem is new
+	 * enough to use BUI log items and big rt extents are in play, the only
+	 * way to prevent userspace from seeing partially mapped big rt extents
+	 * in case of a crash midway through remapping a big rt extent is to
+	 * convert all the partially written rt extents before the swap.
+	 */
+	return xfs_swapext_supports_nonatomic(ip->i_mount) &&
+	       xfs_inode_has_bigallocunit(ip);
+}
+
 /* Prepare two files to have their data exchanged. */
 int
 xfs_xchg_range_prep(
 	struct file		*file1,
 	struct file		*file2,
-	struct xfs_exch_range	*fxr)
+	struct xfs_exch_range	*fxr,
+	unsigned int		xchg_flags)
 {
 	struct xfs_inode	*ip1 = XFS_I(file_inode(file1));
 	struct xfs_inode	*ip2 = XFS_I(file_inode(file2));
@@ -837,6 +872,19 @@ xfs_xchg_range_prep(
 	if (xfs_inode_has_cow_data(ip2)) {
 		error = xfs_reflink_cancel_cow_range(ip2, fxr->file2_offset,
 				fxr->length, true);
+		if (error)
+			return error;
+	}
+
+	/* Convert unwritten sub-extent mappings if required. */
+	if (xfs_xchg_range_need_convert_bigalloc(ip2, xchg_flags)) {
+		error = xfs_convert_bigalloc_file_space(ip2, fxr->file2_offset,
+				fxr->length);
+		if (error)
+			return error;
+
+		error = xfs_convert_bigalloc_file_space(ip1, fxr->file1_offset,
+				fxr->length);
 		if (error)
 			return error;
 	}
@@ -1101,6 +1149,15 @@ xfs_xchg_range(
 		req.req_flags |= XFS_SWAP_REQ_INO1_WRITTEN;
 	if (xchg_flags & XFS_XCHG_RANGE_LOGGED)
 		req.req_flags |= XFS_SWAP_REQ_LOGGED;
+
+	/*
+	 * Round the request length up to the nearest file allocation unit.
+	 * The prep function already checked that the request offsets and
+	 * length in @fxr are safe to round up.
+	 */
+	if (xfs_inode_has_bigallocunit(ip2))
+		req.blockcount = roundup_64(req.blockcount,
+					    mp->m_sb.sb_rextsize);
 
 	error = xfs_xchg_range_estimate(&req);
 	if (error)
