@@ -203,4 +203,7 @@ struct xfs_imeta_update;
 int xfs_rtrmapbt_create(struct xfs_trans **tpp, struct xfs_imeta_path *path,
 		struct xfs_imeta_update *ic, struct xfs_inode **ipp);
 
+unsigned long long xfs_rtrmapbt_calc_size(struct xfs_mount *mp,
+		unsigned long long len);
+
 #endif	/* __XFS_RTRMAP_BTREE_H__ */
