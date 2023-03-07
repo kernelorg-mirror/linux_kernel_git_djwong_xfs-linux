@@ -9,13 +9,16 @@
 #include "xfs_format.h"
 #include "xfs_trans_resv.h"
 #include "xfs_mount.h"
+#include "xfs_log_format.h"
+#include "xfs_trans.h"
 #include "xfs_btree.h"
 #include "xfs_alloc.h"
 #include "xfs_rmap.h"
+#include "xfs_ag.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/btree.h"
-#include "xfs_ag.h"
+#include "scrub/repair.h"
 
 /*
  * Set us up to scrub free space btrees.
@@ -24,10 +27,19 @@ int
 xchk_setup_ag_allocbt(
 	struct xfs_scrub	*sc)
 {
+	int			error;
+
 	if (xchk_need_intent_drain(sc))
 		xchk_fsgates_enable(sc, XCHK_FSGATES_DRAIN);
 
-	return xchk_setup_ag_btree(sc, false);
+	error = xchk_setup_ag_btree(sc, false);
+	if (error)
+		return error;
+
+	if (xchk_could_repair(sc))
+		return xrep_setup_ag_allocbt(sc);
+
+	return 0;
 }
 
 /* Free space btree scrubber. */
