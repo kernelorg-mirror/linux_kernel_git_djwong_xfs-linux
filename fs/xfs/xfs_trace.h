@@ -2507,7 +2507,7 @@ TRACE_EVENT(xfs_btree_alloc_block,
 	),
 	TP_fast_assign(
 		__entry->dev = cur->bc_mp->m_super->s_dev;
-		if (cur->bc_flags & XFS_BTREE_ROOT_IN_INODE) {
+		if (xfs_btree_has_iroot(cur)) {
 			__entry->agno = 0;
 			__entry->ino = cur->bc_ino.ip->i_ino;
 		} else {
@@ -2517,7 +2517,7 @@ TRACE_EVENT(xfs_btree_alloc_block,
 		__entry->btnum = cur->bc_btnum;
 		__entry->error = error;
 		if (!error && stat) {
-			if (cur->bc_flags & XFS_BTREE_LONG_PTRS) {
+			if (xfs_btree_has_long_ptrs(cur)) {
 				xfs_fsblock_t	fsb = be64_to_cpu(ptr->l);
 
 				__entry->agno = XFS_FSB_TO_AGNO(cur->bc_mp,
@@ -2554,7 +2554,7 @@ TRACE_EVENT(xfs_btree_free_block,
 		__entry->dev = cur->bc_mp->m_super->s_dev;
 		__entry->agno = xfs_daddr_to_agno(cur->bc_mp,
 							xfs_buf_daddr(bp));
-		if (cur->bc_flags & XFS_BTREE_ROOT_IN_INODE)
+		if (xfs_btree_has_iroot(cur))
 			__entry->ino = cur->bc_ino.ip->i_ino;
 		else
 			__entry->ino = 0;
@@ -4280,7 +4280,7 @@ TRACE_EVENT(xfs_btree_bload_block,
 		__entry->level = level;
 		__entry->block_idx = block_idx;
 		__entry->nr_blocks = nr_blocks;
-		if (cur->bc_flags & XFS_BTREE_LONG_PTRS) {
+		if (xfs_btree_has_long_ptrs(cur)) {
 			xfs_fsblock_t	fsb = be64_to_cpu(ptr->l);
 
 			__entry->agno = XFS_FSB_TO_AGNO(cur->bc_mp, fsb);
