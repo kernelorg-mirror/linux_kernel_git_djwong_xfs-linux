@@ -18,6 +18,7 @@
 #include "xfs_bmap.h"
 #include "xfs_bmap_btree.h"
 #include "xfs_swapext.h"
+#include "xfs_rtbitmap.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -77,12 +78,13 @@ xrep_rtsummary_prep_buf(
 {
 	struct xchk_rtsummary	*rts = data;
 	struct xfs_mount	*mp = sc->mp;
+	xfs_suminfo_t		*ondisk;
 	int			error;
 
 	bp->b_ops = &xfs_rtbuf_ops;
 
-	error = xfsum_copyout(sc, rts->prep_wordoff, bp->b_addr,
-			mp->m_blockwsize);
+	ondisk = xfs_rsumblock_infoptr(bp, 0);
+	error = xfsum_copyout(sc, rts->prep_wordoff, ondisk, mp->m_blockwsize);
 	if (error)
 		return error;
 

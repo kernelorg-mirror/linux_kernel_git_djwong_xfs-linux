@@ -6,8 +6,6 @@
 #ifndef __XFS_SCRUB_RTSUMMARY_H__
 #define __XFS_SCRUB_RTSUMMARY_H__
 
-typedef unsigned int xchk_rtsumoff_t;
-
 struct xchk_rtsummary {
 #ifdef CONFIG_XFS_ONLINE_REPAIR
 	struct xrep_tempswap	tempswap;
@@ -20,13 +18,13 @@ struct xchk_rtsummary {
 	unsigned int		resblks;
 
 	/* suminfo position of xfile as we write buffers to disk. */
-	xchk_rtsumoff_t		prep_wordoff;
+	xfs_rtsumoff_t		prep_wordoff;
 
 	/* Memory buffer for the summary comparison. */
 	xfs_suminfo_t		words[];
 };
 
-int xfsum_copyout(struct xfs_scrub *sc, xchk_rtsumoff_t sumoff,
+int xfsum_copyout(struct xfs_scrub *sc, xfs_rtsumoff_t sumoff,
 		xfs_suminfo_t *info, unsigned int nr_words);
 
 #ifdef CONFIG_XFS_ONLINE_REPAIR

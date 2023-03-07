@@ -108,7 +108,7 @@ xchk_setup_rtsummary(
 static inline int
 xfsum_load(
 	struct xfs_scrub	*sc,
-	xchk_rtsumoff_t		sumoff,
+	xfs_rtsumoff_t		sumoff,
 	xfs_suminfo_t		*info)
 {
 	return xfile_obj_load(sc->xfile, info, sizeof(xfs_suminfo_t),
@@ -118,7 +118,7 @@ xfsum_load(
 static inline int
 xfsum_store(
 	struct xfs_scrub	*sc,
-	xchk_rtsumoff_t		sumoff,
+	xfs_rtsumoff_t		sumoff,
 	const xfs_suminfo_t	info)
 {
 	return xfile_obj_store(sc->xfile, &info, sizeof(xfs_suminfo_t),
@@ -128,7 +128,7 @@ xfsum_store(
 inline int
 xfsum_copyout(
 	struct xfs_scrub	*sc,
-	xchk_rtsumoff_t		sumoff,
+	xfs_rtsumoff_t		sumoff,
 	xfs_suminfo_t		*info,
 	unsigned int		nr_words)
 {
@@ -148,7 +148,7 @@ xchk_rtsum_record_free(
 	xfs_fileoff_t			rbmoff;
 	xfs_rtblock_t			rtbno;
 	xfs_filblks_t			rtlen;
-	xchk_rtsumoff_t			offs;
+	xfs_rtsumoff_t			offs;
 	unsigned int			lenlog;
 	xfs_suminfo_t			v = 0;
 	int				error = 0;
@@ -159,7 +159,7 @@ xchk_rtsum_record_free(
 	/* Compute the relevant location in the rtsum file. */
 	rbmoff = xfs_rtx_to_rbmblock(mp, rec->ar_startext);
 	lenlog = XFS_RTBLOCKLOG(rec->ar_extcount);
-	offs = XFS_SUMOFFS(mp, lenlog, rbmoff);
+	offs = xfs_rtsumoffs(mp, lenlog, rbmoff);
 
 	rtbno = xfs_rtx_to_rtb(mp, rec->ar_startext);
 	rtlen = xfs_rtx_to_rtb(mp, rec->ar_extcount);
@@ -212,7 +212,7 @@ xchk_rtsum_compare(
 	struct xfs_buf		*bp;
 	xfs_fileoff_t		off = 0;
 	xfs_fileoff_t		endoff;
-	xchk_rtsumoff_t		sumoff = 0;
+	xfs_rtsumoff_t		sumoff = 0;
 	int			error = 0;
 
 	/* Mappings may not cross or lie beyond EOF. */
@@ -245,6 +245,8 @@ xchk_rtsum_compare(
 	}
 
 	for (off = 0; off < endoff; off++) {
+		xfs_suminfo_t	*ondisk_info;
+
 		/* Read a block's worth of ondisk rtsummary file. */
 		error = xfs_rtbuf_get(mp, sc->tp, off, 1, &bp);
 		if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, off, &error))
@@ -257,7 +259,8 @@ xchk_rtsum_compare(
 			return error;
 		}
 
-		if (memcmp(bp->b_addr, rts->words,
+		ondisk_info = xfs_rsumblock_infoptr(bp, 0);
+		if (memcmp(ondisk_info, rts->words,
 					mp->m_blockwsize << XFS_WORDLOG) != 0)
 			xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, off);
 
