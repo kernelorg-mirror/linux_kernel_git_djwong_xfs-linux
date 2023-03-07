@@ -2229,53 +2229,6 @@ xfs_rename_call_dirent_hooks(
 # define xfs_rename_call_dirent_hooks(...)	((void)0)
 #endif /* CONFIG_XFS_LIVE_HOOKS */
 
-static int
-xfs_finish_rename(
-	struct xfs_trans	*tp)
-{
-	/*
-	 * If this is a synchronous mount, make sure that the rename transaction
-	 * goes to disk before returning to the user.
-	 */
-	if (xfs_has_wsync(tp->t_mountp) || xfs_has_dirsync(tp->t_mountp))
-		xfs_trans_set_sync(tp);
-
-	return xfs_trans_commit(tp);
-}
-
-/*
- * xfs_cross_rename()
- *
- * responsible for handling RENAME_EXCHANGE flag in renameat2() syscall
- */
-STATIC int
-xfs_cross_rename(
-	struct xfs_trans	*tp,
-	struct xfs_inode	*dp1,
-	struct xfs_name		*name1,
-	struct xfs_inode	*ip1,
-	struct xfs_inode	*dp2,
-	struct xfs_name		*name2,
-	struct xfs_inode	*ip2,
-	int			spaceres)
-{
-	int			error;
-
-	error = xfs_dir_exchange(tp, dp1, name1, ip1, dp2, name2, ip2,
-			spaceres);
-	if (error)
-		goto out_trans_abort;
-
-	if (xfs_hooks_switched_on(&xfs_dirents_hooks_switch))
-		xfs_exchange_call_dirent_hooks(dp1, name1, ip1, dp2, name2, ip2);
-
-	return xfs_finish_rename(tp);
-
-out_trans_abort:
-	xfs_trans_cancel(tp);
-	return error;
-}
-
 /*
  * xfs_rename_alloc_whiteout()
  *
@@ -2428,12 +2381,6 @@ retry:
 		goto out_trans_cancel;
 	}
 
-	/* RENAME_EXCHANGE is unique from here on. */
-	if (flags & RENAME_EXCHANGE)
-		return xfs_cross_rename(tp, src_dp, src_name, src_ip,
-					target_dp, target_name, target_ip,
-					spaceres);
-
 	/*
 	 * Try to reserve quota to handle an expansion of the target directory.
 	 * We'll allow the rename to continue in reservationless mode if we hit
@@ -2485,8 +2432,13 @@ retry:
 		}
 	}
 
-	error = xfs_dir_rename(tp, src_dp, src_name, src_ip, target_dp,
-			target_name, target_ip, spaceres, wip);
+	if (flags & RENAME_EXCHANGE)
+		error = xfs_dir_exchange(tp, src_dp, src_name, src_ip,
+				target_dp, target_name, target_ip, spaceres);
+	else
+		error = xfs_dir_rename(tp, src_dp, src_name, src_ip,
+				target_dp, target_name, target_ip, spaceres,
+				wip);
 	if (error)
 		goto out_trans_cancel;
 
@@ -2499,11 +2451,25 @@ retry:
 		VFS_I(wip)->i_state &= ~I_LINKABLE;
 	}
 
-	if (xfs_hooks_switched_on(&xfs_dirents_hooks_switch))
-		xfs_rename_call_dirent_hooks(src_dp, src_name, src_ip,
-				target_dp, target_name, target_ip, wip);
+	if (xfs_hooks_switched_on(&xfs_dirents_hooks_switch)) {
+		if (flags & RENAME_EXCHANGE)
+			xfs_exchange_call_dirent_hooks(src_dp, src_name,
+					src_ip, target_dp, target_name,
+					target_ip);
+		else
+			xfs_rename_call_dirent_hooks(src_dp, src_name,
+					src_ip, target_dp, target_name,
+					target_ip, wip);
+	}
 
-	error = xfs_finish_rename(tp);
+	/*
+	 * If this is a synchronous mount, make sure that the rename
+	 * transaction goes to disk before returning to the user.
+	 */
+	if (xfs_has_wsync(tp->t_mountp) || xfs_has_dirsync(tp->t_mountp))
+		xfs_trans_set_sync(tp);
+
+	error = xfs_trans_commit(tp);
 	if (wip)
 		xfs_irele(wip);
 	return error;
