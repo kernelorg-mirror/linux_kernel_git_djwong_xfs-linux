@@ -2501,6 +2501,14 @@ xfs_iflush(
 				__func__, ip->i_ino, ip);
 			goto flush_out;
 		}
+	} else if (ip->i_df.if_format == XFS_DINODE_FMT_REFCOUNT) {
+		if (!S_ISREG(VFS_I(ip)->i_mode) ||
+		    !(ip->i_diflags2 & XFS_DIFLAG2_METADIR)) {
+			xfs_alert_tag(mp, XFS_PTAG_IFLUSH,
+				"%s: Bad rt refcountbt inode %Lu, ptr "PTR_FMT,
+				__func__, ip->i_ino, ip);
+			goto flush_out;
+		}
 	} else if (S_ISREG(VFS_I(ip)->i_mode)) {
 		if (XFS_TEST_ERROR(
 		    ip->i_df.if_format != XFS_DINODE_FMT_EXTENTS &&
@@ -2545,6 +2553,11 @@ xfs_iflush(
 		if (ip->i_af.if_format == XFS_DINODE_FMT_RMAP) {
 			xfs_alert_tag(mp, XFS_PTAG_IFLUSH,
 				"%s: rt rmapbt in inode %Lu attr fork, ptr "PTR_FMT,
+				__func__, ip->i_ino, ip);
+			goto flush_out;
+		} else if (ip->i_af.if_format == XFS_DINODE_FMT_REFCOUNT) {
+			xfs_alert_tag(mp, XFS_PTAG_IFLUSH,
+				"%s: rt refcountbt in inode %Lu attr fork, ptr "PTR_FMT,
 				__func__, ip->i_ino, ip);
 			goto flush_out;
 		}
