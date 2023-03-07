@@ -30,6 +30,7 @@
 #include "xfs_dir2_priv.h"
 #include "xfs_dir2.h"
 #include "xfs_symlink_remote.h"
+#include "xfs_rtbitmap.h"
 
 struct kmem_cache	*xfs_swapext_intent_cache;
 
@@ -209,19 +210,19 @@ xfs_swapext_check_rt_extents(
 					  irec2.br_blockcount);
 
 		/* Both mappings must be aligned to the realtime extent size. */
-		div_u64_rem(irec1.br_startoff, mp->m_sb.sb_rextsize, &mod);
+		mod = xfs_rtb_to_rtxoff(mp, irec1.br_startoff);
 		if (mod) {
 			ASSERT(mod == 0);
 			return -EINVAL;
 		}
 
-		div_u64_rem(irec2.br_startoff, mp->m_sb.sb_rextsize, &mod);
+		mod = xfs_rtb_to_rtxoff(mp, irec1.br_startoff);
 		if (mod) {
 			ASSERT(mod == 0);
 			return -EINVAL;
 		}
 
-		div_u64_rem(irec1.br_blockcount, mp->m_sb.sb_rextsize, &mod);
+		mod = xfs_rtb_to_rtxoff(mp, irec1.br_blockcount);
 		if (mod) {
 			ASSERT(mod == 0);
 			return -EINVAL;

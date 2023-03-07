@@ -1252,16 +1252,16 @@ xfs_want_convert_bigalloc_mapping(
 	struct xfs_bmbt_irec	*irec)
 {
 	xfs_fileoff_t		rext_next;
-	uint32_t		modoff, modcnt;
+	xfs_extlen_t		modoff, modcnt;
 
 	if (irec->br_state != XFS_EXT_UNWRITTEN)
 		return false;
 
-	div_u64_rem(irec->br_startoff, mp->m_sb.sb_rextsize, &modoff);
+	modoff = xfs_rtb_to_rtxoff(mp, irec->br_startoff);
 	if (modoff == 0) {
-		uint64_t	rexts = div_u64_rem(irec->br_blockcount,
-						mp->m_sb.sb_rextsize, &modcnt);
+		xfs_rtbxlen_t	rexts;
 
+		rexts = xfs_rtb_to_rtxrem(mp, irec->br_blockcount, &modcnt);
 		if (rexts > 0) {
 			/*
 			 * Unwritten mapping starts at an rt extent boundary
