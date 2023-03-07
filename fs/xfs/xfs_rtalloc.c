@@ -1303,6 +1303,14 @@ error_cancel:
 		goto out_free;
 
 	error = xfs_rtgroup_update_secondary_sbs(mp);
+	if (error)
+		goto out_free;
+
+	/* Reset the rt metadata btree space reservations. */
+	xfs_rt_resv_free(mp);
+	error = xfs_rt_resv_init(mp);
+	if (error == -ENOSPC)
+		error = 0;
 
 out_free:
 	/*
@@ -1534,6 +1542,21 @@ xfs_rtalloc_reinit_frextents(
 	mp->m_sb.sb_frextents = val;
 	spin_unlock(&mp->m_sb_lock);
 	percpu_counter_set(&mp->m_frextents, mp->m_sb.sb_frextents);
+	return 0;
+}
+
+/* Free space reservations for rt metadata inodes. */
+void
+xfs_rt_resv_free(
+	struct xfs_mount	*mp)
+{
+}
+
+/* Reserve space for rt metadata inodes' space expansion. */
+int
+xfs_rt_resv_init(
+	struct xfs_mount	*mp)
+{
 	return 0;
 }
 
