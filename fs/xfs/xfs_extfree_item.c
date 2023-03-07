@@ -547,14 +547,12 @@ xfs_extent_free_defer_add(
 	else
 		optype = XFS_DEFER_OPS_TYPE_FREE;
 
-	if (xfs_efi_is_realtime(xefi)) {
-		xfs_rgnumber_t		rgno;
-
-		rgno = xfs_rtb_to_rgno(mp, xefi->xefi_startblock);
-		xefi->xefi_rtg = xfs_rtgroup_get(mp, rgno);
-	} else {
-		xefi->xefi_pag = xfs_perag_intent_get(mp, xefi->xefi_startblock);
-	}
+	if (xfs_efi_is_realtime(xefi))
+		xefi->xefi_rtg = xfs_rtgroup_intent_get(mp,
+						xefi->xefi_startblock);
+	else
+		xefi->xefi_pag = xfs_perag_intent_get(mp,
+						xefi->xefi_startblock);
 	*dfpp = xfs_defer_add(tp, optype, &xefi->xefi_list);
 }
 
@@ -651,7 +649,7 @@ xfs_rtextent_free_cancel_item(
 {
 	struct xfs_extent_free_item	*xefi = xefi_entry(item);
 
-	xfs_rtgroup_put(xefi->xefi_rtg);
+	xfs_rtgroup_intent_put(xefi->xefi_rtg);
 	kmem_cache_free(xfs_extfree_item_cache, xefi);
 }
 
@@ -859,16 +857,14 @@ xfs_efi_recover_rtextent(
 		.xefi_flags		= XFS_EFI_REALTIME,
 	};
 	struct xfs_mount		*mp = tp->t_mountp;
-	xfs_rgnumber_t			rgno;
 	int				error;
 
 	if (*requeue_only)
 		goto requeue;
 
-	rgno = xfs_rtb_to_rgno(mp, extp->ext_start);
-	fake.xefi_rtg = xfs_rtgroup_get(mp, rgno);
+	fake.xefi_rtg = xfs_rtgroup_intent_get(mp, extp->ext_start);
 	error = xfs_trans_free_rtextent(tp, efdp, &fake);
-	xfs_rtgroup_put(fake.xefi_rtg);
+	xfs_rtgroup_intent_put(fake.xefi_rtg);
 	if (error == 0 || error != -EAGAIN)
 		return error;
 
