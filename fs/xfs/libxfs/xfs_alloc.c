@@ -243,14 +243,11 @@ xfs_alloc_btrec_to_irec(
 	irec->ar_blockcount = be32_to_cpu(rec->alloc.ar_blockcount);
 }
 
-/* Simple checks for free space records. */
-xfs_failaddr_t
-xfs_alloc_check_irec(
-	struct xfs_btree_cur		*cur,
+inline xfs_failaddr_t
+xfs_alloc_check_perag_irec(
+	struct xfs_perag		*pag,
 	const struct xfs_alloc_rec_incore *irec)
 {
-	struct xfs_perag		*pag = cur->bc_ag.pag;
-
 	if (irec->ar_blockcount == 0)
 		return __this_address;
 
@@ -259,6 +256,15 @@ xfs_alloc_check_irec(
 		return __this_address;
 
 	return NULL;
+}
+
+/* Simple checks for free space records. */
+xfs_failaddr_t
+xfs_alloc_check_irec(
+	struct xfs_btree_cur		*cur,
+	const struct xfs_alloc_rec_incore *irec)
+{
+	return xfs_alloc_check_perag_irec(cur->bc_ag.pag, irec);
 }
 
 static inline int
