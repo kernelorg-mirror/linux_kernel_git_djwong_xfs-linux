@@ -29,10 +29,25 @@ xfs_imeta_init(
 	const struct xfs_imeta_path	*path,
 	struct xfs_imeta_update		*upd)
 {
+	int				error;
+
 	memset(upd, 0, sizeof(struct xfs_imeta_update));
 	upd->mp = mp;
 	upd->path = path;
-	return 0;
+
+	if (!xfs_has_metadir(mp))
+		return 0;
+
+	/*
+	 * Find the parent of the last path component.  If the parent path does
+	 * not exist, we consider this corruption because paths are supposed
+	 * to exist.  For example, if the path is /quota/user, we require that
+	 * /quota already exists.
+	 */
+	error = xfs_imeta_dir_parent(mp, upd->path, &upd->dp);
+	if (error == -ENOENT)
+		return -EFSCORRUPTED;
+	return error;
 }
 
 /*
@@ -53,11 +68,25 @@ xfs_imeta_start_create(
 		return error;
 
 	upd->quota = want_quota;
+	if (upd->quota && upd->dp) {
+		error = xfs_qm_dqattach(upd->dp);
+		if (error)
+			return error;
+	}
 
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_imeta_create,
 			xfs_imeta_create_space_res(mp), 0, 0, &upd->tp);
 	if (error)
 		return error;
+
+	/*
+	 * Lock the parent directory if there is one.  We can't ijoin it to
+	 * the transaction until after the child file has been created.
+	 */
+	if (upd->dp) {
+		xfs_ilock(upd->dp, XFS_ILOCK_EXCL | XFS_ILOCK_PARENT);
+		upd->dp_locked = true;
+	}
 
 	trace_xfs_imeta_start_create(upd);
 	return 0;
@@ -83,15 +112,40 @@ xfs_imeta_start_dir_update(
 		return error;
 
 	upd->quota = true;
+	if (upd->dp) {
+		error = xfs_qm_dqattach(upd->dp);
+		if (error)
+			return error;
+	}
+
 	upd->ip = ip;
 	error = xfs_qm_dqattach(upd->ip);
 	if (error)
 		return error;
 
-	error = xfs_trans_alloc_inode(upd->ip, tr_resv, resblks, 0, false,
-			&upd->tp);
-	if (error)
-		return error;
+	if (upd->dp) {
+		int			nospace_error = 0;
+
+		error = xfs_trans_alloc_dir(upd->dp, tr_resv, upd->ip,
+				&resblks, &upd->tp, &nospace_error);
+		if (error)
+			return error;
+		if (!resblks) {
+			/* We don't allow reservationless updates. */
+			xfs_trans_cancel(upd->tp);
+			upd->tp = NULL;
+			xfs_iunlock(upd->dp, XFS_ILOCK_EXCL);
+			xfs_iunlock(upd->ip, XFS_ILOCK_EXCL);
+			return nospace_error;
+		}
+
+		upd->dp_locked = true;
+	} else {
+		error = xfs_trans_alloc_inode(upd->ip, tr_resv, resblks, 0,
+				false, &upd->tp);
+		if (error)
+			return error;
+	}
 
 	upd->ip_locked = true;
 	return 0;
@@ -159,6 +213,15 @@ xfs_imeta_end_update(
 		if (upd->ip_locked)
 			xfs_iunlock(upd->ip, XFS_ILOCK_EXCL);
 		upd->ip_locked = false;
+	}
+
+	if (upd->dp) {
+		if (upd->dp_locked)
+			xfs_iunlock(upd->dp, XFS_ILOCK_EXCL);
+		upd->dp_locked = false;
+
+		xfs_imeta_irele(upd->dp);
+		upd->dp = NULL;
 	}
 }
 
