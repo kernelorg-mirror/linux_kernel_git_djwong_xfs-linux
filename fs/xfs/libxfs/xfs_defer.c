@@ -235,7 +235,7 @@ static const struct xfs_defer_op_type xfs_barrier_defer_type = {
 	.cancel_item	= xfs_defer_barrier_cancel_item,
 };
 
-static const struct xfs_defer_op_type *defer_op_types[] = {
+static const struct xfs_defer_op_type *defer_op_types[XFS_DEFER_OPS_TYPE_MAX] = {
 	[XFS_DEFER_OPS_TYPE_BMAP]	= &xfs_bmap_update_defer_type,
 	[XFS_DEFER_OPS_TYPE_REFCOUNT]	= &xfs_refcount_update_defer_type,
 	[XFS_DEFER_OPS_TYPE_RMAP]	= &xfs_rmap_update_defer_type,
@@ -244,6 +244,9 @@ static const struct xfs_defer_op_type *defer_op_types[] = {
 	[XFS_DEFER_OPS_TYPE_ATTR]	= &xfs_attr_defer_type,
 	[XFS_DEFER_OPS_TYPE_BARRIER]	= &xfs_barrier_defer_type,
 	[XFS_DEFER_OPS_TYPE_SWAPEXT]	= &xfs_swapext_defer_type,
+#ifdef CONFIG_XFS_RT
+	[XFS_DEFER_OPS_TYPE_FREE_RT]	= &xfs_rtextent_free_defer_type,
+#endif
 };
 
 /*
@@ -262,6 +265,11 @@ xfs_defer_create_intent(
 
 	if (dfp->dfp_intent)
 		return 1;
+
+	if (!ops) {
+		ASSERT(ops != NULL);
+		return -EFSCORRUPTED;
+	}
 
 	lip = ops->create_intent(tp, &dfp->dfp_work, dfp->dfp_count, sort);
 	if (!lip)
