@@ -26,6 +26,9 @@ xchk_setup_rgbitmap(
 {
 	int			error;
 
+	if (xchk_need_intent_drain(sc))
+		xchk_fsgates_enable(sc, XCHK_FSGATES_DRAIN);
+
 	error = xchk_trans_alloc(sc, 0);
 	if (error)
 		return error;
