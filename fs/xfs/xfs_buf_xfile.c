@@ -49,6 +49,13 @@ xfile_alloc_buftarg(
 	if (error)
 		return error;
 
+	/*
+	 * We're hooking the xfile up to the buffer cache, so disable its
+	 * internal page caching because all callers should be using xfs_buf
+	 * functions.
+	 */
+	xfile_cache_disable(xfile);
+
 	error = xfs_buf_cache_init(&xfile->bcache);
 	if (error)
 		goto out_xfile;
