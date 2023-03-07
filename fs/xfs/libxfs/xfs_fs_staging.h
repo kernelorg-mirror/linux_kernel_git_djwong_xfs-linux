@@ -102,4 +102,21 @@ struct xfs_exch_range {
 
 #define XFS_IOC_EXCHANGE_RANGE	_IOWR('X', 129, struct xfs_exch_range)
 
+/*
+ * Output for XFS_IOC_RTGROUP_GEOMETRY
+ */
+struct xfs_rtgroup_geometry {
+	uint32_t	rg_number;	/* i/o: rtgroup number */
+	uint32_t	rg_length;	/* o: length in blocks */
+	uint32_t	rg_sick;	/* o: sick things in ag */
+	uint32_t	rg_checked;	/* o: checked metadata in ag */
+	uint32_t	rg_flags;	/* i/o: flags for this ag */
+	uint32_t	rg_pad;		/* o: zero */
+	uint64_t	rg_reserved[13];/* o: zero */
+};
+#define XFS_RTGROUP_GEOM_SICK_SUPER	(1 << 0)  /* superblock */
+#define XFS_RTGROUP_GEOM_SICK_BITMAP	(1 << 1)  /* rtbitmap for this group */
+
+#define XFS_IOC_RTGROUP_GEOMETRY _IOWR('X', 62, struct xfs_rtgroup_geometry)
+
 #endif /* __XFS_FS_STAGING_H__ */
