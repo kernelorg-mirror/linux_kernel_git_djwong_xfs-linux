@@ -705,18 +705,13 @@ xfs_inode_inherit_flags2(
  * caller locked exclusively.
  */
 int
-xfs_init_new_inode(
-	struct mnt_idmap	*idmap,
+xfs_icreate(
 	struct xfs_trans	*tp,
-	struct xfs_inode	*pip,
 	xfs_ino_t		ino,
-	umode_t			mode,
-	xfs_nlink_t		nlink,
-	dev_t			rdev,
-	prid_t			prid,
-	bool			init_xattrs,
+	const struct xfs_icreate_args *args,
 	struct xfs_inode	**ipp)
 {
+	struct xfs_inode	*pip = args->pip;
 	struct inode		*dir = pip ? VFS_I(pip) : NULL;
 	struct xfs_mount	*mp = tp->t_mountp;
 	struct xfs_inode	*ip;
@@ -749,16 +744,16 @@ xfs_init_new_inode(
 
 	ASSERT(ip != NULL);
 	inode = VFS_I(ip);
-	set_nlink(inode, nlink);
-	inode->i_rdev = rdev;
-	ip->i_projid = prid;
+	set_nlink(inode, args->nlink);
+	inode->i_rdev = args->rdev;
+	ip->i_projid = args->prid;
 
 	if (dir && !(dir->i_mode & S_ISGID) && xfs_has_grpid(mp)) {
-		inode_fsuid_set(inode, idmap);
+		inode_fsuid_set(inode, args->idmap);
 		inode->i_gid = dir->i_gid;
-		inode->i_mode = mode;
+		inode->i_mode = args->mode;
 	} else {
-		inode_init_owner(idmap, inode, dir, mode);
+		inode_init_owner(args->idmap, inode, dir, args->mode);
 	}
 
 	/*
@@ -767,8 +762,20 @@ xfs_init_new_inode(
 	 * (and only if the irix_sgid_inherit compatibility variable is set).
 	 */
 	if (irix_sgid_inherit && (inode->i_mode & S_ISGID) &&
-	    !vfsgid_in_group_p(i_gid_into_vfsgid(idmap, inode)))
+	    !vfsgid_in_group_p(i_gid_into_vfsgid(args->idmap, inode)))
 		inode->i_mode &= ~S_ISGID;
+
+	/* struct copies */
+	if (args->flags & XFS_ICREATE_ARGS_FORCE_UID)
+		inode->i_uid = args->uid;
+	else
+		ASSERT(uid_eq(inode->i_uid, args->uid));
+	if (args->flags & XFS_ICREATE_ARGS_FORCE_GID)
+		inode->i_gid = args->gid;
+	else if (!pip || !XFS_INHERIT_GID(pip))
+		ASSERT(gid_eq(inode->i_gid, args->gid));
+	if (args->flags & XFS_ICREATE_ARGS_FORCE_MODE)
+		inode->i_mode = args->mode;
 
 	ip->i_disk_size = 0;
 	ip->i_df.if_nextents = 0;
@@ -789,7 +796,7 @@ xfs_init_new_inode(
 	}
 
 	flags = XFS_ILOG_CORE;
-	switch (mode & S_IFMT) {
+	switch (args->mode & S_IFMT) {
 	case S_IFIFO:
 	case S_IFCHR:
 	case S_IFBLK:
@@ -822,7 +829,8 @@ xfs_init_new_inode(
 	 * this saves us from needing to run a separate transaction to set the
 	 * fork offset in the immediate future.
 	 */
-	if (init_xattrs && xfs_has_attr(mp)) {
+	if ((args->flags & XFS_ICREATE_ARGS_INIT_XATTRS) &&
+	    xfs_has_attr(mp)) {
 		ip->i_forkoff = xfs_default_attroffset(ip) >> 3;
 		xfs_ifork_init_attr(ip, XFS_DINODE_FMT_EXTENTS, 0);
 	}
@@ -838,6 +846,38 @@ xfs_init_new_inode(
 
 	*ipp = ip;
 	return 0;
+}
+
+/* Set up inode attributes for newly created children of a directory. */
+void
+xfs_icreate_args_inherit(
+	struct xfs_icreate_args	*args,
+	struct xfs_inode	*dp,
+	struct mnt_idmap	*idmap,
+	umode_t			mode)
+{
+	args->idmap = idmap;
+	args->pip = dp;
+	args->uid = mapped_fsuid(idmap, &init_user_ns);
+	args->gid = mapped_fsgid(idmap, &init_user_ns);
+	args->prid = xfs_get_initial_prid(dp);
+	args->mode = mode;
+}
+
+/* Set up inode attributes for newly created internal files. */
+void
+xfs_icreate_args_rootfile(
+	struct xfs_icreate_args	*args,
+	umode_t			mode)
+{
+	args->idmap = &nop_mnt_idmap;
+	args->uid = GLOBAL_ROOT_UID;
+	args->gid = GLOBAL_ROOT_GID;
+	args->prid = 0;
+	args->mode = mode;
+	args->flags = XFS_ICREATE_ARGS_FORCE_UID |
+		      XFS_ICREATE_ARGS_FORCE_GID |
+		      XFS_ICREATE_ARGS_FORCE_MODE;
 }
 
 /*
@@ -996,13 +1036,16 @@ xfs_create(
 	bool			init_xattrs,
 	xfs_inode_t		**ipp)
 {
+	struct xfs_icreate_args	args = {
+		.rdev		= rdev,
+		.nlink		= S_ISDIR(mode) ? 2 : 1,
+	};
 	int			is_dir = S_ISDIR(mode);
 	struct xfs_mount	*mp = dp->i_mount;
 	struct xfs_inode	*ip = NULL;
 	struct xfs_trans	*tp = NULL;
 	int			error;
 	bool                    unlock_dp_on_error = false;
-	prid_t			prid;
 	struct xfs_dquot	*udqp = NULL;
 	struct xfs_dquot	*gdqp = NULL;
 	struct xfs_dquot	*pdqp = NULL;
@@ -1015,13 +1058,14 @@ xfs_create(
 	if (xfs_is_shutdown(mp))
 		return -EIO;
 
-	prid = xfs_get_initial_prid(dp);
+	xfs_icreate_args_inherit(&args, dp, idmap, mode);
+	if (init_xattrs)
+		args.flags |= XFS_ICREATE_ARGS_INIT_XATTRS;
 
 	/*
 	 * Make sure that we have allocated dquot(s) on disk.
 	 */
-	error = xfs_qm_vop_dqalloc(dp, mapped_fsuid(idmap, &init_user_ns),
-			mapped_fsgid(idmap, &init_user_ns), prid,
+	error = xfs_qm_vop_dqalloc(dp, args.uid, args.gid, args.prid,
 			XFS_QMOPT_QUOTALL | XFS_QMOPT_INHERIT,
 			&udqp, &gdqp, &pdqp);
 	if (error)
@@ -1062,8 +1106,7 @@ xfs_create(
 	 */
 	error = xfs_dialloc(&tp, dp->i_ino, mode, &ino);
 	if (!error)
-		error = xfs_init_new_inode(idmap, tp, dp, ino, mode,
-				is_dir ? 2 : 1, rdev, prid, init_xattrs, &ip);
+		error = xfs_icreate(tp, ino, &args, &ip);
 	if (error)
 		goto out_trans_cancel;
 
@@ -1159,11 +1202,11 @@ xfs_create_tmpfile(
 	umode_t			mode,
 	struct xfs_inode	**ipp)
 {
+	struct xfs_icreate_args	args = { NULL };
 	struct xfs_mount	*mp = dp->i_mount;
 	struct xfs_inode	*ip = NULL;
 	struct xfs_trans	*tp = NULL;
 	int			error;
-	prid_t                  prid;
 	struct xfs_dquot	*udqp = NULL;
 	struct xfs_dquot	*gdqp = NULL;
 	struct xfs_dquot	*pdqp = NULL;
@@ -1174,13 +1217,12 @@ xfs_create_tmpfile(
 	if (xfs_is_shutdown(mp))
 		return -EIO;
 
-	prid = xfs_get_initial_prid(dp);
+	xfs_icreate_args_inherit(&args, dp, idmap, mode);
 
 	/*
 	 * Make sure that we have allocated dquot(s) on disk.
 	 */
-	error = xfs_qm_vop_dqalloc(dp, mapped_fsuid(idmap, &init_user_ns),
-			mapped_fsgid(idmap, &init_user_ns), prid,
+	error = xfs_qm_vop_dqalloc(dp, args.uid, args.gid, args.prid,
 			XFS_QMOPT_QUOTALL | XFS_QMOPT_INHERIT,
 			&udqp, &gdqp, &pdqp);
 	if (error)
@@ -1196,8 +1238,7 @@ xfs_create_tmpfile(
 
 	error = xfs_dialloc(&tp, dp->i_ino, mode, &ino);
 	if (!error)
-		error = xfs_init_new_inode(idmap, tp, dp, ino, mode,
-				0, 0, prid, false, &ip);
+		error = xfs_icreate(tp, ino, &args, &ip);
 	if (error)
 		goto out_trans_cancel;
 
