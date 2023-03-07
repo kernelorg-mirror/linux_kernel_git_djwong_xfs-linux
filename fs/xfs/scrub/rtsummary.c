@@ -94,7 +94,7 @@ xchk_setup_rtsummary(
 	 * growfsrt trying to expand the summary or change the size of the rt
 	 * volume.  Hence it is safe to compute and check the geometry values.
 	 */
-	rts->rextents = div_u64(mp->m_sb.sb_rblocks, mp->m_sb.sb_rextsize);
+	rts->rextents = xfs_rtb_to_rtx(mp, mp->m_sb.sb_rblocks);
 	rts->rbmblocks = howmany_64(rts->rextents,
 				    NBBY * mp->m_sb.sb_blocksize);
 	rts->rsumlevels = rts->rextents ? xfs_highbit32(rts->rextents) + 1 : 0;
