@@ -2477,6 +2477,7 @@ DEFINE_EVENT(xrep_dir_class, name, \
 	TP_ARGS(dp, parent_ino))
 DEFINE_XREP_DIR_CLASS(xrep_dir_rebuild_tree);
 DEFINE_XREP_DIR_CLASS(xrep_dir_reset_fork);
+DEFINE_XREP_DIR_CLASS(xrep_parent_reset_dir);
 
 DECLARE_EVENT_CLASS(xrep_dirent_class,
 	TP_PROTO(struct xfs_inode *dp, struct xfs_name *name, xfs_ino_t ino),
