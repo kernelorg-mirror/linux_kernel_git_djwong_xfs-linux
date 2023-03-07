@@ -358,6 +358,89 @@ xrep_adoption_prep(
 }
 
 /*
+ * Make sure the dcache does not have a positive dentry for the name we've
+ * chosen.  The caller should have checked with the ondisk directory, so any
+ * discrepancy is a sign that something is seriously wrong.
+ */
+static int
+xrep_orphanage_check_dcache(
+	struct xrep_adoption	*adopt)
+{
+	struct qstr		qname = QSTR_INIT(adopt->xname.name,
+						  adopt->xname.len);
+	struct dentry		*d_orphanage, *d_child, *dentry;
+	int			error = 0;
+
+	d_orphanage = d_find_alias(VFS_I(adopt->sc->orphanage));
+	if (!d_orphanage)
+		return 0;
+
+	d_child = d_hash_and_lookup(d_orphanage, &qname);
+	if (d_child) {
+		trace_xrep_orphanage_check_child(adopt->sc->mp, d_child);
+
+		if (d_is_positive(d_child)) {
+			ASSERT(d_is_negative(d_child));
+			error = -EFSCORRUPTED;
+		}
+
+		dput(d_child);
+	}
+
+	dput(d_orphanage);
+	if (error)
+		return error;
+
+	/*
+	 * Do we need to update d_parent of the dentry for the file being
+	 * repaired?  In theory there shouldn't be one since the file had
+	 * nonzero nlink but wasn't connected to any parent dir.
+	 */
+	dentry = d_find_alias(VFS_I(adopt->sc->ip));
+	if (dentry) {
+		trace_xrep_orphanage_check_dentry(adopt->sc->mp, d_child);
+		ASSERT(dentry->d_parent == NULL);
+
+		dput(dentry);
+		return -EFSCORRUPTED;
+	}
+
+	return 0;
+}
+
+/*
+ * Remove all negative dentries from the dcache.  There should not be any
+ * positive entries, since we've maintained our lock on the orphanage
+ * directory.
+ */
+static int
+xrep_orphanage_zap_dcache(
+	struct xrep_adoption	*adopt)
+{
+	struct qstr		qname = QSTR_INIT(adopt->xname.name,
+						  adopt->xname.len);
+	struct dentry		*d_orphanage, *d_child;
+	int			error = 0;
+
+	d_orphanage = d_find_alias(VFS_I(adopt->sc->orphanage));
+	if (!d_orphanage)
+		return 0;
+
+	d_child = d_hash_and_lookup(d_orphanage, &qname);
+	while (d_child != NULL) {
+		trace_xrep_orphanage_zap_child(adopt->sc->mp, d_child);
+
+		ASSERT(d_is_negative(d_child));
+		d_invalidate(d_child);
+		dput(d_child);
+		d_child = d_lookup(d_orphanage, &qname);
+	}
+
+	dput(d_orphanage);
+	return error;
+}
+
+/*
  * Move the current file to the orphanage.
  *
  * The caller must hold the IOLOCKs and the ILOCKs for both sc->ip and the
@@ -376,6 +459,10 @@ xrep_adoption_commit(
 
 	trace_xrep_adoption_commit(sc->orphanage, &adopt->xname, sc->ip->i_ino);
 
+	error = xrep_orphanage_check_dcache(adopt);
+	if (error)
+		return error;
+
 	/*
 	 * Create the new name in the orphanage, and bump the link count of
 	 * the orphanage if we just added a directory.
@@ -391,12 +478,15 @@ xrep_adoption_commit(
 		xfs_bumplink(sc->tp, sc->orphanage);
 	xfs_trans_log_inode(sc->tp, sc->orphanage, XFS_ILOG_CORE);
 
-	if (!isdir)
-		return 0;
+	if (isdir) {
+		/* Replace the dotdot entry in the child directory. */
+		error = xfs_dir_replace(sc->tp, sc->ip, &xfs_name_dotdot,
+				sc->orphanage->i_ino, adopt->child_blkres);
+		if (error)
+			return error;
+	}
 
-	/* Replace the dotdot entry in the child directory. */
-	return xfs_dir_replace(sc->tp, sc->ip, &xfs_name_dotdot,
-			sc->orphanage->i_ino, adopt->child_blkres);
+	return xrep_orphanage_zap_dcache(adopt);
 }
 
 /* Release the orphanage. */
