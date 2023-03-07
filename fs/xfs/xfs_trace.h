@@ -3892,6 +3892,7 @@ TRACE_EVENT(xfs_ioctl_clone,
 
 /* unshare tracepoints */
 DEFINE_SIMPLE_IO_EVENT(xfs_reflink_unshare);
+DEFINE_SIMPLE_IO_EVENT(xfs_file_cow_around);
 DEFINE_INODE_ERROR_EVENT(xfs_reflink_unshare_error);
 #ifdef CONFIG_XFS_RT
 DEFINE_SIMPLE_IO_EVENT(xfs_convert_bigalloc_file_space);
