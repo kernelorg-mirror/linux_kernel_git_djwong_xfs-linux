@@ -21,11 +21,11 @@ struct xchk_rtsummary {
 	xfs_rtsumoff_t		prep_wordoff;
 
 	/* Memory buffer for the summary comparison. */
-	xfs_suminfo_t		words[];
+	union xfs_suminfo_raw	words[];
 };
 
 int xfsum_copyout(struct xfs_scrub *sc, xfs_rtsumoff_t sumoff,
-		xfs_suminfo_t *info, unsigned int nr_words);
+		union xfs_suminfo_raw *info, unsigned int nr_words);
 
 #ifdef CONFIG_XFS_ONLINE_REPAIR
 int xrep_setup_rtsummary(struct xfs_scrub *sc, struct xchk_rtsummary *rts);

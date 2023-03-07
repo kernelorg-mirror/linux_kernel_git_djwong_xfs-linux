@@ -78,7 +78,7 @@ xrep_rtsummary_prep_buf(
 {
 	struct xchk_rtsummary	*rts = data;
 	struct xfs_mount	*mp = sc->mp;
-	xfs_suminfo_t		*ondisk;
+	union xfs_suminfo_raw	*ondisk;
 	int			error;
 
 	bp->b_ops = &xfs_rtbuf_ops;
