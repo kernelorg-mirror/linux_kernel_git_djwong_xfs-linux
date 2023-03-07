@@ -21,6 +21,7 @@
 #include "xfs_ag.h"
 #include "xfs_ag_resv.h"
 #include "xfs_trace.h"
+#include "xfs_rtgroup.h"
 
 /*
  * Write new AG headers to disk. Non-transactional, but need to be
@@ -315,6 +316,9 @@ xfs_growfs_data(
 
 	/* Update secondary superblocks now the physical grow has completed */
 	error = xfs_update_secondary_sbs(mp);
+	if (error)
+		goto out_error;
+	error = xfs_rtgroup_update_secondary_sbs(mp);
 
 out_error:
 	/*
