@@ -43,6 +43,7 @@
 #include "xfs_swapext.h"
 #include "xfs_xchgrange.h"
 #include "xfs_parent.h"
+#include "xfs_imeta.h"
 
 /*
  * We include this last to have the helpers above available for the trace

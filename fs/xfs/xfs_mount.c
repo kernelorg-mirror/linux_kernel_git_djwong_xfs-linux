@@ -34,6 +34,7 @@
 #include "xfs_health.h"
 #include "xfs_trace.h"
 #include "xfs_ag.h"
+#include "xfs_imeta.h"
 #include "scrub/stats.h"
 
 static DEFINE_MUTEX(xfs_uuid_table_mutex);
@@ -610,6 +611,29 @@ xfs_mount_setup_inode_geom(
 	xfs_ialloc_setup_geometry(mp);
 }
 
+STATIC int
+xfs_mount_setup_metadir(
+	struct xfs_mount	*mp)
+{
+	struct xfs_trans	*tp;
+	int			error;
+
+	error = xfs_trans_alloc_empty(mp, &tp);
+	if (error)
+		return error;
+
+	error = xfs_imeta_mount(tp);
+	if (error) {
+		xfs_warn(mp, "Failed to load metadata inodes, error %d",
+				error);
+		goto err_cancel;
+	}
+
+err_cancel:
+	xfs_trans_cancel(tp);
+	return error;
+}
+
 /* Compute maximum possible height for per-AG btree types for this fs. */
 static inline void
 xfs_agbtree_compute_maxlevels(
@@ -845,6 +869,10 @@ xfs_mountfs(
 		   (mp->m_sb.sb_features2 & XFS_SB_VERSION2_ATTR2BIT)) {
 		mp->m_features |= XFS_FEAT_ATTR2;
 	}
+
+	error = xfs_mount_setup_metadir(mp);
+	if (error)
+		goto out_log_dealloc;
 
 	/*
 	 * Get and sanity-check the root inode.
