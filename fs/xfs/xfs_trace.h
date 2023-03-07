@@ -97,6 +97,7 @@ struct xfs_rtgroup;
 struct xfs_extent_free_item;
 struct xfs_rmap_intent;
 struct xfs_refcount_intent;
+struct xfs_fsrefs;
 
 #define XFS_ATTR_FILTER_FLAGS \
 	{ XFS_ATTR_ROOT,	"ROOT" }, \
@@ -4207,6 +4208,104 @@ DEFINE_EVENT(xfs_getfsmap_class, name, \
 DEFINE_GETFSMAP_EVENT(xfs_getfsmap_low_key);
 DEFINE_GETFSMAP_EVENT(xfs_getfsmap_high_key);
 DEFINE_GETFSMAP_EVENT(xfs_getfsmap_mapping);
+
+/* fsrefs traces */
+DECLARE_EVENT_CLASS(xfs_fsrefs_class,
+	TP_PROTO(struct xfs_mount *mp, u32 keydev, xfs_agnumber_t agno,
+		 const struct xfs_refcount_irec *refc),
+	TP_ARGS(mp, keydev, agno, refc),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(dev_t, keydev)
+		__field(xfs_agnumber_t, agno)
+		__field(xfs_agblock_t, bno)
+		__field(xfs_extlen_t, len)
+		__field(uint64_t, owners)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->keydev = new_decode_dev(keydev);
+		__entry->agno = agno;
+		__entry->bno = refc->rc_startblock;
+		__entry->len = refc->rc_blockcount;
+		__entry->owners = refc->rc_refcount;
+	),
+	TP_printk("dev %d:%d keydev %d:%d agno 0x%x refcbno 0x%x fsbcount 0x%x owners %llu",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  MAJOR(__entry->keydev), MINOR(__entry->keydev),
+		  __entry->agno,
+		  __entry->bno,
+		  __entry->len,
+		  __entry->owners)
+)
+#define DEFINE_FSREFS_EVENT(name) \
+DEFINE_EVENT(xfs_fsrefs_class, name, \
+	TP_PROTO(struct xfs_mount *mp, u32 keydev, xfs_agnumber_t agno, \
+		 const struct xfs_refcount_irec *refc), \
+	TP_ARGS(mp, keydev, agno, refc))
+DEFINE_FSREFS_EVENT(xfs_fsrefs_low_key);
+DEFINE_FSREFS_EVENT(xfs_fsrefs_high_key);
+DEFINE_FSREFS_EVENT(xfs_fsrefs_mapping);
+
+DECLARE_EVENT_CLASS(xfs_fsrefs_linear_class,
+	TP_PROTO(struct xfs_mount *mp, u32 keydev, uint64_t bno),
+	TP_ARGS(mp, keydev, bno),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(dev_t, keydev)
+		__field(xfs_fsblock_t, bno)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->keydev = new_decode_dev(keydev);
+		__entry->bno = bno;
+	),
+	TP_printk("dev %d:%d keydev %d:%d bno 0x%llx",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  MAJOR(__entry->keydev), MINOR(__entry->keydev),
+		  __entry->bno)
+)
+#define DEFINE_FSREFS_LINEAR_EVENT(name) \
+DEFINE_EVENT(xfs_fsrefs_linear_class, name, \
+	TP_PROTO(struct xfs_mount *mp, u32 keydev, uint64_t bno), \
+	TP_ARGS(mp, keydev, bno))
+DEFINE_FSREFS_LINEAR_EVENT(xfs_fsrefs_low_key_linear);
+DEFINE_FSREFS_LINEAR_EVENT(xfs_fsrefs_high_key_linear);
+
+DECLARE_EVENT_CLASS(xfs_getfsrefs_class,
+	TP_PROTO(struct xfs_mount *mp, struct xfs_fsrefs *fsrefs),
+	TP_ARGS(mp, fsrefs),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(dev_t, keydev)
+		__field(xfs_daddr_t, block)
+		__field(xfs_daddr_t, len)
+		__field(uint64_t, owners)
+		__field(uint32_t, flags)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->keydev = new_decode_dev(fsrefs->fcr_device);
+		__entry->block = fsrefs->fcr_physical;
+		__entry->len = fsrefs->fcr_length;
+		__entry->owners = fsrefs->fcr_owners;
+		__entry->flags = fsrefs->fcr_flags;
+	),
+	TP_printk("dev %d:%d keydev %d:%d daddr 0x%llx bbcount 0x%llx owners %llu flags 0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  MAJOR(__entry->keydev), MINOR(__entry->keydev),
+		  __entry->block,
+		  __entry->len,
+		  __entry->owners,
+		  __entry->flags)
+)
+#define DEFINE_GETFSREFS_EVENT(name) \
+DEFINE_EVENT(xfs_getfsrefs_class, name, \
+	TP_PROTO(struct xfs_mount *mp, struct xfs_fsrefs *fsrefs), \
+	TP_ARGS(mp, fsrefs))
+DEFINE_GETFSREFS_EVENT(xfs_getfsrefs_low_key);
+DEFINE_GETFSREFS_EVENT(xfs_getfsrefs_high_key);
+DEFINE_GETFSREFS_EVENT(xfs_getfsrefs_mapping);
 
 DECLARE_EVENT_CLASS(xfs_trans_resv_class,
 	TP_PROTO(struct xfs_mount *mp, unsigned int type,

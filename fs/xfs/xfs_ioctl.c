@@ -31,6 +31,7 @@
 #include "xfs_btree.h"
 #include <linux/fsmap.h>
 #include "xfs_fsmap.h"
+#include "xfs_fsrefs.h"
 #include "scrub/xfs_scrub.h"
 #include "xfs_sb.h"
 #include "xfs_ag.h"
@@ -1626,6 +1627,137 @@ out_free:
 }
 
 STATIC int
+xfs_ioc_getfsrefcounts(
+	struct xfs_inode		*ip,
+	struct xfs_getfsrefs_head	__user *arg)
+{
+	struct xfs_fsrefs_head		xhead = {0};
+	struct xfs_getfsrefs_head	head;
+	struct xfs_getfsrefs		*recs;
+	unsigned int			count;
+	__u32				last_flags = 0;
+	bool				done = false;
+	int				error;
+
+	if (copy_from_user(&head, arg, sizeof(struct xfs_getfsrefs_head)))
+		return -EFAULT;
+	if (memchr_inv(head.fch_reserved, 0, sizeof(head.fch_reserved)) ||
+	    memchr_inv(head.fch_keys[0].fcr_reserved, 0,
+		       sizeof(head.fch_keys[0].fcr_reserved)) ||
+	    memchr_inv(head.fch_keys[1].fcr_reserved, 0,
+		       sizeof(head.fch_keys[1].fcr_reserved)))
+		return -EINVAL;
+
+	/*
+	 * Use an internal memory buffer so that we don't have to copy fsrefs
+	 * data to userspace while holding locks.  Start by trying to allocate
+	 * up to 128k for the buffer, but fall back to a single page if needed.
+	 */
+	count = min_t(unsigned int, head.fch_count,
+			131072 / sizeof(struct xfs_getfsrefs));
+	recs = kvzalloc(count * sizeof(struct xfs_getfsrefs), GFP_KERNEL);
+	if (!recs) {
+		count = min_t(unsigned int, head.fch_count,
+				PAGE_SIZE / sizeof(struct xfs_getfsrefs));
+		recs = kvzalloc(count * sizeof(struct xfs_getfsrefs),
+				GFP_KERNEL);
+		if (!recs)
+			return -ENOMEM;
+	}
+
+	xhead.fch_iflags = head.fch_iflags;
+	xfs_fsrefs_to_internal(&xhead.fch_keys[0], &head.fch_keys[0]);
+	xfs_fsrefs_to_internal(&xhead.fch_keys[1], &head.fch_keys[1]);
+
+	trace_xfs_getfsrefs_low_key(ip->i_mount, &xhead.fch_keys[0]);
+	trace_xfs_getfsrefs_high_key(ip->i_mount, &xhead.fch_keys[1]);
+
+	head.fch_entries = 0;
+	do {
+		struct xfs_getfsrefs __user	*user_recs;
+		struct xfs_getfsrefs		*last_rec;
+
+		user_recs = &arg->fch_recs[head.fch_entries];
+		xhead.fch_entries = 0;
+		xhead.fch_count = min_t(unsigned int, count,
+					head.fch_count - head.fch_entries);
+
+		/* Run query, record how many entries we got. */
+		error = xfs_getfsrefs(ip->i_mount, &xhead, recs);
+		switch (error) {
+		case 0:
+			/*
+			 * There are no more records in the result set.  Copy
+			 * whatever we got to userspace and break out.
+			 */
+			done = true;
+			break;
+		case -ECANCELED:
+			/*
+			 * The internal memory buffer is full.  Copy whatever
+			 * records we got to userspace and go again if we have
+			 * not yet filled the userspace buffer.
+			 */
+			error = 0;
+			break;
+		default:
+			goto out_free;
+		}
+		head.fch_entries += xhead.fch_entries;
+		head.fch_oflags = xhead.fch_oflags;
+
+		/*
+		 * If the caller wanted a record count or there aren't any
+		 * new records to return, we're done.
+		 */
+		if (head.fch_count == 0 || xhead.fch_entries == 0)
+			break;
+
+		/* Copy all the records we got out to userspace. */
+		if (copy_to_user(user_recs, recs,
+				 xhead.fch_entries * sizeof(struct xfs_getfsrefs))) {
+			error = -EFAULT;
+			goto out_free;
+		}
+
+		/* Remember the last record flags we copied to userspace. */
+		last_rec = &recs[xhead.fch_entries - 1];
+		last_flags = last_rec->fcr_flags;
+
+		/* Set up the low key for the next iteration. */
+		xfs_fsrefs_to_internal(&xhead.fch_keys[0], last_rec);
+		trace_xfs_getfsrefs_low_key(ip->i_mount, &xhead.fch_keys[0]);
+	} while (!done && head.fch_entries < head.fch_count);
+
+	/*
+	 * If there are no more records in the query result set and we're not
+	 * in counting mode, mark the last record returned with the LAST flag.
+	 */
+	if (done && head.fch_count > 0 && head.fch_entries > 0) {
+		struct xfs_getfsrefs __user	*user_rec;
+
+		last_flags |= FCR_OF_LAST;
+		user_rec = &arg->fch_recs[head.fch_entries - 1];
+
+		if (copy_to_user(&user_rec->fcr_flags, &last_flags,
+					sizeof(last_flags))) {
+			error = -EFAULT;
+			goto out_free;
+		}
+	}
+
+	/* copy back header */
+	if (copy_to_user(arg, &head, sizeof(struct xfs_getfsrefs_head))) {
+		error = -EFAULT;
+		goto out_free;
+	}
+
+out_free:
+	kmem_free(recs);
+	return error;
+}
+
+STATIC int
 xfs_ioc_scrub_metadata(
 	struct file			*file,
 	void				__user *arg)
@@ -2129,6 +2261,9 @@ xfs_file_ioctl(
 
 	case FS_IOC_GETFSMAP:
 		return xfs_ioc_getfsmap(ip, arg);
+
+	case XFS_IOC_GETFSREFCOUNTS:
+		return xfs_ioc_getfsrefcounts(ip, arg);
 
 	case XFS_IOC_SCRUBV_METADATA:
 		return xfs_ioc_scrubv_metadata(filp, arg);
