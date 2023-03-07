@@ -24,10 +24,31 @@ static inline pgoff_t xfile_page_index(const struct xfile_page *xfpage)
 	return xfpage->page->index;
 }
 
+struct xfile_cache {
+	struct xfile_page	xfpage;
+	void			*kaddr;
+};
+
+#define XFILE_CACHE_ENTRIES	(sizeof(struct xfs_buf_cache) / \
+				 sizeof(struct xfile_cache))
+
 struct xfile {
 	struct file		*file;
-	struct xfs_buf_cache	bcache;
+
+	union {
+		struct xfs_buf_cache	bcache;
+		struct xfile_cache	cached[XFILE_CACHE_ENTRIES];
+	};
+
+	/* XFILE_* flags */
+	unsigned int		flags;
 };
+
+/* Use the internal cache for faster access. */
+#define XFILE_INTERNAL_CACHE	(1U << 0)
+
+void xfile_cache_enable(struct xfile *xf);
+void xfile_cache_disable(struct xfile *xf);
 
 int xfile_create(const char *description, loff_t isize, struct xfile **xfilep);
 void xfile_destroy(struct xfile *xf);
