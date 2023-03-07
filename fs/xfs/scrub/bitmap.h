@@ -124,6 +124,8 @@ int xagb_bitmap_set_btblocks(struct xagb_bitmap *bitmap,
 int xagb_bitmap_set_btcur_path(struct xagb_bitmap *bitmap,
 		struct xfs_btree_cur *cur);
 
+uint32_t xagb_bitmap_count_set_regions(struct xagb_bitmap *bitmap);
+
 /* Bitmaps, but for type-checked for xfs_fsblock_t */
 
 struct xfsb_bitmap {

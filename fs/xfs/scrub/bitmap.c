@@ -685,3 +685,17 @@ xagb_bitmap_set_btcur_path(
 
 	return 0;
 }
+
+/* Count the number of set regions in this agblock bitmap. */
+uint32_t
+xagb_bitmap_count_set_regions(
+	struct xagb_bitmap	*bitmap)
+{
+	struct xbitmap32_node	*bn;
+	uint32_t		nr = 0;
+
+	for_each_xbitmap32_extent(bn, &bitmap->agbitmap)
+		nr++;
+
+	return nr;
+}
