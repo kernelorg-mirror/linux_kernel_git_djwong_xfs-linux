@@ -1704,8 +1704,10 @@ xfs_rt_resv_free(
 	struct xfs_rtgroup	*rtg;
 	xfs_rgnumber_t		rgno;
 
-	for_each_rtgroup(mp, rgno, rtg)
+	for_each_rtgroup(mp, rgno, rtg) {
+		xfs_imeta_resv_free_inode(rtg->rtg_refcountip);
 		xfs_imeta_resv_free_inode(rtg->rtg_rmapip);
+	}
 }
 
 /* Reserve space for rt metadata inodes' space expansion. */
@@ -1723,6 +1725,11 @@ xfs_rt_resv_init(
 
 		ask = xfs_rtrmapbt_calc_reserves(mp);
 		err2 = xfs_imeta_resv_init_inode(rtg->rtg_rmapip, ask);
+		if (err2 && !error)
+			error = err2;
+
+		ask = xfs_rtrefcountbt_calc_reserves(mp);
+		err2 = xfs_imeta_resv_init_inode(rtg->rtg_refcountip, ask);
 		if (err2 && !error)
 			error = err2;
 	}
