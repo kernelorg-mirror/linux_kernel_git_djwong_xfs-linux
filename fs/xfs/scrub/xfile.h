@@ -86,6 +86,18 @@ static inline loff_t xfile_size(struct xfile *xf)
 	return i_size_read(file_inode(xf->file));
 }
 
+static inline unsigned long long xfile_bytes(struct xfile *xf)
+{
+	struct xfile_stat	xs;
+	int			ret;
+
+	ret = xfile_stat(xf, &xs);
+	if (ret)
+		return 0;
+
+	return xs.bytes;
+}
+
 /* file block (aka system page size) to basic block conversions. */
 typedef unsigned long long	xfileoff_t;
 #define XFB_BLOCKSIZE		(PAGE_SIZE)
