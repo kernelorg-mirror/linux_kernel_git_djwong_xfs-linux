@@ -929,6 +929,7 @@ TRACE_EVENT(xfarray_sort_stats,
 		__field(unsigned long long, loads)
 		__field(unsigned long long, stores)
 		__field(unsigned long long, compares)
+		__field(unsigned long long, heapsorts)
 #endif
 		__field(unsigned int, max_stack_depth)
 		__field(unsigned int, max_stack_used)
@@ -940,6 +941,7 @@ TRACE_EVENT(xfarray_sort_stats,
 		__entry->loads = si->loads;
 		__entry->stores = si->stores;
 		__entry->compares = si->compares;
+		__entry->heapsorts = si->heapsorts;
 #endif
 		__entry->max_stack_depth = si->max_stack_depth;
 		__entry->max_stack_used = si->max_stack_used;
@@ -947,7 +949,7 @@ TRACE_EVENT(xfarray_sort_stats,
 	),
 	TP_printk(
 #ifdef DEBUG
-		  "xfino 0x%lx loads %llu stores %llu compares %llu stack_depth %u/%u error %d",
+		  "xfino 0x%lx loads %llu stores %llu compares %llu heapsorts %llu stack_depth %u/%u error %d",
 #else
 		  "xfino 0x%lx stack_depth %u/%u error %d",
 #endif
@@ -956,6 +958,7 @@ TRACE_EVENT(xfarray_sort_stats,
 		  __entry->loads,
 		  __entry->stores,
 		  __entry->compares,
+		  __entry->heapsorts,
 #endif
 		  __entry->max_stack_used,
 		  __entry->max_stack_depth,
