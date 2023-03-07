@@ -408,7 +408,7 @@ xrep_bmap_check_rtfork_rmap(
 	/* Make sure this isn't free space. */
 	rtbno = xfs_rgbno_to_rtb(sc->mp, cur->bc_ino.rtg->rtg_rgno,
 			rec->rm_startblock);
-	return xrep_require_rtext_inuse(sc, rtbno, rec->rm_blockcount);
+	return xrep_require_rtext_inuse(sc, rtbno, rec->rm_blockcount, false);
 }
 
 /* Record realtime extents that belong to this inode's fork. */
