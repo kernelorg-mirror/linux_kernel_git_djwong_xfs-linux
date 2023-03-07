@@ -233,6 +233,7 @@ rcbagbt_mem_create(
 	struct xfbtree_config	cfg = {
 		.btree_ops	= &rcbagbt_mem_ops,
 		.target		= target,
+		.flags		= XFBTREE_DIRECT_MAP,
 	};
 
 	return xfbtree_create(mp, &cfg, xfbtreep);
