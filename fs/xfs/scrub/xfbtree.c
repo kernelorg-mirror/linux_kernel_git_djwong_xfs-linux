@@ -501,6 +501,9 @@ xfbtree_create(
 	if (!xfbt)
 		return -ENOMEM;
 	xfbt->target = cfg->target;
+	if (cfg->flags & XFBTREE_DIRECT_MAP)
+		xfbt->target->bt_flags |= XFS_BUFTARG_DIRECT_MAP;
+
 	xfoff_bitmap_init(&xfbt->freespace);
 
 	/* Set up min/maxrecs for this btree. */
@@ -753,7 +756,7 @@ xfbtree_trans_commit(
 
 		dirty = xfbtree_trans_bdetach(tp, bp);
 		if (dirty && !corrupt) {
-			xfs_failaddr_t	fa = bp->b_ops->verify_struct(bp);
+			xfs_failaddr_t	fa;
 
 			/*
 			 * Because this btree is ephemeral, validate the buffer
@@ -761,16 +764,30 @@ xfbtree_trans_commit(
 			 * corruption errors to the caller without shutting
 			 * down the filesystem.
 			 *
+			 * Buffers that are directly mapped to the xfile do not
+			 * need to be queued for IO at all.  Check if the DRAM
+			 * has been poisoned, however.
+			 *
 			 * If the buffer fails verification, log the failure
 			 * but continue walking the transaction items so that
 			 * we remove all ephemeral btree buffers.
 			 */
+			if (xfs_buf_check_poisoned(bp)) {
+				corrupt = true;
+				xfs_verifier_error(bp, -EFSCORRUPTED,
+						__this_address);
+				continue;
+			}
+
+			fa = bp->b_ops->verify_struct(bp);
 			if (fa) {
 				corrupt = true;
 				xfs_verifier_error(bp, -EFSCORRUPTED, fa);
-			} else {
-				xfs_buf_delwri_queue_here(bp, &buffer_list);
+				continue;
 			}
+
+			if (!(bp->b_flags & _XBF_DIRECT_MAP))
+				xfs_buf_delwri_queue_here(bp, &buffer_list);
 		}
 
 		xfs_buf_relse(bp);

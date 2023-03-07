@@ -43,6 +43,11 @@ struct xfile;
 #define _XBF_PAGES	 (1u << 20)/* backed by refcounted pages */
 #define _XBF_KMEM	 (1u << 21)/* backed by heap memory */
 #define _XBF_DELWRI_Q	 (1u << 22)/* buffer on a delwri queue */
+#ifdef CONFIG_XFS_IN_MEMORY_FILE
+# define _XBF_DIRECT_MAP (1u << 23)/* pages directly mapped to storage */
+#else
+# define _XBF_DIRECT_MAP (0)
+#endif
 
 /* flags used only as arguments to access routines */
 /*
@@ -72,6 +77,7 @@ typedef unsigned int xfs_buf_flags_t;
 	{ _XBF_PAGES,		"PAGES" }, \
 	{ _XBF_KMEM,		"KMEM" }, \
 	{ _XBF_DELWRI_Q,	"DELWRI_Q" }, \
+	{ _XBF_DIRECT_MAP,	"DIRECT_MAP" }, \
 	/* The following interface flags should never be set */ \
 	{ XBF_LIVESCAN,		"LIVESCAN" }, \
 	{ XBF_INCORE,		"INCORE" }, \
@@ -132,8 +138,14 @@ typedef struct xfs_buftarg {
 #ifdef CONFIG_XFS_IN_MEMORY_FILE
 /* in-memory buftarg via bt_xfile */
 # define XFS_BUFTARG_XFILE	(1U << 0)
+/*
+ * Buffer pages are direct-mapped to the xfile; caller does not care about
+ * transactional updates.
+ */
+# define XFS_BUFTARG_DIRECT_MAP	(1U << 1)
 #else
 # define XFS_BUFTARG_XFILE	(0)
+# define XFS_BUFTARG_DIRECT_MAP	(0)
 #endif
 
 #define XB_PAGES	2
@@ -383,6 +395,9 @@ xfs_buf_update_cksum(struct xfs_buf *bp, unsigned long cksum_offset)
 			 cksum_offset);
 }
 
+int xfs_buf_alloc_page_array(struct xfs_buf *bp, gfp_t gfp_mask);
+void xfs_buf_free_page_array(struct xfs_buf *bp);
+
 /*
  *	Handling of buftargs.
  */
@@ -454,5 +469,6 @@ xfs_buftarg_verify_daddr(
 int xfs_buf_reverify(struct xfs_buf *bp, const struct xfs_buf_ops *ops);
 bool xfs_verify_magic(struct xfs_buf *bp, __be32 dmagic);
 bool xfs_verify_magic16(struct xfs_buf *bp, __be16 dmagic);
+bool xfs_buf_check_poisoned(struct xfs_buf *bp);
 
 #endif	/* __XFS_BUF_H__ */
