@@ -1629,6 +1629,10 @@ DEFINE_SIMPLE_IO_EVENT(xfs_free_file_space);
 DEFINE_SIMPLE_IO_EVENT(xfs_zero_file_space);
 DEFINE_SIMPLE_IO_EVENT(xfs_collapse_file_space);
 DEFINE_SIMPLE_IO_EVENT(xfs_insert_file_space);
+#ifdef CONFIG_XFS_RT
+DEFINE_SIMPLE_IO_EVENT(xfs_map_free_rt_space);
+#endif /* CONFIG_XFS_RT */
+DEFINE_SIMPLE_IO_EVENT(xfs_map_free_space);
 
 DECLARE_EVENT_CLASS(xfs_itrunc_class,
 	TP_PROTO(struct xfs_inode *ip, xfs_fsize_t new_size),
@@ -1718,6 +1722,31 @@ TRACE_EVENT(xfs_bunmap,
 
 );
 
+TRACE_EVENT(xfs_bmapi_freesp,
+	TP_PROTO(struct xfs_inode *ip, xfs_fileoff_t bno, xfs_extlen_t len),
+	TP_ARGS(ip, bno, len),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(xfs_fsize_t, size)
+		__field(xfs_fileoff_t, bno)
+		__field(xfs_extlen_t, len)
+	),
+	TP_fast_assign(
+		__entry->dev = VFS_I(ip)->i_sb->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->size = ip->i_disk_size;
+		__entry->bno = bno;
+		__entry->len = len;
+	),
+	TP_printk("dev %d:%d ino 0x%llx disize 0x%llx fileoff 0x%llx fsbcount 0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->size,
+		  __entry->bno,
+		  __entry->len)
+);
+
 DECLARE_EVENT_CLASS(xfs_extent_busy_class,
 	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno,
 		 xfs_agblock_t agbno, xfs_extlen_t len),
@@ -1750,6 +1779,8 @@ DEFINE_BUSY_EVENT(xfs_extent_busy_enomem);
 DEFINE_BUSY_EVENT(xfs_extent_busy_force);
 DEFINE_BUSY_EVENT(xfs_extent_busy_reuse);
 DEFINE_BUSY_EVENT(xfs_extent_busy_clear);
+DEFINE_BUSY_EVENT(xfs_alloc_find_freesp);
+DEFINE_BUSY_EVENT(xfs_alloc_find_freesp_done);
 
 TRACE_EVENT(xfs_extent_busy_trim,
 	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno,
@@ -1780,6 +1811,35 @@ TRACE_EVENT(xfs_extent_busy_trim,
 		  __entry->tbno,
 		  __entry->tlen)
 );
+
+#ifdef CONFIG_XFS_RT
+DECLARE_EVENT_CLASS(xfs_rtextent_class,
+	TP_PROTO(struct xfs_mount *mp, xfs_rtxnum_t off_rtx,
+		 xfs_rtxnum_t len_rtx),
+	TP_ARGS(mp, off_rtx, len_rtx),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_rtxnum_t, off_rtx)
+		__field(xfs_rtxnum_t, len_rtx)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->off_rtx = off_rtx;
+		__entry->len_rtx = len_rtx;
+	),
+	TP_printk("dev %d:%d rtx 0x%llx rtxcount 0x%llx",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->off_rtx,
+		  __entry->len_rtx)
+);
+#define DEFINE_RTEXTENT_EVENT(name) \
+DEFINE_EVENT(xfs_rtextent_class, name, \
+	TP_PROTO(struct xfs_mount *mp, xfs_rtxnum_t off_rtx, \
+		 xfs_rtxnum_t len_rtx), \
+	TP_ARGS(mp, off_rtx, len_rtx))
+DEFINE_RTEXTENT_EVENT(xfs_rtalloc_find_freesp);
+DEFINE_RTEXTENT_EVENT(xfs_rtalloc_find_freesp_done);
+#endif /* CONFIG_XFS_RT */
 
 DECLARE_EVENT_CLASS(xfs_agf_class,
 	TP_PROTO(struct xfs_mount *mp, struct xfs_agf *agf, int flags,
@@ -3783,6 +3843,7 @@ DECLARE_EVENT_CLASS(xfs_inode_irec_class,
 DEFINE_EVENT(xfs_inode_irec_class, name, \
 	TP_PROTO(struct xfs_inode *ip, struct xfs_bmbt_irec *irec), \
 	TP_ARGS(ip, irec))
+DEFINE_INODE_IREC_EVENT(xfs_bmapi_freesp_done);
 
 /* inode iomap invalidation events */
 DECLARE_EVENT_CLASS(xfs_wb_invalid_class,
@@ -3917,6 +3978,7 @@ DEFINE_INODE_ERROR_EVENT(xfs_reflink_remap_blocks_error);
 DEFINE_INODE_ERROR_EVENT(xfs_reflink_remap_extent_error);
 DEFINE_INODE_IREC_EVENT(xfs_reflink_remap_extent_src);
 DEFINE_INODE_IREC_EVENT(xfs_reflink_remap_extent_dest);
+DEFINE_INODE_ERROR_EVENT(xfs_map_free_reserve_more_fail);
 
 /* dedupe tracepoints */
 DEFINE_DOUBLE_IO_EVENT(xfs_reflink_compare_extents);

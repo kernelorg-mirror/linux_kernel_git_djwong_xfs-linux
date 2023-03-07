@@ -86,8 +86,17 @@ int xfs_growfs_check_rtgeom(const struct xfs_mount *mp, xfs_rfsblock_t dblocks,
 		xfs_rfsblock_t rblocks, xfs_agblock_t rextsize,
 		xfs_rtblock_t rextents, xfs_extlen_t rbmblocks,
 		uint8_t rextslog);
+
+int xfs_rtalloc_find_freesp(struct xfs_trans *tp, xfs_rtxnum_t *rtx,
+		xfs_rtxnum_t end_rtx, xfs_rtxlen_t *len_rtx);
 #else
-# define xfs_rtallocate_extent(t,b,min,max,l,f,p,rb)	(-ENOSYS)
+static inline int
+xfs_rtallocate_extent(struct xfs_trans *tp, xfs_rtxnum_t start,
+		xfs_rtxlen_t minlen, xfs_rtxlen_t maxlen, xfs_rtxlen_t *len,
+		int wasdel, xfs_rtxlen_t prod, xfs_rtxnum_t *rtblock)
+{
+	return -ENOSYS;
+}
 # define xfs_rtpick_extent(m,t,l,rb)			(-ENOSYS)
 # define xfs_growfs_rt(mp,in)				(-ENOSYS)
 # define xfs_rtalloc_reinit_frextents(m)		(0)
@@ -109,6 +118,7 @@ xfs_rtmount_init(
 # define xfs_rt_resv_init(mp)				(0)
 # define xfs_growfs_check_rtgeom(mp, d, r, rs, rx, rb, rl)	(0)
 # define xfs_rtmount_dqattach(mp)			(0)
+# define xfs_rtalloc_find_freesp(tp, rtx, end_rtx, len_rtx)	(-ENOSYS)
 #endif	/* CONFIG_XFS_RT */
 
 #endif	/* __XFS_RTALLOC_H__ */
