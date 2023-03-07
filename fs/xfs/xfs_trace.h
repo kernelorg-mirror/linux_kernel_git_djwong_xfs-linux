@@ -2507,7 +2507,10 @@ TRACE_EVENT(xfs_btree_alloc_block,
 	),
 	TP_fast_assign(
 		__entry->dev = cur->bc_mp->m_super->s_dev;
-		if (cur->bc_flags & XFS_BTREE_ROOT_IN_INODE) {
+		if (cur->bc_flags & XFS_BTREE_IN_XFILE) {
+			__entry->agno = 0;
+			__entry->ino = 0;
+		} else if (cur->bc_flags & XFS_BTREE_ROOT_IN_INODE) {
 			__entry->agno = 0;
 			__entry->ino = cur->bc_ino.ip->i_ino;
 		} else {
