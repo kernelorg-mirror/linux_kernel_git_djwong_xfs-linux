@@ -25,6 +25,7 @@
 #include "scrub/iscan.h"
 #include "scrub/nlinks.h"
 #include "scrub/trace.h"
+#include "scrub/tempfile.h"
 
 /*
  * Live Inode Link Count Repair
@@ -51,6 +52,14 @@ xrep_nlinks_repair_inode(
 	uint64_t		total_links;
 	unsigned int		actual_nlink;
 	int			error;
+
+	/*
+	 * Ignore temporary files being used to stage repairs, since we assume
+	 * they're correct for non-directories, and the directory repair code
+	 * doesn't bump the link counts for the children.
+	 */
+	if (xrep_is_tempfile(ip))
+		return 0;
 
 	xfs_ilock(ip, XFS_IOLOCK_EXCL);
 
