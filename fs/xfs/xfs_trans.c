@@ -25,6 +25,7 @@
 #include "xfs_dquot.h"
 #include "xfs_icache.h"
 #include "xfs_rtbitmap.h"
+#include "xfs_rtgroup.h"
 
 struct kmem_cache	*xfs_trans_cache;
 
@@ -533,6 +534,7 @@ xfs_trans_apply_sb_deltas(
 {
 	struct xfs_dsb	*sbp;
 	struct xfs_buf	*bp;
+	bool		update_rtsb = false;
 	int		whole = 0;
 
 	bp = xfs_trans_getsb(tp);
@@ -593,22 +595,27 @@ xfs_trans_apply_sb_deltas(
 	if (tp->t_rextsize_delta) {
 		be32_add_cpu(&sbp->sb_rextsize, tp->t_rextsize_delta);
 		whole = 1;
+		update_rtsb = true;
 	}
 	if (tp->t_rbmblocks_delta) {
 		be32_add_cpu(&sbp->sb_rbmblocks, tp->t_rbmblocks_delta);
 		whole = 1;
+		update_rtsb = true;
 	}
 	if (tp->t_rblocks_delta) {
 		be64_add_cpu(&sbp->sb_rblocks, tp->t_rblocks_delta);
 		whole = 1;
+		update_rtsb = true;
 	}
 	if (tp->t_rextents_delta) {
 		be64_add_cpu(&sbp->sb_rextents, tp->t_rextents_delta);
 		whole = 1;
+		update_rtsb = true;
 	}
 	if (tp->t_rextslog_delta) {
 		sbp->sb_rextslog += tp->t_rextslog_delta;
 		whole = 1;
+		update_rtsb = true;
 	}
 
 	xfs_trans_buf_set_type(tp, bp, XFS_BLFT_SB_BUF);
@@ -625,6 +632,9 @@ xfs_trans_apply_sb_deltas(
 		xfs_trans_log_buf(tp, bp, offsetof(struct xfs_dsb, sb_icount),
 				  offsetof(struct xfs_dsb, sb_frextents) +
 				  sizeof(sbp->sb_frextents) - 1);
+
+	if (update_rtsb)
+		xfs_rtgroup_log_super(tp, bp);
 }
 
 /*
