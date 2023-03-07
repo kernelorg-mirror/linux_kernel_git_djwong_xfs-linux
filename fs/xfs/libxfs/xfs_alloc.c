@@ -2527,6 +2527,7 @@ xfs_free_extent_later(
 {
 	struct xfs_extent_free_item	*xefi;
 	struct xfs_mount		*mp = tp->t_mountp;
+	enum xfs_defer_ops_type		optype;
 #ifdef DEBUG
 	xfs_agnumber_t			agno;
 	xfs_agblock_t			agbno;
@@ -2535,12 +2536,19 @@ xfs_free_extent_later(
 	ASSERT(len > 0);
 	ASSERT(len <= XFS_MAX_BMBT_EXTLEN);
 	ASSERT(!isnullstartblock(bno));
-	agno = XFS_FSB_TO_AGNO(mp, bno);
-	agbno = XFS_FSB_TO_AGBNO(mp, bno);
-	ASSERT(agno < mp->m_sb.sb_agcount);
-	ASSERT(agbno < mp->m_sb.sb_agblocks);
-	ASSERT(len < mp->m_sb.sb_agblocks);
-	ASSERT(agbno + len <= mp->m_sb.sb_agblocks);
+	if (flags & XFS_FREE_EXTENT_REALTIME) {
+		ASSERT(bno < mp->m_sb.sb_rblocks);
+		ASSERT(len <= mp->m_sb.sb_rblocks);
+		ASSERT(bno + len <= mp->m_sb.sb_rblocks);
+	} else {
+		agno = XFS_FSB_TO_AGNO(mp, bno);
+		agbno = XFS_FSB_TO_AGBNO(mp, bno);
+
+		ASSERT(agno < mp->m_sb.sb_agcount);
+		ASSERT(agbno < mp->m_sb.sb_agblocks);
+		ASSERT(len < mp->m_sb.sb_agblocks);
+		ASSERT(agbno + len <= mp->m_sb.sb_agblocks);
+	}
 #endif
 	ASSERT(!(flags & ~XFS_FREE_EXTENT_ALL_FLAGS));
 	ASSERT(xfs_extfree_item_cache != NULL);
@@ -2551,6 +2559,19 @@ xfs_free_extent_later(
 	xefi->xefi_blockcount = (xfs_extlen_t)len;
 	if (flags & XFS_FREE_EXTENT_SKIP_DISCARD)
 		xefi->xefi_flags |= XFS_EFI_SKIP_DISCARD;
+	if (flags & XFS_FREE_EXTENT_REALTIME) {
+		/*
+		 * Realtime and data section EFIs must use separate
+		 * transactions to finish deferred work because updates to
+		 * realtime metadata files can lock AGFs to allocate btree
+		 * blocks and we don't want that mixing with the AGF locks
+		 * taken to finish data section EFIs.
+		 */
+		optype = XFS_DEFER_OPS_TYPE_FREE_RT;
+		xefi->xefi_flags |= XFS_EFI_REALTIME;
+	} else {
+		optype = XFS_DEFER_OPS_TYPE_FREE;
+	}
 	if (oinfo) {
 		ASSERT(oinfo->oi_offset == 0);
 
@@ -2566,7 +2587,7 @@ xfs_free_extent_later(
 	trace_xfs_extent_free_defer(mp, xefi);
 
 	xfs_extent_free_get_group(mp, xefi);
-	xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_FREE, &xefi->xefi_list);
+	xfs_defer_add(tp, optype, &xefi->xefi_list);
 }
 
 #ifdef DEBUG
