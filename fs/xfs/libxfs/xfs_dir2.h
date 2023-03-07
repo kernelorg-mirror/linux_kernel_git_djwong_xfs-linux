@@ -52,7 +52,7 @@ extern int xfs_dir_replace(struct xfs_trans *tp, struct xfs_inode *dp,
 				const struct xfs_name *name, xfs_ino_t inum,
 				xfs_extlen_t tot);
 extern int xfs_dir_canenter(struct xfs_trans *tp, struct xfs_inode *dp,
-				struct xfs_name *name);
+				const struct xfs_name *name);
 
 /*
  * Direct call from the bmap code, bypassing the generic directory layer.
@@ -285,6 +285,9 @@ static inline unsigned char xfs_ascii_ci_xfrm(unsigned char c)
 }
 
 int xfs_dir_create_child(struct xfs_trans *tp, unsigned int resblks,
+		struct xfs_inode *dp, const struct xfs_name *name,
+		struct xfs_inode *ip);
+int xfs_dir_add_child(struct xfs_trans *tp, unsigned int resblks,
 		struct xfs_inode *dp, const struct xfs_name *name,
 		struct xfs_inode *ip);
 
