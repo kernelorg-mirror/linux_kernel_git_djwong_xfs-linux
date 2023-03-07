@@ -23,6 +23,7 @@
 #include "xfs_ag.h"
 #include "xfs_iunlink_item.h"
 #include "xfs_inode_item.h"
+#include "xfs_imeta.h"
 
 uint16_t
 xfs_flags2diflags(
@@ -649,6 +650,8 @@ xfs_droplink(
 	if (inode->i_nlink)
 		return 0;
 
+	if (xfs_is_metadir_inode(ip))
+		xfs_imeta_clear_iflag(tp, ip);
 	return xfs_iunlink(tp, ip);
 }
 
