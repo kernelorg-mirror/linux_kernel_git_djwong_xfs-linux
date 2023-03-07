@@ -2487,6 +2487,7 @@ DEFINE_DISCARD_EVENT(xfs_discard_extent);
 DEFINE_DISCARD_EVENT(xfs_discard_toosmall);
 DEFINE_DISCARD_EVENT(xfs_discard_exclude);
 DEFINE_DISCARD_EVENT(xfs_discard_busy);
+DEFINE_DISCARD_EVENT(xfs_discard_relax);
 
 /* btree cursor events */
 TRACE_DEFINE_ENUM(XFS_BTNUM_BNOi);
