@@ -163,14 +163,26 @@ xfile_buf_map_pages(
 	gfp_t			gfp_mask = __GFP_NOWARN;
 	const unsigned int	page_align_mask = PAGE_SIZE - 1;
 	unsigned int		m, p, n;
+	unsigned int		first_page_offset;
 	int			error;
 
 	ASSERT(xfile_buftarg_can_direct_map(bp->b_target));
 
-	/* For direct-map buffers, each map has to be page aligned. */
-	for (m = 0, map = bp->b_maps; m < bp->b_map_count; m++, map++)
-		if (BBTOB(map->bm_bn | map->bm_len) & page_align_mask)
+	/*
+	 * For direct-map buffer targets with multiple mappings, the first map
+	 * must end on a page boundary and the rest of the mappings must start
+	 * and end on a page boundary.  For single-mapping buffers, we don't
+	 * care.
+	 */
+	if (bp->b_map_count > 1) {
+		map = &bp->b_maps[0];
+		if (BBTOB(map->bm_bn + map->bm_len) & page_align_mask)
 			return -ENOTBLK;
+
+		for (m = 1, map++; m < bp->b_map_count - 1; m++, map++)
+			if (BBTOB(map->bm_bn | map->bm_len) & page_align_mask)
+				return -ENOTBLK;
+	}
 
 	if (flags & XBF_READ_AHEAD)
 		gfp_mask |= __GFP_NORETRY;
@@ -182,6 +194,7 @@ xfile_buf_map_pages(
 		return error;
 
 	/* Map in the xfile pages. */
+	first_page_offset = offset_in_page(BBTOB(xfs_buf_daddr(bp)));
 	for (m = 0, p = 0, map = bp->b_maps; m < bp->b_map_count; m++, map++) {
 		for (n = 0; n < map->bm_len; n += BTOBB(PAGE_SIZE)) {
 			unsigned int	len;
@@ -198,6 +211,7 @@ xfile_buf_map_pages(
 	}
 
 	bp->b_flags |= _XBF_DIRECT_MAP;
+	bp->b_offset = first_page_offset;
 	return 0;
 
 fail:
