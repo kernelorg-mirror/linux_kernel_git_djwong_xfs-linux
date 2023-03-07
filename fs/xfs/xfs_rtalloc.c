@@ -784,10 +784,13 @@ xfs_growfs_init_rtbuf(
 	bp->b_ops = xfs_rtblock_ops(mp, buf_type == XFS_BLFT_RTSUMMARY_BUF);
 	memset(bp->b_addr, 0, mp->m_sb.sb_blocksize);
 
-	if (xfs_has_rtgroups(mp) && buf_type == XFS_BLFT_RTBITMAP_BUF) {
+	if (xfs_has_rtgroups(mp)) {
 		struct xfs_rtbuf_blkinfo	*hdr = bp->b_addr;
 
-		hdr->rt_magic = cpu_to_be32(XFS_RTBITMAP_MAGIC);
+		if (buf_type == XFS_BLFT_RTBITMAP_BUF)
+			hdr->rt_magic = cpu_to_be32(XFS_RTBITMAP_MAGIC);
+		else
+			hdr->rt_magic = cpu_to_be32(XFS_RTSUMMARY_MAGIC);
 		hdr->rt_owner = cpu_to_be64(ip->i_ino);
 		hdr->rt_blkno = cpu_to_be64(d);
 		uuid_copy(&hdr->rt_uuid, &mp->m_sb.sb_meta_uuid);
