@@ -3905,3 +3905,10 @@ xfs_inode_is_alloc_unit_aligned(
 
 	return !((pos | len) & (alloc_unit - 1));
 }
+
+bool
+xfs_is_always_cow_inode(
+	struct xfs_inode	*ip)
+{
+	return ip->i_mount->m_always_cow && xfs_has_reflink(ip->i_mount);
+}
