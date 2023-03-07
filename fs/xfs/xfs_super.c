@@ -324,6 +324,7 @@ xfs_set_inode_alloc(
 		pag = xfs_perag_get(mp, index);
 		if (xfs_set_inode_alloc_perag(pag, ino, max_metadata))
 			maxagi++;
+		clear_bit(XFS_AGSTATE_NOALLOC, &pag->pag_opstate);
 		xfs_perag_put(pag);
 	}
 
