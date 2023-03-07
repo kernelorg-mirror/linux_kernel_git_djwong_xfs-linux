@@ -120,14 +120,11 @@ xfs_refcount_btrec_to_irec(
 	irec->rc_refcount = be32_to_cpu(rec->refc.rc_refcount);
 }
 
-/* Simple checks for refcount records. */
-xfs_failaddr_t
-xfs_refcount_check_irec(
-	struct xfs_btree_cur		*cur,
+inline xfs_failaddr_t
+xfs_refcount_check_perag_irec(
+	struct xfs_perag		*pag,
 	const struct xfs_refcount_irec	*irec)
 {
-	struct xfs_perag		*pag = cur->bc_ag.pag;
-
 	if (irec->rc_blockcount == 0 || irec->rc_blockcount > MAXREFCEXTLEN)
 		return __this_address;
 
@@ -142,6 +139,15 @@ xfs_refcount_check_irec(
 		return __this_address;
 
 	return NULL;
+}
+
+/* Simple checks for refcount records. */
+xfs_failaddr_t
+xfs_refcount_check_irec(
+	struct xfs_btree_cur		*cur,
+	const struct xfs_refcount_irec	*irec)
+{
+	return xfs_refcount_check_perag_irec(cur->bc_ag.pag, irec);
 }
 
 static inline int
