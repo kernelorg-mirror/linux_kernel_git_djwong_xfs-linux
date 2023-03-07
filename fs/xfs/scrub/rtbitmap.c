@@ -15,10 +15,62 @@
 #include "xfs_inode.h"
 #include "xfs_bmap.h"
 #include "xfs_bit.h"
+#include "xfs_rtgroup.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/repair.h"
 #include "scrub/rtbitmap.h"
+
+static inline void
+xchk_rtbitmap_compute_geometry(
+	struct xfs_mount	*mp,
+	struct xchk_rtbitmap	*rtb)
+{
+	rtb->rextents = xfs_rtb_to_rtx(mp, mp->m_sb.sb_rblocks);
+	rtb->rextslog = rtb->rextents ? xfs_highbit32(rtb->rextents) : 0;
+	rtb->rbmblocks = xfs_rtbitmap_blockcount(mp, rtb->rextents);
+}
+
+/* Set us up with the realtime group metadata locked. */
+int
+xchk_setup_rgbitmap(
+	struct xfs_scrub	*sc)
+{
+	struct xfs_mount	*mp = sc->mp;
+	struct xchk_rgbitmap	*rgb;
+	int			error;
+
+	rgb = kzalloc(sizeof(struct xchk_rgbitmap), XCHK_GFP_FLAGS);
+	if (!rgb)
+		return -ENOMEM;
+	rgb->sc = sc;
+	sc->buf = rgb;
+
+	error = xchk_trans_alloc(sc, 0);
+	if (error)
+		return error;
+
+	error = xchk_install_live_inode(sc, mp->m_rbmip);
+	if (error)
+		return error;
+
+	error = xchk_ino_dqattach(sc);
+	if (error)
+		return error;
+
+	error = xchk_rtgroup_init(sc, sc->sm->sm_agno, &sc->sr,
+			XCHK_RTGLOCK_ALL);
+	if (error)
+		return error;
+
+	/*
+	 * Now that we've locked the rtbitmap, we can't race with growfsrt
+	 * trying to expand the bitmap or change the size of the rt volume.
+	 * Hence it is safe to compute and check the geometry values.
+	 */
+	xchk_rtbitmap_compute_geometry(mp, &rgb->rtb);
+	return 0;
+}
 
 /* Set us up with the realtime metadata locked. */
 int
@@ -59,9 +111,68 @@ xchk_setup_rtbitmap(
 	 * trying to expand the bitmap or change the size of the rt volume.
 	 * Hence it is safe to compute and check the geometry values.
 	 */
-	rtb->rextents = xfs_rtb_to_rtx(mp, mp->m_sb.sb_rblocks);
-	rtb->rextslog = rtb->rextents ? xfs_highbit32(rtb->rextents) : 0;
-	rtb->rbmblocks = xfs_rtbitmap_blockcount(mp, rtb->rextents);
+	xchk_rtbitmap_compute_geometry(mp, rtb);
+	return 0;
+}
+
+/* Per-rtgroup bitmap contents. */
+
+/* Scrub a free extent record from the realtime bitmap. */
+STATIC int
+xchk_rgbitmap_rec(
+	struct xfs_mount	*mp,
+	struct xfs_trans	*tp,
+	const struct xfs_rtalloc_rec *rec,
+	void			*priv)
+{
+	struct xchk_rgbitmap	*rgb = priv;
+	struct xfs_scrub	*sc = rgb->sc;
+	xfs_rtblock_t		startblock;
+	xfs_filblks_t		blockcount;
+
+	startblock = xfs_rtx_to_rtb(mp, rec->ar_startext);
+	blockcount = xfs_rtx_to_rtb(mp, rec->ar_extcount);
+
+	if (!xfs_verify_rtbext(mp, startblock, blockcount))
+		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, 0);
+	return 0;
+}
+
+/* Scrub this group's realtime bitmap. */
+int
+xchk_rgbitmap(
+	struct xfs_scrub	*sc)
+{
+	struct xfs_rtalloc_rec	keys[2];
+	struct xfs_mount	*mp = sc->mp;
+	struct xfs_rtgroup	*rtg = sc->sr.rtg;
+	struct xchk_rgbitmap	*rgb = sc->buf;
+	xfs_rtblock_t		rtbno;
+	xfs_rgblock_t		last_rgbno = rtg->rtg_blockcount - 1;
+	int			error;
+
+	/* Sanity check the realtime bitmap size. */
+	if (sc->ip->i_disk_size < XFS_FSB_TO_B(mp, rgb->rtb.rbmblocks)) {
+		xchk_ino_set_corrupt(sc, sc->ip->i_ino);
+		return 0;
+	}
+
+	/*
+	 * Check only the portion of the rtbitmap that corresponds to this
+	 * realtime group.
+	 */
+	rtbno = xfs_rgbno_to_rtb(mp, rtg->rtg_rgno, 0);
+	keys[0].ar_startext = xfs_rtb_to_rtx(mp, rtbno);
+
+	rtbno = xfs_rgbno_to_rtb(mp, rtg->rtg_rgno, last_rgbno);
+	keys[1].ar_startext = xfs_rtb_to_rtx(mp, rtbno);
+	keys[0].ar_extcount = keys[1].ar_extcount = 0;
+
+	error = xfs_rtalloc_query_range(mp, sc->tp, &keys[0], &keys[1],
+			xchk_rgbitmap_rec, rgb);
+	if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, 0, &error))
+		return error;
+
 	return 0;
 }
 
@@ -189,6 +300,13 @@ xchk_rtbitmap(
 	error = xchk_rtbitmap_check_extents(sc);
 	if (error || (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT))
 		return error;
+
+	/*
+	 * Each rtgroup checks its portion of the rt bitmap, so if we don't
+	 * have that feature, we have to check the bitmap contents now.
+	 */
+	if (xfs_has_rtgroups(mp))
+		return 0;
 
 	error = xfs_rtalloc_query_all(mp, sc->tp, xchk_rtbitmap_rec, sc);
 	if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, 0, &error))
