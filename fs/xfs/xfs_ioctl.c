@@ -38,6 +38,7 @@
 #include "xfs_reflink.h"
 #include "xfs_ioctl.h"
 #include "xfs_xattr.h"
+#include "xfs_xchgrange.h"
 
 #include <linux/mount.h>
 #include <linux/namei.h>
@@ -1862,6 +1863,32 @@ xfs_fs_eofblocks_from_user(
 	return 0;
 }
 
+static long
+xfs_ioc_exchange_range(
+	struct file			*file2,
+	struct xfs_exch_range __user	*argp)
+{
+	struct xfs_exch_range		args;
+	struct fd			file1;
+	int				error;
+
+	if (copy_from_user(&args, argp, sizeof(args)))
+		return -EFAULT;
+
+	file1 = fdget(args.file1_fd);
+	if (!file1.file)
+		return -EBADF;
+
+	error = -EXDEV;
+	if (file1.file->f_path.mnt != file2->f_path.mnt)
+		goto fdput;
+
+	error = xfs_exch_range(file1.file, file2, &args);
+fdput:
+	fdput(file1);
+	return error;
+}
+
 /*
  * These long-unused ioctls were removed from the official ioctl API in 5.17,
  * but retain these definitions so that we can log warnings about them.
@@ -2149,6 +2176,9 @@ xfs_file_ioctl(
 		sb_end_write(mp->m_super);
 		return error;
 	}
+
+	case XFS_IOC_EXCHANGE_RANGE:
+		return xfs_ioc_exchange_range(filp, arg);
 
 	default:
 		return -ENOTTY;
