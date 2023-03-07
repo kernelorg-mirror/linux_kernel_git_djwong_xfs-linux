@@ -474,7 +474,7 @@ static const struct xchk_meta_ops meta_scrub_ops[] = {
 		.setup	= xchk_setup_rgbitmap,
 		.scrub	= xchk_rgbitmap,
 		.has	= xfs_has_rtgroups,
-		.repair = xrep_notsupported,
+		.repair = xrep_rgbitmap,
 	},
 	[XFS_SCRUB_TYPE_RTRMAPBT] = {	/* realtime group rmapbt */
 		.type	= ST_RTGROUP,
