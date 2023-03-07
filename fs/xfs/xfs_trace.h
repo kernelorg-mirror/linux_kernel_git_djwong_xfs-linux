@@ -1584,6 +1584,7 @@ DEFINE_EVENT(xfs_writeback_class, name,	\
 	TP_PROTO(struct xfs_inode *ip, const struct writeback_control *wbc), \
 	TP_ARGS(ip, wbc))
 DEFINE_WRITEBACK_EVENT(xfs_vm_writepages);
+DEFINE_WRITEBACK_EVENT(xfs_vm_writepages_extend);
 DEFINE_WRITEBACK_EVENT(xfs_dax_writepages);
 
 DECLARE_EVENT_CLASS(xfs_simple_io_class,
