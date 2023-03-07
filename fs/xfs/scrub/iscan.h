@@ -70,6 +70,7 @@ xchk_iscan_abort(struct xchk_iscan *iscan)
 
 void xchk_iscan_start(struct xfs_scrub *sc, unsigned int iget_timeout,
 		unsigned int iget_retry_delay, struct xchk_iscan *iscan);
+void xchk_iscan_finish_early(struct xchk_iscan *iscan);
 void xchk_iscan_teardown(struct xchk_iscan *iscan);
 
 int xchk_iscan_iter(struct xchk_iscan *iscan, struct xfs_inode **ipp);
