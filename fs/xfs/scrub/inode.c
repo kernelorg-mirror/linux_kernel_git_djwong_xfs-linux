@@ -498,6 +498,7 @@ xchk_dinode(
 			xchk_ino_set_corrupt(sc, ino);
 		break;
 	case XFS_DINODE_FMT_RMAP:
+	case XFS_DINODE_FMT_REFCOUNT:
 		if (!S_ISREG(mode))
 			xchk_ino_set_corrupt(sc, ino);
 		break;
