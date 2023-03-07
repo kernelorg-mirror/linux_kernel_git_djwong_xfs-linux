@@ -278,6 +278,11 @@ int vfs_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 	    (mode & ~(FALLOC_FL_UNSHARE_RANGE | FALLOC_FL_KEEP_SIZE)))
 		return -EINVAL;
 
+	/* Mapping free space should only be used by itself. */
+	if ((mode & FALLOC_FL_MAP_FREE_SPACE) &&
+	    (mode & ~FALLOC_FL_MAP_FREE_SPACE))
+		return -EINVAL;
+
 	if (!(file->f_mode & FMODE_WRITE))
 		return -EBADF;
 
