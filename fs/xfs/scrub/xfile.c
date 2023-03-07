@@ -417,3 +417,101 @@ xfile_put_page(
 		return -EIO;
 	return 0;
 }
+
+/* Dump an xfile to dmesg. */
+int
+xfile_dump(
+	struct xfile		*xf)
+{
+	struct xfile_stat	sb;
+	struct inode		*inode = file_inode(xf->file);
+	struct address_space	*mapping = inode->i_mapping;
+	loff_t			holepos = 0;
+	loff_t			datapos;
+	loff_t			ret;
+	unsigned int		pflags;
+	bool			all_zeroes = true;
+	int			error = 0;
+
+	error = xfile_stat(xf, &sb);
+	if (error)
+		return error;
+
+	printk(KERN_ALERT "xfile ino 0x%lx isize 0x%llx dump:", inode->i_ino,
+			sb.size);
+	pflags = memalloc_nofs_save();
+
+	while ((ret = vfs_llseek(xf->file, holepos, SEEK_DATA)) >= 0) {
+		datapos = rounddown_64(ret, PAGE_SIZE);
+		ret = vfs_llseek(xf->file, datapos, SEEK_HOLE);
+		if (ret < 0)
+			break;
+		holepos = min_t(loff_t, sb.size, roundup_64(ret, PAGE_SIZE));
+
+		while (datapos < holepos) {
+			struct page	*page = NULL;
+			void		*p, *kaddr;
+			u64		datalen = holepos - datapos;
+			unsigned int	pagepos;
+			unsigned int	pagelen;
+
+			cond_resched();
+
+			if (fatal_signal_pending(current)) {
+				error = -EINTR;
+				goto out_pflags;
+			}
+
+			pagelen = min_t(u64, datalen, PAGE_SIZE);
+
+			page = shmem_read_mapping_page_gfp(mapping,
+					datapos >> PAGE_SHIFT, __GFP_NOWARN);
+			if (IS_ERR(page)) {
+				error = PTR_ERR(page);
+				if (error == -EIO)
+					printk(KERN_ALERT "%.8llx: poisoned",
+							datapos);
+				else if (error != -ENOMEM)
+					goto out_pflags;
+
+				goto next_pgoff;
+			}
+
+			if (!PageUptodate(page))
+				goto next_page;
+
+			kaddr = kmap_local_page(page);
+			p = kaddr;
+
+			for (pagepos = 0; pagepos < pagelen; pagepos += 16) {
+				char prefix[16];
+				unsigned int linelen;
+
+				linelen = min_t(unsigned int, pagelen, 16);
+
+				if (!memchr_inv(p + pagepos, 0, linelen))
+					continue;
+
+				snprintf(prefix, 16, "%.8llx: ",
+						datapos + pagepos);
+
+				all_zeroes = false;
+				print_hex_dump(KERN_ALERT, prefix,
+						DUMP_PREFIX_NONE, 16, 1,
+						p + pagepos, linelen, true);
+			}
+			kunmap_local(kaddr);
+next_page:
+			put_page(page);
+next_pgoff:
+			datapos += PAGE_SIZE;
+		}
+	}
+	if (all_zeroes)
+		printk(KERN_ALERT "<all zeroes>");
+	if (ret != -ENXIO)
+		error = ret;
+out_pflags:
+	memalloc_nofs_restore(pflags);
+	return error;
+}
