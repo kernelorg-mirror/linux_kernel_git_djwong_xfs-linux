@@ -1360,103 +1360,6 @@ xfs_swap_extent_flush(
 	return 0;
 }
 
-/* Swap the extents of two files by swapping data forks. */
-STATIC int
-xfs_swap_extent_forks(
-	struct xfs_trans	*tp,
-	struct xfs_inode	*ip,
-	struct xfs_inode	*tip,
-	int			*src_log_flags,
-	int			*target_log_flags)
-{
-	xfs_filblks_t		aforkblks = 0;
-	xfs_filblks_t		taforkblks = 0;
-	xfs_extnum_t		junk;
-	uint64_t		tmp;
-	int			error;
-
-	/*
-	 * Count the number of extended attribute blocks
-	 */
-	if (xfs_inode_has_attr_fork(ip) && ip->i_af.if_nextents > 0 &&
-	    ip->i_af.if_format != XFS_DINODE_FMT_LOCAL) {
-		error = xfs_bmap_count_blocks(tp, ip, XFS_ATTR_FORK, &junk,
-				&aforkblks);
-		if (error)
-			return error;
-	}
-	if (xfs_inode_has_attr_fork(tip) && tip->i_af.if_nextents > 0 &&
-	    tip->i_af.if_format != XFS_DINODE_FMT_LOCAL) {
-		error = xfs_bmap_count_blocks(tp, tip, XFS_ATTR_FORK, &junk,
-				&taforkblks);
-		if (error)
-			return error;
-	}
-
-	/*
-	 * Btree format (v3) inodes have the inode number stamped in the bmbt
-	 * block headers. We can't start changing the bmbt blocks until the
-	 * inode owner change is logged so recovery does the right thing in the
-	 * event of a crash. Set the owner change log flags now and leave the
-	 * bmbt scan as the last step.
-	 */
-	if (xfs_has_v3inodes(ip->i_mount)) {
-		if (ip->i_df.if_format == XFS_DINODE_FMT_BTREE)
-			(*target_log_flags) |= XFS_ILOG_DOWNER;
-		if (tip->i_df.if_format == XFS_DINODE_FMT_BTREE)
-			(*src_log_flags) |= XFS_ILOG_DOWNER;
-	}
-
-	/*
-	 * Swap the data forks of the inodes
-	 */
-	swap(ip->i_df, tip->i_df);
-
-	/*
-	 * Fix the on-disk inode values
-	 */
-	tmp = (uint64_t)ip->i_nblocks;
-	ip->i_nblocks = tip->i_nblocks - taforkblks + aforkblks;
-	tip->i_nblocks = tmp + taforkblks - aforkblks;
-
-	/*
-	 * The extents in the source inode could still contain speculative
-	 * preallocation beyond EOF (e.g. the file is open but not modified
-	 * while defrag is in progress). In that case, we need to copy over the
-	 * number of delalloc blocks the data fork in the source inode is
-	 * tracking beyond EOF so that when the fork is truncated away when the
-	 * temporary inode is unlinked we don't underrun the i_delayed_blks
-	 * counter on that inode.
-	 */
-	ASSERT(tip->i_delayed_blks == 0);
-	tip->i_delayed_blks = ip->i_delayed_blks;
-	ip->i_delayed_blks = 0;
-
-	switch (ip->i_df.if_format) {
-	case XFS_DINODE_FMT_EXTENTS:
-		(*src_log_flags) |= XFS_ILOG_DEXT;
-		break;
-	case XFS_DINODE_FMT_BTREE:
-		ASSERT(!xfs_has_v3inodes(ip->i_mount) ||
-		       (*src_log_flags & XFS_ILOG_DOWNER));
-		(*src_log_flags) |= XFS_ILOG_DBROOT;
-		break;
-	}
-
-	switch (tip->i_df.if_format) {
-	case XFS_DINODE_FMT_EXTENTS:
-		(*target_log_flags) |= XFS_ILOG_DEXT;
-		break;
-	case XFS_DINODE_FMT_BTREE:
-		(*target_log_flags) |= XFS_ILOG_DBROOT;
-		ASSERT(!xfs_has_v3inodes(ip->i_mount) ||
-		       (*target_log_flags & XFS_ILOG_DOWNER));
-		break;
-	}
-
-	return 0;
-}
-
 /*
  * Fix up the owners of the bmbt blocks to refer to the current inode. The
  * change owner scan attempts to order all modified buffers in the current
@@ -1499,6 +1402,154 @@ xfs_swap_change_owner(
 	return error;
 }
 
+/* Swap the extents of two files by swapping data forks. */
+STATIC int
+xfs_swap_extent_forks(
+	struct xfs_trans	**tpp,
+	struct xfs_inode	*ip,
+	struct xfs_inode	*tip)
+{
+	xfs_filblks_t		aforkblks = 0;
+	xfs_filblks_t		taforkblks = 0;
+	xfs_extnum_t		junk;
+	uint64_t		tmp;
+	int			src_log_flags = XFS_ILOG_CORE;
+	int			target_log_flags = XFS_ILOG_CORE;
+	int			error;
+
+	/*
+	 * Count the number of extended attribute blocks
+	 */
+	if (xfs_inode_has_attr_fork(ip) && ip->i_af.if_nextents > 0 &&
+	    ip->i_af.if_format != XFS_DINODE_FMT_LOCAL) {
+		error = xfs_bmap_count_blocks(*tpp, ip, XFS_ATTR_FORK, &junk,
+				&aforkblks);
+		if (error)
+			return error;
+	}
+	if (xfs_inode_has_attr_fork(tip) && tip->i_af.if_nextents > 0 &&
+	    tip->i_af.if_format != XFS_DINODE_FMT_LOCAL) {
+		error = xfs_bmap_count_blocks(*tpp, tip, XFS_ATTR_FORK, &junk,
+				&taforkblks);
+		if (error)
+			return error;
+	}
+
+	/*
+	 * Btree format (v3) inodes have the inode number stamped in the bmbt
+	 * block headers. We can't start changing the bmbt blocks until the
+	 * inode owner change is logged so recovery does the right thing in the
+	 * event of a crash. Set the owner change log flags now and leave the
+	 * bmbt scan as the last step.
+	 */
+	if (xfs_has_v3inodes(ip->i_mount)) {
+		if (ip->i_df.if_format == XFS_DINODE_FMT_BTREE)
+			target_log_flags |= XFS_ILOG_DOWNER;
+		if (tip->i_df.if_format == XFS_DINODE_FMT_BTREE)
+			src_log_flags |= XFS_ILOG_DOWNER;
+	}
+
+	/*
+	 * Swap the data forks of the inodes
+	 */
+	swap(ip->i_df, tip->i_df);
+
+	/*
+	 * Fix the on-disk inode values
+	 */
+	tmp = (uint64_t)ip->i_nblocks;
+	ip->i_nblocks = tip->i_nblocks - taforkblks + aforkblks;
+	tip->i_nblocks = tmp + taforkblks - aforkblks;
+
+	/*
+	 * The extents in the source inode could still contain speculative
+	 * preallocation beyond EOF (e.g. the file is open but not modified
+	 * while defrag is in progress). In that case, we need to copy over the
+	 * number of delalloc blocks the data fork in the source inode is
+	 * tracking beyond EOF so that when the fork is truncated away when the
+	 * temporary inode is unlinked we don't underrun the i_delayed_blks
+	 * counter on that inode.
+	 */
+	ASSERT(tip->i_delayed_blks == 0);
+	tip->i_delayed_blks = ip->i_delayed_blks;
+	ip->i_delayed_blks = 0;
+
+	switch (ip->i_df.if_format) {
+	case XFS_DINODE_FMT_EXTENTS:
+		src_log_flags |= XFS_ILOG_DEXT;
+		break;
+	case XFS_DINODE_FMT_BTREE:
+		ASSERT(!xfs_has_v3inodes(ip->i_mount) ||
+		       (src_log_flags & XFS_ILOG_DOWNER));
+		src_log_flags |= XFS_ILOG_DBROOT;
+		break;
+	}
+
+	switch (tip->i_df.if_format) {
+	case XFS_DINODE_FMT_EXTENTS:
+		target_log_flags |= XFS_ILOG_DEXT;
+		break;
+	case XFS_DINODE_FMT_BTREE:
+		target_log_flags |= XFS_ILOG_DBROOT;
+		ASSERT(!xfs_has_v3inodes(ip->i_mount) ||
+		       (target_log_flags & XFS_ILOG_DOWNER));
+		break;
+	}
+
+	/* Do we have to swap reflink flags? */
+	if ((ip->i_diflags2 & XFS_DIFLAG2_REFLINK) ^
+	    (tip->i_diflags2 & XFS_DIFLAG2_REFLINK)) {
+		uint64_t	f;
+
+		f = ip->i_diflags2 & XFS_DIFLAG2_REFLINK;
+		ip->i_diflags2 &= ~XFS_DIFLAG2_REFLINK;
+		ip->i_diflags2 |= tip->i_diflags2 & XFS_DIFLAG2_REFLINK;
+		tip->i_diflags2 &= ~XFS_DIFLAG2_REFLINK;
+		tip->i_diflags2 |= f & XFS_DIFLAG2_REFLINK;
+	}
+
+	/* Swap the cow forks. */
+	if (xfs_has_reflink(ip->i_mount)) {
+		ASSERT(!ip->i_cowfp ||
+		       ip->i_cowfp->if_format == XFS_DINODE_FMT_EXTENTS);
+		ASSERT(!tip->i_cowfp ||
+		       tip->i_cowfp->if_format == XFS_DINODE_FMT_EXTENTS);
+
+		swap(ip->i_cowfp, tip->i_cowfp);
+
+		if (ip->i_cowfp && ip->i_cowfp->if_bytes)
+			xfs_inode_set_cowblocks_tag(ip);
+		else
+			xfs_inode_clear_cowblocks_tag(ip);
+		if (tip->i_cowfp && tip->i_cowfp->if_bytes)
+			xfs_inode_set_cowblocks_tag(tip);
+		else
+			xfs_inode_clear_cowblocks_tag(tip);
+	}
+
+	xfs_trans_log_inode(*tpp, ip,  src_log_flags);
+	xfs_trans_log_inode(*tpp, tip, target_log_flags);
+
+	/*
+	 * The extent forks have been swapped, but crc=1,rmapbt=0 filesystems
+	 * have inode number owner values in the bmbt blocks that still refer to
+	 * the old inode. Scan each bmbt to fix up the owner values with the
+	 * inode number of the current inode.
+	 */
+	if (src_log_flags & XFS_ILOG_DOWNER) {
+		error = xfs_swap_change_owner(tpp, ip, tip);
+		if (error)
+			return error;
+	}
+	if (target_log_flags & XFS_ILOG_DOWNER) {
+		error = xfs_swap_change_owner(tpp, tip, ip);
+		if (error)
+			return error;
+	}
+
+	return 0;
+}
+
 int
 xfs_swap_extents(
 	struct xfs_inode	*ip,	/* target inode */
@@ -1508,9 +1559,7 @@ xfs_swap_extents(
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_trans	*tp;
 	struct xfs_bstat	*sbp = &sxp->sx_stat;
-	int			src_log_flags, target_log_flags;
 	int			error = 0;
-	uint64_t		f;
 	int			resblks = 0;
 	unsigned int		flags = 0;
 	struct timespec64	ctime;
@@ -1642,9 +1691,6 @@ xfs_swap_extents(
 	 * recovery is going to see the fork as owned by the swapped inode,
 	 * not the pre-swapped inodes.
 	 */
-	src_log_flags = XFS_ILOG_CORE;
-	target_log_flags = XFS_ILOG_CORE;
-
 	if (xfs_has_rmapbt(mp)) {
 		struct xfs_swapext_req	req = {
 			.ip1		= tip,
@@ -1657,60 +1703,10 @@ xfs_swap_extents(
 		xfs_swapext(tp, &req);
 		error = xfs_defer_finish(&tp);
 	} else
-		error = xfs_swap_extent_forks(tp, ip, tip, &src_log_flags,
-				&target_log_flags);
+		error = xfs_swap_extent_forks(&tp, ip, tip);
 	if (error) {
 		trace_xfs_swap_extent_error(ip, error, _THIS_IP_);
 		goto out_trans_cancel;
-	}
-
-	/* Do we have to swap reflink flags? */
-	if ((ip->i_diflags2 & XFS_DIFLAG2_REFLINK) ^
-	    (tip->i_diflags2 & XFS_DIFLAG2_REFLINK)) {
-		f = ip->i_diflags2 & XFS_DIFLAG2_REFLINK;
-		ip->i_diflags2 &= ~XFS_DIFLAG2_REFLINK;
-		ip->i_diflags2 |= tip->i_diflags2 & XFS_DIFLAG2_REFLINK;
-		tip->i_diflags2 &= ~XFS_DIFLAG2_REFLINK;
-		tip->i_diflags2 |= f & XFS_DIFLAG2_REFLINK;
-	}
-
-	/* Swap the cow forks. */
-	if (xfs_has_reflink(mp)) {
-		ASSERT(!ip->i_cowfp ||
-		       ip->i_cowfp->if_format == XFS_DINODE_FMT_EXTENTS);
-		ASSERT(!tip->i_cowfp ||
-		       tip->i_cowfp->if_format == XFS_DINODE_FMT_EXTENTS);
-
-		swap(ip->i_cowfp, tip->i_cowfp);
-
-		if (ip->i_cowfp && ip->i_cowfp->if_bytes)
-			xfs_inode_set_cowblocks_tag(ip);
-		else
-			xfs_inode_clear_cowblocks_tag(ip);
-		if (tip->i_cowfp && tip->i_cowfp->if_bytes)
-			xfs_inode_set_cowblocks_tag(tip);
-		else
-			xfs_inode_clear_cowblocks_tag(tip);
-	}
-
-	xfs_trans_log_inode(tp, ip,  src_log_flags);
-	xfs_trans_log_inode(tp, tip, target_log_flags);
-
-	/*
-	 * The extent forks have been swapped, but crc=1,rmapbt=0 filesystems
-	 * have inode number owner values in the bmbt blocks that still refer to
-	 * the old inode. Scan each bmbt to fix up the owner values with the
-	 * inode number of the current inode.
-	 */
-	if (src_log_flags & XFS_ILOG_DOWNER) {
-		error = xfs_swap_change_owner(&tp, ip, tip);
-		if (error)
-			goto out_trans_cancel;
-	}
-	if (target_log_flags & XFS_ILOG_DOWNER) {
-		error = xfs_swap_change_owner(&tp, tip, ip);
-		if (error)
-			goto out_trans_cancel;
 	}
 
 	/*
