@@ -654,5 +654,8 @@ void xfs_icreate_args_inherit(struct xfs_icreate_args *args,
 		bool init_xattrs);
 void xfs_icreate_args_rootfile(struct xfs_icreate_args *args,
 		struct xfs_mount *mp, umode_t mode, bool init_xattrs);
+int xfs_icreate_dqalloc(const struct xfs_icreate_args *args,
+		struct xfs_dquot **udqpp, struct xfs_dquot **gdqpp,
+		struct xfs_dquot **pdqpp);
 
 #endif	/* __XFS_INODE_H__ */
