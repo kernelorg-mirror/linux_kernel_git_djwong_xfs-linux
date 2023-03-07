@@ -12,10 +12,12 @@
 #include "xfs_mount.h"
 #include "xfs_inode.h"
 #include "xfs_btree.h"
+#include "xfs_btree_mem.h"
 #include "xfs_ag.h"
 #include "xfs_quota.h"
 #include "xfs_quota_defs.h"
 #include "xfs_dir2.h"
+#include "xfs_da_format.h"
 #include "scrub/scrub.h"
 #include "scrub/xfile.h"
 #include "scrub/xfarray.h"
@@ -23,6 +25,7 @@
 #include "scrub/iscan.h"
 #include "scrub/nlinks.h"
 #include "scrub/fscounters.h"
+#include "scrub/xfbtree.h"
 
 /* Figure out which block the btree cursor was pointing to. */
 static inline xfs_fsblock_t
@@ -40,6 +43,15 @@ xchk_btree_cur_fsbno(
 
 	return NULLFSBLOCK;
 }
+
+#ifdef CONFIG_XFS_BTREE_IN_XFILE
+static inline unsigned long
+xfbtree_ino(
+	struct xfbtree		*xfbt)
+{
+	return file_inode(xfbt->target->bt_xfile->file)->i_ino;
+}
+#endif /* CONFIG_XFS_BTREE_IN_XFILE */
 
 /*
  * We include this last to have the helpers above available for the trace
