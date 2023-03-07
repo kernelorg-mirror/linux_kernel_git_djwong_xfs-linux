@@ -31,6 +31,7 @@
 #include "scrub/xfile.h"
 #include "scrub/xfbtree.h"
 #include "xfs_btree_mem.h"
+#include "xfs_rtgroup.h"
 
 /*
  * Btree magic numbers.
@@ -476,6 +477,10 @@ xfs_btree_del_cursor(
 	       xfs_is_shutdown(cur->bc_mp) || error != 0);
 	if (unlikely(cur->bc_flags & XFS_BTREE_STAGING))
 		kmem_free(cur->bc_ops);
+	if ((cur->bc_ops->geom_flags & XFS_BTGEO_ROOT_IN_INODE) &&
+	    !(cur->bc_ops->geom_flags & XFS_BTGEO_IN_XFILE) &&
+	    cur->bc_ino.rtg)
+		xfs_rtgroup_put(cur->bc_ino.rtg);
 	if (!(cur->bc_ops->geom_flags & XFS_BTGEO_LONG_PTRS) &&
 	    !(cur->bc_ops->geom_flags & XFS_BTGEO_IN_XFILE) &&
 	    cur->bc_ag.pag)
