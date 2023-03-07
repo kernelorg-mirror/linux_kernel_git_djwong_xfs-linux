@@ -1722,14 +1722,27 @@ xfs_fs_fill_super(
 "EXPERIMENTAL realtime allocation group feature in use. Use at your own risk!");
 
 	if (xfs_has_reflink(mp)) {
-		if (mp->m_sb.sb_rblocks) {
+		/*
+		 * Reflink doesn't support rt extent sizes larger than a single
+		 * block because we would have to perform unshare-around for
+		 * rtext-unaligned write requests.
+		 */
+		if (xfs_has_realtime(mp) && mp->m_sb.sb_rextsize != 1) {
 			xfs_alert(mp,
-	"reflink not compatible with realtime device!");
+	"reflink not compatible with realtime extent size %u!",
+					mp->m_sb.sb_rextsize);
 			error = -EINVAL;
 			goto out_filestream_unmount;
 		}
 
-		if (xfs_globals.always_cow) {
+		/*
+		 * always-cow mode is not supported on filesystems with rt
+		 * extent sizes larger than a single block because we'd have
+		 * to perform write-around for unaligned writes because remap
+		 * requests must be aligned to an rt extent.
+		 */
+		if (xfs_globals.always_cow &&
+		    (!xfs_has_realtime(mp) || mp->m_sb.sb_rextsize == 1)) {
 			xfs_info(mp, "using DEBUG-only always_cow mode.");
 			mp->m_always_cow = true;
 		}
