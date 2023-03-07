@@ -101,7 +101,7 @@ xrep_quota_item(
 		rqi->need_quotacheck = true;
 		dirty = true;
 	}
-	if (dqp->q_rtb.count > mp->m_sb.sb_rblocks) {
+	if (!xfs_has_reflink(mp) && dqp->q_rtb.count > mp->m_sb.sb_rblocks) {
 		dqp->q_rtb.reserved -= dqp->q_rtb.count;
 		dqp->q_rtb.reserved += mp->m_sb.sb_rblocks;
 		dqp->q_rtb.count = mp->m_sb.sb_rblocks;
