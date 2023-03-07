@@ -110,12 +110,14 @@ int xchk_setup_rtsummary(struct xfs_scrub *sc);
 int xchk_setup_rgsuperblock(struct xfs_scrub *sc);
 int xchk_setup_rgbitmap(struct xfs_scrub *sc);
 int xchk_setup_rtrmapbt(struct xfs_scrub *sc);
+int xchk_setup_rtrefcountbt(struct xfs_scrub *sc);
 #else
 # define xchk_setup_rtbitmap		xchk_setup_nothing
 # define xchk_setup_rtsummary		xchk_setup_nothing
 # define xchk_setup_rgsuperblock	xchk_setup_nothing
 # define xchk_setup_rgbitmap		xchk_setup_nothing
 # define xchk_setup_rtrmapbt		xchk_setup_nothing
+# define xchk_setup_rtrefcountbt	xchk_setup_nothing
 #endif
 #ifdef CONFIG_XFS_QUOTA
 int xchk_ino_dqattach(struct xfs_scrub *sc);
@@ -177,7 +179,8 @@ void xchk_rt_unlock_rtbitmap(struct xfs_scrub *sc);
 
 /* All the locks we need to check an rtgroup. */
 #define XCHK_RTGLOCK_ALL	(XFS_RTGLOCK_BITMAP_SHARED | \
-				 XFS_RTGLOCK_RMAP)
+				 XFS_RTGLOCK_RMAP | \
+				 XFS_RTGLOCK_REFCOUNT)
 
 int xchk_rtgroup_init(struct xfs_scrub *sc, xfs_rgnumber_t rgno,
 		struct xchk_rt *sr, unsigned int rtglock_flags);
