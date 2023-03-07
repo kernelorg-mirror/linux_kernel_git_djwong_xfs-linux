@@ -3514,3 +3514,24 @@ xfs_iunlock2_io_mmap(
 	if (ip1 != ip2)
 		inode_unlock(VFS_I(ip1));
 }
+
+/* Compute the number of data and realtime blocks used by a file. */
+void
+xfs_inode_count_blocks(
+	struct xfs_trans	*tp,
+	struct xfs_inode	*ip,
+	xfs_filblks_t		*dblocks,
+	xfs_filblks_t		*rblocks)
+{
+	struct xfs_ifork	*ifp = xfs_ifork_ptr(ip, XFS_DATA_FORK);
+
+	if (!XFS_IS_REALTIME_INODE(ip)) {
+		*dblocks = ip->i_nblocks;
+		*rblocks = 0;
+		return;
+	}
+
+	*rblocks = 0;
+	xfs_bmap_count_leaves(ifp, rblocks);
+	*dblocks = ip->i_nblocks - *rblocks;
+}
