@@ -512,6 +512,7 @@ xfs_getfsmap_rtdev_rtbitmap(
 	xfs_rtblock_t			start_rtb;
 	xfs_rtblock_t			end_rtb;
 	uint64_t			eofs;
+	xfs_extlen_t			mod;
 	int				error;
 
 	eofs = XFS_FSB_TO_BB(mp, xfs_rtx_to_rtb(mp, mp->m_sb.sb_rextents));
@@ -539,10 +540,9 @@ xfs_getfsmap_rtdev_rtbitmap(
 	 * Set up query parameters to return free rtextents covering the range
 	 * we want.
 	 */
-	alow.ar_startext = start_rtb;
-	ahigh.ar_startext = end_rtb;
-	do_div(alow.ar_startext, mp->m_sb.sb_rextsize);
-	if (do_div(ahigh.ar_startext, mp->m_sb.sb_rextsize))
+	alow.ar_startext = xfs_rtb_to_rtxt(mp, start_rtb);
+	ahigh.ar_startext = xfs_rtb_to_rtx(mp, end_rtb, &mod);
+	if (mod)
 		ahigh.ar_startext++;
 	error = xfs_rtalloc_query_range(mp, tp, &alow, &ahigh,
 			xfs_getfsmap_rtdev_rtbitmap_helper, info);
