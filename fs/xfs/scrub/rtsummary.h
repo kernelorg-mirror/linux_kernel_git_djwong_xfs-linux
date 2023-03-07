@@ -6,9 +6,9 @@
 #ifndef __XFS_SCRUB_RTSUMMARY_H__
 #define __XFS_SCRUB_RTSUMMARY_H__
 
-typedef unsigned int xchk_rtsumoff_t;
+typedef unsigned int xfs_rtsumoff_t;
 
-int xfsum_copyout(struct xfs_scrub *sc, xchk_rtsumoff_t sumoff,
+int xfsum_copyout(struct xfs_scrub *sc, xfs_rtsumoff_t sumoff,
 		xfs_suminfo_t *info, unsigned int nr_words);
 
 #endif /* __XFS_SCRUB_RTSUMMARY_H__ */
