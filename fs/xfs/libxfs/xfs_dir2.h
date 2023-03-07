@@ -284,4 +284,8 @@ static inline unsigned char xfs_ascii_ci_xfrm(unsigned char c)
 	return c;
 }
 
+int xfs_dir_create_new_child(struct xfs_trans *tp, uint resblks,
+		struct xfs_inode *dp, struct xfs_name *name,
+		struct xfs_inode *ip);
+
 #endif	/* __XFS_DIR2_H__ */
