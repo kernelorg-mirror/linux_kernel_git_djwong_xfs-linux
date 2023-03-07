@@ -730,9 +730,10 @@ struct xfs_scrub_metadata {
 #define XFS_SCRUB_TYPE_RGSUPER	28	/* realtime superblock */
 #define XFS_SCRUB_TYPE_RGBITMAP	29	/* realtime group bitmap */
 #define XFS_SCRUB_TYPE_RTRMAPBT	30	/* rtgroup reverse mapping btree */
+#define XFS_SCRUB_TYPE_RTREFCBT	31	/* realtime reference count btree */
 
 /* Number of scrub subcommands. */
-#define XFS_SCRUB_TYPE_NR	31
+#define XFS_SCRUB_TYPE_NR	32
 
 /* i: Repair this metadata. */
 #define XFS_SCRUB_IFLAG_REPAIR		(1u << 0)
