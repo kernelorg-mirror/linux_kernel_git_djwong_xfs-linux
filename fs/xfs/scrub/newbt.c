@@ -273,7 +273,8 @@ xrep_newbt_add_blocks(
 	struct xrep_newbt		*xnr,
 	struct xfs_perag		*pag,
 	xfs_agblock_t			agbno,
-	xfs_extlen_t			len)
+	xfs_extlen_t			len,
+	bool				autoreap)
 {
 	struct xrep_newbt_resv		*resv;
 	int				error;
@@ -288,9 +289,11 @@ xrep_newbt_add_blocks(
 	resv->used = 0;
 	resv->pag = xfs_perag_hold(pag);
 
-	error = xrep_newbt_schedule_autoreap(xnr, resv);
-	if (error)
-		goto out_pag;
+	if (autoreap) {
+		error = xrep_newbt_schedule_autoreap(xnr, resv);
+		if (error)
+			goto out_pag;
+	}
 
 	list_add_tail(&resv->list, &xnr->resv_list);
 	return 0;
@@ -298,6 +301,21 @@ out_pag:
 	xfs_perag_put(resv->pag);
 	kfree(resv);
 	return error;
+}
+
+/*
+ * Add an extent to the new btree reservation pool.  Callers are required to
+ * handle any automatic reaping if the repair is cancelled.  @pag must be a
+ * passive reference.
+ */
+int
+xrep_newbt_add_extent(
+	struct xrep_newbt		*xnr,
+	struct xfs_perag		*pag,
+	xfs_agblock_t			agbno,
+	xfs_extlen_t			len)
+{
+	return xrep_newbt_add_blocks(xnr, pag, agbno, len, false);
 }
 
 /* Don't let our allocation hint take us beyond this AG */
@@ -361,7 +379,7 @@ xrep_newbt_alloc_ag_blocks(
 		}
 
 		error = xrep_newbt_add_blocks(xnr, sc->sa.pag, agbno,
-				args.len);
+				args.len, true);
 		if (error)
 			return error;
 
@@ -433,7 +451,7 @@ xrep_newbt_alloc_file_blocks(
 			return -EFSCORRUPTED;
 		}
 
-		error = xrep_newbt_add_blocks(xnr, pag, agbno, args.len);
+		error = xrep_newbt_add_blocks(xnr, pag, agbno, args.len, true);
 		xfs_perag_put(pag);
 		if (error)
 			return error;
@@ -494,6 +512,7 @@ xrep_newbt_free_extent(
 			free_aglen, xnr->oinfo.oi_owner);
 
 	ASSERT(xnr->resv != XFS_AG_RESV_AGFL);
+	ASSERT(xnr->resv != XFS_AG_RESV_IGNORE);
 
 	/*
 	 * Use EFIs to free the reservations.  This reduces the chance
@@ -636,4 +655,17 @@ xrep_newbt_claim_block(
 	else
 		ptr->s = cpu_to_be32(agbno);
 	return 0;
+}
+
+/* How many reserved blocks are unused? */
+unsigned int
+xrep_newbt_unused_blocks(
+	struct xrep_newbt	*xnr)
+{
+	struct xrep_newbt_resv	*resv;
+	unsigned int		unused = 0;
+
+	list_for_each_entry(resv, &xnr->resv_list, list)
+		unused += resv->len - resv->used;
+	return unused;
 }
