@@ -269,6 +269,7 @@ struct xfs_btree_cur_mem {
 	struct xfbtree			*xfbtree;
 	struct xfs_buf			*head_bp;
 	struct xfs_perag		*pag;
+	struct xfs_rtgroup		*rtg;
 };
 
 struct xfs_btree_level {
