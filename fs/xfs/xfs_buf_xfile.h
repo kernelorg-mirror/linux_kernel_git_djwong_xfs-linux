@@ -11,8 +11,10 @@ int xfile_buf_ioapply(struct xfs_buf *bp);
 int xfile_alloc_buftarg(struct xfs_mount *mp, const char *descr,
 		struct xfs_buftarg **btpp);
 void xfile_free_buftarg(struct xfs_buftarg *btp);
+xfs_daddr_t xfile_buftarg_nr_sectors(struct xfs_buftarg *btp);
 #else
 # define xfile_buf_ioapply(bp)			(-EOPNOTSUPP)
+# define xfile_buftarg_nr_sectors(btp)		(0)
 #endif /* CONFIG_XFS_IN_MEMORY_FILE */
 
 #endif /* __XFS_BUF_XFILE_H__ */
