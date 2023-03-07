@@ -21,6 +21,7 @@
 #include "xfs_errortag.h"
 #include "xfs_error.h"
 #include "xfs_ag.h"
+#include "xfs_buf_xfile.h"
 
 struct kmem_cache *xfs_buf_cache;
 
@@ -1556,6 +1557,30 @@ next_chunk:
 
 }
 
+/* Start a synchronous process-context buffer IO. */
+static inline void
+xfs_buf_start_sync_io(
+	struct xfs_buf	*bp)
+{
+	atomic_inc(&bp->b_io_remaining);
+}
+
+/* Finish a synchronous bprocess-context uffer IO. */
+static void
+xfs_buf_end_sync_io(
+	struct xfs_buf	*bp,
+	int		error)
+{
+	if (error)
+		cmpxchg(&bp->b_io_error, 0, error);
+
+	if (!bp->b_error && xfs_buf_is_vmapped(bp) && (bp->b_flags & XBF_READ))
+		invalidate_kernel_vmap_range(bp->b_addr, xfs_buf_vmap_len(bp));
+
+	if (atomic_dec_and_test(&bp->b_io_remaining) == 1)
+		xfs_buf_ioend(bp);
+}
+
 STATIC void
 _xfs_buf_ioapply(
 	struct xfs_buf	*bp)
@@ -1612,6 +1637,15 @@ _xfs_buf_ioapply(
 
 	/* we only use the buffer cache for meta-data */
 	op |= REQ_META;
+
+	if (bp->b_target->bt_flags & XFS_BUFTARG_XFILE) {
+		int	error;
+
+		xfs_buf_start_sync_io(bp);
+		error = xfile_buf_ioapply(bp);
+		xfs_buf_end_sync_io(bp, error);
+		return;
+	}
 
 	/*
 	 * Walk all the vectors issuing IO on them. Set up the initial offset
@@ -1980,10 +2014,12 @@ xfs_free_buftarg(
 	percpu_counter_destroy(&btp->bt_io_count);
 	list_lru_destroy(&btp->bt_lru);
 
-	fs_put_dax(btp->bt_daxdev, btp->bt_mount);
-	/* the main block device is closed by kill_block_super */
-	if (bdev != btp->bt_mount->m_super->s_bdev)
-		blkdev_put(bdev, btp->bt_mount->m_super);
+	if (!(btp->bt_flags & XFS_BUFTARG_XFILE)) {
+		fs_put_dax(btp->bt_daxdev, btp->bt_mount);
+		/* the main block device is closed by kill_block_super */
+		if (bdev != btp->bt_mount->m_super->s_bdev)
+			blkdev_put(bdev, btp->bt_mount->m_super);
+	}
 
 	kvfree(btp);
 }
@@ -2024,7 +2060,7 @@ xfs_setsize_buftarg_early(
 	return xfs_setsize_buftarg(btp, bdev_logical_block_size(bdev));
 }
 
-static struct xfs_buftarg *
+struct xfs_buftarg *
 xfs_alloc_buftarg_common(
 	struct xfs_mount	*mp,
 	const char		*descr)
