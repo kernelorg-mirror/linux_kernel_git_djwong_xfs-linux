@@ -25,6 +25,8 @@
 #include "xfs_imeta.h"
 #include "xfs_rtbitmap.h"
 #include "xfs_rtgroup.h"
+#include "xfs_error.h"
+#include "xfs_rtrmap_btree.h"
 
 /*
  * Realtime metadata files are not quite regular files because userspace can't
@@ -35,6 +37,7 @@
  */
 static struct lock_class_key xfs_rbmip_key;
 static struct lock_class_key xfs_rsumip_key;
+static struct lock_class_key xfs_rrmapip_key;
 
 /*
  * Read and return the summary information for a given extent size,
@@ -1582,6 +1585,53 @@ __xfs_rt_iget(
 #define xfs_rt_iget(tp, ino, lockdep_key, ipp) \
 	__xfs_rt_iget((tp), (ino), (lockdep_key), #lockdep_key, (ipp))
 
+/* Load realtime rmap btree inode. */
+STATIC int
+xfs_rtmount_rmapbt(
+	struct xfs_rtgroup	*rtg,
+	struct xfs_trans	*tp)
+{
+	struct xfs_mount	*mp = rtg->rtg_mount;
+	struct xfs_imeta_path	*path;
+	struct xfs_inode	*ip;
+	xfs_ino_t		ino;
+	int			error;
+
+	if (!xfs_has_rtrmapbt(mp))
+		return 0;
+
+	error = xfs_rtrmapbt_create_path(mp, rtg->rtg_rgno, &path);
+	if (error)
+		return error;
+
+	error = xfs_imeta_lookup(tp, path, &ino);
+	if (error)
+		goto out_path;
+
+	if (ino == NULLFSINO) {
+		error = -EFSCORRUPTED;
+		goto out_path;
+	}
+
+	error = xfs_rt_iget(tp, ino, &xfs_rrmapip_key, &ip);
+	if (error)
+		goto out_path;
+
+	if (XFS_IS_CORRUPT(mp, ip->i_df.if_format != XFS_DINODE_FMT_RMAP)) {
+		error = -EFSCORRUPTED;
+		goto out_rele;
+	}
+
+	rtg->rtg_rmapip = ip;
+	ip = NULL;
+out_rele:
+	if (ip)
+		xfs_imeta_irele(ip);
+out_path:
+	xfs_imeta_free_path(path);
+	return error;
+}
+
 /*
  * Read in the bmbt of an rt metadata inode so that we never have to load them
  * at runtime.  This enables the use of shared ILOCKs for rtbitmap scans.  Use
@@ -1656,12 +1706,24 @@ xfs_rtmount_inodes(
 	for_each_rtgroup(mp, rgno, rtg) {
 		rtg->rtg_blockcount = xfs_rtgroup_block_count(mp,
 							      rtg->rtg_rgno);
+
+		error = xfs_rtmount_rmapbt(rtg, tp);
+		if (error) {
+			xfs_rtgroup_rele(rtg);
+			goto out_rele_rtgroup;
+		}
 	}
 
 	xfs_alloc_rsum_cache(mp, sbp->sb_rbmblocks);
 	xfs_trans_cancel(tp);
 	return 0;
 
+out_rele_rtgroup:
+	for_each_rtgroup(mp, rgno, rtg) {
+		if (rtg->rtg_rmapip)
+			xfs_imeta_irele(rtg->rtg_rmapip);
+		rtg->rtg_rmapip = NULL;
+	}
 out_rele_summary:
 	xfs_imeta_irele(mp->m_rsumip);
 out_rele_bitmap:
@@ -1675,7 +1737,16 @@ void
 xfs_rtunmount_inodes(
 	struct xfs_mount	*mp)
 {
+	struct xfs_rtgroup	*rtg;
+	xfs_rgnumber_t		rgno;
+
 	kmem_free(mp->m_rsum_cache);
+
+	for_each_rtgroup(mp, rgno, rtg) {
+		if (rtg->rtg_rmapip)
+			xfs_imeta_irele(rtg->rtg_rmapip);
+		rtg->rtg_rmapip = NULL;
+	}
 	if (mp->m_rbmip)
 		xfs_imeta_irele(mp->m_rbmip);
 	if (mp->m_rsumip)
