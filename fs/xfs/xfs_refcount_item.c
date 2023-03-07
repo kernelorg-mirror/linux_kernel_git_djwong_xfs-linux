@@ -613,6 +613,7 @@ const struct xfs_defer_op_type xfs_rtrefcount_update_defer_type = {
 static inline bool
 xfs_cui_validate_phys(
 	struct xfs_mount		*mp,
+	bool				isrt,
 	struct xfs_phys_extent		*pmap)
 {
 	if (!xfs_has_reflink(mp))
@@ -631,12 +632,16 @@ xfs_cui_validate_phys(
 		return false;
 	}
 
+	if (isrt)
+		return xfs_verify_rtbext(mp, pmap->pe_startblock, pmap->pe_len);
+
 	return xfs_verify_fsbext(mp, pmap->pe_startblock, pmap->pe_len);
 }
 
 STATIC int
 xfs_cui_recover_extent(
 	struct xfs_trans		*tp,
+	bool				isrt,
 	const struct xfs_phys_extent	*pmap,
 	struct xfs_cud_log_item		*cudp,
 	struct xfs_btree_cur		**rcur,
@@ -658,9 +663,17 @@ xfs_cui_recover_extent(
 	 * Update the metadata.  If there is more work to be done, @fake will
 	 * be returned to us with blockcount > 0 and an updated startblock.
 	 */
-	fake.ri_pag = xfs_perag_intent_get(mp, pmap->pe_startblock);
-	error = xfs_trans_log_finish_refcount_update(tp, cudp, &fake, rcur);
-	xfs_perag_intent_put(fake.ri_pag);
+	if (isrt) {
+		fake.ri_rtg = xfs_rtgroup_intent_get(mp, pmap->pe_startblock);
+		error = xfs_trans_log_finish_rtrefcount_update(tp, cudp, &fake,
+				rcur);
+		xfs_rtgroup_intent_put(fake.ri_rtg);
+	} else {
+		fake.ri_pag = xfs_perag_intent_get(mp, pmap->pe_startblock);
+		error = xfs_trans_log_finish_refcount_update(tp, cudp, &fake,
+				rcur);
+		xfs_perag_intent_put(fake.ri_pag);
+	}
 	if (error || fake.ri_blockcount == 0)
 		return error;
 
@@ -672,17 +685,17 @@ requeue:
 
 	switch (fake.ri_type) {
 	case XFS_REFCOUNT_INCREASE:
-		xfs_refcount_increase_extent(tp, false, &irec);
+		xfs_refcount_increase_extent(tp, isrt, &irec);
 		break;
 	case XFS_REFCOUNT_DECREASE:
-		xfs_refcount_decrease_extent(tp, false, &irec);
+		xfs_refcount_decrease_extent(tp, isrt, &irec);
 		break;
 	case XFS_REFCOUNT_ALLOC_COW:
-		xfs_refcount_alloc_cow_extent(tp, false, irec.br_startblock,
+		xfs_refcount_alloc_cow_extent(tp, isrt, irec.br_startblock,
 				irec.br_blockcount);
 		break;
 	case XFS_REFCOUNT_FREE_COW:
-		xfs_refcount_free_cow_extent(tp, false, irec.br_startblock,
+		xfs_refcount_free_cow_extent(tp, isrt, irec.br_startblock,
 				irec.br_blockcount);
 		break;
 	default:
@@ -713,6 +726,7 @@ xfs_cui_item_recover(
 	struct xfs_btree_cur		*rcur = NULL;
 	struct xfs_mount		*mp = lip->li_log->l_mp;
 	struct xfs_phys_extent		*pmap;
+	bool				isrt = xfs_cui_item_isrt(lip);
 	bool				requeue_only = false;
 	int				i;
 	int				error = 0;
@@ -723,7 +737,7 @@ xfs_cui_item_recover(
 	 * just toss the CUI.
 	 */
 	for_each_cui_extent(cuip, i, pmap) {
-		if (!xfs_cui_validate_phys(mp, pmap)) {
+		if (!xfs_cui_validate_phys(mp, isrt, pmap)) {
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 					&cuip->cui_format,
 					sizeof(cuip->cui_format));
@@ -752,7 +766,7 @@ xfs_cui_item_recover(
 	cudp = xfs_trans_get_cud(tp, cuip);
 
 	for_each_cui_extent(cuip, i, pmap) {
-		error = xfs_cui_recover_extent(tp, pmap, cudp, &rcur,
+		error = xfs_cui_recover_extent(tp, isrt, pmap, cudp, &rcur,
 				&requeue_only);
 		if (error == -EFSCORRUPTED)
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
@@ -761,11 +775,17 @@ xfs_cui_item_recover(
 			goto abort_error;
 	}
 
-	xfs_refcount_finish_one_cleanup(tp, rcur, error);
+	if (isrt)
+		xfs_rtrefcount_finish_one_cleanup(tp, rcur, error);
+	else
+		xfs_refcount_finish_one_cleanup(tp, rcur, error);
 	return xfs_defer_ops_capture_and_commit(tp, capture_list);
 
 abort_error:
-	xfs_refcount_finish_one_cleanup(tp, rcur, error);
+	if (isrt)
+		xfs_rtrefcount_finish_one_cleanup(tp, rcur, error);
+	else
+		xfs_refcount_finish_one_cleanup(tp, rcur, error);
 	xfs_trans_cancel(tp);
 	return error;
 }
