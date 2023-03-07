@@ -64,7 +64,7 @@ xrep_nlinks_is_orphaned(
 
 	if (obs->parents != 0)
 		return false;
-	if (ip == mp->m_rootip || ip == sc->orphanage)
+	if (ip == mp->m_rootip || ip == sc->orphanage || ip == mp->m_metadirip)
 		return false;
 	return actual_nlink != 0;
 }
