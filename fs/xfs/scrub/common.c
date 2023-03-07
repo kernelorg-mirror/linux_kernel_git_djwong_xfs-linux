@@ -887,7 +887,12 @@ xchk_install_handle_inode(
 	struct xfs_scrub	*sc,
 	struct xfs_inode	*ip)
 {
-	if (VFS_I(ip)->i_generation != sc->sm->sm_gen) {
+	/*
+	 * Only the directories in the metadata directory tree can be scrubbed
+	 * by handle -- files must be checked through an explicit scrub type.
+	 */
+	if ((xfs_is_metadir_inode(ip) && !S_ISDIR(VFS_I(ip)->i_mode)) ||
+	    VFS_I(ip)->i_generation != sc->sm->sm_gen) {
 		xchk_irele(sc, ip);
 		return -ENOENT;
 	}
@@ -941,9 +946,14 @@ xchk_iget_for_scrubbing(
 	if (sc->sm->sm_ino == 0 || sc->sm->sm_ino == ip_in->i_ino)
 		return xchk_install_live_inode(sc, ip_in);
 
-	/* Reject internal metadata files and obviously bad inode numbers. */
-	if (xfs_internal_inum(mp, sc->sm->sm_ino))
+	/*
+	 * On pre-metadir filesystems, reject internal metadata files.
+	 * For metadir filesystems, xchk_install_handle_inode will
+	 * filter metadata files appropriately.
+	 */
+	if (!xfs_has_metadir(mp) && xfs_internal_inum(mp, sc->sm->sm_ino))
 		return -ENOENT;
+	/* Reject obviously bad inode numbers. */
 	if (!xfs_verify_ino(sc->mp, sc->sm->sm_ino))
 		return -ENOENT;
 
