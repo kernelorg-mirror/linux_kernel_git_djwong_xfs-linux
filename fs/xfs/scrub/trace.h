@@ -2556,6 +2556,7 @@ DEFINE_EVENT(xrep_parent_salvage_class, name, \
 	TP_PROTO(struct xfs_inode *dp, xfs_ino_t ino), \
 	TP_ARGS(dp, ino))
 DEFINE_XREP_PARENT_SALVAGE_CLASS(xrep_dir_salvaged_parent);
+DEFINE_XREP_PARENT_SALVAGE_CLASS(xrep_findparent_dirent);
 
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
 
