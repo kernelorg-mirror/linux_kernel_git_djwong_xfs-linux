@@ -46,6 +46,8 @@ void
 xfs_rtunmount_inodes(
 	struct xfs_mount	*mp);
 
+int xfs_rtmount_dqattach(struct xfs_mount *mp);
+
 /*
  * Get the bitmap and summary inodes into the mount structure
  * at mount time.
@@ -106,6 +108,7 @@ xfs_rtmount_init(
 # define xfs_rt_resv_free(mp)				((void)0)
 # define xfs_rt_resv_init(mp)				(0)
 # define xfs_growfs_check_rtgeom(mp, d, r, rs, rx, rb, rl)	(0)
+# define xfs_rtmount_dqattach(mp)			(0)
 #endif	/* CONFIG_XFS_RT */
 
 #endif	/* __XFS_RTALLOC_H__ */
