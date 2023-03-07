@@ -3472,7 +3472,8 @@ xlog_recover_finish(
 	 * longer anything to protect.  We rely on the AIL push to write out the
 	 * updated superblock after everything else.
 	 */
-	if (xfs_clear_incompat_log_features(log->l_mp)) {
+	if (xfs_clear_incompat_log_features(log->l_mp,
+				XFS_SB_FEAT_INCOMPAT_LOG_ALL)) {
 		error = xfs_sync_sb(log->l_mp, false);
 		if (error < 0) {
 			xfs_alert(log->l_mp,
