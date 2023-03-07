@@ -184,10 +184,13 @@ int xchk_rtgroup_init(struct xfs_scrub *sc, xfs_rgnumber_t rgno,
 void xchk_rtgroup_unlock(struct xfs_scrub *sc, struct xchk_rt *sr);
 void xchk_rtgroup_btcur_free(struct xchk_rt *sr);
 void xchk_rtgroup_free(struct xfs_scrub *sc, struct xchk_rt *sr);
+int xchk_rtgroup_drain_and_lock(struct xfs_scrub *sc, struct xchk_rt *sr,
+		unsigned int rtglock_flags);
 #else
 # define xchk_rtgroup_init(sc, rgno, sr, lockflags)	(-ENOSYS)
 # define xchk_rtgroup_btcur_free(sr)			((void)0)
 # define xchk_rtgroup_free(sc, sr)			((void)0)
+# define xchk_rtgroup_drain_and_lock(sc, sr, lockflags)	(-ENOSYS)
 #endif /* CONFIG_XFS_RT */
 
 int xchk_ag_read_headers(struct xfs_scrub *sc, xfs_agnumber_t agno,

@@ -780,7 +780,7 @@ xchk_rt_unlock_rtbitmap(
 
 #ifdef CONFIG_XFS_RT
 /* Lock all the rt group metadata inode ILOCKs and wait for intents. */
-static int
+int
 xchk_rtgroup_drain_and_lock(
 	struct xfs_scrub	*sc,
 	struct xchk_rt		*sr,
