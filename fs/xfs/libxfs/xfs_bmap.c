@@ -1171,6 +1171,7 @@ xfs_iread_extents(
 		goto out;
 	}
 	ASSERT(ir.loaded == xfs_iext_count(ifp));
+	smp_store_release(&ifp->if_needextents, 0);
 	return 0;
 out:
 	xfs_iext_destroy(ifp);

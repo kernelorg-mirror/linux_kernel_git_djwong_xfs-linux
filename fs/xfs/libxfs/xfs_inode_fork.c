@@ -174,6 +174,8 @@ xfs_iformat_btree(
 	int			level;
 
 	ifp = xfs_ifork_ptr(ip, whichfork);
+	ifp->if_needextents = 1;
+
 	dfp = (xfs_bmdr_block_t *)XFS_DFORK_PTR(dip, whichfork);
 	size = XFS_BMAP_BROOT_SPACE(mp, dfp);
 	nrecs = be16_to_cpu(dfp->bb_numrecs);
@@ -226,10 +228,15 @@ xfs_iformat_data_fork(
 
 	/*
 	 * Initialize the extent count early, as the per-format routines may
-	 * depend on it.
+	 * depend on it.  Use release semantics to set needextents /after/ we
+	 * set the format. This ensures that we can use acquire semantics on
+	 * needextents in xfs_need_iread_extents() and be guaranteed to see a
+	 * valid format value after that load.
 	 */
 	ip->i_df.if_format = dip->di_format;
 	ip->i_df.if_nextents = xfs_dfork_data_extents(dip);
+	smp_store_release(&ip->i_df.if_needextents,
+			   ip->i_df.if_format == XFS_DINODE_FMT_BTREE ? 1 : 0);
 
 	switch (inode->i_mode & S_IFMT) {
 	case S_IFIFO:
@@ -284,6 +291,8 @@ xfs_ifork_init_attr(
 {
 	ip->i_af.if_format = format;
 	ip->i_af.if_nextents = nextents;
+	smp_store_release(&ip->i_af.if_needextents,
+			   ip->i_af.if_format == XFS_DINODE_FMT_BTREE ? 1 : 0);
 }
 
 void
