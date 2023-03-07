@@ -1024,7 +1024,9 @@ xfs_mountfs(
 		ASSERT(mp->m_qflags == 0);
 		mp->m_qflags = quotaflags;
 
-		xfs_qm_mount_quotas(mp);
+		error = xfs_qm_mount_quotas(mp);
+		if (error)
+			goto out_rtunmount;
 	}
 
 	/*

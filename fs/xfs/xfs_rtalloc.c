@@ -32,6 +32,7 @@
 #include "xfs_rtrmap_btree.h"
 #include "xfs_trace.h"
 #include "xfs_rtrefcount_btree.h"
+#include "xfs_quota.h"
 
 /*
  * Realtime metadata files are not quite regular files because userspace can't
@@ -2030,6 +2031,27 @@ out_rele_bitmap:
 out_trans:
 	xfs_trans_cancel(tp);
 	return error;
+}
+
+/*
+ * Attach dquots for realtime metadata files.  Prior to the introduction of the
+ * metadata directory tree, the rtbitmap and rtsummary inodes were counted in
+ * the root dquot icount, so we must dqattach them to maintain correct counts.
+ */
+int
+xfs_rtmount_dqattach(
+	struct xfs_mount	*mp)
+{
+	int			error;
+
+	if (xfs_has_metadir(mp))
+		return 0;
+
+	error = xfs_qm_dqattach(mp->m_rbmip);
+	if (error)
+		return error;
+
+	return xfs_qm_dqattach(mp->m_rsumip);
 }
 
 void

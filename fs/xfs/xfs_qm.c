@@ -30,6 +30,7 @@
 #include "xfs_imeta.h"
 #include "xfs_imeta_utils.h"
 #include "xfs_da_format.h"
+#include "xfs_rtalloc.h"
 
 /*
  * The global quota manager. There is only one of these for the entire
@@ -1524,7 +1525,7 @@ error_purge:
  * If we fail here, the mount will continue with quota turned off. We don't
  * need to inidicate success or failure at all.
  */
-void
+int
 xfs_qm_mount_quotas(
 	struct xfs_mount	*mp)
 {
@@ -1563,7 +1564,7 @@ xfs_qm_mount_quotas(
 		error = xfs_qm_quotacheck(mp);
 		if (error) {
 			/* Quotacheck failed and disabled quotas. */
-			return;
+			return 0;
 		}
 	}
 	/*
@@ -1604,8 +1605,21 @@ xfs_qm_mount_quotas(
 
 	if (error) {
 		xfs_warn(mp, "Failed to initialize disk quotas.");
-		return;
+		return 0;
 	}
+
+	/*
+	 * Attach dquots to realtime metadata files before we do anything that
+	 * could alter the resource usage of rt metadata (log recovery, normal
+	 * operation, etc).
+	 */
+	error = xfs_rtmount_dqattach(mp);
+	if (error) {
+		xfs_qm_unmount_quotas(mp);
+		return error;
+	}
+
+	return 0;
 }
 
 /*
