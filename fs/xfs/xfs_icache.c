@@ -850,6 +850,7 @@ bad_rele:
 	xfs_irele(ip);
 whine:
 	xfs_err(mp, "metadata inode 0x%llx is corrupt", ino);
+	xfs_fs_mark_sick(mp, XFS_SICK_FS_METADIR);
 	return -EFSCORRUPTED;
 }
 
