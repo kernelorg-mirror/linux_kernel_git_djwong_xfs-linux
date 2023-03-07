@@ -1953,6 +1953,8 @@ static int xfs_init_fs_context(
 	mp->m_logbsize = -1;
 	mp->m_allocsize_log = 16; /* 64k */
 
+	xfs_hooks_init(&mp->m_dirent_update_hooks);
+
 	/*
 	 * Copy binary VFS mount flags we are interested in.
 	 */

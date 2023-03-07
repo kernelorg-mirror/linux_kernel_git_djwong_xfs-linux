@@ -241,6 +241,8 @@ typedef struct xfs_mount {
 	unsigned int		*m_errortag;
 	struct xfs_kobj		m_errortag_kobj;
 #endif
+	/* Hook to feed dirent updates to an active online repair. */
+	struct xfs_hooks	m_dirent_update_hooks;
 } xfs_mount_t;
 
 #define M_IGEO(mp)		(&(mp)->m_ino_geo)
