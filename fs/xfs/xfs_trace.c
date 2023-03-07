@@ -39,6 +39,7 @@
 #include "scrub/xfile.h"
 #include "scrub/xfbtree.h"
 #include "xfs_btree_mem.h"
+#include "xfs_bmap.h"
 
 /*
  * We include this last to have the helpers above available for the trace
