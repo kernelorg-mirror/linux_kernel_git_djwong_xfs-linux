@@ -6,6 +6,8 @@
 #ifndef __XFS_SCRUB_XFILE_H__
 #define __XFS_SCRUB_XFILE_H__
 
+#ifdef CONFIG_XFS_IN_MEMORY_FILE
+
 struct xfile_page {
 	struct page		*page;
 	void			*fsdata;
@@ -24,6 +26,7 @@ static inline pgoff_t xfile_page_index(const struct xfile_page *xfpage)
 
 struct xfile {
 	struct file		*file;
+	struct xfs_buf_cache	bcache;
 };
 
 int xfile_create(const char *description, loff_t isize, struct xfile **xfilep);
@@ -75,5 +78,18 @@ int xfile_get_page(struct xfile *xf, loff_t offset, unsigned int len,
 int xfile_put_page(struct xfile *xf, struct xfile_page *xbuf);
 
 int xfile_dump(struct xfile *xf);
+#else
+static inline int
+xfile_obj_load(struct xfile *xf, void *buf, size_t count, loff_t offset)
+{
+	return -EIO;
+}
+
+static inline int
+xfile_obj_store(struct xfile *xf, const void *buf, size_t count, loff_t offset)
+{
+	return -EIO;
+}
+#endif /* CONFIG_XFS_IN_MEMORY_FILE */
 
 #endif /* __XFS_SCRUB_XFILE_H__ */
