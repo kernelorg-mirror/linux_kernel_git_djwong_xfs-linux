@@ -512,12 +512,11 @@ int		xfs_release(struct xfs_inode *ip);
 int		xfs_inactive(struct xfs_inode *ip);
 int		xfs_lookup(struct xfs_inode *dp, const struct xfs_name *name,
 			   struct xfs_inode **ipp, struct xfs_name *ci_name);
-int		xfs_create(struct mnt_idmap *idmap,
-			   struct xfs_inode *dp, struct xfs_name *name,
-			   umode_t mode, dev_t rdev, bool need_xattr,
+int		xfs_create(struct xfs_inode *dp, struct xfs_name *name,
+			   const struct xfs_icreate_args *iargs,
 			   struct xfs_inode **ipp);
-int		xfs_create_tmpfile(struct mnt_idmap *idmap,
-			   struct xfs_inode *dp, umode_t mode, bool init_xattrs,
+int		xfs_create_tmpfile(struct xfs_inode *dp,
+			   const struct xfs_icreate_args *iargs,
 			   struct xfs_inode **ipp);
 int		xfs_remove(struct xfs_inode *dp, struct xfs_name *name,
 			   struct xfs_inode *ip);
