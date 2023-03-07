@@ -43,7 +43,8 @@ xfile_alloc_buftarg(
 {
 	struct xfs_buftarg	*btp;
 	int			error;
-       
+
+	xfile_cache_disable(xfile);
 	error = xfs_buf_cache_init(&xfile->bcache);
 	if (error)
 		return error;
@@ -51,6 +52,7 @@ xfile_alloc_buftarg(
 	btp = xfs_alloc_buftarg_common(mp);
 	if (!btp) {
 		xfs_buf_cache_destroy(&xfile->bcache);
+		xfile_cache_enable(xfile);
 		return -ENOMEM;
 	}
 
@@ -76,6 +78,7 @@ xfile_free_buftarg(
 {
 	xfs_free_buftarg(btp);
 	xfs_buf_cache_destroy(&xfile->bcache);
+	xfile_cache_enable(xfile);
 }
 
 /* Sector count for this xfile buftarg. */
