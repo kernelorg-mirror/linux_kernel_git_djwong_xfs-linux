@@ -425,7 +425,6 @@ xfs_file_compat_ioctl(
 	struct inode		*inode = file_inode(filp);
 	struct xfs_inode	*ip = XFS_I(inode);
 	void			__user *arg = compat_ptr(p);
-	int			error;
 
 	trace_xfs_file_compat_ioctl(ip);
 
@@ -435,6 +434,7 @@ xfs_file_compat_ioctl(
 		return xfs_compat_ioc_fsgeometry_v1(ip->i_mount, arg);
 	case XFS_IOC_FSGROWFSDATA_32: {
 		struct xfs_growfs_data	in;
+		int			error;
 
 		if (xfs_compat_growfs_data_copyin(&in, arg))
 			return -EFAULT;
@@ -447,6 +447,7 @@ xfs_file_compat_ioctl(
 	}
 	case XFS_IOC_FSGROWFSRT_32: {
 		struct xfs_growfs_rt	in;
+		int			error;
 
 		if (xfs_compat_growfs_rt_copyin(&in, arg))
 			return -EFAULT;
@@ -471,12 +472,8 @@ xfs_file_compat_ioctl(
 				   offsetof(struct xfs_swapext, sx_stat)) ||
 		    xfs_ioctl32_bstat_copyin(&sxp.sx_stat, &sxu->sx_stat))
 			return -EFAULT;
-		error = mnt_want_write_file(filp);
-		if (error)
-			return error;
-		error = xfs_ioc_swapext(&sxp);
-		mnt_drop_write_file(filp);
-		return error;
+
+		return xfs_ioc_swapext(&sxp);
 	}
 	case XFS_IOC_FSBULKSTAT_32:
 	case XFS_IOC_FSBULKSTAT_SINGLE_32:
