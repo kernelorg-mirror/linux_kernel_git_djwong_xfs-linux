@@ -185,6 +185,8 @@ xfs_alloc_get_rec(
 union xfs_btree_rec;
 void xfs_alloc_btrec_to_irec(const union xfs_btree_rec *rec,
 		struct xfs_alloc_rec_incore *irec);
+xfs_failaddr_t xfs_alloc_check_perag_irec(struct xfs_perag *pag,
+		const struct xfs_alloc_rec_incore *irec);
 xfs_failaddr_t xfs_alloc_check_irec(struct xfs_btree_cur *cur,
 		const struct xfs_alloc_rec_incore *irec);
 
