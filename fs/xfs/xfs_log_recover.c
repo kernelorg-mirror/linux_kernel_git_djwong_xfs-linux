@@ -28,6 +28,7 @@
 #include "xfs_ag.h"
 #include "xfs_quota.h"
 #include "xfs_reflink.h"
+#include "xfs_rtgroup.h"
 
 #define BLK_AVG(blk1, blk2)	((blk1+blk2) >> 1)
 
@@ -3338,6 +3339,11 @@ xlog_do_recover(
 			&mp->m_maxagi);
 	if (error) {
 		xfs_warn(mp, "Failed post-recovery per-ag init: %d", error);
+		return error;
+	}
+	error = xfs_initialize_rtgroups(mp, sbp->sb_rgcount);
+	if (error) {
+		xfs_warn(mp, "Failed post-recovery rtgroup init: %d", error);
 		return error;
 	}
 	mp->m_alloc_set_aside = xfs_alloc_set_aside(mp);
