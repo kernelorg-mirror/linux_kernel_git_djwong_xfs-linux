@@ -138,7 +138,10 @@ xfs_bmap_rtalloc(
 	bool			ignore_locality = false;
 	int			error;
 
-	align = xfs_get_extsz_hint(ap->ip);
+	if (ap->flags & XFS_BMAPI_COWFORK)
+		align = xfs_get_cowextsz_hint(ap->ip);
+	else
+		align = xfs_get_extsz_hint(ap->ip);
 retry:
 	prod = xfs_extlen_to_rtxlen(mp, align);
 	error = xfs_bmap_extsize_align(mp, &ap->got, &ap->prev,
