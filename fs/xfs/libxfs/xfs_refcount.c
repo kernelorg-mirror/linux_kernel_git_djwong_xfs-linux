@@ -26,6 +26,7 @@
 #include "xfs_health.h"
 #include "xfs_rtgroup.h"
 #include "xfs_rtalloc.h"
+#include "xfs_rtrefcount_btree.h"
 
 struct kmem_cache	*xfs_refcount_intent_cache;
 
@@ -1489,9 +1490,9 @@ xfs_refcount_finish_one(
 	}
 	if (rcur == NULL) {
 		if (ri->ri_realtime) {
-			/* coming in a later patch */
-			ASSERT(0);
-			return -EFSCORRUPTED;
+			xfs_rtgroup_lock(tp, ri->ri_rtg, XFS_RTGLOCK_REFCOUNT);
+			rcur = xfs_rtrefcountbt_init_cursor(mp, tp, ri->ri_rtg,
+					ri->ri_rtg->rtg_refcountip);
 		} else {
 			error = xfs_alloc_read_agf(ri->ri_pag, tp,
 					XFS_ALLOC_FLAG_FREEING, &agbp);
