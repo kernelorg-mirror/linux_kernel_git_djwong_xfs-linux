@@ -31,6 +31,7 @@ int xbitmap_walk(struct xbitmap *bitmap, xbitmap_walk_fn fn,
 
 bool xbitmap_empty(struct xbitmap *bitmap);
 bool xbitmap_test(struct xbitmap *bitmap, uint64_t start, uint64_t *len);
+uint64_t xbitmap_count_set_regions(struct xbitmap *bitmap);
 
 int xbitmap_take_first_set(struct xbitmap *bitmap, uint64_t start,
 		uint64_t last, uint64_t *valp);
@@ -88,6 +89,10 @@ static inline int xagb_bitmap_disunion(struct xagb_bitmap *bitmap,
 	return xbitmap_disunion(&bitmap->agbitmap, &sub->agbitmap);
 }
 
+static inline uint32_t xagb_bitmap_count_set_regions(struct xagb_bitmap *bitmap)
+{
+	return xbitmap_count_set_regions(&bitmap->agbitmap);
+}
 static inline uint32_t xagb_bitmap_hweight(struct xagb_bitmap *bitmap)
 {
 	return xbitmap_hweight(&bitmap->agbitmap);
