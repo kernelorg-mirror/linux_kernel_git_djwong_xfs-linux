@@ -750,10 +750,12 @@ union xfs_rtword_ondisk {
 
 /*
  * Realtime summary counts are accessed by the word, which is currently
- * stored in host-endian format.
+ * stored in host-endian format.  Starting with the realtime groups feature,
+ * the words are stored in be32 ondisk.
  */
 union xfs_suminfo_ondisk {
 	__u32		raw;
+	__be32		rtg;
 };
 
 /*
