@@ -21,6 +21,7 @@ extern struct kmem_cache *xfs_buf_cache;
  *	Base types
  */
 struct xfs_buf;
+struct xfile;
 
 #define XFS_BUF_DADDR_NULL	((xfs_daddr_t) (-1LL))
 
@@ -106,11 +107,15 @@ void xfs_buf_cache_destroy(struct xfs_buf_cache *bch);
  */
 typedef struct xfs_buftarg {
 	dev_t			bt_dev;
-	struct block_device	*bt_bdev;
+	union {
+		struct block_device	*bt_bdev;
+		struct xfile		*bt_xfile;
+	};
 	struct dax_device	*bt_daxdev;
 	u64			bt_dax_part_off;
 	struct xfs_mount	*bt_mount;
 	struct xfs_buf_cache	*bt_cache;
+	unsigned int		bt_flags;
 	unsigned int		bt_meta_sectorsize;
 	size_t			bt_meta_sectormask;
 	size_t			bt_logical_sectorsize;
@@ -123,6 +128,13 @@ typedef struct xfs_buftarg {
 	struct percpu_counter	bt_io_count;
 	struct ratelimit_state	bt_ioerror_rl;
 } xfs_buftarg_t;
+
+#ifdef CONFIG_XFS_IN_MEMORY_FILE
+/* in-memory buftarg via bt_xfile */
+# define XFS_BUFTARG_XFILE	(1U << 0)
+#else
+# define XFS_BUFTARG_XFILE	(0)
+#endif
 
 #define XB_PAGES	2
 
@@ -374,6 +386,8 @@ xfs_buf_update_cksum(struct xfs_buf *bp, unsigned long cksum_offset)
 /*
  *	Handling of buftargs.
  */
+struct xfs_buftarg *xfs_alloc_buftarg_common(struct xfs_mount *mp,
+		const char *descr);
 struct xfs_buftarg *xfs_alloc_buftarg(struct xfs_mount *mp,
 		struct block_device *bdev);
 extern void xfs_free_buftarg(struct xfs_buftarg *);
@@ -384,24 +398,32 @@ extern int xfs_setsize_buftarg(struct xfs_buftarg *, unsigned int);
 static inline struct block_device *
 xfs_buftarg_bdev(struct xfs_buftarg *btp)
 {
+	if (btp->bt_flags & XFS_BUFTARG_XFILE)
+		return NULL;
 	return btp->bt_bdev;
 }
 
 static inline unsigned int
 xfs_getsize_buftarg(struct xfs_buftarg *btp)
 {
+	if (btp->bt_flags & XFS_BUFTARG_XFILE)
+		return SECTOR_SIZE;
 	return block_size(btp->bt_bdev);
 }
 
 static inline bool
 xfs_readonly_buftarg(struct xfs_buftarg *btp)
 {
+	if (btp->bt_flags & XFS_BUFTARG_XFILE)
+		return false;
 	return bdev_read_only(btp->bt_bdev);
 }
 
 static inline int
 xfs_buftarg_flush(struct xfs_buftarg *btp)
 {
+	if (btp->bt_flags & XFS_BUFTARG_XFILE)
+		return 0;
 	return blkdev_issue_flush(btp->bt_bdev);
 }
 
@@ -413,6 +435,8 @@ xfs_buftarg_zeroout(
 	gfp_t			gfp_mask,
 	unsigned int		flags)
 {
+	if (btp->bt_flags & XFS_BUFTARG_XFILE)
+		return -EOPNOTSUPP;
 	return blkdev_issue_zeroout(btp->bt_bdev, sector, nr_sects, gfp_mask,
 			flags);
 }
