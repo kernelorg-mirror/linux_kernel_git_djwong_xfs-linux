@@ -761,6 +761,42 @@ xfs_rtallocate_extent_size(
 	return 0;
 }
 
+/* Get a buffer for the block. */
+static int
+xfs_growfs_init_rtbuf(
+	struct xfs_trans	*tp,
+	struct xfs_inode	*ip,
+	xfs_fsblock_t		fsbno,
+	enum xfs_blft		buf_type)
+{
+	struct xfs_mount	*mp = tp->t_mountp;
+	struct xfs_buf		*bp;
+	xfs_daddr_t		d;
+	int			error;
+
+	d = XFS_FSB_TO_DADDR(mp, fsbno);
+	error = xfs_trans_get_buf(tp, mp->m_ddev_targp, d, mp->m_bsize, 0,
+			&bp);
+	if (error)
+		return error;
+
+	xfs_trans_buf_set_type(tp, bp, buf_type);
+	bp->b_ops = xfs_rtblock_ops(mp, buf_type == XFS_BLFT_RTSUMMARY_BUF);
+	memset(bp->b_addr, 0, mp->m_sb.sb_blocksize);
+
+	if (xfs_has_rtgroups(mp) && buf_type == XFS_BLFT_RTBITMAP_BUF) {
+		struct xfs_rtbuf_blkinfo	*hdr = bp->b_addr;
+
+		hdr->rt_magic = cpu_to_be32(XFS_RTBITMAP_MAGIC);
+		hdr->rt_owner = cpu_to_be64(ip->i_ino);
+		hdr->rt_blkno = cpu_to_be64(d);
+		uuid_copy(&hdr->rt_uuid, &mp->m_sb.sb_meta_uuid);
+	}
+
+	xfs_trans_log_buf(tp, bp, 0, mp->m_sb.sb_blocksize - 1);
+	return 0;
+}
+
 /*
  * Allocate space to the bitmap or summary file, and zero it, for growfs.
  */
@@ -772,8 +808,6 @@ xfs_growfs_rt_alloc(
 	struct xfs_inode	*ip)		/* inode (bitmap/summary) */
 {
 	xfs_fileoff_t		bno;		/* block number in file */
-	struct xfs_buf		*bp;	/* temporary buffer for zeroing */
-	xfs_daddr_t		d;		/* disk block address */
 	int			error;		/* error return value */
 	xfs_fsblock_t		fsbno;		/* filesystem block for bno */
 	struct xfs_bmbt_irec	map;		/* block map output */
@@ -848,19 +882,11 @@ xfs_growfs_rt_alloc(
 			 */
 			xfs_ilock(ip, XFS_ILOCK_EXCL);
 			xfs_trans_ijoin(tp, ip, XFS_ILOCK_EXCL);
-			/*
-			 * Get a buffer for the block.
-			 */
-			d = XFS_FSB_TO_DADDR(mp, fsbno);
-			error = xfs_trans_get_buf(tp, mp->m_ddev_targp, d,
-					mp->m_bsize, 0, &bp);
+
+			error = xfs_growfs_init_rtbuf(tp, ip, fsbno, buf_type);
 			if (error)
 				goto out_trans_cancel;
 
-			xfs_trans_buf_set_type(tp, bp, buf_type);
-			bp->b_ops = &xfs_rtbuf_ops;
-			memset(bp->b_addr, 0, mp->m_sb.sb_blocksize);
-			xfs_trans_log_buf(tp, bp, 0, mp->m_sb.sb_blocksize - 1);
 			/*
 			 * Commit the transaction.
 			 */
@@ -1131,10 +1157,10 @@ xfs_growfs_rt(
 	 * Skip the current block if it is exactly full.
 	 * This also deals with the case where there were no rtextents before.
 	 */
-	for (bmbno = sbp->sb_rbmblocks -
-		     ((sbp->sb_rextents & ((1 << mp->m_blkbit_log) - 1)) != 0);
-	     bmbno < nrbmblocks;
-	     bmbno++) {
+	bmbno = sbp->sb_rbmblocks;
+	if (xfs_rtx_to_rbmword(mp, sbp->sb_rextents) != 0)
+		bmbno--;
+	for (; bmbno < nrbmblocks; bmbno++) {
 		struct xfs_rtalloc_args	args = {
 			.mp		= mp,
 		};
@@ -1155,7 +1181,7 @@ xfs_growfs_rt(
 		nsbp->sb_rextsize = in->extsize;
 		nmp->m_rtxblklog = -1; /* don't use shift or masking */
 		nsbp->sb_rbmblocks = bmbno + 1;
-		nrblocks_step = (bmbno + 1) * NBBY * nsbp->sb_blocksize *
+		nrblocks_step = (bmbno + 1) * mp->m_rtx_per_rbmblock *
 				nsbp->sb_rextsize;
 		nsbp->sb_rblocks = min(nrblocks, nrblocks_step);
 		nsbp->sb_rextents = xfs_rtb_to_rtx(nmp, nsbp->sb_rblocks);
