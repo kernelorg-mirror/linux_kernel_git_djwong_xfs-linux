@@ -230,6 +230,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   )
 
 xfs-$(CONFIG_XFS_RT)		+= $(addprefix scrub/, \
+				   rgsuper_repair.o \
 				   rtbitmap_repair.o \
 				   rtsummary_repair.o \
 				   )
