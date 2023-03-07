@@ -782,43 +782,35 @@ xfs_dir_hook_del(
 
 int
 xfs_create(
-	struct mnt_idmap	*idmap,
 	struct xfs_inode	*dp,
 	struct xfs_name		*name,
-	umode_t			mode,
-	dev_t			rdev,
-	bool			init_xattrs,
-	xfs_inode_t		**ipp)
+	const struct xfs_icreate_args *args,
+	struct xfs_inode	**ipp)
 {
-	struct xfs_icreate_args	args = {
-		.rdev		= rdev,
-		.nlink		= S_ISDIR(mode) ? 2 : 1,
-	};
-	int			is_dir = S_ISDIR(mode);
 	struct xfs_mount	*mp = dp->i_mount;
 	struct xfs_inode	*ip = NULL;
 	struct xfs_trans	*tp = NULL;
-	int			error;
-	bool			unlock_dp_on_error = false;
 	struct xfs_dquot	*udqp = NULL;
 	struct xfs_dquot	*gdqp = NULL;
 	struct xfs_dquot	*pdqp = NULL;
 	struct xfs_trans_res	*tres;
-	uint			resblks;
-	xfs_ino_t		ino;
 	struct xfs_parent_args	*ppargs;
+	xfs_ino_t		ino;
+	bool			unlock_dp_on_error = false;
+	bool			is_dir = S_ISDIR(args->mode);
+	uint			resblks;
+	int			error;
 
+	ASSERT(args->pip == dp);
 	trace_xfs_create(dp, name);
 
 	if (xfs_is_shutdown(mp))
 		return -EIO;
 
-	xfs_icreate_args_inherit(&args, dp, idmap, mode, init_xattrs);
-
 	/*
 	 * Make sure that we have allocated dquot(s) on disk.
 	 */
-	error = xfs_qm_vop_dqalloc(dp, args.uid, args.gid, args.prid,
+	error = xfs_qm_vop_dqalloc(dp, args->uid, args->gid, args->prid,
 			XFS_QMOPT_QUOTALL | XFS_QMOPT_INHERIT,
 			&udqp, &gdqp, &pdqp);
 	if (error)
@@ -861,9 +853,9 @@ xfs_create(
 	 * entry pointing to them, but a directory also the "." entry
 	 * pointing to itself.
 	 */
-	error = xfs_dialloc(&tp, dp->i_ino, mode, &ino);
+	error = xfs_dialloc(&tp, dp->i_ino, args->mode, &ino);
 	if (!error)
-		error = xfs_icreate(tp, ino, &args, &ip);
+		error = xfs_icreate(tp, ino, args, &ip);
 	if (error)
 		goto out_trans_cancel;
 
@@ -963,33 +955,31 @@ xfs_create(
 
 int
 xfs_create_tmpfile(
-	struct mnt_idmap	*idmap,
 	struct xfs_inode	*dp,
-	umode_t			mode,
-	bool			init_xattrs,
+	const struct xfs_icreate_args *args,
 	struct xfs_inode	**ipp)
 {
-	struct xfs_icreate_args	args = { NULL };
 	struct xfs_mount	*mp = dp->i_mount;
 	struct xfs_inode	*ip = NULL;
 	struct xfs_trans	*tp = NULL;
-	int			error;
 	struct xfs_dquot	*udqp = NULL;
 	struct xfs_dquot	*gdqp = NULL;
 	struct xfs_dquot	*pdqp = NULL;
 	struct xfs_trans_res	*tres;
-	uint			resblks;
 	xfs_ino_t		ino;
+	uint			resblks;
+	int			error;
+
+	ASSERT(args->nlink == 0);
+	ASSERT(args->pip == dp);
 
 	if (xfs_is_shutdown(mp))
 		return -EIO;
 
-	xfs_icreate_args_inherit(&args, dp, idmap, mode, init_xattrs);
-
 	/*
 	 * Make sure that we have allocated dquot(s) on disk.
 	 */
-	error = xfs_qm_vop_dqalloc(dp, args.uid, args.gid, args.prid,
+	error = xfs_qm_vop_dqalloc(dp, args->uid, args->gid, args->prid,
 			XFS_QMOPT_QUOTALL | XFS_QMOPT_INHERIT,
 			&udqp, &gdqp, &pdqp);
 	if (error)
@@ -1003,9 +993,9 @@ xfs_create_tmpfile(
 	if (error)
 		goto out_release_dquots;
 
-	error = xfs_dialloc(&tp, dp->i_ino, mode, &ino);
+	error = xfs_dialloc(&tp, dp->i_ino, args->mode, &ino);
 	if (!error)
-		error = xfs_icreate(tp, ino, &args, &ip);
+		error = xfs_icreate(tp, ino, args, &ip);
 	if (error)
 		goto out_trans_cancel;
 
@@ -2850,12 +2840,17 @@ xfs_rename_alloc_whiteout(
 	struct xfs_inode	*dp,
 	struct xfs_inode	**wip)
 {
+	struct xfs_icreate_args	args = {
+		.nlink		= 0,
+	};
 	struct xfs_inode	*tmpfile;
 	struct qstr		name;
 	int			error;
 
-	error = xfs_create_tmpfile(idmap, dp, S_IFCHR | WHITEOUT_MODE,
-			xfs_has_parent(dp->i_mount), &tmpfile);
+	xfs_icreate_args_inherit(&args, dp, idmap, S_IFCHR | WHITEOUT_MODE,
+			xfs_has_parent(dp->i_mount));
+
+	error = xfs_create_tmpfile(dp, &args, &tmpfile);
 	if (error)
 		return error;
 
