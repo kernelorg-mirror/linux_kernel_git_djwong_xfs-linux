@@ -994,7 +994,10 @@ int
 xchk_setup_rt(
 	struct xfs_scrub	*sc)
 {
-	return xchk_trans_alloc(sc, 0);
+	uint			resblks;
+
+	resblks = xrep_calc_rtgroup_resblks(sc);
+	return xchk_trans_alloc(sc, resblks);
 }
 
 /* Set us up with AG headers and btree cursors. */
