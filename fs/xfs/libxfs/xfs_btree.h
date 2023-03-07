@@ -116,6 +116,9 @@ struct xfs_btree_ops {
 	size_t	key_len;
 	size_t	rec_len;
 
+	/* XFS_BTREE_* flags that determine the geometry of the btree */
+	unsigned int	geom_flags;
+
 	/* cursor operations */
 	struct xfs_btree_cur *(*dup_cursor)(struct xfs_btree_cur *);
 	void	(*update_cursor)(struct xfs_btree_cur *src,
@@ -750,6 +753,9 @@ xfs_btree_alloc_cursor(
 	cur->bc_btnum = btnum;
 	cur->bc_maxlevels = maxlevels;
 	cur->bc_cache = cache;
+	cur->bc_flags = ops->geom_flags;
+	if (xfs_has_crc(mp))
+		cur->bc_flags |= XFS_BTREE_CRC_BLOCKS;
 
 	return cur;
 }
