@@ -286,6 +286,154 @@ out_del_cursor:
 	return error;
 }
 
+/* Trim the free space in this AG by block number. */
+static inline int
+xfs_trim_gather_bybno(
+	struct xfs_perag	*pag,
+	xfs_daddr_t		start,
+	xfs_daddr_t		end,
+	xfs_daddr_t		minlen,
+	struct xfs_alloc_rec_incore *tcur,
+	struct xfs_busy_extents	*extents,
+	uint64_t		*blocks_trimmed)
+{
+	struct xfs_mount	*mp = pag->pag_mount;
+	struct xfs_btree_cur	*cur;
+	struct xfs_buf		*agbp;
+	xfs_daddr_t		end_daddr;
+	xfs_agnumber_t		agno = pag->pag_agno;
+	xfs_agblock_t		start_agbno;
+	xfs_agblock_t		end_agbno;
+	xfs_extlen_t		minlen_fsb = XFS_BB_TO_FSB(mp, minlen);
+	int			i;
+	int			batch = 100;
+	int			error;
+
+	start = max(start, XFS_AGB_TO_DADDR(mp, agno, 0));
+	start_agbno = xfs_daddr_to_agbno(mp, start);
+
+	end_daddr = XFS_AGB_TO_DADDR(mp, agno, pag->block_count);
+	end = min(end, end_daddr - 1);
+	end_agbno = xfs_daddr_to_agbno(mp, end);
+
+	error = xfs_alloc_read_agf(pag, NULL, 0, &agbp);
+	if (error)
+		return error;
+
+	cur = xfs_allocbt_init_cursor(mp, NULL, agbp, pag, XFS_BTNUM_BNO);
+
+	/*
+	 * If this is our first time, look for any extent crossing start_agbno.
+	 * Otherwise, continue at the next extent after wherever we left off.
+	 */
+	if (tcur->ar_startblock == NULLAGBLOCK) {
+		error = xfs_alloc_lookup_le(cur, start_agbno, 0, &i);
+		if (error)
+			goto out_del_cursor;
+
+		/*
+		 * If we didn't find anything at or below start_agbno,
+		 * increment the cursor to see if there's another record above
+		 * it.
+		 */
+		if (!i)
+			error = xfs_btree_increment(cur, 0, &i);
+	} else {
+		error = xfs_alloc_lookup_ge(cur, tcur->ar_startblock, 0, &i);
+	}
+	if (error)
+		goto out_del_cursor;
+	if (!i) {
+		/* nothing left in the AG, we are done */
+		tcur->ar_blockcount = 0;
+		goto out_del_cursor;
+	}
+
+	/* Loop the entire range that was asked for. */
+	while (i) {
+		xfs_agblock_t	fbno;
+		xfs_extlen_t	flen;
+
+		error = xfs_alloc_get_rec(cur, &fbno, &flen, &i);
+		if (error)
+			break;
+		if (XFS_IS_CORRUPT(mp, i != 1)) {
+			xfs_btree_mark_sick(cur);
+			error = -EFSCORRUPTED;
+			break;
+		}
+
+		if (--batch <= 0) {
+			/*
+			 * Update the cursor to point at this extent so we
+			 * restart the next batch from this extent.
+			 */
+			tcur->ar_startblock = fbno;
+			tcur->ar_blockcount = flen;
+			break;
+		}
+
+		/* Exit on extents entirely outside of the range. */
+		if (fbno >= end_agbno) {
+			tcur->ar_blockcount = 0;
+			break;
+		}
+		if (fbno + flen < start_agbno)
+			goto next_extent;
+
+		/* Trim the extent returned to the range we want. */
+		if (fbno < start_agbno) {
+			flen -= start_agbno - fbno;
+			fbno = start_agbno;
+		}
+		if (fbno + flen > end_agbno + 1)
+			flen = end_agbno - fbno + 1;
+
+		/* Ignore too small. */
+		if (flen < minlen_fsb) {
+			trace_xfs_discard_toosmall(mp, agno, fbno, flen);
+			goto next_extent;
+		}
+
+		/*
+		 * If any blocks in the range are still busy, skip the
+		 * discard and try again the next time.
+		 */
+		if (xfs_extent_busy_search(mp, pag, fbno, flen)) {
+			trace_xfs_discard_busy(mp, agno, fbno, flen);
+			goto next_extent;
+		}
+
+		xfs_extent_busy_insert_discard(pag, fbno, flen,
+				&extents->extent_list);
+		*blocks_trimmed += flen;
+next_extent:
+		error = xfs_btree_increment(cur, 0, &i);
+		if (error)
+			break;
+
+		/*
+		 * If there's no more records in the tree, we are done. Set the
+		 * cursor block count to 0 to indicate to the caller that there
+		 * are no more extents to search.
+		 */
+		if (i == 0)
+			tcur->ar_blockcount = 0;
+	}
+
+	/*
+	 * If there was an error, release all the gathered busy extents because
+	 * we aren't going to issue a discard on them any more.
+	 */
+	if (error)
+		xfs_extent_busy_clear(mp, &extents->extent_list, false);
+
+out_del_cursor:
+	xfs_btree_del_cursor(cur, error);
+	xfs_buf_relse(agbp);
+	return error;
+}
+
 static bool
 xfs_trim_should_stop(void)
 {
@@ -309,7 +457,14 @@ xfs_trim_extents(
 		.ar_blockcount = pag->pagf_longest,
 		.ar_startblock = NULLAGBLOCK,
 	};
+	struct xfs_mount	*mp = pag->pag_mount;
+	bool			by_len = true;
 	int			error = 0;
+
+	/* Are we only trimming part of this AG? */
+	if (start > XFS_AGB_TO_DADDR(mp, pag->pag_agno, 0) ||
+	    end < XFS_AGB_TO_DADDR(mp, pag->pag_agno, pag->block_count - 1))
+		by_len = false;
 
 	do {
 		struct xfs_busy_extents	*extents;
@@ -324,8 +479,13 @@ xfs_trim_extents(
 		extents->owner = extents;
 		INIT_LIST_HEAD(&extents->extent_list);
 
-		error = xfs_trim_gather_extents(pag, start, end, minlen,
-				&tcur, extents, blocks_trimmed);
+		if (by_len)
+			error = xfs_trim_gather_extents(pag, start, end,
+					minlen, &tcur, extents,
+					blocks_trimmed);
+		else
+			error = xfs_trim_gather_bybno(pag, start, end, minlen,
+					&tcur, extents, blocks_trimmed);
 		if (error) {
 			kfree(extents);
 			break;
