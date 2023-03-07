@@ -19,12 +19,14 @@
 #include "xfs_trans_space.h"
 #include "xfs_dir2.h"
 #include "xfs_xchgrange.h"
+#include "xfs_swapext.h"
 #include "xfs_defer.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/repair.h"
 #include "scrub/trace.h"
 #include "scrub/tempfile.h"
+#include "scrub/tempswap.h"
 #include "scrub/xfile.h"
 
 /*
@@ -444,5 +446,207 @@ xrep_tempfile_roll_trans(
 		return error;
 
 	xfs_trans_ijoin(sc->tp, sc->tempip, 0);
+	return 0;
+}
+
+/* Enable atomic extent swapping. */
+int
+xrep_tempswap_grab_log_assist(
+	struct xfs_scrub	*sc)
+{
+	bool			need_rele = false;
+	int			error;
+
+	if (sc->flags & XREP_FSGATES_ATOMIC_XCHG)
+		return 0;
+
+	error = xfs_xchg_range_grab_log_assist(sc->mp, true, &need_rele);
+	if (error)
+		return error;
+	if (!need_rele) {
+		ASSERT(need_rele);
+		return -EOPNOTSUPP;
+	}
+
+	trace_xchk_fsgates_enable(sc, XREP_FSGATES_ATOMIC_XCHG);
+
+	sc->flags |= XREP_FSGATES_ATOMIC_XCHG;
+	return 0;
+}
+
+/*
+ * Fill out the swapext request in preparation for swapping the contents of a
+ * metadata file that we've rebuilt in the temp file.
+ */
+STATIC int
+xrep_tempswap_prep_request(
+	struct xfs_scrub	*sc,
+	int			whichfork,
+	struct xrep_tempswap	*tx)
+{
+	struct xfs_swapext_req	*req = &tx->req;
+
+	memset(tx, 0, sizeof(struct xrep_tempswap));
+
+	/* COW forks don't exist on disk. */
+	if (whichfork == XFS_COW_FORK) {
+		ASSERT(0);
+		return -EINVAL;
+	}
+
+	/* Both files should have the relevant forks. */
+	if (!xfs_ifork_ptr(sc->ip, whichfork) ||
+	    !xfs_ifork_ptr(sc->tempip, whichfork)) {
+		ASSERT(xfs_ifork_ptr(sc->ip, whichfork) != NULL);
+		ASSERT(xfs_ifork_ptr(sc->tempip, whichfork) != NULL);
+		return -EINVAL;
+	}
+
+	/* Swap all mappings in both forks. */
+	req->ip1 = sc->tempip;
+	req->ip2 = sc->ip;
+	req->startoff1 = 0;
+	req->startoff2 = 0;
+	req->whichfork = whichfork;
+	req->blockcount = XFS_MAX_FILEOFF;
+	req->req_flags = XFS_SWAP_REQ_LOGGED;
+
+	/* Always swap sizes when we're swapping data fork mappings. */
+	if (whichfork == XFS_DATA_FORK)
+		req->req_flags |= XFS_SWAP_REQ_SET_SIZES;
+
+	/*
+	 * If we're repairing symlinks, xattrs, or directories, always try to
+	 * convert ip2 to short format after swapping.
+	 */
+	if (whichfork == XFS_ATTR_FORK || S_ISDIR(VFS_I(sc->ip)->i_mode) ||
+	    S_ISLNK(VFS_I(sc->ip)->i_mode))
+		req->req_flags |= XFS_SWAP_REQ_CVT_INO2_SF;
+
+	return 0;
+}
+
+/*
+ * Obtain a quota reservation to make sure we don't hit EDQUOT.  We can skip
+ * this if quota enforcement is disabled or if both inodes' dquots are the
+ * same.  The qretry structure must be initialized to zeroes before the first
+ * call to this function.
+ */
+STATIC int
+xrep_tempswap_reserve_quota(
+	struct xfs_scrub		*sc,
+	const struct xrep_tempswap	*tx)
+{
+	struct xfs_trans		*tp = sc->tp;
+	const struct xfs_swapext_req	*req = &tx->req;
+	int64_t				ddelta, rdelta;
+	int				error;
+
+	/*
+	 * Don't bother with a quota reservation if we're not enforcing them
+	 * or the two inodes have the same dquots.
+	 */
+	if (!XFS_IS_QUOTA_ON(tp->t_mountp) || req->ip1 == req->ip2 ||
+	    (req->ip1->i_udquot == req->ip2->i_udquot &&
+	     req->ip1->i_gdquot == req->ip2->i_gdquot &&
+	     req->ip1->i_pdquot == req->ip2->i_pdquot))
+		return 0;
+
+	/*
+	 * Quota reservation for each file comes from two sources.  First, we
+	 * need to account for any net gain in mapped blocks during the swap.
+	 * Second, we need reservation for the gross gain in mapped blocks so
+	 * that we don't trip over any quota block reservation assertions.  We
+	 * must reserve the gross gain because the quota code subtracts from
+	 * bcount the number of blocks that we unmap; it does not add that
+	 * quantity back to the quota block reservation.
+	 */
+	ddelta = max_t(int64_t, 0, req->ip2_bcount - req->ip1_bcount);
+	rdelta = max_t(int64_t, 0, req->ip2_rtbcount - req->ip1_rtbcount);
+	error = xfs_trans_reserve_quota_nblks(tp, req->ip1,
+			ddelta + req->ip1_bcount, rdelta + req->ip1_rtbcount,
+			true);
+	if (error)
+		return error;
+
+	ddelta = max_t(int64_t, 0, req->ip1_bcount - req->ip2_bcount);
+	rdelta = max_t(int64_t, 0, req->ip1_rtbcount - req->ip2_rtbcount);
+	return xfs_trans_reserve_quota_nblks(tp, req->ip2,
+			ddelta + req->ip2_bcount, rdelta + req->ip2_rtbcount,
+			true);
+}
+
+/*
+ * Prepare an existing transaction for a swap.
+ *
+ * This function fills out the swapext request and resource estimation
+ * structures in preparation for swapping the contents of a metadata file that
+ * has been rebuilt in the temp file.  Next, it reserves space and quota for
+ * the transaction.
+ *
+ * The caller must hold ILOCK_EXCL of the scrub target file and the temporary
+ * file.  The caller must join both inodes to the transaction with no unlock
+ * flags, and is responsible for dropping both ILOCKs when appropriate.  Only
+ * use this when those ILOCKs cannot be dropped.
+ */
+int
+xrep_tempswap_trans_reserve(
+	struct xfs_scrub	*sc,
+	int			whichfork,
+	struct xrep_tempswap	*tx)
+{
+	int			error;
+
+	ASSERT(sc->tp != NULL);
+	ASSERT(xfs_isilocked(sc->ip, XFS_ILOCK_EXCL));
+	ASSERT(xfs_isilocked(sc->tempip, XFS_ILOCK_EXCL));
+
+	error = xrep_tempswap_prep_request(sc, whichfork, tx);
+	if (error)
+		return error;
+
+	error = xfs_swapext_estimate(&tx->req);
+	if (error)
+		return error;
+
+	error = xfs_trans_reserve_more(sc->tp, tx->req.resblks, 0);
+	if (error)
+		return error;
+
+	return xrep_tempswap_reserve_quota(sc, tx);
+}
+
+/*
+ * Swap forks between the file being repaired and the temporary file.  Returns
+ * with both inodes locked and joined to a clean scrub transaction.
+ */
+int
+xrep_tempswap_contents(
+	struct xfs_scrub	*sc,
+	struct xrep_tempswap	*tx)
+{
+	int			error;
+
+	ASSERT(sc->flags & XREP_FSGATES_ATOMIC_XCHG);
+
+	xfs_swapext(sc->tp, &tx->req);
+	error = xfs_defer_finish(&sc->tp);
+	if (error)
+		return error;
+
+	/*
+	 * If we swapped the ondisk sizes of two metadata files, we must swap
+	 * the incore sizes as well.  Since online fsck doesn't use swapext on
+	 * the data forks of user-accessible files, the two sizes are always
+	 * the same, so we don't need to log the inodes.
+	 */
+	if (tx->req.req_flags & XFS_SWAP_REQ_SET_SIZES) {
+		loff_t	temp;
+
+		temp = i_size_read(VFS_I(sc->ip));
+		i_size_write(VFS_I(sc->ip), i_size_read(VFS_I(sc->tempip)));
+		i_size_write(VFS_I(sc->tempip), temp);
+	}
+
 	return 0;
 }
