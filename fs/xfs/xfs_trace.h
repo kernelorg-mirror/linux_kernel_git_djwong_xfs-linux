@@ -4523,6 +4523,52 @@ DEFINE_INODE_CORRUPT_EVENT(xfs_inode_mark_sick);
 DEFINE_INODE_CORRUPT_EVENT(xfs_inode_mark_healthy);
 DEFINE_INODE_CORRUPT_EVENT(xfs_inode_unfixed_corruption);
 
+DECLARE_EVENT_CLASS(xfs_ag_noalloc_class,
+	TP_PROTO(struct xfs_perag *pag),
+	TP_ARGS(pag),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_agnumber_t, agno)
+		__field(xfs_extlen_t, freeblks)
+		__field(xfs_extlen_t, flcount)
+		__field(xfs_extlen_t, btreeblks)
+		__field(xfs_extlen_t, meta_resv)
+		__field(xfs_extlen_t, rmap_resv)
+
+		__field(unsigned long long, resblks)
+		__field(unsigned long long, resblks_avail)
+	),
+	TP_fast_assign(
+		__entry->dev = pag->pag_mount->m_super->s_dev;
+		__entry->agno = pag->pag_agno;
+		__entry->freeblks = pag->pagf_freeblks;
+		__entry->flcount = pag->pagf_flcount;
+		__entry->btreeblks = pag->pagf_btreeblks;
+		__entry->meta_resv = pag->pag_meta_resv.ar_reserved;
+		__entry->rmap_resv = pag->pag_rmapbt_resv.ar_orig_reserved;
+
+		__entry->resblks = pag->pag_mount->m_resblks;
+		__entry->resblks_avail = pag->pag_mount->m_resblks_avail;
+	),
+	TP_printk("dev %d:%d agno 0x%x freeblks %u flcount %u btreeblks %u metaresv %u rmapresv %u resblks %llu resblks_avail %llu",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->agno,
+		  __entry->freeblks,
+		  __entry->flcount,
+		  __entry->btreeblks,
+		  __entry->meta_resv,
+		  __entry->rmap_resv,
+		  __entry->resblks,
+		  __entry->resblks_avail)
+);
+#define DEFINE_AG_NOALLOC_EVENT(name)	\
+DEFINE_EVENT(xfs_ag_noalloc_class, name,	\
+	TP_PROTO(struct xfs_perag *pag),	\
+	TP_ARGS(pag))
+
+DEFINE_AG_NOALLOC_EVENT(xfs_ag_set_noalloc);
+DEFINE_AG_NOALLOC_EVENT(xfs_ag_clear_noalloc);
+
 TRACE_EVENT(xfs_iwalk_ag,
 	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno,
 		 xfs_agino_t startino),
