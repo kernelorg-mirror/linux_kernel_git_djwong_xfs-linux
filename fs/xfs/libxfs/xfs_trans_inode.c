@@ -14,6 +14,7 @@
 #include "xfs_trans.h"
 #include "xfs_trans_priv.h"
 #include "xfs_inode_item.h"
+#include "xfs_rtbitmap.h"
 
 #include <linux/iversion.h>
 
