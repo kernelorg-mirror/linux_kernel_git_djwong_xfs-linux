@@ -61,6 +61,7 @@ xfs_initxattrs(
 			.namelen	= strlen(xattr->name),
 			.value		= xattr->value,
 			.valuelen	= xattr->value_len,
+			.owner		= ip->i_ino,
 		};
 		error = xfs_attr_change(&args);
 		if (error < 0)
