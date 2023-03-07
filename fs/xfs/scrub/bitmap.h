@@ -34,6 +34,9 @@ int xbitmap_walk(struct xbitmap *bitmap, xbitmap_walk_fn fn,
 bool xbitmap_empty(struct xbitmap *bitmap);
 bool xbitmap_test(struct xbitmap *bitmap, uint64_t start, uint64_t *len);
 
+int xbitmap_take_first_set(struct xbitmap *bitmap, uint64_t start,
+		uint64_t last, uint64_t *valp);
+
 /* u32 bitmap */
 
 struct xbitmap32 {
