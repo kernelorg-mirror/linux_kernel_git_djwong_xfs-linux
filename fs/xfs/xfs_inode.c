@@ -1131,10 +1131,11 @@ out:
 
 int
 xfs_release(
-	xfs_inode_t	*ip)
+	struct xfs_inode	*ip,
+	bool			want_free_eofblocks)
 {
-	xfs_mount_t	*mp = ip->i_mount;
-	int		error = 0;
+	struct xfs_mount	*mp = ip->i_mount;
+	int			error = 0;
 
 	if (!S_ISREG(VFS_I(ip)->i_mode) || (VFS_I(ip)->i_mode == 0))
 		return 0;
@@ -1176,7 +1177,7 @@ xfs_release(
 	 * another chance to drop them once the last reference to the inode is
 	 * dropped, so we'll never leak blocks permanently.
 	 */
-	if (!xfs_ilock_nowait(ip, XFS_IOLOCK_EXCL))
+	if (!want_free_eofblocks || !xfs_ilock_nowait(ip, XFS_IOLOCK_EXCL))
 		return 0;
 
 	if (xfs_can_free_eofblocks(ip, false)) {
