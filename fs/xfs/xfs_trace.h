@@ -87,6 +87,7 @@ struct xfs_getparents;
 struct xfs_parent_name_irec;
 struct xfs_attrlist_cursor_kern;
 struct xfs_imeta_update;
+struct xfs_rtgroup;
 
 #define XFS_ATTR_FILTER_FLAGS \
 	{ XFS_ATTR_ROOT,	"ROOT" }, \
@@ -215,6 +216,43 @@ DEFINE_PERAG_REF_EVENT(xfs_perag_grab_tag);
 DEFINE_PERAG_REF_EVENT(xfs_perag_rele);
 DEFINE_PERAG_REF_EVENT(xfs_perag_set_inode_tag);
 DEFINE_PERAG_REF_EVENT(xfs_perag_clear_inode_tag);
+
+#ifdef CONFIG_XFS_RT
+DECLARE_EVENT_CLASS(xfs_rtgroup_class,
+	TP_PROTO(struct xfs_rtgroup *rtg, unsigned long caller_ip),
+	TP_ARGS(rtg, caller_ip),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_rgnumber_t, rgno)
+		__field(int, refcount)
+		__field(int, active_refcount)
+		__field(unsigned long, caller_ip)
+	),
+	TP_fast_assign(
+		__entry->dev = rtg->rtg_mount->m_super->s_dev;
+		__entry->rgno = rtg->rtg_rgno;
+		__entry->refcount = atomic_read(&rtg->rtg_ref);
+		__entry->active_refcount = atomic_read(&rtg->rtg_active_ref);
+		__entry->caller_ip = caller_ip;
+	),
+	TP_printk("dev %d:%d rgno 0x%x passive refs %d active refs %d caller %pS",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->rgno,
+		  __entry->refcount,
+		  __entry->active_refcount,
+		  (char *)__entry->caller_ip)
+);
+
+#define DEFINE_RTGROUP_REF_EVENT(name)	\
+DEFINE_EVENT(xfs_rtgroup_class, name,	\
+	TP_PROTO(struct xfs_rtgroup *rtg, unsigned long caller_ip), \
+	TP_ARGS(rtg, caller_ip))
+DEFINE_RTGROUP_REF_EVENT(xfs_rtgroup_get);
+DEFINE_RTGROUP_REF_EVENT(xfs_rtgroup_hold);
+DEFINE_RTGROUP_REF_EVENT(xfs_rtgroup_put);
+DEFINE_RTGROUP_REF_EVENT(xfs_rtgroup_grab);
+DEFINE_RTGROUP_REF_EVENT(xfs_rtgroup_rele);
+#endif /* CONFIG_XFS_RT */
 
 TRACE_EVENT(xfs_inodegc_worker,
 	TP_PROTO(struct xfs_mount *mp, unsigned int shrinker_hits),
