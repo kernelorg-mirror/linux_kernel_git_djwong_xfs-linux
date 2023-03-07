@@ -36,6 +36,8 @@
 #include "xfs_swapext.h"
 #include "xfs_rtbitmap.h"
 #include "xfs_rtgroup.h"
+#include "xfs_rtrmap_btree.h"
+#include "xfs_bmap_util.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -867,6 +869,8 @@ xchk_rtgroup_init(
 	struct xchk_rt		*sr,
 	unsigned int		rtglock_flags)
 {
+	int			error;
+
 	ASSERT(sr->rtg == NULL);
 	ASSERT(sr->rtlock_flags == 0);
 
@@ -874,7 +878,30 @@ xchk_rtgroup_init(
 	if (!sr->rtg)
 		return -ENOENT;
 
-	return xchk_rtgroup_drain_and_lock(sc, sr, rtglock_flags);
+	error = xchk_rtgroup_drain_and_lock(sc, sr, rtglock_flags);
+	if (error)
+		return error;
+
+	if (xfs_has_rtrmapbt(sc->mp) && (rtglock_flags & XFS_RTGLOCK_RMAP))
+		sr->rmap_cur = xfs_rtrmapbt_init_cursor(sc->mp, sc->tp,
+				sr->rtg, sr->rtg->rtg_rmapip);
+
+	return 0;
+}
+
+/*
+ * Free all the btree cursors and other incore data relating to the realtime
+ * group.  This has to be done /before/ committing (or cancelling) the scrub
+ * transaction.
+ */
+void
+xchk_rtgroup_btcur_free(
+	struct xchk_rt		*sr)
+{
+	if (sr->rmap_cur)
+		xfs_btree_del_cursor(sr->rmap_cur, XFS_BTREE_ERROR);
+
+	sr->rmap_cur = NULL;
 }
 
 /*
@@ -960,6 +987,14 @@ xchk_setup_fs(
 
 	resblks = xrep_calc_ag_resblks(sc);
 	return xchk_trans_alloc(sc, resblks);
+}
+
+/* Set us up with a transaction and an empty context to repair rt metadata. */
+int
+xchk_setup_rt(
+	struct xfs_scrub	*sc)
+{
+	return xchk_trans_alloc(sc, 0);
 }
 
 /* Set us up with AG headers and btree cursors. */
@@ -1696,4 +1731,45 @@ out_skip:
 out_rcu:
 	rcu_read_unlock();
 	return error;
+}
+
+/* Count the blocks used by a file, even if it's a metadata inode. */
+int
+xchk_inode_count_blocks(
+	struct xfs_scrub	*sc,
+	int			whichfork,
+	xfs_extnum_t		*nextents,
+	xfs_filblks_t		*count)
+{
+	struct xfs_ifork	*ifp = xfs_ifork_ptr(sc->ip, whichfork);
+	struct xfs_btree_cur	*cur;
+	xfs_extlen_t		btblocks;
+	int			error;
+
+	if (!ifp) {
+		*nextents = 0;
+		*count = 0;
+		return 0;
+	}
+
+	switch (ifp->if_format) {
+	case XFS_DINODE_FMT_RMAP:
+		if (!sc->sr.rtg) {
+			ASSERT(0);
+			return -EFSCORRUPTED;
+		}
+		cur = xfs_rtrmapbt_init_cursor(sc->mp, sc->tp, sc->sr.rtg,
+				sc->ip);
+		error = xfs_btree_count_blocks(cur, &btblocks);
+		xfs_btree_del_cursor(cur, error);
+		if (error)
+			return error;
+
+		*nextents = 0;
+		*count = btblocks - 1;
+		return 0;
+	default:
+		return xfs_bmap_count_blocks(sc->tp, sc->ip, whichfork,
+				nextents, count);
+	}
 }
