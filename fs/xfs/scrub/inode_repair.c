@@ -36,6 +36,7 @@
 #include "xfs_attr_leaf.h"
 #include "xfs_log_priv.h"
 #include "xfs_symlink_remote.h"
+#include "xfs_rtbitmap.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
@@ -1599,7 +1600,7 @@ xrep_inode_extsize(
 	/* Fix misaligned extent size hints on a directory. */
 	if ((sc->ip->i_diflags & XFS_DIFLAG_RTINHERIT) &&
 	    (sc->ip->i_diflags & XFS_DIFLAG_EXTSZINHERIT) &&
-	    sc->ip->i_extsize % sc->mp->m_sb.sb_rextsize > 0) {
+	    xfs_extlen_to_rtxmod(sc->mp, sc->ip->i_extsize) > 0) {
 		sc->ip->i_extsize = 0;
 		sc->ip->i_diflags &= ~XFS_DIFLAG_EXTSZINHERIT;
 	}
