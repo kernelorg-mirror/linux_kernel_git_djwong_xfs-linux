@@ -78,6 +78,9 @@ struct xrep_bmap {
 
 	/* Are there shared extents? */
 	bool			shared_extents;
+
+	/* Do we allow unwritten extents? */
+	bool			allow_unwritten;
 };
 
 /* Is this space extent shared?  Flag the inode if it is. */
@@ -271,6 +274,10 @@ xrep_bmap_walk_rmap(
 	if (rb->whichfork == XFS_ATTR_FORK &&
 	    !(rec->rm_flags & XFS_RMAP_ATTR_FORK))
 		return 0;
+
+	/* Reject unwritten extents if we don't allow those. */
+	if ((rec->rm_flags & XFS_RMAP_UNWRITTEN) && !rb->allow_unwritten)
+		return -EFSCORRUPTED;
 
 	fsbno = XFS_AGB_TO_FSB(mp, cur->bc_ag.pag->pag_agno,
 			rec->rm_startblock);
@@ -762,10 +769,11 @@ xrep_bmap_check_inputs(
 }
 
 /* Repair an inode fork. */
-STATIC int
+int
 xrep_bmap(
 	struct xfs_scrub	*sc,
-	int			whichfork)
+	int			whichfork,
+	bool			allow_unwritten)
 {
 	struct xrep_bmap	*rb;
 	char			*descr;
@@ -784,6 +792,7 @@ xrep_bmap(
 		return -ENOMEM;
 	rb->sc = sc;
 	rb->whichfork = whichfork;
+	rb->allow_unwritten = allow_unwritten;
 
 	/*
 	 * No need to waste time scanning for shared extents if the inode is
@@ -834,7 +843,7 @@ int
 xrep_bmap_data(
 	struct xfs_scrub	*sc)
 {
-	return xrep_bmap(sc, XFS_DATA_FORK);
+	return xrep_bmap(sc, XFS_DATA_FORK, true);
 }
 
 /* Repair an inode's attr fork. */
@@ -842,5 +851,5 @@ int
 xrep_bmap_attr(
 	struct xfs_scrub	*sc)
 {
-	return xrep_bmap(sc, XFS_ATTR_FORK);
+	return xrep_bmap(sc, XFS_ATTR_FORK, false);
 }
