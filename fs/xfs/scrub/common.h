@@ -154,6 +154,24 @@ xchk_ag_init_existing(
 	return error == -ENOENT ? -EFSCORRUPTED : error;
 }
 
+/* Lock the rt bitmap in exclusive mode */
+#define XCHK_RTLOCK_BITMAP		(1U << 31)
+/* Lock the rt bitmap in shared mode */
+#define XCHK_RTLOCK_BITMAP_SHARED	(1U << 30)
+/* Lock the rt summary in exclusive mode */
+#define XCHK_RTLOCK_SUMMARY		(1U << 29)
+/* Lock the rt summary in shared mode */
+#define XCHK_RTLOCK_SUMMARY_SHARED	(1U << 28)
+
+#define XCHK_RTLOCK_ALL		(XCHK_RTLOCK_BITMAP | \
+				 XCHK_RTLOCK_BITMAP_SHARED | \
+				 XCHK_RTLOCK_SUMMARY | \
+				 XCHK_RTLOCK_SUMMARY_SHARED)
+
+void xchk_rt_init(struct xfs_scrub *sc, struct xchk_rt *sr,
+		unsigned int xchk_rtlock_flags);
+void xchk_rt_unlock(struct xfs_scrub *sc, struct xchk_rt *sr);
+void xchk_rt_unlock_rtbitmap(struct xfs_scrub *sc);
 int xchk_ag_read_headers(struct xfs_scrub *sc, xfs_agnumber_t agno,
 		struct xchk_ag *sa);
 void xchk_ag_btcur_free(struct xchk_ag *sa);

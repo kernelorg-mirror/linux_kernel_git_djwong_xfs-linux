@@ -80,14 +80,8 @@ xchk_setup_rtsummary(
 	if (error)
 		return error;
 
-	/*
-	 * Locking order requires us to take the rtbitmap first.  We must be
-	 * careful to unlock it ourselves when we are done with the rtbitmap
-	 * file since the scrub infrastructure won't do that for us.  Only
-	 * then we can lock the rtsummary inode.
-	 */
-	xfs_ilock(mp->m_rbmip, XFS_ILOCK_SHARED | XFS_ILOCK_RTBITMAP);
-	xchk_ilock(sc, XFS_ILOCK_EXCL | XFS_ILOCK_RTSUM);
+	xchk_rt_init(sc, &sc->sr,
+			XCHK_RTLOCK_SUMMARY | XCHK_RTLOCK_BITMAP_SHARED);
 
 	/*
 	 * Now that we've locked the rtbitmap and rtsummary, we can't race with
@@ -356,6 +350,6 @@ out_rbm:
 	 * that order, so we're still protected against allocation activities
 	 * even if we continue on to the repair function.
 	 */
-	xfs_iunlock(mp->m_rbmip, XFS_ILOCK_SHARED | XFS_ILOCK_RTBITMAP);
+	xchk_rt_unlock_rtbitmap(sc);
 	return error;
 }
