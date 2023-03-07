@@ -702,14 +702,14 @@ xchk_rt_init(
 					 XCHK_RTLOCK_SUMMARY_SHARED)) < 2);
 
 	if (rtlock_flags & XCHK_RTLOCK_BITMAP)
-		xfs_ilock(sc->mp->m_rbmip, XFS_ILOCK_EXCL | XFS_ILOCK_RTBITMAP);
+		xfs_ilock(sc->mp->m_rbmip, XFS_ILOCK_EXCL);
 	else if (rtlock_flags & XCHK_RTLOCK_BITMAP_SHARED)
-		xfs_ilock(sc->mp->m_rbmip, XFS_ILOCK_SHARED | XFS_ILOCK_RTBITMAP);
+		xfs_ilock(sc->mp->m_rbmip, XFS_ILOCK_SHARED);
 
 	if (rtlock_flags & XCHK_RTLOCK_SUMMARY)
-		xfs_ilock(sc->mp->m_rsumip, XFS_ILOCK_EXCL | XFS_ILOCK_RTSUM);
+		xfs_ilock(sc->mp->m_rsumip, XFS_ILOCK_EXCL);
 	else if (rtlock_flags & XCHK_RTLOCK_SUMMARY_SHARED)
-		xfs_ilock(sc->mp->m_rsumip, XFS_ILOCK_SHARED | XFS_ILOCK_RTSUM);
+		xfs_ilock(sc->mp->m_rsumip, XFS_ILOCK_SHARED);
 
 	sr->rtlock_flags = rtlock_flags;
 }
@@ -746,7 +746,7 @@ xchk_rt_unlock_rtbitmap(
 {
 	ASSERT(sc->sr.rtlock_flags & XCHK_RTLOCK_BITMAP_SHARED);
 
-	xfs_iunlock(sc->mp->m_rbmip, XFS_ILOCK_SHARED | XFS_ILOCK_RTBITMAP);
+	xfs_iunlock(sc->mp->m_rbmip, XFS_ILOCK_SHARED);
 	sc->sr.rtlock_flags &= ~XCHK_RTLOCK_BITMAP_SHARED;
 }
 
