@@ -2013,6 +2013,41 @@ DEFINE_REPAIR_EXTENT_EVENT(xreap_agextent_binval);
 DEFINE_REPAIR_EXTENT_EVENT(xreap_bmapi_binval);
 DEFINE_REPAIR_EXTENT_EVENT(xrep_agfl_insert);
 
+#ifdef CONFIG_XFS_RT
+DECLARE_EVENT_CLASS(xrep_rtgroup_extent_class,
+	TP_PROTO(struct xfs_rtgroup *rtg, xfs_rgblock_t rgbno,
+		 xfs_extlen_t len),
+	TP_ARGS(rtg, rgbno, len),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(dev_t, rtdev)
+		__field(xfs_rgnumber_t, rgno)
+		__field(xfs_rgblock_t, rgbno)
+		__field(xfs_extlen_t, len)
+	),
+	TP_fast_assign(
+		__entry->dev = rtg->rtg_mount->m_super->s_dev;
+		__entry->rtdev = rtg->rtg_mount->m_rtdev_targp->bt_dev;
+		__entry->rgno = rtg->rtg_rgno;
+		__entry->rgbno = rgbno;
+		__entry->len = len;
+	),
+	TP_printk("dev %d:%d rtdev %d:%d rgno 0x%x rgbno 0x%x fsbcount 0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  MAJOR(__entry->rtdev), MINOR(__entry->rtdev),
+		  __entry->rgno,
+		  __entry->rgbno,
+		  __entry->len)
+);
+#define DEFINE_REPAIR_RTGROUP_EXTENT_EVENT(name) \
+DEFINE_EVENT(xrep_rtgroup_extent_class, name, \
+	TP_PROTO(struct xfs_rtgroup *rtg, xfs_rgblock_t rgbno, \
+		 xfs_extlen_t len), \
+	TP_ARGS(rtg, rgbno, len))
+DEFINE_REPAIR_RTGROUP_EXTENT_EVENT(xreap_dispose_unmap_rtextent);
+DEFINE_REPAIR_RTGROUP_EXTENT_EVENT(xreap_dispose_free_rtextent);
+#endif /* CONFIG_XFS_RT */
+
 DECLARE_EVENT_CLASS(xrep_reap_find_class,
 	TP_PROTO(struct xfs_perag *pag, xfs_agblock_t agbno, xfs_extlen_t len,
 		bool crosslinked),
@@ -2045,6 +2080,43 @@ DEFINE_EVENT(xrep_reap_find_class, name, \
 	TP_ARGS(pag, agbno, len, crosslinked))
 DEFINE_REPAIR_REAP_FIND_EVENT(xreap_agextent_select);
 DEFINE_REPAIR_REAP_FIND_EVENT(xreap_bmapi_select);
+
+#ifdef CONFIG_XFS_RT
+DECLARE_EVENT_CLASS(xrep_rtgroup_reap_find_class,
+	TP_PROTO(struct xfs_rtgroup *rtg, xfs_rgblock_t rgbno, xfs_extlen_t len,
+		 bool crosslinked),
+	TP_ARGS(rtg, rgbno, len, crosslinked),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(dev_t, rtdev)
+		__field(xfs_rgnumber_t, rgno)
+		__field(xfs_rgblock_t, rgbno)
+		__field(xfs_extlen_t, len)
+		__field(bool, crosslinked)
+	),
+	TP_fast_assign(
+		__entry->dev = rtg->rtg_mount->m_super->s_dev;
+		__entry->rtdev = rtg->rtg_mount->m_rtdev_targp->bt_dev;
+		__entry->rgno = rtg->rtg_rgno;
+		__entry->rgbno = rgbno;
+		__entry->len = len;
+		__entry->crosslinked = crosslinked;
+	),
+	TP_printk("dev %d:%d rtdev %d:%d rgno 0x%x rgbno 0x%x fsbcount 0x%x crosslinked %d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  MAJOR(__entry->rtdev), MINOR(__entry->rtdev),
+		  __entry->rgno,
+		  __entry->rgbno,
+		  __entry->len,
+		  __entry->crosslinked ? 1 : 0)
+);
+#define DEFINE_REPAIR_RTGROUP_REAP_FIND_EVENT(name) \
+DEFINE_EVENT(xrep_rtgroup_reap_find_class, name, \
+	TP_PROTO(struct xfs_rtgroup *rtg, xfs_rgblock_t rgbno, \
+		 xfs_extlen_t len, bool crosslinked), \
+	TP_ARGS(rtg, rgbno, len, crosslinked))
+DEFINE_REPAIR_RTGROUP_REAP_FIND_EVENT(xreap_rgextent_select);
+#endif /* CONFIG_XFS_RT */
 
 DECLARE_EVENT_CLASS(xrep_rmap_class,
 	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno,

@@ -321,4 +321,32 @@ static inline int xino_bitmap_test(struct xino_bitmap *bitmap, xfs_ino_t ino)
 	return xbitmap_test(&bitmap->inobitmap, ino, &len);
 }
 
+/* Bitmaps, but for type-checked for xfs_rtblock_t */
+
+struct xrtb_bitmap {
+	struct xbitmap	rtbitmap;
+};
+
+static inline void xrtb_bitmap_init(struct xrtb_bitmap *bitmap)
+{
+	xbitmap_init(&bitmap->rtbitmap);
+}
+
+static inline void xrtb_bitmap_destroy(struct xrtb_bitmap *bitmap)
+{
+	xbitmap_destroy(&bitmap->rtbitmap);
+}
+
+static inline int xrtb_bitmap_set(struct xrtb_bitmap *bitmap,
+		xfs_rtblock_t start, xfs_filblks_t len)
+{
+	return xbitmap_set(&bitmap->rtbitmap, start, len);
+}
+
+static inline int xrtb_bitmap_walk(struct xrtb_bitmap *bitmap,
+		xbitmap_walk_fn fn, void *priv)
+{
+	return xbitmap_walk(&bitmap->rtbitmap, fn, priv);
+}
+
 #endif	/* __XFS_SCRUB_BITMAP_H__ */
