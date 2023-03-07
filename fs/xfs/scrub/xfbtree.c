@@ -289,11 +289,11 @@ xfbtree_dup_cursor(
 	ASSERT(cur->bc_flags & XFS_BTREE_IN_XFILE);
 
 	ncur = xfs_btree_alloc_cursor(cur->bc_mp, cur->bc_tp, cur->bc_btnum,
-			cur->bc_maxlevels, cur->bc_cache);
+			cur->bc_ops, cur->bc_maxlevels, cur->bc_cache);
 	ncur->bc_flags = cur->bc_flags;
 	ncur->bc_nlevels = cur->bc_nlevels;
 	ncur->bc_statoff = cur->bc_statoff;
-	ncur->bc_ops = cur->bc_ops;
+
 	memcpy(&ncur->bc_mem, &cur->bc_mem, sizeof(cur->bc_mem));
 
 	if (cur->bc_mem.pag)
