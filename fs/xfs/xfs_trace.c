@@ -47,6 +47,24 @@
 #include "xfs_rtgroup.h"
 #include "xfs_rmap.h"
 
+static inline void
+xfs_rmapbt_crack_agno_opdev(
+	struct xfs_btree_cur	*cur,
+	xfs_agnumber_t		*agno,
+	dev_t			*opdev)
+{
+	if (cur->bc_flags & XFS_BTREE_IN_XFILE) {
+		*agno = 0;
+		*opdev = xfbtree_target(cur->bc_mem.xfbtree)->bt_dev;
+	} else if (cur->bc_flags & XFS_BTREE_ROOT_IN_INODE) {
+		*agno = cur->bc_ino.rtg->rtg_rgno;
+		*opdev = cur->bc_mp->m_rtdev_targp->bt_dev;
+	} else {
+		*agno = cur->bc_ag.pag->pag_agno;
+		*opdev = cur->bc_mp->m_super->s_dev;
+	}
+}
+
 /*
  * We include this last to have the helpers above available for the trace
  * event implementations.
