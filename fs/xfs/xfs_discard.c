@@ -21,7 +21,7 @@
 #include "xfs_health.h"
 
 STATIC int
-xfs_trim_extents(
+xfs_trim_ag_extents(
 	struct xfs_perag	*pag,
 	xfs_daddr_t		start,
 	xfs_daddr_t		end,
@@ -135,6 +135,37 @@ out_del_cursor:
 	return error;
 }
 
+static int
+xfs_trim_ddev_extents(
+	struct xfs_mount	*mp,
+	xfs_daddr_t		start,
+	xfs_daddr_t		end,
+	xfs_daddr_t		minlen,
+	uint64_t		*blocks_trimmed)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+	int			error, last_error = 0;
+
+	if (end > XFS_FSB_TO_BB(mp, mp->m_sb.sb_dblocks) - 1)
+		end = XFS_FSB_TO_BB(mp, mp->m_sb.sb_dblocks) - 1;
+
+	agno = xfs_daddr_to_agno(mp, start);
+	for_each_perag_range(mp, agno, xfs_daddr_to_agno(mp, end), pag) {
+		error = xfs_trim_ag_extents(pag, start, end, minlen,
+				blocks_trimmed);
+		if (error) {
+			last_error = error;
+			if (error == -ERESTARTSYS) {
+				xfs_perag_rele(pag);
+				break;
+			}
+		}
+	}
+
+	return last_error;
+}
+
 /*
  * trim a range of the filesystem.
  *
@@ -149,12 +180,10 @@ xfs_ioc_trim(
 	struct xfs_mount		*mp,
 	struct fstrim_range __user	*urange)
 {
-	struct xfs_perag	*pag;
 	struct block_device	*bdev = xfs_buftarg_bdev(mp->m_ddev_targp);
 	unsigned int		granularity = bdev_discard_granularity(bdev);
 	struct fstrim_range	range;
 	xfs_daddr_t		start, end, minlen;
-	xfs_agnumber_t		agno;
 	uint64_t		blocks_trimmed = 0;
 	int			error, last_error = 0;
 
@@ -190,21 +219,11 @@ xfs_ioc_trim(
 	start = BTOBB(range.start);
 	end = start + BTOBBT(range.len) - 1;
 
-	if (end > XFS_FSB_TO_BB(mp, mp->m_sb.sb_dblocks) - 1)
-		end = XFS_FSB_TO_BB(mp, mp->m_sb.sb_dblocks) - 1;
-
-	agno = xfs_daddr_to_agno(mp, start);
-	for_each_perag_range(mp, agno, xfs_daddr_to_agno(mp, end), pag) {
-		error = xfs_trim_extents(pag, start, end, minlen,
-					  &blocks_trimmed);
-		if (error) {
-			last_error = error;
-			if (error == -ERESTARTSYS) {
-				xfs_perag_rele(pag);
-				break;
-			}
-		}
-	}
+	error = xfs_trim_ddev_extents(mp, start, end, minlen, &blocks_trimmed);
+	if (error == -ERESTARTSYS)
+		return error;
+	if (error)
+		last_error = error;
 
 	if (last_error)
 		return last_error;
