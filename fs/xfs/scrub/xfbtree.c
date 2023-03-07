@@ -437,10 +437,6 @@ xfbtree_init_leaf_block(
 	struct xfs_buf			*bp;
 	xfs_daddr_t			daddr;
 	int				error;
-	unsigned int			bc_flags = 0;
-
-	if (cfg->flags & XFBTREE_CREATE_LONG_PTRS)
-		bc_flags |= XFS_BTREE_LONG_PTRS;
 
 	daddr = xfo_to_daddr(XFBTREE_INIT_LEAF_BLOCK);
 	error = xfs_buf_get(xfbt->target, daddr, xfbtree_bbsize(), &bp);
@@ -450,8 +446,8 @@ xfbtree_init_leaf_block(
 	trace_xfbtree_create_root_buf(xfbt, bp);
 
 	bp->b_ops = cfg->btree_ops->buf_ops;
-	xfs_btree_init_block_int(mp, bp->b_addr, daddr, cfg->btnum, 0, 0,
-			cfg->owner, bc_flags);
+	xfs_btree_init_block_int(mp, bp->b_addr, cfg->btree_ops, daddr, 0, 0,
+			cfg->owner);
 	error = xfs_bwrite(bp);
 	xfs_buf_relse(bp);
 	if (error)
