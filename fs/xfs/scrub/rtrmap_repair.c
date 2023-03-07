@@ -135,7 +135,7 @@ xrep_rtrmap_check_mapping(
 	/* Make sure this isn't free space. */
 	rtbno = xfs_rgbno_to_rtb(sc->mp, sc->sr.rtg->rtg_rgno,
 			rec->rm_startblock);
-	return xrep_require_rtext_inuse(sc, rtbno, rec->rm_blockcount);
+	return xrep_require_rtext_inuse(sc, rtbno, rec->rm_blockcount, false);
 }
 
 /* Store a reverse-mapping record. */
