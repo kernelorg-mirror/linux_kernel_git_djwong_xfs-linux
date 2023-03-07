@@ -22,6 +22,7 @@
 #include "xfs_parent.h"
 #include "xfs_imeta.h"
 #include "xfs_rtbitmap.h"
+#include "xfs_rtgroup.h"
 #include "scrub/scrub.h"
 #include "scrub/xfile.h"
 #include "scrub/xfarray.h"
