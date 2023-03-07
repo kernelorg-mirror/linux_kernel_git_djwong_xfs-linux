@@ -20,6 +20,121 @@
 #include "xfs_ag.h"
 #include "xfs_health.h"
 
+/* Trim the free space in this AG by block number. */
+static inline int
+xfs_trim_ag_bybno(
+	struct xfs_perag	*pag,
+	struct xfs_buf		*agbp,
+	xfs_daddr_t		start,
+	xfs_daddr_t		end,
+	xfs_daddr_t		minlen,
+	uint64_t		*blocks_trimmed)
+{
+	struct xfs_mount	*mp = pag->pag_mount;
+	struct block_device	*bdev = xfs_buftarg_bdev(mp->m_ddev_targp);
+	struct xfs_btree_cur	*cur;
+	struct xfs_agf		*agf = agbp->b_addr;
+	xfs_daddr_t		end_daddr;
+	xfs_agnumber_t		agno = pag->pag_agno;
+	xfs_agblock_t		start_agbno;
+	xfs_agblock_t		end_agbno;
+	xfs_extlen_t		minlen_fsb = XFS_BB_TO_FSB(mp, minlen);
+	int			i;
+	int			error;
+
+	start = max(start, XFS_AGB_TO_DADDR(mp, agno, 0));
+	start_agbno = xfs_daddr_to_agbno(mp, start);
+
+	end_daddr = XFS_AGB_TO_DADDR(mp, agno, be32_to_cpu(agf->agf_length));
+	end = min(end, end_daddr - 1);
+	end_agbno = xfs_daddr_to_agbno(mp, end);
+
+	cur = xfs_allocbt_init_cursor(mp, NULL, agbp, pag, XFS_BTNUM_BNO);
+
+	error = xfs_alloc_lookup_le(cur, start_agbno, 0, &i);
+	if (error)
+		goto out_del_cursor;
+
+	/*
+	 * If we didn't find anything at or below start_agbno, increment the
+	 * cursor to see if there's another record above it.
+	 */
+	if (!i) {
+		error = xfs_btree_increment(cur, 0, &i);
+		if (error)
+			goto out_del_cursor;
+	}
+
+	/* Loop the entire range that was asked for. */
+	while (i) {
+		xfs_agblock_t	fbno;
+		xfs_extlen_t	flen;
+		xfs_daddr_t	dbno;
+		xfs_extlen_t	dlen;
+
+		error = xfs_alloc_get_rec(cur, &fbno, &flen, &i);
+		if (error)
+			goto out_del_cursor;
+		if (XFS_IS_CORRUPT(mp, i != 1)) {
+			xfs_btree_mark_sick(cur);
+			error = -EFSCORRUPTED;
+			goto out_del_cursor;
+		}
+
+		/* Skip extents entirely outside of the range. */
+		if (fbno >= end_agbno)
+			break;
+		if (fbno + flen < start_agbno)
+			goto next_extent;
+
+		/* Trim the extent returned to the range we want. */
+		if (fbno < start_agbno) {
+			flen -= start_agbno - fbno;
+			fbno = start_agbno;
+		}
+		if (fbno + flen > end_agbno + 1)
+			flen = end_agbno - fbno + 1;
+
+		/* Ignore too small. */
+		if (flen < minlen_fsb) {
+			trace_xfs_discard_toosmall(mp, agno, fbno, flen);
+			goto next_extent;
+		}
+
+		/*
+		 * If any blocks in the range are still busy, skip the
+		 * discard and try again the next time.
+		 */
+		if (xfs_extent_busy_search(mp, pag, fbno, flen)) {
+			trace_xfs_discard_busy(mp, agno, fbno, flen);
+			goto next_extent;
+		}
+
+		trace_xfs_discard_extent(mp, agno, fbno, flen);
+
+		dbno = XFS_AGB_TO_DADDR(mp, agno, fbno);
+		dlen = XFS_FSB_TO_BB(mp, flen);
+		error = blkdev_issue_discard(bdev, dbno, dlen, GFP_NOFS);
+		if (error)
+			goto out_del_cursor;
+		*blocks_trimmed += flen;
+
+next_extent:
+		error = xfs_btree_increment(cur, 0, &i);
+		if (error)
+			goto out_del_cursor;
+
+		if (fatal_signal_pending(current)) {
+			error = -ERESTARTSYS;
+			goto out_del_cursor;
+		}
+	}
+
+out_del_cursor:
+	xfs_btree_del_cursor(cur, error);
+	return error;
+}
+
 /* Trim the free space in this AG by length. */
 static inline int
 xfs_trim_ag_bylen(
@@ -78,18 +193,9 @@ xfs_trim_ag_bylen(
 		 * Too small?  Give up.
 		 */
 		if (dlen < minlen) {
-			trace_xfs_discard_toosmall(mp, pag->pag_agno, fbno, flen);
+			trace_xfs_discard_toosmall(mp, pag->pag_agno, fbno,
+					flen);
 			break;
-		}
-
-		/*
-		 * If the extent is entirely outside of the range we are
-		 * supposed to discard skip it.  Do not bother to trim
-		 * down partially overlapping ranges for now.
-		 */
-		if (dbno + dlen < start || dbno > end) {
-			trace_xfs_discard_exclude(mp, pag->pag_agno, fbno, flen);
-			goto next_extent;
 		}
 
 		/*
@@ -133,6 +239,7 @@ xfs_trim_ag_extents(
 {
 	struct xfs_mount	*mp = pag->pag_mount;
 	struct xfs_buf		*agbp;
+	struct xfs_agf		*agf;
 	int			error;
 
 	/*
@@ -145,9 +252,20 @@ xfs_trim_ag_extents(
 	error = xfs_alloc_read_agf(pag, NULL, 0, &agbp);
 	if (error)
 		return error;
+	agf = agbp->b_addr;
 
-	error = xfs_trim_ag_bylen(pag, agbp, start, end, minlen,
-			blocks_trimmed);
+	if (start > XFS_AGB_TO_DADDR(mp, pag->pag_agno, 0) ||
+	    end < XFS_AGB_TO_DADDR(mp, pag->pag_agno,
+				   be32_to_cpu(agf->agf_length)) - 1) {
+		/* Only trimming part of this AG */
+		error = xfs_trim_ag_bybno(pag, agbp, start, end, minlen,
+				blocks_trimmed);
+	} else {
+		/* Trim this entire AG */
+		error = xfs_trim_ag_bylen(pag, agbp, start, end, minlen,
+				blocks_trimmed);
+	}
+
 	xfs_buf_relse(agbp);
 	return error;
 }
