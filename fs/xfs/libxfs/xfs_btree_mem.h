@@ -17,16 +17,7 @@ struct xfbtree_config {
 
 	/* Owner of this btree. */
 	unsigned long long		owner;
-
-	/* Btree type number */
-	xfs_btnum_t			btnum;
-
-	/* XFBTREE_CREATE_* flags */
-	unsigned int			flags;
 };
-
-/* btree has long pointers */
-#define XFBTREE_CREATE_LONG_PTRS	(1U << 0)
 
 #ifdef CONFIG_XFS_BTREE_IN_XFILE
 unsigned int xfs_btree_mem_head_nlevels(struct xfs_buf *head_bp);
