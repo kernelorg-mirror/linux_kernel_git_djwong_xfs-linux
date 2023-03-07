@@ -331,27 +331,44 @@ xreap_agextent(
 		return 0;
 	}
 
-	/* Put blocks back on the AGFL one at a time. */
-	if (rs->resv == XFS_AG_RESV_AGFL) {
+	switch (rs->resv) {
+	case XFS_AG_RESV_AGFL:
+		/* Put blocks back on the AGFL one at a time. */
 		ASSERT(*aglenp == 1);
 		error = xreap_put_freelist(sc, agbno);
 		if (error)
 			return error;
 
 		rs->force_roll = true;
-		return 0;
+		break;
+	case XFS_AG_RESV_IGNORE:
+		/*
+		 * bnobt/cntbt blocks are counted as free space, so we pass
+		 * XFS_AG_RESV_IGNORE when reaping the old free space btree
+		 * blocks to avoid changing fdblocks.
+		 */
+		error = __xfs_free_extent(sc->tp, sc->sa.pag, agbno, *aglenp,
+				rs->oinfo, rs->resv, true);
+		if (error)
+			return error;
+
+		rs->force_roll = true;
+		break;
+	default:
+		/*
+		 * Use deferred frees to get rid of the old btree blocks to try
+		 * to minimize the window in which we could crash and lose the
+		 * old blocks.
+		 */
+		error = __xfs_free_extent_later(sc->tp, fsbno, *aglenp,
+				rs->oinfo, true);
+		if (error)
+			return error;
+
+		rs->deferred++;
+		break;
 	}
 
-	/*
-	 * Use deferred frees to get rid of the old btree blocks to try to
-	 * minimize the window in which we could crash and lose the old blocks.
-	 */
-	error = __xfs_free_extent_later(sc->tp, fsbno, *aglenp, rs->oinfo,
-			true);
-	if (error)
-		return error;
-
-	rs->deferred++;
 	return 0;
 }
 
