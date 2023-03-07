@@ -18,6 +18,7 @@
 #include "xfs_btree.h"
 #include "xfs_btree_staging.h"
 #include "xfs_buf_xfile.h"
+#include "xfs_rmap.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -165,6 +166,9 @@ xchk_fsgates_disable(
 
 	if (sc->flags & XCHK_FSGATES_DIRENTS)
 		xfs_dir_hook_disable();
+
+	if (sc->flags & XCHK_FSGATES_RMAP)
+		xfs_rmap_hook_disable();
 
 	sc->flags &= ~XCHK_FSGATES_ALL;
 }
