@@ -13,12 +13,14 @@
 #include "xfs_btree_staging.h"
 #include "xfs_log_format.h"
 #include "xfs_trans.h"
+#include "xfs_log.h"
 #include "xfs_sb.h"
 #include "xfs_inode.h"
 #include "xfs_alloc.h"
 #include "xfs_rmap.h"
 #include "xfs_ag.h"
 #include "xfs_defer.h"
+#include "xfs_extfree_item.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -125,6 +127,139 @@ xrep_newbt_init_bare(
 }
 
 /*
+ * Set up automatic reaping of the blocks reserved for btree reconstruction in
+ * case we crash by logging a deferred free item for each extent we allocate so
+ * that we can get all of the space back if we crash before we can commit the
+ * new btree.  This function returns a token that can be used to cancel
+ * automatic reaping if repair is successful.
+ */
+static int
+xrep_newbt_schedule_autoreap(
+	struct xrep_newbt		*xnr,
+	struct xrep_newbt_resv		*resv)
+{
+	struct xfs_extent_free_item	efi_item = {
+		.xefi_blockcount	= resv->len,
+		.xefi_owner		= xnr->oinfo.oi_owner,
+		.xefi_flags		= XFS_EFI_SKIP_DISCARD,
+		.xefi_pag		= resv->pag,
+	};
+	struct xfs_scrub		*sc = xnr->sc;
+	struct xfs_log_item		*lip;
+	LIST_HEAD(items);
+
+	ASSERT(xnr->oinfo.oi_offset == 0);
+
+	efi_item.xefi_startblock = XFS_AGB_TO_FSB(sc->mp, resv->pag->pag_agno,
+			resv->agbno);
+	if (xnr->oinfo.oi_flags & XFS_OWNER_INFO_ATTR_FORK)
+		efi_item.xefi_flags |= XFS_EFI_ATTR_FORK;
+	if (xnr->oinfo.oi_flags & XFS_OWNER_INFO_BMBT_BLOCK)
+		efi_item.xefi_flags |= XFS_EFI_BMBT_BLOCK;
+
+	INIT_LIST_HEAD(&efi_item.xefi_list);
+	list_add(&efi_item.xefi_list, &items);
+
+	xfs_perag_intent_hold(resv->pag);
+	lip = xfs_extent_free_defer_type.create_intent(sc->tp, &items, 1,
+			false);
+	ASSERT(lip != NULL && !IS_ERR(lip));
+
+	resv->efi = lip;
+	return 0;
+}
+
+/*
+ * Earlier, we logged EFIs for the extents that we allocated to hold the new
+ * btree so that we could automatically roll back those allocations if the
+ * system crashed.  Now we log an EFD to cancel the EFI, either because the
+ * repair succeeded and the new blocks are in use; or because the repair was
+ * cancelled and we're about to free the extents directly.
+ */
+static inline void
+xrep_newbt_finish_autoreap(
+	struct xfs_scrub	*sc,
+	struct xrep_newbt_resv	*resv)
+{
+	struct xfs_efd_log_item	*efdp;
+	struct xfs_extent	*extp;
+	struct xfs_log_item	*efd_lip;
+
+	efd_lip = xfs_extent_free_defer_type.create_done(sc->tp, resv->efi, 1);
+	efdp = container_of(efd_lip, struct xfs_efd_log_item, efd_item);
+	extp = efdp->efd_format.efd_extents;
+	extp->ext_start = XFS_AGB_TO_FSB(sc->mp, resv->pag->pag_agno,
+					 resv->agbno);
+	extp->ext_len = resv->len;
+	efdp->efd_next_extent++;
+	set_bit(XFS_LI_DIRTY, &efd_lip->li_flags);
+	xfs_perag_intent_rele(resv->pag);
+}
+
+/* Abort an EFI logged for a new btree block reservation. */
+static inline void
+xrep_newbt_cancel_autoreap(
+	struct xrep_newbt_resv	*resv)
+{
+	xfs_extent_free_defer_type.abort_intent(resv->efi);
+	xfs_perag_intent_rele(resv->pag);
+}
+
+/*
+ * Relog the EFIs attached to a staging btree so that we don't pin the log
+ * tail.  Same logic as xfs_defer_relog.
+ */
+int
+xrep_newbt_relog_autoreap(
+	struct xrep_newbt	*xnr)
+{
+	struct xrep_newbt_resv	*resv;
+	unsigned int		efi_bytes = 0;
+
+	list_for_each_entry(resv, &xnr->resv_list, list) {
+		/*
+		 * If the log intent item for this deferred op is in a
+		 * different checkpoint, relog it to keep the log tail moving
+		 * forward.  We're ok with this being racy because an incorrect
+		 * decision means we'll be a little slower at pushing the tail.
+		 */
+		if (!resv->efi || xfs_log_item_in_current_chkpt(resv->efi))
+			continue;
+
+		resv->efi = xfs_trans_item_relog(resv->efi, xnr->sc->tp);
+
+		/*
+		 * If free space is very fragmented, it's possible that the new
+		 * btree will be allocated a large number of small extents.
+		 * On an active system, it's possible that so many of those
+		 * EFIs will need relogging here that doing them all in one
+		 * transaction will overflow the reservation.
+		 *
+		 * Each allocation for the new btree (xrep_newbt_resv) points
+		 * to a unique single-mapping EFI, so each relog operation logs
+		 * a single-mapping EFD followed by a new EFI.  Each single
+		 * mapping EF[ID] item consumes about 128 bytes, so we'll
+		 * assume 256 bytes per relog.  Roll if we consume more than
+		 * half of the transaction reservation.
+		 */
+		efi_bytes += 256;
+		if (efi_bytes > xnr->sc->tp->t_log_res / 2) {
+			int	error;
+
+			error = xrep_roll_trans(xnr->sc);
+			if (error)
+				return error;
+
+			efi_bytes = 0;
+		}
+	}
+
+	if (xnr->sc->tp->t_flags & XFS_TRANS_DIRTY)
+		return xrep_roll_trans(xnr->sc);
+	return 0;
+}
+
+/*
  * Designate specific blocks to be used to build our new btree.  @pag must be
  * a passive reference.
  */
@@ -136,6 +271,7 @@ xrep_newbt_add_blocks(
 	xfs_extlen_t			len)
 {
 	struct xrep_newbt_resv		*resv;
+	int				error;
 
 	resv = kmalloc(sizeof(struct xrep_newbt_resv), XCHK_GFP_FLAGS);
 	if (!resv)
@@ -147,8 +283,16 @@ xrep_newbt_add_blocks(
 	resv->used = 0;
 	resv->pag = xfs_perag_hold(pag);
 
+	error = xrep_newbt_schedule_autoreap(xnr, resv);
+	if (error)
+		goto out_pag;
+
 	list_add_tail(&resv->list, &xnr->resv_list);
 	return 0;
+out_pag:
+	xfs_perag_put(resv->pag);
+	kfree(resv);
+	return error;
 }
 
 /* Allocate disk space for a new per-AG btree. */
@@ -304,6 +448,8 @@ xrep_newbt_free_extent(
 		free_aglen -= resv->used;
 	}
 
+	xrep_newbt_finish_autoreap(sc, resv);
+
 	if (free_aglen == 0)
 		return 0;
 
@@ -389,6 +535,7 @@ junkit:
 	 * reservations.
 	 */
 	list_for_each_entry_safe(resv, n, &xnr->resv_list, list) {
+		xrep_newbt_cancel_autoreap(resv);
 		list_del(&resv->list);
 		xfs_perag_put(resv->pag);
 		kfree(resv);
