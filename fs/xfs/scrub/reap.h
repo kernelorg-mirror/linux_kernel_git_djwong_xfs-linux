@@ -12,6 +12,13 @@ int xrep_reap_fsblocks(struct xfs_scrub *sc, struct xfsb_bitmap *bitmap,
 		const struct xfs_owner_info *oinfo, enum xfs_ag_resv_type type);
 int xrep_reap_ifork(struct xfs_scrub *sc, struct xfs_inode *ip, int whichfork);
 
+#ifdef CONFIG_XFS_RT
+int xrep_reap_rtblocks(struct xfs_scrub *sc, struct xrtb_bitmap *bitmap,
+		const struct xfs_owner_info *oinfo);
+#else
+# define xrep_reap_rtblocks(...)	(-EOPNOTSUPP)
+#endif /* CONFIG_XFS_RT */
+
 /* Buffer cache scan context. */
 struct xrep_bufscan {
 	/* Disk address for the buffers we want to scan. */
