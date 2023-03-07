@@ -1150,7 +1150,7 @@ xfs_file_fallocate(
 			 */
 			unsigned int blksize = i_blocksize(inode);
 
-			trace_xfs_zero_file_space(ip);
+			trace_xfs_zero_file_space(ip, offset, len);
 
 			/* Unshare around the region to zero, if needed. */
 			if (xfs_file_write_needs_cow_around(ip, offset, len)) {
