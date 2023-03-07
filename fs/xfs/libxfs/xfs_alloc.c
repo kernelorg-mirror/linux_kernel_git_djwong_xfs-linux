@@ -2583,6 +2583,7 @@ xfs_defer_extent_free(
 {
 	struct xfs_extent_free_item	*xefi;
 	struct xfs_mount		*mp = tp->t_mountp;
+	enum xfs_defer_ops_type		optype;
 #ifdef DEBUG
 	xfs_agnumber_t			agno;
 	xfs_agblock_t			agbno;
@@ -2591,19 +2592,31 @@ xfs_defer_extent_free(
 	ASSERT(len > 0);
 	ASSERT(len <= XFS_MAX_BMBT_EXTLEN);
 	ASSERT(!isnullstartblock(bno));
-	agno = XFS_FSB_TO_AGNO(mp, bno);
-	agbno = XFS_FSB_TO_AGBNO(mp, bno);
-	ASSERT(agno < mp->m_sb.sb_agcount);
-	ASSERT(agbno < mp->m_sb.sb_agblocks);
-	ASSERT(len < mp->m_sb.sb_agblocks);
-	ASSERT(agbno + len <= mp->m_sb.sb_agblocks);
-#endif
 	ASSERT(!(free_flags & ~XFS_FREE_EXTENT_ALL_FLAGS));
+	if (free_flags & XFS_FREE_EXTENT_REALTIME) {
+		ASSERT(bno < mp->m_sb.sb_rblocks);
+		ASSERT(len <= mp->m_sb.sb_rblocks);
+		ASSERT(bno + len <= mp->m_sb.sb_rblocks);
+	} else {
+		agno = XFS_FSB_TO_AGNO(mp, bno);
+		agbno = XFS_FSB_TO_AGBNO(mp, bno);
+
+		ASSERT(agno < mp->m_sb.sb_agcount);
+		ASSERT(agbno < mp->m_sb.sb_agblocks);
+		ASSERT(len < mp->m_sb.sb_agblocks);
+		ASSERT(agbno + len <= mp->m_sb.sb_agblocks);
+	}
+#endif
 	ASSERT(xfs_extfree_item_cache != NULL);
 	ASSERT(type != XFS_AG_RESV_AGFL);
 
-	if (XFS_IS_CORRUPT(mp, !xfs_verify_fsbext(mp, bno, len)))
-		return -EFSCORRUPTED;
+	if (free_flags & XFS_FREE_EXTENT_REALTIME) {
+		if (XFS_IS_CORRUPT(mp, !xfs_verify_rtbext(mp, bno, len)))
+			return -EFSCORRUPTED;
+	} else {
+		if (XFS_IS_CORRUPT(mp, !xfs_verify_fsbext(mp, bno, len)))
+			return -EFSCORRUPTED;
+	}
 
 	xefi = kmem_cache_zalloc(xfs_extfree_item_cache,
 			       GFP_KERNEL | __GFP_NOFAIL);
@@ -2612,6 +2625,19 @@ xfs_defer_extent_free(
 	xefi->xefi_agresv = type;
 	if (free_flags & XFS_FREE_EXTENT_SKIP_DISCARD)
 		xefi->xefi_flags |= XFS_EFI_SKIP_DISCARD;
+	if (free_flags & XFS_FREE_EXTENT_REALTIME) {
+		/*
+		 * Realtime and data section EFIs must use separate
+		 * transactions to finish deferred work because updates to
+		 * realtime metadata files can lock AGFs to allocate btree
+		 * blocks and we don't want that mixing with the AGF locks
+		 * taken to finish data section EFIs.
+		 */
+		optype = XFS_DEFER_OPS_TYPE_FREE_RT;
+		xefi->xefi_flags |= XFS_EFI_REALTIME;
+	} else {
+		optype = XFS_DEFER_OPS_TYPE_FREE;
+	}
 	if (oinfo) {
 		ASSERT(oinfo->oi_offset == 0);
 
@@ -2627,7 +2653,7 @@ xfs_defer_extent_free(
 	trace_xfs_extent_free_defer(mp, xefi);
 
 	xfs_extent_free_get_group(mp, xefi);
-	*dfpp = xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_FREE, &xefi->xefi_list);
+	*dfpp = xfs_defer_add(tp, optype, &xefi->xefi_list);
 	return 0;
 }
 
