@@ -9,6 +9,7 @@
 #include "xfs_format.h"
 #include "xfs_trans_resv.h"
 #include "xfs_mount.h"
+#include "xfs_btree.h"
 #include "xfs_log_format.h"
 #include "xfs_trans.h"
 #include "xfs_rtbitmap.h"
@@ -16,10 +17,13 @@
 #include "xfs_bmap.h"
 #include "xfs_bit.h"
 #include "xfs_rtgroup.h"
+#include "xfs_rmap.h"
+#include "xfs_rtrmap_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/repair.h"
 #include "scrub/rtbitmap.h"
+#include "scrub/btree.h"
 
 static inline void
 xchk_rtbitmap_compute_geometry(
@@ -120,6 +124,36 @@ xchk_setup_rtbitmap(
 
 /* Per-rtgroup bitmap contents. */
 
+/* Cross-reference rtbitmap entries with other metadata. */
+STATIC void
+xchk_rgbitmap_xref(
+	struct xchk_rgbitmap	*rgb,
+	xfs_rtblock_t		startblock,
+	xfs_rtblock_t		blockcount)
+{
+	struct xfs_scrub	*sc = rgb->sc;
+	xfs_rgnumber_t		rgno;
+	xfs_rgblock_t		rgbno;
+
+	if (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
+		return;
+	if (!sc->sr.rmap_cur)
+		return;
+
+	rgbno = xfs_rtb_to_rgbno(sc->mp, startblock, &rgno);
+	xchk_xref_has_no_rt_owner(sc, rgbno, blockcount);
+
+	if (rgb->next_free_rtblock < startblock) {
+		xfs_rgblock_t	next_rgbno;
+
+		next_rgbno = xfs_rtb_to_rgbno(sc->mp, rgb->next_free_rtblock,
+				&rgno);
+		xchk_xref_has_rt_owner(sc, next_rgbno, rgbno - next_rgbno);
+	}
+
+	rgb->next_free_rtblock = startblock + blockcount;
+}
+
 /* Scrub a free extent record from the realtime bitmap. */
 STATIC int
 xchk_rgbitmap_rec(
@@ -138,6 +172,12 @@ xchk_rgbitmap_rec(
 
 	if (!xfs_verify_rtbext(mp, startblock, blockcount))
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, 0);
+
+	xchk_rgbitmap_xref(rgb, startblock, blockcount);
+
+	if (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
+		return -ECANCELED;
+
 	return 0;
 }
 
@@ -151,6 +191,7 @@ xchk_rgbitmap(
 	struct xfs_rtgroup	*rtg = sc->sr.rtg;
 	struct xchk_rgbitmap	*rgb = sc->buf;
 	xfs_rtblock_t		rtbno;
+	xfs_rtblock_t		last_rtbno;
 	xfs_rgblock_t		last_rgbno = rtg->rtg_blockcount - 1;
 	int			error;
 
@@ -165,6 +206,7 @@ xchk_rgbitmap(
 	 * realtime group.
 	 */
 	rtbno = xfs_rgbno_to_rtb(mp, rtg->rtg_rgno, 0);
+	rgb->next_free_rtblock = rtbno;
 	keys[0].ar_startext = xfs_rtb_to_rtx(mp, rtbno);
 
 	rtbno = xfs_rgbno_to_rtb(mp, rtg->rtg_rgno, last_rgbno);
@@ -175,6 +217,22 @@ xchk_rgbitmap(
 			xchk_rgbitmap_rec, rgb);
 	if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, 0, &error))
 		return error;
+
+	/*
+	 * Check that the are rmappings for all rt extents between the end of
+	 * the last free extent we saw and the last possible extent in the rt
+	 * group.
+	 */
+	last_rtbno = xfs_rgbno_to_rtb(sc->mp, rtg->rtg_rgno, last_rgbno);
+	if (rgb->next_free_rtblock < last_rtbno) {
+		xfs_rgnumber_t	rgno;
+		xfs_rgblock_t	next_rgbno;
+
+		next_rgbno = xfs_rtb_to_rgbno(sc->mp, rgb->next_free_rtblock,
+				&rgno);
+		xchk_xref_has_rt_owner(sc, next_rgbno,
+				last_rgbno - next_rgbno);
+	}
 
 	return 0;
 }
