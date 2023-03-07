@@ -246,6 +246,7 @@ static const struct xfs_defer_op_type *defer_op_types[XFS_DEFER_OPS_TYPE_MAX] = 
 	[XFS_DEFER_OPS_TYPE_SWAPEXT]	= &xfs_swapext_defer_type,
 #ifdef CONFIG_XFS_RT
 	[XFS_DEFER_OPS_TYPE_FREE_RT]	= &xfs_rtextent_free_defer_type,
+	[XFS_DEFER_OPS_TYPE_RMAP_RT]	= &xfs_rtrmap_update_defer_type,
 #endif
 };
 

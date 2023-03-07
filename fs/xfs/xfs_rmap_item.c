@@ -23,6 +23,7 @@
 #include "xfs_ag.h"
 #include "xfs_btree.h"
 #include "xfs_trace.h"
+#include "xfs_rtgroup.h"
 
 struct kmem_cache	*xfs_rui_cache;
 struct kmem_cache	*xfs_rud_cache;
@@ -94,7 +95,9 @@ xfs_rui_item_format(
 	ASSERT(atomic_read(&ruip->rui_next_extent) ==
 			ruip->rui_format.rui_nextents);
 
-	ruip->rui_format.rui_type = XFS_LI_RUI;
+	ASSERT(lip->li_type == XFS_LI_RUI || lip->li_type == XFS_LI_RUI_RT);
+
+	ruip->rui_format.rui_type = lip->li_type;
 	ruip->rui_format.rui_size = 1;
 
 	xlog_copy_iovec(lv, &vecp, XLOG_REG_TYPE_RUI_FORMAT, &ruip->rui_format,
@@ -137,19 +140,22 @@ xfs_rui_item_release(
 STATIC struct xfs_rui_log_item *
 xfs_rui_init(
 	struct xfs_mount		*mp,
+	unsigned short			item_type,
 	uint				nextents)
 
 {
 	struct xfs_rui_log_item		*ruip;
 
 	ASSERT(nextents > 0);
+	ASSERT(item_type == XFS_LI_RUI || item_type == XFS_LI_RUI_RT);
+
 	if (nextents > XFS_RUI_MAX_FAST_EXTENTS)
 		ruip = kmem_zalloc(xfs_rui_log_item_sizeof(nextents), 0);
 	else
 		ruip = kmem_cache_zalloc(xfs_rui_cache,
 					 GFP_KERNEL | __GFP_NOFAIL);
 
-	xfs_log_item_init(mp, &ruip->rui_item, XFS_LI_RUI, &xfs_rui_item_ops);
+	xfs_log_item_init(mp, &ruip->rui_item, item_type, &xfs_rui_item_ops);
 	ruip->rui_format.rui_nextents = nextents;
 	ruip->rui_format.rui_id = (uintptr_t)(void *)ruip;
 	atomic_set(&ruip->rui_next_extent, 0);
@@ -188,7 +194,9 @@ xfs_rud_item_format(
 	struct xfs_rud_log_item	*rudp = RUD_ITEM(lip);
 	struct xfs_log_iovec	*vecp = NULL;
 
-	rudp->rud_format.rud_type = XFS_LI_RUD;
+	ASSERT(lip->li_type == XFS_LI_RUD || lip->li_type == XFS_LI_RUD_RT);
+
+	rudp->rud_format.rud_type = lip->li_type;
 	rudp->rud_format.rud_size = 1;
 
 	xlog_copy_iovec(lv, &vecp, XLOG_REG_TYPE_RUD_FORMAT, &rudp->rud_format,
@@ -232,6 +240,20 @@ static inline struct xfs_rmap_intent *ri_entry(const struct list_head *e)
 	return list_entry(e, struct xfs_rmap_intent, ri_list);
 }
 
+static inline bool
+xfs_rui_item_isrt(const struct xfs_log_item *lip)
+{
+	ASSERT(lip->li_type == XFS_LI_RUI || lip->li_type == XFS_LI_RUI_RT);
+
+	return lip->li_type == XFS_LI_RUI_RT;
+}
+
+static inline unsigned short
+xfs_rud_type_from_rui(const struct xfs_rui_log_item *ruip)
+{
+	return xfs_rui_item_isrt(&ruip->rui_item) ? XFS_LI_RUD_RT : XFS_LI_RUD;
+}
+
 static struct xfs_rud_log_item *
 xfs_trans_get_rud(
 	struct xfs_trans		*tp,
@@ -240,8 +262,8 @@ xfs_trans_get_rud(
 	struct xfs_rud_log_item		*rudp;
 
 	rudp = kmem_cache_zalloc(xfs_rud_cache, GFP_KERNEL | __GFP_NOFAIL);
-	xfs_log_item_init(tp->t_mountp, &rudp->rud_item, XFS_LI_RUD,
-			  &xfs_rud_item_ops);
+	xfs_log_item_init(tp->t_mountp, &rudp->rud_item,
+			xfs_rud_type_from_rui(ruip), &xfs_rud_item_ops);
 	rudp->rud_ruip = ruip;
 	rudp->rud_format.rud_rui_id = ruip->rui_format.rui_id;
 
@@ -360,11 +382,12 @@ xfs_rmap_update_create_intent(
 	bool				sort)
 {
 	struct xfs_mount		*mp = tp->t_mountp;
-	struct xfs_rui_log_item		*ruip = xfs_rui_init(mp, count);
+	struct xfs_rui_log_item		*ruip;
 	struct xfs_rmap_intent		*ri;
 
 	ASSERT(count > 0);
 
+	ruip = xfs_rui_init(mp, XFS_LI_RUI, count);
 	xfs_trans_add_item(tp, &ruip->rui_item);
 	if (sort)
 		list_sort(mp, items, xfs_rmap_update_diff_items);
@@ -390,11 +413,28 @@ xfs_rmap_defer_add(
 	struct xfs_rmap_intent	*ri)
 {
 	struct xfs_mount	*mp = tp->t_mountp;
+	enum xfs_defer_ops_type	optype;
 
 	trace_xfs_rmap_defer(mp, ri);
 
-	ri->ri_pag = xfs_perag_intent_get(mp, ri->ri_bmap.br_startblock);
-	xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_RMAP, &ri->ri_list);
+	/*
+	 * Deferred rmap updates for the realtime and data sections must use
+	 * separate transactions to finish deferred work because updates to
+	 * realtime metadata files can lock AGFs to allocate btree blocks and
+	 * we don't want that mixing with the AGF locks taken to finish data
+	 * section updates.
+	 */
+	if (ri->ri_realtime) {
+		xfs_rgnumber_t	rgno;
+
+		rgno = xfs_rtb_to_rgno(mp, ri->ri_bmap.br_startblock);
+		ri->ri_rtg = xfs_rtgroup_get(mp, rgno);
+		optype = XFS_DEFER_OPS_TYPE_RMAP_RT;
+	} else {
+		ri->ri_pag = xfs_perag_intent_get(mp, ri->ri_bmap.br_startblock);
+		optype = XFS_DEFER_OPS_TYPE_RMAP;
+	}
+	xfs_defer_add(tp, optype, &ri->ri_list);
 }
 
 /* Cancel a deferred rmap update. */
@@ -459,6 +499,124 @@ const struct xfs_defer_op_type xfs_rmap_update_defer_type = {
 	.finish_cleanup = xfs_rmap_finish_one_cleanup,
 	.cancel_item	= xfs_rmap_update_cancel_item,
 };
+
+#ifdef CONFIG_XFS_RT
+/* Sort rmap intents by rtgroup. */
+static int
+xfs_rtrmap_update_diff_items(
+	void				*priv,
+	const struct list_head		*a,
+	const struct list_head		*b)
+{
+	struct xfs_rmap_intent		*ra = ri_entry(a);
+	struct xfs_rmap_intent		*rb = ri_entry(b);
+
+	return ra->ri_rtg->rtg_rgno - rb->ri_rtg->rtg_rgno;
+}
+
+static struct xfs_log_item *
+xfs_rtrmap_update_create_intent(
+	struct xfs_trans		*tp,
+	struct list_head		*items,
+	unsigned int			count,
+	bool				sort)
+{
+	struct xfs_mount		*mp = tp->t_mountp;
+	struct xfs_rui_log_item		*ruip;
+	struct xfs_rmap_intent		*ri;
+
+	ASSERT(count > 0);
+
+	ruip = xfs_rui_init(mp, XFS_LI_RUI_RT, count);
+	xfs_trans_add_item(tp, &ruip->rui_item);
+	if (sort)
+		list_sort(mp, items, xfs_rtrmap_update_diff_items);
+	list_for_each_entry(ri, items, ri_list)
+		xfs_rmap_update_log_item(tp, ruip, ri);
+	return &ruip->rui_item;
+}
+
+/* Cancel a deferred realtime rmap update. */
+STATIC void
+xfs_rtrmap_update_cancel_item(
+	struct list_head		*item)
+{
+	struct xfs_rmap_intent		*ri = ri_entry(item);
+
+	xfs_rtgroup_put(ri->ri_rtg);
+	kmem_cache_free(xfs_rmap_intent_cache, ri);
+}
+
+/*
+ * Finish an rmap update and log it to the RUD. Note that the transaction is
+ * marked dirty regardless of whether the rmap update succeeds or fails to
+ * support the RUI/RUD lifecycle rules.
+ */
+static int
+xfs_trans_log_finish_rtrmap_update(
+	struct xfs_trans		*tp,
+	struct xfs_rud_log_item		*rudp,
+	struct xfs_rmap_intent		*ri,
+	struct xfs_btree_cur		**pcur)
+{
+	int				error;
+
+	error = xfs_rtrmap_finish_one(tp, ri, pcur);
+
+	/*
+	 * Mark the transaction dirty, even on error. This ensures the
+	 * transaction is aborted, which:
+	 *
+	 * 1.) releases the RUI and frees the RUD
+	 * 2.) shuts down the filesystem
+	 */
+	tp->t_flags |= XFS_TRANS_DIRTY | XFS_TRANS_HAS_INTENT_DONE;
+	set_bit(XFS_LI_DIRTY, &rudp->rud_item.li_flags);
+
+	return error;
+}
+
+/* Process a deferred realtime rmap update. */
+STATIC int
+xfs_rtrmap_update_finish_item(
+	struct xfs_trans		*tp,
+	struct xfs_log_item		*done,
+	struct list_head		*item,
+	struct xfs_btree_cur		**state)
+{
+	struct xfs_rmap_intent		*ri = ri_entry(item);
+	int				error;
+
+	error = xfs_trans_log_finish_rtrmap_update(tp, RUD_ITEM(done), ri,
+			state);
+	xfs_rtrmap_update_cancel_item(item);
+	return error;
+}
+
+/* Clean up after calling xfs_rtrmap_finish_one. */
+STATIC void
+xfs_rtrmap_finish_one_cleanup(
+	struct xfs_trans	*tp,
+	struct xfs_btree_cur	*rcur,
+	int			error)
+{
+	if (rcur)
+		xfs_btree_del_cursor(rcur, error);
+}
+
+const struct xfs_defer_op_type xfs_rtrmap_update_defer_type = {
+	.max_items	= XFS_RUI_MAX_FAST_EXTENTS,
+	.create_intent	= xfs_rtrmap_update_create_intent,
+	.abort_intent	= xfs_rmap_update_abort_intent,
+	.create_done	= xfs_rmap_update_create_done,
+	.finish_item	= xfs_rtrmap_update_finish_item,
+	.finish_cleanup = xfs_rtrmap_finish_one_cleanup,
+	.cancel_item	= xfs_rtrmap_update_cancel_item,
+};
+#else
+# define xfs_rtrmap_finish_one_cleanup(...)		((void)0)
+# define xfs_trans_log_finish_rtrmap_update(...)	(-EOPNOTSUPP)
+#endif
 
 /* Is this recovered RUI ok? */
 static inline bool
@@ -638,6 +796,8 @@ xfs_rui_item_relog(
 	struct xfs_map_extent		*map;
 	unsigned int			count;
 
+	ASSERT(intent->li_type == XFS_LI_RUI || intent->li_type == XFS_LI_RUI_RT);
+
 	count = RUI_ITEM(intent)->rui_format.rui_nextents;
 	map = RUI_ITEM(intent)->rui_format.rui_extents;
 
@@ -645,7 +805,7 @@ xfs_rui_item_relog(
 	rudp = xfs_trans_get_rud(tp, RUI_ITEM(intent));
 	set_bit(XFS_LI_DIRTY, &rudp->rud_item.li_flags);
 
-	ruip = xfs_rui_init(tp->t_mountp, count);
+	ruip = xfs_rui_init(tp->t_mountp, intent->li_type, count);
 	memcpy(ruip->rui_format.rui_extents, map, count * sizeof(*map));
 	atomic_set(&ruip->rui_next_extent, count);
 	xfs_trans_add_item(tp, &ruip->rui_item);
@@ -712,7 +872,9 @@ xlog_recover_rui_commit_pass2(
 		return -EFSCORRUPTED;
 	}
 
-	ruip = xfs_rui_init(mp, rui_formatp->rui_nextents);
+	ASSERT(ITEM_TYPE(item) == XFS_LI_RUI || ITEM_TYPE(item) == XFS_LI_RUI_RT);
+
+	ruip = xfs_rui_init(mp, ITEM_TYPE(item), rui_formatp->rui_nextents);
 	xfs_rui_copy_format(&ruip->rui_format, rui_formatp);
 	atomic_set(&ruip->rui_next_extent, rui_formatp->rui_nextents);
 	/*
@@ -728,6 +890,21 @@ const struct xlog_recover_item_ops xlog_rui_item_ops = {
 	.item_type		= XFS_LI_RUI,
 	.commit_pass2		= xlog_recover_rui_commit_pass2,
 };
+
+const struct xlog_recover_item_ops xlog_rtrui_item_ops = {
+	.item_type		= XFS_LI_RUI_RT,
+	.commit_pass2		= xlog_recover_rui_commit_pass2,
+};
+
+static inline unsigned short
+xfs_rui_type_from_rud(const struct xlog_recover_item *item)
+{
+	unsigned short	item_type = ITEM_TYPE(item);
+
+	ASSERT(item_type == XFS_LI_RUD || item_type == XFS_LI_RUD_RT);
+
+	return item_type == XFS_LI_RUD_RT ? XFS_LI_RUI_RT : XFS_LI_RUI;
+}
 
 /*
  * This routine is called when an RUD format structure is found in a committed
@@ -752,11 +929,17 @@ xlog_recover_rud_commit_pass2(
 		return -EFSCORRUPTED;
 	}
 
-	xlog_recover_release_intent(log, XFS_LI_RUI, rud_formatp->rud_rui_id);
+	xlog_recover_release_intent(log, xfs_rui_type_from_rud(item),
+			rud_formatp->rud_rui_id);
 	return 0;
 }
 
 const struct xlog_recover_item_ops xlog_rud_item_ops = {
 	.item_type		= XFS_LI_RUD,
+	.commit_pass2		= xlog_recover_rud_commit_pass2,
+};
+
+const struct xlog_recover_item_ops xlog_rtrud_item_ops = {
+	.item_type		= XFS_LI_RUD_RT,
 	.commit_pass2		= xlog_recover_rud_commit_pass2,
 };
