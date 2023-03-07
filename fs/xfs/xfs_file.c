@@ -1014,7 +1014,8 @@ static inline bool xfs_file_sync_writes(struct file *filp)
 #define	XFS_FALLOC_FL_SUPPORTED						\
 		(FALLOC_FL_KEEP_SIZE | FALLOC_FL_PUNCH_HOLE |		\
 		 FALLOC_FL_COLLAPSE_RANGE | FALLOC_FL_ZERO_RANGE |	\
-		 FALLOC_FL_INSERT_RANGE | FALLOC_FL_UNSHARE_RANGE)
+		 FALLOC_FL_INSERT_RANGE | FALLOC_FL_UNSHARE_RANGE |	\
+		 FALLOC_FL_MAP_FREE_SPACE)
 
 STATIC long
 xfs_file_fallocate(
@@ -1129,6 +1130,40 @@ xfs_file_fallocate(
 			goto out_unlock;
 		}
 		do_file_insert = true;
+	} else if (mode & FALLOC_FL_MAP_FREE_SPACE) {
+		struct xfs_mount	*mp = ip->i_mount;
+		xfs_off_t		device_size;
+
+		if (!capable(CAP_SYS_ADMIN)) {
+			error = -EPERM;
+			goto out_unlock;
+		}
+
+		if (XFS_IS_REALTIME_INODE(ip))
+			device_size = XFS_FSB_TO_B(mp, mp->m_sb.sb_rblocks);
+		else
+			device_size = XFS_FSB_TO_B(mp, mp->m_sb.sb_dblocks);
+
+		/*
+		 * Bail out now if we aren't allowed to make the file size the
+		 * same length as the device.
+		 */
+		if (device_size > i_size_read(inode)) {
+			new_size = device_size;
+			error = inode_newsize_ok(inode, new_size);
+			if (error)
+				goto out_unlock;
+		}
+
+		if (XFS_IS_REALTIME_INODE(ip))
+			error = xfs_map_free_rt_space(ip, offset, len);
+		else
+			error = xfs_map_free_space(ip, offset, len);
+		if (error) {
+			if (error == -ECANCELED)
+				error = 0;
+			goto out_unlock;
+		}
 	} else {
 		if (!(mode & FALLOC_FL_KEEP_SIZE) &&
 		    offset + len > i_size_read(inode)) {
