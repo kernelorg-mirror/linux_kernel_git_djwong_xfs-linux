@@ -1090,6 +1090,59 @@ out_path:
 	return error;
 }
 
+/* Add a metadata inode for a realtime refcount btree. */
+static int
+xfs_growfsrt_create_rtrefcount(
+	struct xfs_rtgroup	*rtg)
+{
+	struct xfs_imeta_update	upd;
+	struct xfs_mount	*mp = rtg->rtg_mount;
+	struct xfs_imeta_path	*path;
+	struct xfs_inode	*ip = NULL;
+	int			error;
+
+	if (!xfs_has_rtreflink(mp) || rtg->rtg_refcountip)
+		return 0;
+
+	error = xfs_rtrefcountbt_create_path(mp, rtg->rtg_rgno, &path);
+	if (error)
+		return error;
+
+	error = xfs_imeta_ensure_dirpath(mp, path);
+	if (error)
+		goto out_path;
+
+	error = xfs_imeta_start_create(mp, path, &upd);
+	if (error)
+		goto out_path;
+
+	error = xfs_rtrefcountbt_create(&upd, &ip);
+	if (error)
+		goto out_cancel;
+
+	lockdep_set_class(&ip->i_lock.mr_lock, &xfs_rrefcountip_key);
+
+	error = xfs_imeta_commit_update(&upd);
+	if (error)
+		goto out_path;
+
+	xfs_imeta_free_path(path);
+	xfs_finish_inode_setup(ip);
+	rtg->rtg_refcountip = ip;
+	return 0;
+
+out_cancel:
+	xfs_imeta_cancel_update(&upd, error);
+	/* Have to finish setting up the inode to ensure it's deleted. */
+	if (ip) {
+		xfs_finish_inode_setup(ip);
+		xfs_irele(ip);
+	}
+out_path:
+	xfs_imeta_free_path(path);
+	return error;
+}
+
 /*
  * Check that changes to the realtime geometry won't affect the minimum
  * log size, which would cause the fs to become unusable.
@@ -1196,9 +1249,11 @@ xfs_growfs_rt(
 		return -EINVAL;
 
 	/* Unsupported realtime features. */
-	if (!xfs_has_rtgroups(mp) && xfs_has_rmapbt(mp))
+	if (!xfs_has_rtgroups(mp) && (xfs_has_rmapbt(mp) || xfs_has_reflink(mp)))
 		return -EOPNOTSUPP;
-	if (xfs_has_reflink(mp) || xfs_has_quota(mp))
+	if (xfs_has_quota(mp))
+		return -EOPNOTSUPP;
+	if (xfs_has_reflink(mp) && in->extsize != 1)
 		return -EOPNOTSUPP;
 
 	nrblocks = in->newblocks;
@@ -1340,6 +1395,12 @@ xfs_growfs_rt(
 
 			for_each_rtgroup_range(mp, rgno, nsbp->sb_rgcount, rtg) {
 				error = xfs_growfsrt_create_rtrmap(rtg);
+				if (error) {
+					xfs_rtgroup_rele(rtg);
+					break;
+				}
+
+				error = xfs_growfsrt_create_rtrefcount(rtg);
 				if (error) {
 					xfs_rtgroup_rele(rtg);
 					break;
