@@ -449,7 +449,7 @@ xreap_agextent_iter(
 
 		xfs_refcount_free_cow_extent(sc->tp, fsbno, *aglenp);
 		error = xfs_free_extent_later(sc->tp, fsbno, *aglenp, NULL,
-				rs->resv, true);
+				rs->resv, XFS_FREE_EXTENT_SKIP_DISCARD);
 		if (error)
 			return error;
 
@@ -475,7 +475,7 @@ xreap_agextent_iter(
 	 * system with large EFIs.
 	 */
 	error = xfs_free_extent_later(sc->tp, fsbno, *aglenp, rs->oinfo,
-			rs->resv, true);
+			rs->resv, XFS_FREE_EXTENT_SKIP_DISCARD);
 	if (error)
 		return error;
 
@@ -942,7 +942,8 @@ xrep_reap_bmapi_iter(
 	xfs_trans_mod_dquot_byino(sc->tp, ip, XFS_TRANS_DQ_BCOUNT,
 			-(int64_t)imap->br_blockcount);
 	return xfs_free_extent_later(sc->tp, imap->br_startblock,
-			imap->br_blockcount, NULL, XFS_AG_RESV_NONE, true);
+			imap->br_blockcount, NULL, XFS_AG_RESV_NONE,
+			XFS_FREE_EXTENT_SKIP_DISCARD);
 }
 
 /*
