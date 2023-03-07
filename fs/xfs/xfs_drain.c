@@ -11,11 +11,12 @@
 #include "xfs_mount.h"
 #include "xfs_ag.h"
 #include "xfs_trace.h"
+#include "xfs_rtgroup.h"
 
 /*
- * Use a static key here to reduce the overhead of xfs_drain_rele.  If the
+ * Use a static key here to reduce the overhead of xfs_defer_drain_rele.  If the
  * compiler supports jump labels, the static branch will be replaced by a nop
- * sled when there are no xfs_drain_wait callers.  Online fsck is currently
+ * sled when there are no xfs_defer_drain_wait callers.  Online fsck is currently
  * the only caller, so this is a reasonable tradeoff.
  *
  * Note: Patching the kernel code requires taking the cpu hotplug lock.  Other
@@ -23,18 +24,18 @@
  * XFS callers cannot hold any locks that might be used by memory reclaim or
  * writeback when calling the static_branch_{inc,dec} functions.
  */
-static DEFINE_STATIC_KEY_FALSE(xfs_drain_waiter_gate);
+static DEFINE_STATIC_KEY_FALSE(xfs_defer_drain_waiter_gate);
 
 void
-xfs_drain_wait_disable(void)
+xfs_defer_drain_wait_disable(void)
 {
-	static_branch_dec(&xfs_drain_waiter_gate);
+	static_branch_dec(&xfs_defer_drain_waiter_gate);
 }
 
 void
-xfs_drain_wait_enable(void)
+xfs_defer_drain_wait_enable(void)
 {
-	static_branch_inc(&xfs_drain_waiter_gate);
+	static_branch_inc(&xfs_defer_drain_waiter_gate);
 }
 
 void
@@ -71,7 +72,7 @@ static inline bool has_waiters(struct wait_queue_head *wq_head)
 static inline void xfs_defer_drain_rele(struct xfs_defer_drain *dr)
 {
 	if (atomic_dec_and_test(&dr->dr_count) &&
-	    static_branch_unlikely(&xfs_drain_waiter_gate) &&
+	    static_branch_unlikely(&xfs_defer_drain_waiter_gate) &&
 	    has_waiters(&dr->dr_waiters))
 		wake_up(&dr->dr_waiters);
 }
@@ -164,3 +165,77 @@ xfs_perag_intent_busy(
 {
 	return xfs_defer_drain_busy(&pag->pag_intents_drain);
 }
+
+#ifdef CONFIG_XFS_RT
+
+/*
+ * Get a passive reference to an rtgroup and declare an intent to update its
+ * metadata.
+ */
+struct xfs_rtgroup *
+xfs_rtgroup_intent_get(
+	struct xfs_mount	*mp,
+	xfs_rgnumber_t		rgno)
+{
+	struct xfs_rtgroup	*rtg;
+
+	rtg = xfs_rtgroup_get(mp, rgno);
+	if (!rtg)
+		return NULL;
+
+	xfs_rtgroup_intent_hold(rtg);
+	return rtg;
+}
+
+/*
+ * Release our intent to update this rtgroup's metadata, and then release our
+ * passive ref to the rtgroup.
+ */
+void
+xfs_rtgroup_intent_put(
+	struct xfs_rtgroup	*rtg)
+{
+	xfs_rtgroup_intent_rele(rtg);
+	xfs_rtgroup_put(rtg);
+}
+/*
+ * Declare an intent to update rtgroup metadata.  Other threads that need
+ * exclusive access can decide to back off if they see declared intentions.
+ */
+void
+xfs_rtgroup_intent_hold(
+	struct xfs_rtgroup	*rtg)
+{
+	trace_xfs_rtgroup_intent_hold(rtg, __return_address);
+	xfs_defer_drain_grab(&rtg->rtg_intents_drain);
+}
+
+/* Release our intent to update this rtgroup's metadata. */
+void
+xfs_rtgroup_intent_rele(
+	struct xfs_rtgroup	*rtg)
+{
+	trace_xfs_rtgroup_intent_rele(rtg, __return_address);
+	xfs_defer_drain_rele(&rtg->rtg_intents_drain);
+}
+
+/*
+ * Wait for the intent update count for this rtgroup to hit zero.
+ * Callers must not hold any rt metadata inode locks.
+ */
+int
+xfs_rtgroup_intent_drain(
+	struct xfs_rtgroup	*rtg)
+{
+	trace_xfs_rtgroup_wait_intents(rtg, __return_address);
+	return xfs_defer_drain_wait(&rtg->rtg_intents_drain);
+}
+
+/* Has anyone declared an intent to update this rtgroup? */
+bool
+xfs_rtgroup_intent_busy(
+	struct xfs_rtgroup	*rtg)
+{
+	return xfs_defer_drain_busy(&rtg->rtg_intents_drain);
+}
+#endif /* CONFIG_XFS_RT */

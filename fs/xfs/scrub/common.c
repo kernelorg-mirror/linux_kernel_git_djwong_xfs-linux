@@ -777,12 +777,88 @@ xchk_rt_unlock_rtbitmap(
 }
 
 #ifdef CONFIG_XFS_RT
+/* Lock all the rt group metadata inode ILOCKs and wait for intents. */
+static int
+xchk_rtgroup_drain_and_lock(
+	struct xfs_scrub	*sc,
+	struct xchk_rt		*sr,
+	unsigned int		rtglock_flags)
+{
+	int			error = 0;
+
+	ASSERT(sr->rtg != NULL);
+
+	/*
+	 * If we're /only/ locking the rtbitmap in shared mode, then we're
+	 * obviously not trying to compare records in two metadata inodes.
+	 * There's no need to drain intents here because the caller (most
+	 * likely the rgsuper scanner) doesn't need that level of consistency.
+	 */
+	if (rtglock_flags == XFS_RTGLOCK_BITMAP_SHARED) {
+		xfs_rtgroup_lock(NULL, sr->rtg, rtglock_flags);
+		sr->rtlock_flags = rtglock_flags;
+		return 0;
+	}
+
+	do {
+		if (xchk_should_terminate(sc, &error))
+			return error;
+
+		xfs_rtgroup_lock(NULL, sr->rtg, rtglock_flags);
+
+		/*
+		 * If we've grabbed a non-metadata file for scrubbing, we
+		 * assume that holding its ILOCK will suffice to coordinate
+		 * with any rt intent chains involving this inode.
+		 */
+		if (sc->ip && !xfs_is_metadata_inode(sc->ip)) {
+			sr->rtlock_flags = rtglock_flags;
+			return 0;
+		}
+
+		/*
+		 * Decide if the rt group is quiet enough for all metadata to
+		 * be consistent with each other.  Regular file IO doesn't get
+		 * to lock all the rt inodes at the same time, which means that
+		 * there could be other threads in the middle of processing a
+		 * chain of deferred ops.
+		 *
+		 * We just locked all the metadata inodes for this rt group;
+		 * now take a look to see if there are any intents in progress.
+		 * If there are, drop the rt group inode locks and wait for the
+		 * intents to drain.  Since we hold the rt group inode locks
+		 * for the duration of the scrub, this is the only time we have
+		 * to sample the intents counter; any threads increasing it
+		 * after this point can't possibly be in the middle of a chain
+		 * of rt metadata updates.
+		 *
+		 * Obviously, this should be slanted against scrub and in favor
+		 * of runtime threads.
+		 */
+		if (!xfs_rtgroup_intent_busy(sr->rtg)) {
+			sr->rtlock_flags = rtglock_flags;
+			return 0;
+		}
+
+		xfs_rtgroup_unlock(sr->rtg, rtglock_flags);
+
+		if (!(sc->flags & XCHK_FSGATES_DRAIN))
+			return -ECHRNG;
+		error = xfs_rtgroup_intent_drain(sr->rtg);
+		if (error == -ERESTARTSYS)
+			error = -EINTR;
+	} while (!error);
+
+	return error;
+}
+
 /*
  * For scrubbing a realtime group, grab all the in-core resources we'll need to
  * check the metadata, which means taking the ILOCK of the realtime group's
- * metadata inodes.  Callers must not join these inodes to the transaction with
- * non-zero lockflags or concurrency problems will result.  The @rtglock_flags
- * argument takes XFS_RTGLOCK_* flags.
+ * metadata inodes and draining any running intent chains.  Callers must not
+ * join these inodes to the transaction with non-zero lockflags or concurrency
+ * problems will result.  The @rtglock_flags argument takes XFS_RTGLOCK_*
+ * flags.
  */
 int
 xchk_rtgroup_init(
@@ -798,9 +874,7 @@ xchk_rtgroup_init(
 	if (!sr->rtg)
 		return -ENOENT;
 
-	xfs_rtgroup_lock(NULL, sr->rtg, rtglock_flags);
-	sr->rtlock_flags = rtglock_flags;
-	return 0;
+	return xchk_rtgroup_drain_and_lock(sc, sr, rtglock_flags);
 }
 
 /*
@@ -1458,7 +1532,7 @@ xchk_fsgates_enable(
 	trace_xchk_fsgates_enable(sc, scrub_fsgates);
 
 	if (scrub_fsgates & XCHK_FSGATES_DRAIN)
-		xfs_drain_wait_enable();
+		xfs_defer_drain_wait_enable();
 
 	if (scrub_fsgates & XCHK_FSGATES_QUOTA)
 		xfs_dqtrx_hook_enable();

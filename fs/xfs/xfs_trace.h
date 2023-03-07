@@ -4950,6 +4950,38 @@ DEFINE_PERAG_INTENTS_EVENT(xfs_perag_intent_hold);
 DEFINE_PERAG_INTENTS_EVENT(xfs_perag_intent_rele);
 DEFINE_PERAG_INTENTS_EVENT(xfs_perag_wait_intents);
 
+#ifdef CONFIG_XFS_RT
+DECLARE_EVENT_CLASS(xfs_rtgroup_intents_class,
+	TP_PROTO(struct xfs_rtgroup *rtg, void *caller_ip),
+	TP_ARGS(rtg, caller_ip),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(dev_t, rtdev)
+		__field(long, nr_intents)
+		__field(void *, caller_ip)
+	),
+	TP_fast_assign(
+		__entry->dev = rtg->rtg_mount->m_super->s_dev;
+		__entry->rtdev = rtg->rtg_mount->m_rtdev_targp->bt_dev;
+		__entry->nr_intents = atomic_read(&rtg->rtg_intents_drain.dr_count);
+		__entry->caller_ip = caller_ip;
+	),
+	TP_printk("dev %d:%d rtdev %d:%d intents %ld caller %pS",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  MAJOR(__entry->rtdev), MINOR(__entry->rtdev),
+		  __entry->nr_intents,
+		  __entry->caller_ip)
+);
+
+#define DEFINE_RTGROUP_INTENTS_EVENT(name)	\
+DEFINE_EVENT(xfs_rtgroup_intents_class, name,					\
+	TP_PROTO(struct xfs_rtgroup *rtg, void *caller_ip), \
+	TP_ARGS(rtg, caller_ip))
+DEFINE_RTGROUP_INTENTS_EVENT(xfs_rtgroup_intent_hold);
+DEFINE_RTGROUP_INTENTS_EVENT(xfs_rtgroup_intent_rele);
+DEFINE_RTGROUP_INTENTS_EVENT(xfs_rtgroup_wait_intents);
+#endif /* CONFIG_XFS_RT */
+
 #endif /* CONFIG_XFS_DRAIN_INTENTS */
 
 TRACE_EVENT(xfs_swapext_overhead,
