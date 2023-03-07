@@ -1924,6 +1924,7 @@ xfs_rtmount_refcountbt(
 		goto out_path;
 
 	if (ino == NULLFSINO) {
+		xfs_rtgroup_mark_sick(rtg, XFS_SICK_RT_REFCNTBT);
 		error = -EFSCORRUPTED;
 		goto out_path;
 	}
@@ -1933,6 +1934,7 @@ xfs_rtmount_refcountbt(
 		goto out_path;
 
 	if (XFS_IS_CORRUPT(mp, ip->i_df.if_format != XFS_DINODE_FMT_REFCOUNT)) {
+		xfs_rtgroup_mark_sick(rtg, XFS_SICK_RT_REFCNTBT);
 		error = -EFSCORRUPTED;
 		goto out_rele;
 	}
