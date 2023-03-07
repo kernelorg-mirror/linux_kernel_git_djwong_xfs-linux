@@ -200,6 +200,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   reap.o \
 				   refcount_repair.o \
 				   repair.o \
+				   xfbtree.o \
 				   )
 
 xfs-$(CONFIG_XFS_RT)		+= $(addprefix scrub/, \
