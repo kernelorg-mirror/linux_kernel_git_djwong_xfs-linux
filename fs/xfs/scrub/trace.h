@@ -964,9 +964,51 @@ DEFINE_XFILE_EVENT(xfile_pread);
 DEFINE_XFILE_EVENT(xfile_pwrite);
 DEFINE_XFILE_EVENT(xfile_seek_data);
 DEFINE_XFILE_EVENT(xfile_get_page);
-DEFINE_XFILE_EVENT(xfile_put_page);
 DEFINE_XFILE_EVENT(xfile_discard);
 DEFINE_XFILE_EVENT(xfile_prealloc);
+
+DECLARE_EVENT_CLASS(xfile_page_class,
+	TP_PROTO(struct xfile *xf, loff_t pos, struct page *page),
+	TP_ARGS(xf, pos, page),
+	TP_STRUCT__entry(
+		__field(unsigned long, ino)
+		__field(unsigned long long, bytes_used)
+		__field(loff_t, pos)
+		__field(loff_t, size)
+		__field(unsigned long long, bytecount)
+		__field(pgoff_t, pgoff)
+	),
+	TP_fast_assign(
+		struct xfile_stat	statbuf;
+		int			ret;
+
+		ret = xfile_stat(xf, &statbuf);
+		if (!ret) {
+			__entry->bytes_used = statbuf.bytes;
+			__entry->size = statbuf.size;
+		} else {
+			__entry->bytes_used = -1;
+			__entry->size = -1;
+		}
+		__entry->ino = file_inode(xf->file)->i_ino;
+		__entry->pos = pos;
+		__entry->bytecount = page_size(page);
+		__entry->pgoff = page_offset(page);
+	),
+	TP_printk("xfino 0x%lx mem_bytes 0x%llx pos 0x%llx bytecount 0x%llx pgoff 0x%lx isize 0x%llx",
+		  __entry->ino,
+		  __entry->bytes_used,
+		  __entry->pos,
+		  __entry->bytecount,
+		  __entry->pgoff,
+		  __entry->size)
+);
+#define DEFINE_XFILE_PAGE_EVENT(name) \
+DEFINE_EVENT(xfile_page_class, name, \
+	TP_PROTO(struct xfile *xf, loff_t pos, struct page *page), \
+	TP_ARGS(xf, pos, page))
+DEFINE_XFILE_PAGE_EVENT(xfile_got_page);
+DEFINE_XFILE_PAGE_EVENT(xfile_put_page);
 
 TRACE_EVENT(xfarray_create,
 	TP_PROTO(struct xfarray *xfa, unsigned long long required_capacity),
