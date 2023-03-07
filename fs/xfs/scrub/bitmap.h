@@ -133,4 +133,32 @@ static inline int xfsb_bitmap_walk(struct xfsb_bitmap *bitmap,
 	return xbitmap_walk(&bitmap->fsbitmap, fn, priv);
 }
 
+/* Bitmaps, but for type-checked for xfs_fileoff_t */
+
+struct xfo_bitmap {
+	struct xbitmap	fobitmap;
+};
+
+static inline void xfo_bitmap_init(struct xfo_bitmap *bitmap)
+{
+	xbitmap_init(&bitmap->fobitmap);
+}
+
+static inline void xfo_bitmap_destroy(struct xfo_bitmap *bitmap)
+{
+	xbitmap_destroy(&bitmap->fobitmap);
+}
+
+static inline int xfo_bitmap_set(struct xfo_bitmap *bitmap,
+		xfs_fileoff_t off, xfs_filblks_t len)
+{
+	return xbitmap_set(&bitmap->fobitmap, off, len);
+}
+
+static inline int xfo_bitmap_walk(struct xfo_bitmap *bitmap,
+		xbitmap_walk_fn fn, void *priv)
+{
+	return xbitmap_walk(&bitmap->fobitmap, fn, priv);
+}
+
 #endif	/* __XFS_SCRUB_BITMAP_H__ */
