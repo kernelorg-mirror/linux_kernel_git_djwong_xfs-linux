@@ -29,6 +29,7 @@
 #include "xfs_health.h"
 #include "xfs_imeta.h"
 #include "xfs_imeta_utils.h"
+#include "xfs_da_format.h"
 
 /*
  * The global quota manager. There is only one of these for the entire
@@ -233,15 +234,15 @@ xfs_qm_unmount_quotas(
 	 */
 	if (mp->m_quotainfo) {
 		if (mp->m_quotainfo->qi_uquotaip) {
-			xfs_irele(mp->m_quotainfo->qi_uquotaip);
+			xfs_imeta_irele(mp->m_quotainfo->qi_uquotaip);
 			mp->m_quotainfo->qi_uquotaip = NULL;
 		}
 		if (mp->m_quotainfo->qi_gquotaip) {
-			xfs_irele(mp->m_quotainfo->qi_gquotaip);
+			xfs_imeta_irele(mp->m_quotainfo->qi_gquotaip);
 			mp->m_quotainfo->qi_gquotaip = NULL;
 		}
 		if (mp->m_quotainfo->qi_pquotaip) {
-			xfs_irele(mp->m_quotainfo->qi_pquotaip);
+			xfs_imeta_irele(mp->m_quotainfo->qi_pquotaip);
 			mp->m_quotainfo->qi_pquotaip = NULL;
 		}
 	}
@@ -766,6 +767,7 @@ xfs_qm_qino_switch(
 	unsigned int		flags,
 	bool			*need_alloc)
 {
+	struct xfs_trans	*tp;
 	xfs_ino_t		ino = NULLFSINO;
 	int			error;
 
@@ -792,7 +794,11 @@ xfs_qm_qino_switch(
 	if (ino == NULLFSINO)
 		return 0;
 
-	error = xfs_iget(mp, NULL, ino, 0, 0, ipp);
+	error = xfs_trans_alloc_empty(mp, &tp);
+	if (error)
+		return error;
+	error = xfs_imeta_iget(tp, ino, XFS_DIR3_FT_REG_FILE, ipp);
+	xfs_trans_cancel(tp);
 	if (error)
 		return error;
 
@@ -1589,6 +1595,7 @@ xfs_qm_init_quotainos(
 	struct xfs_inode	*uip = NULL;
 	struct xfs_inode	*gip = NULL;
 	struct xfs_inode	*pip = NULL;
+	struct xfs_trans	*tp = NULL;
 	int			error;
 	uint			flags = 0;
 
@@ -1598,30 +1605,37 @@ xfs_qm_init_quotainos(
 	 * Get the uquota and gquota inodes
 	 */
 	if (xfs_has_quota(mp)) {
+		error = xfs_trans_alloc_empty(mp, &tp);
+		if (error)
+			return error;
+
 		if (XFS_IS_UQUOTA_ON(mp) &&
 		    mp->m_sb.sb_uquotino != NULLFSINO) {
 			ASSERT(mp->m_sb.sb_uquotino > 0);
-			error = xfs_iget(mp, NULL, mp->m_sb.sb_uquotino,
-					     0, 0, &uip);
+			error = xfs_imeta_iget(tp, mp->m_sb.sb_uquotino,
+					XFS_DIR3_FT_REG_FILE, &uip);
 			if (error)
-				return error;
+				goto error_rele;
 		}
 		if (XFS_IS_GQUOTA_ON(mp) &&
 		    mp->m_sb.sb_gquotino != NULLFSINO) {
 			ASSERT(mp->m_sb.sb_gquotino > 0);
-			error = xfs_iget(mp, NULL, mp->m_sb.sb_gquotino,
-					     0, 0, &gip);
+			error = xfs_imeta_iget(tp, mp->m_sb.sb_gquotino,
+					XFS_DIR3_FT_REG_FILE, &gip);
 			if (error)
 				goto error_rele;
 		}
 		if (XFS_IS_PQUOTA_ON(mp) &&
 		    mp->m_sb.sb_pquotino != NULLFSINO) {
 			ASSERT(mp->m_sb.sb_pquotino > 0);
-			error = xfs_iget(mp, NULL, mp->m_sb.sb_pquotino,
-					     0, 0, &pip);
+			error = xfs_imeta_iget(tp, mp->m_sb.sb_pquotino,
+					XFS_DIR3_FT_REG_FILE, &pip);
 			if (error)
 				goto error_rele;
 		}
+
+		xfs_trans_cancel(tp);
+		tp = NULL;
 	} else {
 		flags |= XFS_QMOPT_SBVERSION;
 	}
@@ -1662,12 +1676,14 @@ xfs_qm_init_quotainos(
 	return 0;
 
 error_rele:
+	if (tp)
+		xfs_trans_cancel(tp);
 	if (uip)
-		xfs_irele(uip);
+		xfs_imeta_irele(uip);
 	if (gip)
-		xfs_irele(gip);
+		xfs_imeta_irele(gip);
 	if (pip)
-		xfs_irele(pip);
+		xfs_imeta_irele(pip);
 	return error;
 }
 
@@ -1676,15 +1692,15 @@ xfs_qm_destroy_quotainos(
 	struct xfs_quotainfo	*qi)
 {
 	if (qi->qi_uquotaip) {
-		xfs_irele(qi->qi_uquotaip);
+		xfs_imeta_irele(qi->qi_uquotaip);
 		qi->qi_uquotaip = NULL; /* paranoia */
 	}
 	if (qi->qi_gquotaip) {
-		xfs_irele(qi->qi_gquotaip);
+		xfs_imeta_irele(qi->qi_gquotaip);
 		qi->qi_gquotaip = NULL;
 	}
 	if (qi->qi_pquotaip) {
-		xfs_irele(qi->qi_pquotaip);
+		xfs_imeta_irele(qi->qi_pquotaip);
 		qi->qi_pquotaip = NULL;
 	}
 }
