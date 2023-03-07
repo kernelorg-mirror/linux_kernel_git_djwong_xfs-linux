@@ -35,39 +35,6 @@
 static const struct vm_operations_struct xfs_file_vm_ops;
 
 /*
- * Decide if the given file range is aligned to the size of the fundamental
- * allocation unit for the file.
- */
-static bool
-xfs_is_falloc_aligned(
-	struct xfs_inode	*ip,
-	loff_t			pos,
-	long long int		len)
-{
-	struct xfs_mount	*mp = ip->i_mount;
-	uint64_t		mask;
-
-	if (XFS_IS_REALTIME_INODE(ip)) {
-		if (!is_power_of_2(mp->m_sb.sb_rextsize)) {
-			u64	rextbytes;
-			u32	mod;
-
-			rextbytes = XFS_FSB_TO_B(mp, mp->m_sb.sb_rextsize);
-			div_u64_rem(pos, rextbytes, &mod);
-			if (mod)
-				return false;
-			div_u64_rem(len, rextbytes, &mod);
-			return mod == 0;
-		}
-		mask = XFS_FSB_TO_B(mp, mp->m_sb.sb_rextsize) - 1;
-	} else {
-		mask = mp->m_sb.sb_blocksize - 1;
-	}
-
-	return !((pos | len) & mask);
-}
-
-/*
  * Fsync operations on directories are much simpler than on regular files,
  * as there is no file data to flush, and thus also no need for explicit
  * cache flush operations, and there are no non-transaction metadata updates
@@ -946,7 +913,7 @@ xfs_file_fallocate(
 		if (error)
 			goto out_unlock;
 	} else if (mode & FALLOC_FL_COLLAPSE_RANGE) {
-		if (!xfs_is_falloc_aligned(ip, offset, len)) {
+		if (!xfs_inode_is_alloc_unit_aligned(ip, offset, len)) {
 			error = -EINVAL;
 			goto out_unlock;
 		}
@@ -968,7 +935,7 @@ xfs_file_fallocate(
 	} else if (mode & FALLOC_FL_INSERT_RANGE) {
 		loff_t		isize = i_size_read(inode);
 
-		if (!xfs_is_falloc_aligned(ip, offset, len)) {
+		if (!xfs_inode_is_alloc_unit_aligned(ip, offset, len)) {
 			error = -EINVAL;
 			goto out_unlock;
 		}

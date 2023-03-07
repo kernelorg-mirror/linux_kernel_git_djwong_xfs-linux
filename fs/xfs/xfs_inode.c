@@ -3817,3 +3817,41 @@ xfs_inode_count_blocks(
 	xfs_bmap_count_leaves(ifp, rblocks);
 	*dblocks = ip->i_nblocks - *rblocks;
 }
+
+/* Returns the size of fundamental allocation unit for a file, in bytes. */
+unsigned int
+xfs_inode_alloc_unitsize(
+	struct xfs_inode	*ip)
+{
+	unsigned int		blocks = 1;
+
+	if (XFS_IS_REALTIME_INODE(ip))
+		blocks = ip->i_mount->m_sb.sb_rextsize;
+
+	return XFS_FSB_TO_B(ip->i_mount, blocks);
+}
+
+/*
+ * Decide if the given file range is aligned to the size of the fundamental
+ * allocation unit for the file.
+ */
+bool
+xfs_inode_is_alloc_unit_aligned(
+	struct xfs_inode	*ip,
+	loff_t			pos,
+	long long int		len)
+{
+	unsigned int		alloc_unit = xfs_inode_alloc_unitsize(ip);
+
+	if (XFS_IS_REALTIME_INODE(ip) && !is_power_of_2(alloc_unit)) {
+		u32	mod;
+
+		div_u64_rem(pos, alloc_unit, &mod);
+		if (mod)
+			return false;
+		div_u64_rem(len, alloc_unit, &mod);
+		return mod == 0;
+	}
+
+	return !((pos | len) & (alloc_unit - 1));
+}
