@@ -213,6 +213,7 @@ bool xchk_ilock_nowait(struct xfs_scrub *sc, unsigned int ilock_flags);
 void xchk_iunlock(struct xfs_scrub *sc, unsigned int ilock_flags);
 
 void xchk_buffer_recheck(struct xfs_scrub *sc, struct xfs_buf *bp);
+void xchk_whine(const struct xfs_mount *mp, const char *fmt, ...);
 
 int xchk_iget(struct xfs_scrub *sc, xfs_ino_t inum, struct xfs_inode **ipp);
 int xchk_iget_agi(struct xfs_scrub *sc, xfs_ino_t inum,
