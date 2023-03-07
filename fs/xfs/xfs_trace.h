@@ -2711,6 +2711,25 @@ TRACE_EVENT(xfs_btree_free_block,
 /* deferred ops */
 struct xfs_defer_pending;
 
+TRACE_EVENT(xfs_defer_stats,
+	TP_PROTO(struct xfs_trans *tp),
+	TP_ARGS(tp),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned int, max)
+		__field(unsigned int, finished)
+	),
+	TP_fast_assign(
+		__entry->dev = tp->t_mountp->m_super->s_dev;
+		__entry->max = tp->t_dfops_nr_max;
+		__entry->finished = tp->t_dfops_finished;
+	),
+	TP_printk("dev %d:%d max %u finished %u",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->max,
+		  __entry->finished)
+)
+
 DECLARE_EVENT_CLASS(xfs_defer_class,
 	TP_PROTO(struct xfs_trans *tp, unsigned long caller_ip),
 	TP_ARGS(tp, caller_ip),
