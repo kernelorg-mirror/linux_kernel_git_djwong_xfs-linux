@@ -24,6 +24,7 @@
 #include "scrub/common.h"
 #include "scrub/btree.h"
 #include "scrub/bitmap.h"
+#include "scrub/repair.h"
 
 /*
  * Set us up to scrub reverse mapping btrees.
@@ -34,6 +35,14 @@ xchk_setup_ag_rmapbt(
 {
 	if (xchk_need_intent_drain(sc))
 		xchk_fsgates_enable(sc, XCHK_FSGATES_DRAIN);
+
+	if (xchk_could_repair(sc)) {
+		int		error;
+
+		error = xrep_setup_ag_rmapbt(sc);
+		if (error)
+			return error;
+	}
 
 	return xchk_setup_ag_btree(sc, false);
 }
