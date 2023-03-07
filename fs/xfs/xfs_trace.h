@@ -5089,13 +5089,16 @@ DECLARE_EVENT_CLASS(xfs_imeta_update_class,
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_ino_t, ino)
+		__string(fname, xfs_imeta_lastpath(upd))
 	),
 	TP_fast_assign(
 		__entry->dev = upd->mp->m_super->s_dev;
 		__entry->ino = upd->ip ? upd->ip->i_ino : NULLFSINO;
+		__assign_str(fname, xfs_imeta_lastpath(upd));
 	),
-	TP_printk("dev %d:%d ino 0x%llx",
+	TP_printk("dev %d:%d fname '%s' ino 0x%llx",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __get_str(fname),
 		  __entry->ino)
 )
 
@@ -5119,14 +5122,17 @@ DECLARE_EVENT_CLASS(xfs_imeta_update_error_class,
 		__field(dev_t, dev)
 		__field(xfs_ino_t, ino)
 		__field(int, error)
+		__string(fname, xfs_imeta_lastpath(upd))
 	),
 	TP_fast_assign(
 		__entry->dev = upd->mp->m_super->s_dev;
 		__entry->ino = upd->ip ? upd->ip->i_ino : NULLFSINO;
 		__entry->error = error;
+		__assign_str(fname, xfs_imeta_lastpath(upd));
 	),
-	TP_printk("dev %d:%d ino 0x%llx error %d",
+	TP_printk("dev %d:%d fname '%s' ino 0x%llx error %d",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __get_str(fname),
 		  __entry->ino,
 		  __entry->error)
 )
