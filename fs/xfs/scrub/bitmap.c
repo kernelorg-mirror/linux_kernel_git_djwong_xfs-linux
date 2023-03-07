@@ -293,6 +293,34 @@ xbitmap_test(
 	return false;
 }
 
+/*
+ * Find the first set bit in this bitmap, clear it, and return the index of
+ * that bit in @valp.  Returns -ENODATA if no bits were set, or the usual
+ * negative errno.
+ */
+int
+xbitmap_take_first_set(
+	struct xbitmap		*bitmap,
+	uint64_t		start,
+	uint64_t		last,
+	uint64_t		*valp)
+{
+	struct xbitmap_node	*bn;
+	uint64_t		val;
+	int			error;
+
+	bn = xbitmap_tree_iter_first(&bitmap->xb_root, start, last);
+	if (!bn)
+		return -ENODATA;
+
+	val = bn->bn_start;
+	error = xbitmap_clear(bitmap, bn->bn_start, 1);
+	if (error)
+		return error;
+	*valp = val;
+	return 0;
+}
+
 /* u32 bitmap */
 
 struct xbitmap32_node {
