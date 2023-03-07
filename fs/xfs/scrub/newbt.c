@@ -349,7 +349,11 @@ xrep_newbt_alloc_ag_blocks(
 						XFS_AGFL_BLOCK(sc->mp) + 1);
 		}
 
-		error = xfs_alloc_vextent_near_bno(&args, xnr->alloc_hint);
+		if (xnr->alloc_vextent)
+			error = xnr->alloc_vextent(sc, &args, xnr->alloc_hint);
+		else
+			error = xfs_alloc_vextent_near_bno(&args,
+					xnr->alloc_hint);
 		if (error)
 			return error;
 		if (args.fsbno == NULLFSBLOCK)
@@ -400,7 +404,11 @@ xrep_newbt_alloc_file_blocks(
 			xnr->alloc_hint = XFS_AGB_TO_FSB(sc->mp, 0,
 						XFS_AGFL_BLOCK(sc->mp) + 1);
 
-		error = xfs_alloc_vextent_start_ag(&args, xnr->alloc_hint);
+		if (xnr->alloc_vextent)
+			error = xnr->alloc_vextent(sc, &args, xnr->alloc_hint);
+		else
+			error = xfs_alloc_vextent_start_ag(&args,
+					xnr->alloc_hint);
 		if (error)
 			return error;
 		if (args.fsbno == NULLFSBLOCK)
