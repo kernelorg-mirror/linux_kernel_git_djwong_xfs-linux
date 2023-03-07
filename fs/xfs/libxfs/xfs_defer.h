@@ -24,6 +24,7 @@ enum xfs_defer_ops_type {
 	XFS_DEFER_OPS_TYPE_SWAPEXT,
 	XFS_DEFER_OPS_TYPE_FREE_RT,
 	XFS_DEFER_OPS_TYPE_RMAP_RT,
+	XFS_DEFER_OPS_TYPE_REFCOUNT_RT,
 	XFS_DEFER_OPS_TYPE_MAX,
 };
 
@@ -84,6 +85,7 @@ struct xfs_defer_op_type {
 
 extern const struct xfs_defer_op_type xfs_bmap_update_defer_type;
 extern const struct xfs_defer_op_type xfs_refcount_update_defer_type;
+extern const struct xfs_defer_op_type xfs_rtrefcount_update_defer_type;
 extern const struct xfs_defer_op_type xfs_rmap_update_defer_type;
 extern const struct xfs_defer_op_type xfs_rtrmap_update_defer_type;
 extern const struct xfs_defer_op_type xfs_extent_free_defer_type;
