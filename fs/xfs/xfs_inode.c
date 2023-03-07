@@ -117,6 +117,20 @@ xfs_ilock_data_map_shared(
 	if (xfs_need_iread_extents(&ip->i_df))
 		lock_mode = XFS_ILOCK_EXCL;
 	xfs_ilock(ip, lock_mode);
+
+	/*
+	 * It's possible that the unlocked access of the data fork to determine
+	 * the lock mode could have raced with another thread that was failing
+	 * to load the bmbt but hadn't yet torn down the iext tree.  Recheck
+	 * the lock mode and upgrade to an exclusive lock if we need to.
+	 */
+	if (lock_mode == XFS_ILOCK_SHARED &&
+	    xfs_need_iread_extents(&ip->i_df)) {
+		xfs_iunlock(ip, lock_mode);
+		lock_mode = XFS_ILOCK_EXCL;
+		xfs_ilock(ip, lock_mode);
+	}
+
 	return lock_mode;
 }
 
@@ -129,6 +143,21 @@ xfs_ilock_attr_map_shared(
 	if (xfs_inode_has_attr_fork(ip) && xfs_need_iread_extents(&ip->i_af))
 		lock_mode = XFS_ILOCK_EXCL;
 	xfs_ilock(ip, lock_mode);
+
+	/*
+	 * It's possible that the unlocked access of the attr fork to determine
+	 * the lock mode could have raced with another thread that was failing
+	 * to load the bmbt but hadn't yet torn down the iext tree.  Recheck
+	 * the lock mode and upgrade to an exclusive lock if we need to.
+	 */
+	if (lock_mode == XFS_ILOCK_SHARED &&
+	    xfs_inode_has_attr_fork(ip) &&
+	    xfs_need_iread_extents(&ip->i_af)) {
+		xfs_iunlock(ip, lock_mode);
+		lock_mode = XFS_ILOCK_EXCL;
+		xfs_ilock(ip, lock_mode);
+	}
+
 	return lock_mode;
 }
 
