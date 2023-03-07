@@ -42,6 +42,7 @@
 #include "xfs_xchgrange.h"
 #include "xfs_file.h"
 #include "xfs_rtbitmap.h"
+#include "xfs_rtgroup.h"
 
 #include <linux/mount.h>
 #include <linux/namei.h>
@@ -1864,6 +1865,8 @@ xfs_ioc_setlabel(
 	 */
 	mutex_lock(&mp->m_growlock);
 	error = xfs_update_secondary_sbs(mp);
+	if (!error)
+		error = xfs_rtgroup_update_secondary_sbs(mp);
 	mutex_unlock(&mp->m_growlock);
 
 	invalidate_bdev(bdev);
