@@ -86,6 +86,7 @@ struct xfs_swapext_req;
 struct xfs_getparents;
 struct xfs_parent_name_irec;
 struct xfs_attrlist_cursor_kern;
+struct xfs_imeta_update;
 
 #define XFS_ATTR_FILTER_FLAGS \
 	{ XFS_ATTR_ROOT,	"ROOT" }, \
@@ -153,7 +154,7 @@ DEFINE_ATTR_LIST_EVENT(xfs_attr_list_notfound);
 DEFINE_ATTR_LIST_EVENT(xfs_attr_leaf_list);
 DEFINE_ATTR_LIST_EVENT(xfs_attr_node_list);
 
-TRACE_EVENT(xlog_intent_recovery_failed,
+DECLARE_EVENT_CLASS(xfs_fs_error_class,
 	TP_PROTO(struct xfs_mount *mp, int error, void *function),
 	TP_ARGS(mp, error, function),
 	TP_STRUCT__entry(
@@ -170,6 +171,11 @@ TRACE_EVENT(xlog_intent_recovery_failed,
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->error, __entry->function)
 );
+#define DEFINE_FS_ERROR_EVENT(name)	\
+DEFINE_EVENT(xfs_fs_error_class, name,	\
+	TP_PROTO(struct xfs_mount *mp, int error, void *function), \
+	TP_ARGS(mp, error, function))
+DEFINE_FS_ERROR_EVENT(xlog_intent_recovery_failed);
 
 DECLARE_EVENT_CLASS(xfs_perag_class,
 	TP_PROTO(struct xfs_perag *pag, unsigned long caller_ip),
@@ -5051,6 +5057,85 @@ TRACE_EVENT(xfs_getparent_pointers,
 		  __entry->blkno,
 		  __entry->offset)
 );
+
+DECLARE_EVENT_CLASS(xfs_imeta_sb_class,
+	TP_PROTO(struct xfs_mount *mp, xfs_ino_t *sb_inop),
+	TP_ARGS(mp, sb_inop),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned int, sb_offset)
+		__field(xfs_ino_t, ino)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->sb_offset = (char *)sb_inop - (char *)&mp->m_sb;
+		__entry->ino = *sb_inop;
+	),
+	TP_printk("dev %d:%d sb_offset 0x%x ino 0x%llx",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->sb_offset,
+		  __entry->ino)
+)
+
+#define DEFINE_IMETA_SB_EVENT(name) \
+DEFINE_EVENT(xfs_imeta_sb_class, name, \
+	TP_PROTO(struct xfs_mount *mp, xfs_ino_t *sb_inop), \
+	TP_ARGS(mp, sb_inop))
+DEFINE_IMETA_SB_EVENT(xfs_imeta_sb_lookup);
+
+DECLARE_EVENT_CLASS(xfs_imeta_update_class,
+	TP_PROTO(const struct xfs_imeta_update *upd),
+	TP_ARGS(upd),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+	),
+	TP_fast_assign(
+		__entry->dev = upd->mp->m_super->s_dev;
+		__entry->ino = upd->ip ? upd->ip->i_ino : NULLFSINO;
+	),
+	TP_printk("dev %d:%d ino 0x%llx",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino)
+)
+
+#define DEFINE_IMETA_UPDATE_EVENT(name) \
+DEFINE_EVENT(xfs_imeta_update_class, name, \
+	TP_PROTO(const struct xfs_imeta_update *upd), \
+	TP_ARGS(upd))
+DEFINE_IMETA_UPDATE_EVENT(xfs_imeta_start_create);
+DEFINE_IMETA_UPDATE_EVENT(xfs_imeta_start_link);
+DEFINE_IMETA_UPDATE_EVENT(xfs_imeta_start_unlink);
+DEFINE_IMETA_UPDATE_EVENT(xfs_imeta_update_commit);
+DEFINE_IMETA_UPDATE_EVENT(xfs_imeta_update_cancel);
+DEFINE_IMETA_UPDATE_EVENT(xfs_imeta_sb_create);
+DEFINE_IMETA_UPDATE_EVENT(xfs_imeta_sb_unlink);
+DEFINE_IMETA_UPDATE_EVENT(xfs_imeta_sb_link);
+
+DECLARE_EVENT_CLASS(xfs_imeta_update_error_class,
+	TP_PROTO(const struct xfs_imeta_update *upd, int error),
+	TP_ARGS(upd, error),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(int, error)
+	),
+	TP_fast_assign(
+		__entry->dev = upd->mp->m_super->s_dev;
+		__entry->ino = upd->ip ? upd->ip->i_ino : NULLFSINO;
+		__entry->error = error;
+	),
+	TP_printk("dev %d:%d ino 0x%llx error %d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->error)
+)
+
+#define DEFINE_IMETA_UPDATE_ERROR_EVENT(name) \
+DEFINE_EVENT(xfs_imeta_update_error_class, name, \
+	TP_PROTO(const struct xfs_imeta_update *upd, int error), \
+	TP_ARGS(upd, error))
+DEFINE_IMETA_UPDATE_ERROR_EVENT(xfs_imeta_teardown);
 
 #endif /* _TRACE_XFS_H */
 
