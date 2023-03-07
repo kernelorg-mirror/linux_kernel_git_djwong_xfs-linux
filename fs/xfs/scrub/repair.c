@@ -31,11 +31,13 @@
 #include "xfs_error.h"
 #include "xfs_reflink.h"
 #include "xfs_health.h"
+#include "xfs_buf_xfile.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
 #include "scrub/repair.h"
 #include "scrub/bitmap.h"
+#include "scrub/xfile.h"
 
 /*
  * Attempt to repair some metadata, if the metadata is corrupt and userspace
@@ -1132,4 +1134,26 @@ xrep_metadata_inode_forks(
 	}
 
 	return 0;
+}
+
+/*
+ * Set up an xfile and a buffer cache so that we can use the xfbtree.  Buffer
+ * target initialization registers a shrinker, so we cannot be in transaction
+ * context.  Park our resources in the scrub context and let the teardown
+ * function take care of them at the right time.
+ */
+int
+xrep_setup_buftarg(
+	struct xfs_scrub	*sc,
+	const char		*descr)
+{
+	int			error;
+
+	ASSERT(sc->tp == NULL);
+
+	error = xfile_create(sc->mp, descr, 0, &sc->xfile);
+	if (error)
+		return error;
+
+	return xfile_alloc_buftarg(sc->mp, sc->xfile, &sc->xfile_buftarg);
 }
