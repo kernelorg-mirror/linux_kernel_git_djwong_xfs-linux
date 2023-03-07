@@ -622,6 +622,7 @@ const struct xfs_defer_op_type xfs_rtrmap_update_defer_type = {
 static inline bool
 xfs_rui_validate_map(
 	struct xfs_mount		*mp,
+	bool				isrt,
 	struct xfs_map_extent		*map)
 {
 	if (!xfs_has_rmapbt(mp))
@@ -651,12 +652,16 @@ xfs_rui_validate_map(
 	if (!xfs_verify_fileext(mp, map->me_startoff, map->me_len))
 		return false;
 
+	if (isrt)
+		return xfs_verify_rtbext(mp, map->me_startblock, map->me_len);
+
 	return xfs_verify_fsbext(mp, map->me_startblock, map->me_len);
 }
 
 STATIC int
 xfs_rui_recover_extent(
 	struct xfs_trans		*tp,
+	bool				isrt,
 	const struct xfs_map_extent	*map,
 	struct xfs_rud_log_item		*rudp,
 	struct xfs_btree_cur		**rcur)
@@ -670,6 +675,7 @@ xfs_rui_recover_extent(
 			.br_state	= XFS_EXT_NORM,
 		},
 		.ri_whichfork		= XFS_DATA_FORK,
+		.ri_realtime		= isrt,
 	};
 	struct xfs_mount		*mp = tp->t_mountp;
 	int				error;
@@ -708,9 +714,19 @@ xfs_rui_recover_extent(
 	if (map->me_flags & XFS_RMAP_EXTENT_UNWRITTEN)
 		fake.ri_bmap.br_state = XFS_EXT_UNWRITTEN;
 
-	fake.ri_pag = xfs_perag_intent_get(mp, map->me_startblock);
-	error = xfs_trans_log_finish_rmap_update(tp, rudp, &fake, rcur);
-	xfs_perag_intent_put(fake.ri_pag);
+	if (isrt) {
+		xfs_rgnumber_t	rgno;
+
+		rgno = xfs_rtb_to_rgno(mp, map->me_startblock);
+		fake.ri_rtg = xfs_rtgroup_get(mp, rgno);
+		error = xfs_trans_log_finish_rtrmap_update(tp, rudp, &fake,
+				rcur);
+		xfs_rtgroup_put(fake.ri_rtg);
+	} else {
+		fake.ri_pag = xfs_perag_intent_get(mp, map->me_startblock);
+		error = xfs_trans_log_finish_rmap_update(tp, rudp, &fake, rcur);
+		xfs_perag_intent_put(fake.ri_pag);
+	}
 	return error;
 }
 
@@ -734,6 +750,7 @@ xfs_rui_item_recover(
 	struct xfs_btree_cur		*rcur = NULL;
 	struct xfs_map_extent		*map;
 	struct xfs_mount		*mp = lip->li_log->l_mp;
+	bool				isrt = xfs_rui_item_isrt(lip);
 	int				i;
 	int				error = 0;
 
@@ -743,7 +760,7 @@ xfs_rui_item_recover(
 	 * just toss the RUI.
 	 */
 	for_each_rui_mapping(ruip, i, map) {
-		if (!xfs_rui_validate_map(mp, map)) {
+		if (!xfs_rui_validate_map(mp, isrt, map)) {
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 					&ruip->rui_format,
 					sizeof(ruip->rui_format));
@@ -759,7 +776,7 @@ xfs_rui_item_recover(
 	rudp = xfs_trans_get_rud(tp, ruip);
 
 	for_each_rui_mapping(ruip, i, map) {
-		error = xfs_rui_recover_extent(tp, map, rudp, &rcur);
+		error = xfs_rui_recover_extent(tp, isrt, map, rudp, &rcur);
 		if (error == -EFSCORRUPTED)
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 					map, sizeof(*map));
@@ -768,11 +785,17 @@ xfs_rui_item_recover(
 
 	}
 
-	xfs_rmap_finish_one_cleanup(tp, rcur, error);
+	if (isrt)
+		xfs_rtrmap_finish_one_cleanup(tp, rcur, error);
+	else
+		xfs_rmap_finish_one_cleanup(tp, rcur, error);
 	return xfs_defer_ops_capture_and_commit(tp, capture_list);
 
 abort_error:
-	xfs_rmap_finish_one_cleanup(tp, rcur, error);
+	if (isrt)
+		xfs_rtrmap_finish_one_cleanup(tp, rcur, error);
+	else
+		xfs_rmap_finish_one_cleanup(tp, rcur, error);
 	xfs_trans_cancel(tp);
 	return error;
 }
