@@ -329,8 +329,11 @@ xfs_rmap_check_btrec(
 	struct xfs_btree_cur		*cur,
 	const struct xfs_rmap_irec	*irec)
 {
-	if (cur->bc_btnum == XFS_BTNUM_RTRMAP)
+	if (cur->bc_btnum == XFS_BTNUM_RTRMAP) {
+		if (cur->bc_flags & XFS_BTREE_IN_XFILE)
+			return xfs_rtrmap_check_irec(cur->bc_mem.rtg, irec);
 		return xfs_rtrmap_check_irec(cur->bc_ino.rtg, irec);
+	}
 
 	if (cur->bc_flags & XFS_BTREE_IN_XFILE)
 		return xfs_rmap_check_irec(cur->bc_mem.pag, irec);
