@@ -19,9 +19,11 @@
 #include "xfs_rtgroup.h"
 #include "xfs_rmap.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_swapext.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/repair.h"
+#include "scrub/tempswap.h"
 #include "scrub/rtbitmap.h"
 #include "scrub/btree.h"
 
@@ -42,15 +44,26 @@ xchk_setup_rgbitmap(
 {
 	struct xfs_mount	*mp = sc->mp;
 	struct xchk_rgbitmap	*rgb;
+	unsigned int		wordcnt = xchk_rgbitmap_wordcnt(sc);
 	int			error;
 
-	rgb = kzalloc(sizeof(struct xchk_rgbitmap), XCHK_GFP_FLAGS);
+	if (xchk_need_intent_drain(sc))
+		xchk_fsgates_enable(sc, XCHK_FSGATES_DRAIN);
+
+	rgb = kzalloc(struct_size(rgb, words, wordcnt), XCHK_GFP_FLAGS);
 	if (!rgb)
 		return -ENOMEM;
 	rgb->sc = sc;
 	sc->buf = rgb;
+	rgb->rtglock_flags = XCHK_RTGLOCK_ALL;
 
-	error = xchk_trans_alloc(sc, 0);
+	if (xchk_could_repair(sc)) {
+		error = xrep_setup_rgbitmap(sc, rgb);
+		if (error)
+			return error;
+	}
+
+	error = xchk_trans_alloc(sc, rgb->rtb.resblks);
 	if (error)
 		return error;
 
@@ -63,7 +76,7 @@ xchk_setup_rgbitmap(
 		return error;
 
 	error = xchk_rtgroup_init(sc, sc->sm->sm_agno, &sc->sr,
-			XCHK_RTGLOCK_ALL);
+			rgb->rtglock_flags);
 	if (error)
 		return error;
 

@@ -168,7 +168,8 @@ xrep_rtsummary(
 	 * Now swap the extents.  Nothing in repair uses the temporary buffer,
 	 * so we can reuse it for the tempfile swapext information.
 	 */
-	error = xrep_tempswap_trans_reserve(sc, XFS_DATA_FORK, &rts->tempswap);
+	error = xrep_tempswap_trans_reserve(sc, XFS_DATA_FORK, 0, rsumblocks,
+			&rts->tempswap);
 	if (error)
 		return error;
 
