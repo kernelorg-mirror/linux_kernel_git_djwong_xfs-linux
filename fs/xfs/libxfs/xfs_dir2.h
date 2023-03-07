@@ -293,5 +293,9 @@ int xfs_dir_add_child(struct xfs_trans *tp, unsigned int resblks,
 int xfs_dir_remove_child(struct xfs_trans *tp, unsigned int resblks,
 		struct xfs_inode *dp, const struct xfs_name *name,
 		struct xfs_inode *ip);
+int xfs_dir_exchange_children(struct xfs_trans *tp, struct xfs_inode *dp1,
+		const struct xfs_name *name1, struct xfs_inode *ip1,
+		struct xfs_inode *dp2, const struct xfs_name *name2,
+		struct xfs_inode *ip2, unsigned int spaceres);
 
 #endif	/* __XFS_DIR2_H__ */
