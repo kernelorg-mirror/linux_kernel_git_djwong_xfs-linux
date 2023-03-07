@@ -214,6 +214,17 @@ xchk_iscan_finish(
 	mutex_unlock(&iscan->lock);
 }
 
+/* Mark an inode scan finished before we actually scan anything. */
+void
+xchk_iscan_finish_early(
+	struct xchk_iscan	*iscan)
+{
+	ASSERT(iscan->cursor_ino == iscan->scan_start_ino);
+	ASSERT(iscan->__visited_ino == iscan->scan_start_ino);
+
+	xchk_iscan_finish(iscan);
+}
+
 /*
  * Advance ino to the next inode that the inobt thinks is allocated, being
  * careful to jump to the next AG if we've reached the right end of this AG's
@@ -373,8 +384,13 @@ xchk_iscan_iget(
 		 * It's possible that this inode has lost all of its links but
 		 * hasn't yet been inactivated.  If we don't have a transaction
 		 * or it's not writable, flush the inodegc workers and wait.
+		 * If we have a non-empty transaction, we must not block on
+		 * inodegc, which allocates its own transactions.
 		 */
-		xfs_inodegc_flush(mp);
+		if (sc->tp && !(sc->tp->t_flags & XFS_TRANS_NO_WRITECOUNT))
+			xfs_inodegc_push(mp);
+		else
+			xfs_inodegc_flush(mp);
 		return xchk_iscan_iget_retry(iscan, true);
 	}
 
