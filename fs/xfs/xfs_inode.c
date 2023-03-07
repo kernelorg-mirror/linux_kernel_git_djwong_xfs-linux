@@ -967,6 +967,117 @@ xfs_bumplink(
 	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
 }
 
+#ifdef CONFIG_XFS_LIVE_HOOKS
+/*
+ * Use a static key here to reduce the overhead of directory live update hooks.
+ * If the compiler supports jump labels, the static branch will be replaced by
+ * a nop sled when there are no hook users.  Online fsck is currently the only
+ * caller, so this is a reasonable tradeoff.
+ *
+ * Note: Patching the kernel code requires taking the cpu hotplug lock.  Other
+ * parts of the kernel allocate memory with that lock held, which means that
+ * XFS callers cannot hold any locks that might be used by memory reclaim or
+ * writeback when calling the static_branch_{inc,dec} functions.
+ */
+DEFINE_STATIC_XFS_HOOK_SWITCH(xfs_dirents_hooks_switch);
+
+void
+xfs_dirent_hook_disable(void)
+{
+	xfs_hooks_switch_off(&xfs_dirents_hooks_switch);
+}
+
+void
+xfs_dirent_hook_enable(void)
+{
+	xfs_hooks_switch_on(&xfs_dirents_hooks_switch);
+}
+
+/* Call hooks for a directory update relating to a dot dirent update. */
+static inline void
+xfs_dirent_self_delta(
+	struct xfs_inode		*dp,
+	int				delta)
+{
+	if (xfs_hooks_switched_on(&xfs_dirents_hooks_switch)) {
+		struct xfs_dirent_update_params	p = {
+			.dp		= dp,
+			.ip		= dp,
+			.delta		= delta,
+			.name		= &xfs_name_dot,
+		};
+		struct xfs_mount	*mp = dp->i_mount;
+
+		xfs_hooks_call(&mp->m_dirent_update_hooks,
+				XFS_DIRENT_SELF_DELTA, &p);
+	}
+}
+
+/* Call hooks for a directory update relating to a dotdot dirent update. */
+static inline void
+xfs_dirent_backref_delta(
+	struct xfs_inode		*dp,
+	struct xfs_inode		*ip,
+	int				delta)
+{
+	if (xfs_hooks_switched_on(&xfs_dirents_hooks_switch)) {
+		struct xfs_dirent_update_params	p = {
+			.dp		= dp,
+			.ip		= ip,
+			.delta		= delta,
+			.name		= &xfs_name_dotdot,
+		};
+		struct xfs_mount	*mp = ip->i_mount;
+
+		xfs_hooks_call(&mp->m_dirent_update_hooks,
+				XFS_DIRENT_BACKREF_DELTA, &p);
+	}
+}
+
+/* Call hooks for a directory update relating to a child dirent update. */
+void
+xfs_dirent_child_delta(
+	struct xfs_inode		*dp,
+	struct xfs_inode		*ip,
+	int				delta,
+	struct xfs_name			*name)
+{
+	if (xfs_hooks_switched_on(&xfs_dirents_hooks_switch)) {
+		struct xfs_dirent_update_params	p = {
+			.dp		= dp,
+			.ip		= ip,
+			.delta		= delta,
+			.name		= name,
+		};
+		struct xfs_mount	*mp = ip->i_mount;
+
+		xfs_hooks_call(&mp->m_dirent_update_hooks,
+				XFS_DIRENT_CHILD_DELTA, &p);
+	}
+}
+
+/* Call the specified function during a directory update. */
+int
+xfs_dirent_hook_add(
+	struct xfs_mount	*mp,
+	struct xfs_dirent_hook	*hook)
+{
+	return xfs_hooks_add(&mp->m_dirent_update_hooks, &hook->delta_hook);
+}
+
+/* Stop calling the specified function during a directory update. */
+void
+xfs_dirent_hook_del(
+	struct xfs_mount	*mp,
+	struct xfs_dirent_hook	*hook)
+{
+	xfs_hooks_del(&mp->m_dirent_update_hooks, &hook->delta_hook);
+}
+#else
+# define xfs_dirent_self_delta(dp, delta)		((void)0)
+# define xfs_dirent_backref_delta(dp, ip, delta)	((void)0)
+#endif /* CONFIG_XFS_LIVE_HOOKS */
+
 int
 xfs_create(
 	struct mnt_idmap	*idmap,
@@ -1073,6 +1184,16 @@ xfs_create(
 			goto out_trans_cancel;
 
 		xfs_bumplink(tp, dp);
+	}
+
+	/*
+	 * Create ip with a reference from dp, and add '.' and '..' references
+	 * if it's a directory.
+	 */
+	xfs_dirent_child_delta(dp, ip, 1, name);
+	if (is_dir) {
+		xfs_dirent_self_delta(ip, 1);
+		xfs_dirent_backref_delta(dp, ip, 1);
 	}
 
 	/*
@@ -1287,6 +1408,7 @@ xfs_link(
 	xfs_trans_log_inode(tp, tdp, XFS_ILOG_CORE);
 
 	xfs_bumplink(tp, sip);
+	xfs_dirent_child_delta(tdp, sip, 1, target_name);
 
 	/*
 	 * If this is a synchronous mount, make sure that the
@@ -2516,6 +2638,16 @@ xfs_remove(
 	}
 
 	/*
+	 * Drop the link from dp to ip, and if ip was a directory, remove the
+	 * '.' and '..' references since we freed the directory.
+	 */
+	xfs_dirent_child_delta(dp, ip, -1, name);
+	if (S_ISDIR(VFS_I(ip)->i_mode)) {
+		xfs_dirent_backref_delta(dp, ip, -1);
+		xfs_dirent_self_delta(ip, -1);
+	}
+
+	/*
 	 * If this is a synchronous mount, make sure that the
 	 * remove transaction goes to disk before returning to
 	 * the user.
@@ -2588,6 +2720,92 @@ xfs_sort_for_rename(
 		}
 	}
 }
+
+#ifdef CONFIG_XFS_LIVE_HOOKS
+/*
+ * Directory entry live update hooks are called with ILOCK_EXCL held on all
+ * inodes after we've committed to making all the directory updates.  Hence we
+ * do not have to call the hooks in *exactly* the same order as the rename and
+ * exchange code make the actual updates.  This is fortunate because we can
+ * simplify things quite a bit, as long as we're careful to delete old dirents
+ * before creating new ones.
+ */
+static inline void
+xfs_exchange_call_dirent_hooks(
+	struct xfs_inode	*src_dp,
+	struct xfs_name		*src_name,
+	struct xfs_inode	*src_ip,
+	struct xfs_inode	*target_dp,
+	struct xfs_name		*target_name,
+	struct xfs_inode	*target_ip)
+{
+	/* Exchange files in the source directory. */
+	xfs_dirent_child_delta(src_dp, src_ip, -1, src_name);
+	xfs_dirent_child_delta(src_dp, target_ip, 1, src_name);
+
+	/* Exchange files in the target directory. */
+	xfs_dirent_child_delta(target_dp, target_ip, -1, target_name);
+	xfs_dirent_child_delta(target_dp, src_ip, 1, target_name);
+
+	/* If the source file is a dir, update its dotdot entry. */
+	if (S_ISDIR(VFS_I(src_ip)->i_mode)) {
+		xfs_dirent_backref_delta(src_dp, src_ip, -1);
+		xfs_dirent_backref_delta(target_dp, src_ip, 1);
+	}
+
+	/* If the target file is a dir, update its dotdot entry. */
+	if (S_ISDIR(VFS_I(target_ip)->i_mode)) {
+		xfs_dirent_backref_delta(target_dp, target_ip, -1);
+		xfs_dirent_backref_delta(src_dp, target_ip, 1);
+	}
+}
+
+static inline void
+xfs_rename_call_dirent_hooks(
+	struct xfs_inode	*src_dp,
+	struct xfs_name		*src_name,
+	struct xfs_inode	*src_ip,
+	struct xfs_inode	*target_dp,
+	struct xfs_name		*target_name,
+	struct xfs_inode	*target_ip,
+	struct xfs_inode	*wip)
+{
+	/*
+	 * If there's a target file, remove it from the target directory and
+	 * move the source file to the target directory.
+	 */
+	if (target_ip)
+		xfs_dirent_child_delta(target_dp, target_ip, -1, target_name);
+	xfs_dirent_child_delta(target_dp, src_ip, 1, target_name);
+
+	/*
+	 * Remove the source file from the source directory, and possibly move
+	 * the whiteout file into its place.
+	 */
+	xfs_dirent_child_delta(src_dp, src_ip, -1, src_name);
+	if (wip)
+		xfs_dirent_child_delta(src_dp, wip, 1, src_name);
+
+	/* If the source file is a dir, update its dotdot entry. */
+	if (S_ISDIR(VFS_I(src_ip)->i_mode)) {
+		xfs_dirent_backref_delta(src_dp, src_ip, -1);
+		xfs_dirent_backref_delta(target_dp, src_ip, 1);
+	}
+
+	/*
+	 * If the target file is a dir, drop the dot and dotdot entries because
+	 * we've dropped the last reference.
+	 */
+	if (target_ip && S_ISDIR(VFS_I(target_ip)->i_mode)) {
+		ASSERT(VFS_I(target_ip)->i_nlink == 0);
+		xfs_dirent_self_delta(target_ip, -1);
+		xfs_dirent_backref_delta(target_dp, target_ip, -1);
+	}
+}
+#else
+# define xfs_exchange_call_dirent_hooks(...)	((void)0)
+# define xfs_rename_call_dirent_hooks(...)	((void)0)
+#endif /* CONFIG_XFS_LIVE_HOOKS */
 
 static int
 xfs_finish_rename(
@@ -2705,6 +2923,10 @@ xfs_cross_rename(
 	}
 	xfs_trans_ichgtime(tp, dp1, XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
 	xfs_trans_log_inode(tp, dp1, XFS_ILOG_CORE);
+
+	if (xfs_hooks_switched_on(&xfs_dirents_hooks_switch))
+		xfs_exchange_call_dirent_hooks(dp1, name1, ip1, dp2, name2, ip2);
+
 	return xfs_finish_rename(tp);
 
 out_trans_abort:
@@ -3087,6 +3309,10 @@ retry:
 	xfs_trans_log_inode(tp, src_dp, XFS_ILOG_CORE);
 	if (new_parent)
 		xfs_trans_log_inode(tp, target_dp, XFS_ILOG_CORE);
+
+	if (xfs_hooks_switched_on(&xfs_dirents_hooks_switch))
+		xfs_rename_call_dirent_hooks(src_dp, src_name, src_ip,
+				target_dp, target_name, target_ip, wip);
 
 	error = xfs_finish_rename(tp);
 	if (wip)
