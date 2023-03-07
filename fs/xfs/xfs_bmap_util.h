@@ -76,4 +76,11 @@ int xfs_bmap_count_blocks(struct xfs_trans *tp, struct xfs_inode *ip,
 int	xfs_flush_unmap_range(struct xfs_inode *ip, xfs_off_t offset,
 			      xfs_off_t len);
 
+#ifdef CONFIG_XFS_RT
+int xfs_convert_bigalloc_file_space(struct xfs_inode *ip, loff_t pos,
+		uint64_t len);
+#else
+# define xfs_convert_bigalloc_file_space(ip, pos, len)	(-EOPNOTSUPP)
+#endif
+
 #endif	/* __XFS_BMAP_UTIL_H__ */
