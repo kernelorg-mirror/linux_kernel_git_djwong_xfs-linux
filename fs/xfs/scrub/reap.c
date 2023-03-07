@@ -448,8 +448,8 @@ xreap_agextent_iter(
 		ASSERT(rs->resv == XFS_AG_RESV_NONE);
 
 		xfs_refcount_free_cow_extent(sc->tp, fsbno, *aglenp);
-		error = __xfs_free_extent_later(sc->tp, fsbno, *aglenp, NULL,
-				rs->resv, true);
+		error = xfs_free_extent_later(sc->tp, fsbno, *aglenp, NULL,
+				rs->resv, XFS_FREE_EXTENT_SKIP_DISCARD);
 		if (error)
 			return error;
 
@@ -472,8 +472,8 @@ xreap_agextent_iter(
 	 * Use deferred frees to get rid of the old btree blocks to try to
 	 * minimize the window in which we could crash and lose the old blocks.
 	 */
-	error = __xfs_free_extent_later(sc->tp, fsbno, *aglenp, rs->oinfo,
-			rs->resv, true);
+	error = xfs_free_extent_later(sc->tp, fsbno, *aglenp, rs->oinfo,
+			rs->resv, XFS_FREE_EXTENT_SKIP_DISCARD);
 	if (error)
 		return error;
 
@@ -937,8 +937,9 @@ xrep_reap_bmapi_iter(
 	xfs_bmap_unmap_extent(sc->tp, ip, whichfork, imap);
 	xfs_trans_mod_dquot_byino(sc->tp, ip, XFS_TRANS_DQ_BCOUNT,
 			-(int64_t)imap->br_blockcount);
-	return __xfs_free_extent_later(sc->tp, imap->br_startblock,
-			imap->br_blockcount, NULL, XFS_AG_RESV_NONE, true);
+	return xfs_free_extent_later(sc->tp, imap->br_startblock,
+			imap->br_blockcount, NULL, XFS_AG_RESV_NONE,
+			XFS_FREE_EXTENT_SKIP_DISCARD);
 }
 
 /*
