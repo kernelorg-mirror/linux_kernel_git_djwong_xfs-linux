@@ -12,6 +12,7 @@
 #include "xfs_log_format.h"
 #include "xfs_inode.h"
 #include "xfs_symlink.h"
+#include "xfs_symlink_remote.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 
