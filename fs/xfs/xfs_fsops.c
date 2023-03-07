@@ -22,6 +22,7 @@
 #include "xfs_ag_resv.h"
 #include "xfs_trace.h"
 #include "xfs_rtgroup.h"
+#include "xfs_rtalloc.h"
 
 /*
  * Write new AG headers to disk. Non-transactional, but need to be
@@ -588,6 +589,19 @@ xfs_fs_reserve_ag_blocks(
 		xfs_warn(mp,
 	"Error %d reserving per-AG metadata reserve pool.", error);
 		xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_INCORE);
+		return error;
+	}
+
+	if (xfs_has_realtime(mp)) {
+		err2 = xfs_rt_resv_init(mp);
+		if (err2 && err2 != -ENOSPC) {
+			xfs_warn(mp,
+		"Error %d reserving realtime metadata reserve pool.", err2);
+			xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_INCORE);
+		}
+
+		if (err2 && !error)
+			error = err2;
 	}
 
 	return error;
@@ -602,6 +616,9 @@ xfs_fs_unreserve_ag_blocks(
 {
 	struct xfs_perag	*pag;
 	xfs_agnumber_t		agno;
+
+	if (xfs_has_realtime(mp))
+		xfs_rt_resv_free(mp);
 
 	for_each_perag(mp, agno, pag)
 		xfs_ag_resv_free(pag);
