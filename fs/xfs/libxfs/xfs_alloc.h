@@ -269,7 +269,6 @@ xfs_free_extent_later(
 	return __xfs_free_extent_later(tp, bno, len, oinfo, type, false);
 }
 
-
 extern struct kmem_cache	*xfs_extfree_item_cache;
 
 int __init xfs_extfree_intent_init_cache(void);
