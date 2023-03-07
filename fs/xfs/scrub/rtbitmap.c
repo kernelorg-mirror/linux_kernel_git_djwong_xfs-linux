@@ -207,7 +207,7 @@ xchk_xref_is_used_rt_space(
 {
 	xfs_rtblock_t		startext;
 	xfs_rtblock_t		endext;
-	xfs_rtblock_t		extcount;
+	xfs_rtxlen_t		extcount;
 	bool			is_free;
 	int			error;
 
