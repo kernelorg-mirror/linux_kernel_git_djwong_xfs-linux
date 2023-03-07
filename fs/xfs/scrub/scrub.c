@@ -167,7 +167,7 @@ xchk_fsgates_disable(
 	trace_xchk_fsgates_disable(sc, sc->flags & FSGATES_MASK);
 
 	if (sc->flags & XCHK_FSGATES_DRAIN)
-		xfs_drain_wait_disable();
+		xfs_defer_drain_wait_disable();
 
 	if (sc->flags & XCHK_FSGATES_QUOTA)
 		xfs_dqtrx_hook_disable();
