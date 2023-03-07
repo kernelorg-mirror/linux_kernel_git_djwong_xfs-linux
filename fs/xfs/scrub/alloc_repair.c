@@ -526,7 +526,7 @@ xrep_abt_dispose_one(
 		xfs_fsblock_t	fsbno;
 
 		fsbno = XFS_AGB_TO_FSB(sc->mp, pag->pag_agno, resv->agbno);
-		xfs_rmap_alloc_extent(sc->tp, fsbno, resv->used,
+		xfs_rmap_alloc_extent(sc->tp, false, fsbno, resv->used,
 				XFS_RMAP_OWN_AG);
 	}
 
