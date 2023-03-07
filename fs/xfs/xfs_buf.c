@@ -321,7 +321,7 @@ xfs_buf_free(
 	ASSERT(list_empty(&bp->b_lru));
 
 	if (xfs_buf_is_vmapped(bp))
-		vm_unmap_ram(bp->b_addr, bp->b_page_count);
+		vm_unmap_ram(bp->b_addr - bp->b_offset, bp->b_page_count);
 
 	if (bp->b_flags & _XBF_DIRECT_MAP)
 		xfile_buf_unmap_pages(bp);
@@ -434,6 +434,8 @@ xfs_buf_alloc_pages(
 		XFS_STATS_INC(bp->b_mount, xb_page_retries);
 		memalloc_retry_wait(gfp_mask);
 	}
+
+	bp->b_offset = 0;
 	return 0;
 }
 
@@ -449,7 +451,7 @@ _xfs_buf_map_pages(
 
 	if (bp->b_page_count == 1) {
 		/* A single page buffer is always mappable */
-		bp->b_addr = page_address(bp->b_pages[0]);
+		bp->b_addr = page_address(bp->b_pages[0]) + bp->b_offset;
 	} else if (flags & XBF_UNMAPPED) {
 		bp->b_addr = NULL;
 	} else {
@@ -476,6 +478,8 @@ _xfs_buf_map_pages(
 
 		if (!bp->b_addr)
 			return -ENOMEM;
+
+		bp->b_addr += bp->b_offset;
 	}
 
 	return 0;
