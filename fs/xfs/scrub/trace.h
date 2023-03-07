@@ -127,6 +127,8 @@ TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_RTREFCBT);
 	{ XFS_SCRUB_TYPE_RTRMAPBT,	"rtrmapbt" }, \
 	{ XFS_SCRUB_TYPE_RTREFCBT,	"rtrefcountbt" }
 
+const char *xchk_type_string(unsigned int type);
+
 #define XFS_SCRUB_FLAG_STRINGS \
 	{ XFS_SCRUB_IFLAG_REPAIR,		"repair" }, \
 	{ XFS_SCRUB_OFLAG_CORRUPT,		"corrupt" }, \
