@@ -1531,15 +1531,9 @@ xfs_qm_mount_quotas(
 	int			error = 0;
 	uint			sbf;
 
-	/*
-	 * If quotas on realtime volumes is not supported, we disable
-	 * quotas immediately.
-	 */
-	if (mp->m_sb.sb_rextents) {
-		xfs_notice(mp, "Cannot turn on quotas for realtime filesystem");
-		mp->m_qflags = 0;
-		goto write_changes;
-	}
+	if (mp->m_sb.sb_rextents)
+		xfs_warn(mp,
+	"EXPERIMENTAL realtime quota feature in use. Use at your own risk!");
 
 	ASSERT(XFS_IS_QUOTA_ON(mp));
 
