@@ -495,6 +495,38 @@ static const struct iomap_writeback_ops xfs_writeback_ops = {
 	.discard_folio		= xfs_discard_folio,
 };
 
+/*
+ * Extend the writeback range to allocation unit granularity and alignment.
+ * This is a requirement for blocksize > pagesize scenarios such as realtime
+ * copy on write, since we can only share full rt extents.
+ */
+static inline void
+xfs_vm_writepages_extend(
+	struct xfs_inode		*ip,
+	struct writeback_control	*wbc)
+{
+	unsigned int			bsize = xfs_inode_alloc_unitsize(ip);
+	long long int			pages_to_write;
+	loff_t				next = wbc->range_end + 1;
+
+	wbc->range_start = rounddown_64(wbc->range_start, bsize);
+	if (wbc->range_end != LLONG_MAX)
+		wbc->range_end = roundup_64(next, bsize) - 1;
+
+	if (wbc->nr_to_write != LONG_MAX) {
+		pgoff_t		pg_start = wbc->range_start >> PAGE_SHIFT;
+		pgoff_t		pg_next = (wbc->range_end + 1) >> PAGE_SHIFT;
+
+		pages_to_write = pg_next - pg_start;
+		if (pages_to_write >= LONG_MAX)
+			pages_to_write = LONG_MAX;
+		if (wbc->nr_to_write < pages_to_write)
+			wbc->nr_to_write = pages_to_write;
+	}
+
+	trace_xfs_vm_writepages_extend(ip, wbc);
+}
+
 STATIC int
 xfs_vm_writepages(
 	struct address_space		*mapping,
@@ -512,6 +544,9 @@ xfs_vm_writepages(
 
 	trace_xfs_vm_writepages(ip, wbc);
 
+	if (xfs_inode_needs_cow_around(ip))
+		xfs_vm_writepages_extend(ip, wbc);
+
 	xfs_iflags_clear(ip, XFS_ITRUNCATED);
 	return iomap_writepages(mapping, wbc, &wpc.ctx, &xfs_writeback_ops);
 }
@@ -524,6 +559,9 @@ xfs_dax_writepages(
 	struct xfs_inode		*ip = XFS_I(mapping->host);
 
 	trace_xfs_dax_writepages(ip, wbc);
+
+	if (xfs_inode_needs_cow_around(ip))
+		xfs_vm_writepages_extend(ip, wbc);
 
 	xfs_iflags_clear(ip, XFS_ITRUNCATED);
 	return dax_writeback_mapping_range(mapping,
