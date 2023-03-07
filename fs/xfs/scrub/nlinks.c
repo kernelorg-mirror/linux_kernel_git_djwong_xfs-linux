@@ -275,7 +275,7 @@ xchk_nlinks_collect_dirent(
 	 * determine the backref count.
 	 */
 	if (dotdot) {
-		if (dp == sc->mp->m_rootip)
+		if (dp == sc->mp->m_rootip || dp == sc->mp->m_metadirip)
 			error = xchk_nlinks_update_incore(xnc, ino, 1, 0, 0);
 		else if (!xfs_has_parent(sc->mp))
 			error = xchk_nlinks_update_incore(xnc, ino, 0, 1, 0);
@@ -516,9 +516,11 @@ xchk_nlinks_collect(
 	int			error;
 
 	/* Count the rt and quota files that are rooted in the superblock. */
-	error = xchk_nlinks_collect_metafiles(xnc);
-	if (error)
-		return error;
+	if (!xfs_has_metadir(sc->mp)) {
+		error = xchk_nlinks_collect_metafiles(xnc);
+		if (error)
+			return error;
+	}
 
 	/*
 	 * Set up for a potentially lengthy filesystem scan by reducing our
@@ -716,7 +718,7 @@ xchk_nlinks_compare_inode(
 		}
 	}
 
-	if (ip == sc->mp->m_rootip) {
+	if (ip == sc->mp->m_rootip || ip == sc->mp->m_metadirip) {
 		/*
 		 * For the root of a directory tree, both the '.' and '..'
 		 * entries should point to the root directory.  The dotdot
