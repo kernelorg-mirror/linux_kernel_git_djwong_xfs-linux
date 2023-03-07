@@ -200,6 +200,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   inode_repair.o \
 				   newbt.o \
 				   nlinks_repair.o \
+				   orphanage.o \
 				   parent_repair.o \
 				   rcbag_btree.o \
 				   rcbag.o \
