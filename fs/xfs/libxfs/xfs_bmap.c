@@ -6257,7 +6257,7 @@ xfs_bmap_validate_extent_raw(
 		return __this_address;
 
 	if (rtfile && whichfork == XFS_DATA_FORK) {
-		if (!xfs_verify_rtext(mp, irec->br_startblock,
+		if (!xfs_verify_rtbext(mp, irec->br_startblock,
 					  irec->br_blockcount))
 			return __this_address;
 	} else {

@@ -474,7 +474,7 @@ xfs_bui_validate(
 		return false;
 
 	if (map->me_flags & XFS_BMAP_EXTENT_REALTIME)
-		return xfs_verify_rtext(mp, map->me_startblock, map->me_len);
+		return xfs_verify_rtbext(mp, map->me_startblock, map->me_len);
 
 	return xfs_verify_fsbext(mp, map->me_startblock, map->me_len);
 }
