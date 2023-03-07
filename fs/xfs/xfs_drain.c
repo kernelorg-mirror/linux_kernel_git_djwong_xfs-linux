@@ -11,6 +11,7 @@
 #include "xfs_mount.h"
 #include "xfs_ag.h"
 #include "xfs_trace.h"
+#include "xfs_rtgroup.h"
 
 /*
  * Use a static key here to reduce the overhead of xfs_drain_rele.  If the
@@ -133,3 +134,46 @@ xfs_perag_intents_busy(
 {
 	return xfs_drain_busy(&pag->pag_intents);
 }
+
+#ifdef CONFIG_XFS_RT
+/*
+ * Declare an intent to update rtgroup metadata.  Other threads that need
+ * exclusive access can decide to back off if they see declared intentions.
+ */
+void
+xfs_rtgroup_intent_hold(
+	struct xfs_rtgroup	*rtg)
+{
+	trace_xfs_rtgroup_intent_hold(rtg, __return_address);
+	xfs_drain_grab(&rtg->rtg_intents);
+}
+
+/* Release our intent to update this rtgroup's metadata. */
+void
+xfs_rtgroup_intent_rele(
+	struct xfs_rtgroup	*rtg)
+{
+	trace_xfs_rtgroup_intent_rele(rtg, __return_address);
+	xfs_drain_rele(&rtg->rtg_intents);
+}
+
+/*
+ * Wait for the intent update count for this rtgroup to hit zero.
+ * Callers must not hold any rt metadata inode locks.
+ */
+int
+xfs_rtgroup_drain_intents(
+	struct xfs_rtgroup	*rtg)
+{
+	trace_xfs_rtgroup_wait_intents(rtg, __return_address);
+	return xfs_drain_wait(&rtg->rtg_intents);
+}
+
+/* Has anyone declared an intent to update this rtgroup? */
+bool
+xfs_rtgroup_intents_busy(
+	struct xfs_rtgroup	*rtg)
+{
+	return xfs_drain_busy(&rtg->rtg_intents);
+}
+#endif /* CONFIG_XFS_RT */
