@@ -634,6 +634,42 @@ xchk_scrub_create_subord(
 	return sub;
 }
 
+static inline void
+repair_outcomes(struct xfs_scrub *sc, int error)
+{
+	struct xfs_scrub_metadata *sm = sc->sm;
+	const char *wut = NULL;
+
+	if (sc->flags & XREP_ALREADY_FIXED) {
+		wut = "*** REPAIR SUCCESS";
+		error = 0;
+	} else if (error == -EBUSY) {
+		wut = "??? FILESYSTEM BUSY";
+	} else if (error == -EAGAIN) {
+		wut = "??? REPAIR DEFERRED";
+	} else if (error == -ECANCELED) {
+		wut = "??? REPAIR CANCELLED";
+	} else if (error == -EINTR) {
+		wut = "??? REPAIR INTERRUPTED";
+	} else if (error != -EOPNOTSUPP && error != -ENOENT) {
+		wut = "!!! REPAIR FAILED";
+		xfs_info(sc->mp,
+"%s ino 0x%llx type %s agno 0x%x inum 0x%llx gen 0x%x flags 0x%x error %d",
+				wut, XFS_I(file_inode(sc->file))->i_ino,
+				xchk_type_string(sm->sm_type), sm->sm_agno,
+				sm->sm_ino, sm->sm_gen, sm->sm_flags, error);
+		return;
+	} else {
+		return;
+	}
+
+	xfs_info_ratelimited(sc->mp,
+"%s ino 0x%llx type %s agno 0x%x inum 0x%llx gen 0x%x flags 0x%x error %d",
+			wut, XFS_I(file_inode(sc->file))->i_ino,
+			xchk_type_string(sm->sm_type), sm->sm_agno, sm->sm_ino,
+			sm->sm_gen, sm->sm_flags, error);
+}
+
 /* Dispatch metadata scrubbing. */
 int
 xfs_scrub_metadata(
@@ -730,6 +766,7 @@ retry_op:
 		 * already tried to fix it, then attempt a repair.
 		 */
 		error = xrep_attempt(sc, &run);
+		repair_outcomes(sc, error);
 		if (error == -EAGAIN) {
 			/*
 			 * Either the repair function succeeded or it couldn't
