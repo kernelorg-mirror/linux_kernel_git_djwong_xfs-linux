@@ -1133,3 +1133,40 @@ xrep_metadata_inode_forks(
 
 	return 0;
 }
+
+/*
+ * Set a file's link count, being careful about integer overflows.  Returns
+ * true if we had to correct an integer overflow.
+ */
+bool
+xrep_set_nlink(
+	struct xfs_inode	*ip,
+	uint64_t		nlink)
+{
+	bool			ret = false;
+
+	if (nlink > U32_MAX) {
+		/*
+		 * The observed link count will overflow the nlink field.
+		 *
+		 * The VFS won't let users create more hardlinks if the link
+		 * count is larger than XFS_MAXLINK, but it will let them
+		 * delete hardlinks.  XFS_MAXLINK is half of U32_MAX, which
+		 * means that sysadmins could actually fix this situation by
+		 * deleting links and calling us again.
+		 *
+		 * Set the link count to the largest possible value that will
+		 * fit in the field.  This will buy us the most possible time
+		 * to avoid a UAF should the sysadmins start deleting links.
+		 * As long as the link count stays above MAXLINK the undercount
+		 * problem will not get worse.
+		 */
+		BUILD_BUG_ON((uint64_t)XFS_MAXLINK >= U32_MAX);
+
+		nlink = U32_MAX;
+		ret = true;
+	}
+
+	set_nlink(VFS_I(ip), nlink);
+	return ret;
+}
