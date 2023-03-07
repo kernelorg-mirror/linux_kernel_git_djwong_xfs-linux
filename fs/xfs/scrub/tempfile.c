@@ -21,6 +21,7 @@
 #include "xfs_xchgrange.h"
 #include "xfs_swapext.h"
 #include "xfs_defer.h"
+#include "xfs_symlink_remote.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/repair.h"
@@ -107,6 +108,10 @@ xrep_tempfile_create(
 
 	if (is_dir) {
 		error = xfs_dir_init(tp, sc->tempip, dp);
+		if (error)
+			goto out_trans_cancel;
+	} else if (S_ISLNK(VFS_I(sc->tempip)->i_mode)) {
+		error = xfs_symlink_write_target(tp, sc->tempip, ".", 1, 0, 0);
 		if (error)
 			goto out_trans_cancel;
 	}
