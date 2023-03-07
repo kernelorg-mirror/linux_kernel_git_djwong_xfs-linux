@@ -585,6 +585,7 @@ xfs_reflink_cancel_cow_blocks(
 	struct xfs_ifork		*ifp = xfs_ifork_ptr(ip, XFS_COW_FORK);
 	struct xfs_bmbt_irec		got, del;
 	struct xfs_iext_cursor		icur;
+	bool				isrt = XFS_IS_REALTIME_INODE(ip);
 	int				error = 0;
 
 	if (!xfs_inode_has_cow_data(ip))
@@ -614,12 +615,13 @@ xfs_reflink_cancel_cow_blocks(
 			ASSERT((*tpp)->t_highest_agno == NULLAGNUMBER);
 
 			/* Free the CoW orphan record. */
-			xfs_refcount_free_cow_extent(*tpp, del.br_startblock,
-					del.br_blockcount);
+			xfs_refcount_free_cow_extent(*tpp, isrt,
+					del.br_startblock, del.br_blockcount);
 
 			error = xfs_free_extent_later(*tpp, del.br_startblock,
 					del.br_blockcount, NULL,
-					XFS_AG_RESV_NONE, 0);
+					XFS_AG_RESV_NONE,
+					isrt ? XFS_FREE_EXTENT_REALTIME : 0);
 			if (error)
 				break;
 
@@ -729,6 +731,7 @@ xfs_reflink_end_cow_extent(
 	struct xfs_ifork	*ifp = xfs_ifork_ptr(ip, XFS_COW_FORK);
 	unsigned int		resblks;
 	int			nmaps;
+	bool			isrt = XFS_IS_REALTIME_INODE(ip);
 	int			error;
 
 	/* No COW extents?  That's easy! */
@@ -806,7 +809,7 @@ xfs_reflink_end_cow_extent(
 		 * or not), unmap the extent and drop its refcount.
 		 */
 		xfs_bmap_unmap_extent(tp, ip, XFS_DATA_FORK, &data);
-		xfs_refcount_decrease_extent(tp, &data);
+		xfs_refcount_decrease_extent(tp, isrt, &data);
 		xfs_trans_mod_dquot_byino(tp, ip, XFS_TRANS_DQ_BCOUNT,
 				-data.br_blockcount);
 	} else if (data.br_startblock == DELAYSTARTBLOCK) {
@@ -826,7 +829,8 @@ xfs_reflink_end_cow_extent(
 	}
 
 	/* Free the CoW orphan record. */
-	xfs_refcount_free_cow_extent(tp, del.br_startblock, del.br_blockcount);
+	xfs_refcount_free_cow_extent(tp, isrt, del.br_startblock,
+			del.br_blockcount);
 
 	/* Map the new blocks into the data fork. */
 	xfs_bmap_map_extent(tp, ip, XFS_DATA_FORK, &del);
@@ -1163,6 +1167,7 @@ xfs_reflink_remap_extent(
 	bool			quota_reserved = true;
 	bool			smap_real;
 	bool			dmap_written = xfs_bmap_is_written_extent(dmap);
+	bool			isrt = XFS_IS_REALTIME_INODE(ip);
 	int			iext_delta = 0;
 	int			nimaps;
 	int			error;
@@ -1294,7 +1299,7 @@ xfs_reflink_remap_extent(
 		 * or not), unmap the extent and drop its refcount.
 		 */
 		xfs_bmap_unmap_extent(tp, ip, XFS_DATA_FORK, &smap);
-		xfs_refcount_decrease_extent(tp, &smap);
+		xfs_refcount_decrease_extent(tp, isrt, &smap);
 		qdelta -= smap.br_blockcount;
 	} else if (smap.br_startblock == DELAYSTARTBLOCK) {
 		int		done;
@@ -1317,7 +1322,7 @@ xfs_reflink_remap_extent(
 	 * its refcount and map it into the file.
 	 */
 	if (dmap_written) {
-		xfs_refcount_increase_extent(tp, dmap);
+		xfs_refcount_increase_extent(tp, isrt, dmap);
 		xfs_bmap_map_extent(tp, ip, XFS_DATA_FORK, dmap);
 		qdelta += dmap->br_blockcount;
 	}
