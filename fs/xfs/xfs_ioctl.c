@@ -2113,6 +2113,86 @@ err_free:
 	return error;
 }
 
+#define XFS_ADDFEATURE_SUPPORTED	(XFS_FSOP_GEOM_FLAGS_INOBTCNT | \
+					 XFS_FSOP_GEOM_FLAGS_BIGTIME | \
+					 XFS_FSOP_GEOM_FLAGS_NREXT64)
+static int
+xfs_ioc_addfeature(
+	struct file		*filp,
+	struct xfs_mount	*mp,
+	__u64			__user *uflags)
+{
+	struct xfs_sb		*sbp = &mp->m_sb;
+	struct block_device	*bdev = xfs_buftarg_bdev(mp->m_ddev_targp);
+	__u64			flags;
+	bool			dirty = false;
+	int			error = 0;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	if (copy_from_user(&flags, uflags, sizeof(__u64)))
+		return -EFAULT;
+
+	if (flags & ~XFS_ADDFEATURE_SUPPORTED)
+		return -EINVAL;
+
+	error = mnt_want_write_file(filp);
+	if (error)
+		return error;
+
+	spin_lock(&mp->m_sb_lock);
+	if ((flags & XFS_FSOP_GEOM_FLAGS_BIGTIME) && !xfs_has_bigtime(mp)) {
+		xfs_info(mp, "Adding bigtime feature.");
+		sbp->sb_features_incompat |= XFS_SB_FEAT_INCOMPAT_BIGTIME;
+		mp->m_features |= XFS_FEAT_BIGTIME;
+		dirty = true;
+	}
+	if ((flags & XFS_FSOP_GEOM_FLAGS_INOBTCNT) &&
+	    !xfs_has_inobtcounts(mp)) {
+		xfs_info(mp, "Adding inobtcount feature.");
+		sbp->sb_features_ro_compat |= XFS_SB_FEAT_RO_COMPAT_INOBTCNT;
+		mp->m_features |= XFS_FEAT_INOBTCNT;
+		dirty = true;
+	}
+	if ((flags & XFS_FSOP_GEOM_FLAGS_NREXT64) &&
+	    !xfs_has_large_extent_counts(mp)) {
+		xfs_info(mp, "Adding nrext64 feature.");
+		sbp->sb_features_incompat |= XFS_SB_FEAT_INCOMPAT_NREXT64;
+		mp->m_features |= XFS_FEAT_NREXT64;
+		dirty = true;
+	}
+	spin_unlock(&mp->m_sb_lock);
+
+	if (!dirty)
+		goto out;
+
+	/*
+	 * Now we do several things to satisfy userspace.
+	 * In addition to normal logging of the primary superblock, we also
+	 * immediately write these changes to sector zero for the primary, then
+	 * update all backup supers (as xfs_db does for a label change), then
+	 * invalidate the block device page cache.  This is so that any prior
+	 * buffered reads from userspace (i.e. from blkid) are invalidated,
+	 * and userspace will see the newly-written label.
+	 */
+	error = xfs_sync_sb_buf(mp);
+	if (error)
+		goto out;
+	/*
+	 * growfs also updates backup supers so lock against that.
+	 */
+	mutex_lock(&mp->m_growlock);
+	error = xfs_update_secondary_sbs(mp);
+	mutex_unlock(&mp->m_growlock);
+
+	invalidate_bdev(bdev);
+
+out:
+	mnt_drop_write_file(filp);
+	return error;
+}
+
 static inline int
 xfs_fs_eofblocks_from_user(
 	struct xfs_fs_eofblocks		*src,
@@ -2292,6 +2372,8 @@ xfs_file_ioctl(
 		return xfs_ioc_getlabel(mp, arg);
 	case FS_IOC_SETFSLABEL:
 		return xfs_ioc_setlabel(filp, mp, arg);
+	case XFS_IOC_ADDFEATURE:
+		return xfs_ioc_addfeature(filp, mp, arg);
 	case XFS_IOC_ALLOCSP:
 	case XFS_IOC_FREESP:
 	case XFS_IOC_ALLOCSP64:
