@@ -54,6 +54,9 @@ int					/* error */
 xfs_rtmount_inodes(
 	struct xfs_mount	*mp);	/* file system mount structure */
 
+void xfs_rt_resv_free(struct xfs_mount *mp);
+int xfs_rt_resv_init(struct xfs_mount *mp);
+
 /*
  * Pick an extent for allocation at the start of a new realtime file.
  * Use the sequence number stored in the atime field of the bitmap inode.
@@ -96,6 +99,8 @@ xfs_rtmount_init(
 }
 # define xfs_rtmount_inodes(m)  (((mp)->m_sb.sb_rblocks == 0)? 0 : (-ENOSYS))
 # define xfs_rtunmount_inodes(m)
+# define xfs_rt_resv_free(mp)				((void)0)
+# define xfs_rt_resv_init(mp)				(0)
 #endif	/* CONFIG_XFS_RT */
 
 #endif	/* __XFS_RTALLOC_H__ */
