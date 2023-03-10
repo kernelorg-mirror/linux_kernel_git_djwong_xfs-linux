@@ -381,8 +381,41 @@ extern void xfs_buftarg_wait(struct xfs_buftarg *);
 extern void xfs_buftarg_drain(struct xfs_buftarg *);
 extern int xfs_setsize_buftarg(struct xfs_buftarg *, unsigned int);
 
-#define xfs_getsize_buftarg(buftarg)	block_size((buftarg)->bt_bdev)
-#define xfs_readonly_buftarg(buftarg)	bdev_read_only((buftarg)->bt_bdev)
+static inline struct block_device *
+xfs_buftarg_bdev(struct xfs_buftarg *btp)
+{
+	return btp->bt_bdev;
+}
+
+static inline unsigned int
+xfs_getsize_buftarg(struct xfs_buftarg *btp)
+{
+	return block_size(btp->bt_bdev);
+}
+
+static inline bool
+xfs_readonly_buftarg(struct xfs_buftarg *btp)
+{
+	return bdev_read_only(btp->bt_bdev);
+}
+
+static inline int
+xfs_buftarg_flush(struct xfs_buftarg *btp)
+{
+	return blkdev_issue_flush(btp->bt_bdev);
+}
+
+static inline int
+xfs_buftarg_zeroout(
+	struct xfs_buftarg	*btp,
+	sector_t		sector,
+	sector_t		nr_sects,
+	gfp_t			gfp_mask,
+	unsigned int		flags)
+{
+	return blkdev_issue_zeroout(btp->bt_bdev, sector, nr_sects, gfp_mask,
+			flags);
+}
 
 int xfs_buf_reverify(struct xfs_buf *bp, const struct xfs_buf_ops *ops);
 bool xfs_verify_magic(struct xfs_buf *bp, __be32 dmagic);
