@@ -1762,6 +1762,7 @@ xfs_ioc_setlabel(
 	char			__user *newlabel)
 {
 	struct xfs_sb		*sbp = &mp->m_sb;
+	struct block_device	*bdev = xfs_buftarg_bdev(mp->m_ddev_targp);
 	char			label[XFSLABEL_MAX + 1];
 	size_t			len;
 	int			error;
@@ -1808,7 +1809,7 @@ xfs_ioc_setlabel(
 	error = xfs_update_secondary_sbs(mp);
 	mutex_unlock(&mp->m_growlock);
 
-	invalidate_bdev(mp->m_ddev_targp->bt_bdev);
+	invalidate_bdev(bdev);
 
 out:
 	mnt_drop_write_file(filp);
