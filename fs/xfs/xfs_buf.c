@@ -1982,7 +1982,7 @@ xfs_free_buftarg(
 	invalidate_bdev(btp->bt_bdev);
 	fs_put_dax(btp->bt_daxdev, btp->bt_mount);
 
-	kmem_free(btp);
+	kvfree(btp);
 }
 
 int
@@ -2028,7 +2028,7 @@ xfs_alloc_buftarg_common(
 {
 	struct xfs_buftarg	*btp;
 
-	btp = kmem_zalloc(sizeof(*btp), KM_NOFS);
+	btp = kzalloc(sizeof(*btp), GFP_NOFS);
 	if (!btp)
 		return NULL;
 
@@ -2044,7 +2044,7 @@ xfs_alloc_buftarg_common(
 	if (list_lru_init(&btp->bt_lru))
 		goto error_free;
 
-	if (percpu_counter_init(&btp->bt_io_count, 0, GFP_KERNEL))
+	if (percpu_counter_init(&btp->bt_io_count, 0, GFP_NOFS))
 		goto error_lru;
 
 	btp->bt_shrinker.count_objects = xfs_buftarg_shrink_count;
@@ -2062,7 +2062,7 @@ error_pcpu:
 error_lru:
 	list_lru_destroy(&btp->bt_lru);
 error_free:
-	kmem_free(btp);
+	kvfree(btp);
 	return NULL;
 }
 
