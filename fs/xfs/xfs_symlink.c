@@ -191,7 +191,6 @@ xfs_symlink(
 	struct xfs_dquot	*pdqp = NULL;
 	uint			resblks;
 	xfs_ino_t		ino;
-	xfs_dir2_dataptr_t      diroffset;
 	struct xfs_parent_defer *parent;
 
 	*ipp = NULL;
@@ -340,8 +339,7 @@ xfs_symlink(
 	/*
 	 * Create the directory entry for the symlink.
 	 */
-	error = xfs_dir_createname(tp, dp, link_name,
-			ip->i_ino, resblks, &diroffset);
+	error = xfs_dir_createname(tp, dp, link_name, ip->i_ino, resblks);
 	if (error)
 		goto out_trans_cancel;
 	xfs_trans_ichgtime(tp, dp, XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);

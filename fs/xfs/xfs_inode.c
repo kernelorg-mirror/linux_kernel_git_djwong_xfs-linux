@@ -1103,7 +1103,6 @@ xfs_create(
 	struct xfs_trans_res	*tres;
 	uint			resblks;
 	xfs_ino_t		ino;
-	xfs_dir2_dataptr_t	diroffset;
 	struct xfs_parent_defer	*parent;
 
 	trace_xfs_create(dp, name);
@@ -1178,8 +1177,7 @@ xfs_create(
 	xfs_trans_ijoin(tp, dp, 0);
 
 	error = xfs_dir_createname(tp, dp, name, ip->i_ino,
-				   resblks - XFS_IALLOC_SPACE_RES(mp),
-				   &diroffset);
+				   resblks - XFS_IALLOC_SPACE_RES(mp));
 	if (error) {
 		ASSERT(error != -ENOSPC);
 		goto out_trans_cancel;
@@ -1390,7 +1388,6 @@ xfs_link(
 	struct xfs_trans	*tp;
 	int			error, nospace_error = 0;
 	int			resblks;
-	xfs_dir2_dataptr_t	diroffset;
 	struct xfs_parent_defer	*parent = NULL;
 
 	trace_xfs_link(tdp, target_name);
@@ -1459,7 +1456,7 @@ xfs_link(
 	}
 
 	error = xfs_dir_createname(tp, tdp, target_name, sip->i_ino,
-				   resblks, &diroffset);
+				   resblks);
 	if (error)
 		goto error_return;
 	xfs_trans_ichgtime(tp, tdp, XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
@@ -3182,7 +3179,6 @@ xfs_rename(
 	int				spaceres;
 	bool				retried = false;
 	int				error, nospace_error = 0;
-	xfs_dir2_dataptr_t		new_diroffset;
 	struct xfs_parent_defer		*src_ip_pptr = NULL;
 	struct xfs_parent_defer		*tgt_ip_pptr = NULL;
 	struct xfs_parent_defer		*wip_pptr = NULL;
@@ -3423,7 +3419,7 @@ retry:
 		 * to account for the ".." reference from the new entry.
 		 */
 		error = xfs_dir_createname(tp, target_dp, target_name,
-					   src_ip->i_ino, spaceres, &new_diroffset);
+					   src_ip->i_ino, spaceres);
 		if (error)
 			goto out_trans_cancel;
 
