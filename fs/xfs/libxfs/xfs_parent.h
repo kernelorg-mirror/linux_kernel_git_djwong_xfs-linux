@@ -103,4 +103,14 @@ xfs_parent_finish(
 unsigned int xfs_pptr_calc_space_res(struct xfs_mount *mp,
 				     unsigned int namelen);
 
+/* Scratchpad memory so that raw parent operations don't burn stack space. */
+struct xfs_parent_scratch {
+	struct xfs_parent_name_rec	rec;
+	struct xfs_da_args		args;
+};
+
+int xfs_parent_lookup(struct xfs_trans *tp, struct xfs_inode *ip,
+		const struct xfs_parent_name_irec *pptr, unsigned char *name,
+		unsigned int namelen, struct xfs_parent_scratch *scratch);
+
 #endif	/* __XFS_PARENT_H__ */
