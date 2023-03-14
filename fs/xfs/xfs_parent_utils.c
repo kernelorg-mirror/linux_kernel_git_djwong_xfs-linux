@@ -86,6 +86,8 @@ xfs_getparent_listent(
 		return;
 	}
 
+	trace_xfs_getparent_listent(context->dp, ppi, irec);
+
 	/* Format the parent pointer directly into the caller buffer. */
 	ppi->gp_offsets[ppi->gp_count] = context->firstu;
 	pptr = xfs_getparents_rec(ppi, ppi->gp_count);
@@ -122,6 +124,8 @@ xfs_getparent_pointers(
 	memcpy(&gp->context.cursor, &ppi->gp_cursor,
 			sizeof(struct xfs_attrlist_cursor));
 	ppi->gp_count = 0;
+
+	trace_xfs_getparent_pointers(ip, ppi, &gp->context.cursor);
 
 	error = xfs_attr_list(&gp->context);
 	if (error)
