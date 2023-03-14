@@ -119,6 +119,9 @@ struct xrep_pptrs {
 	/* Mutex protecting parent_ptrs, pptr_names. */
 	struct mutex		lock;
 
+	/* Hook to capture directory entry updates. */
+	struct xfs_dirent_hook	hooks;
+
 	/* Stashed parent pointer updates. */
 	struct xfarray		*parent_ptrs;
 
@@ -131,6 +134,7 @@ static void
 xrep_pptr_teardown(
 	struct xrep_pptrs	*rp)
 {
+	xfs_dirent_hook_del(rp->sc->mp, &rp->hooks);
 	xchk_iscan_finish(&rp->iscan);
 	mutex_destroy(&rp->lock);
 	xfblob_destroy(rp->pptr_names);
@@ -144,6 +148,8 @@ xrep_setup_parent(
 {
 	struct xrep_pptrs	*rp;
 	int			error;
+
+	xchk_fshooks_enable(sc, XCHK_FSHOOKS_DIRENTS);
 
 	error = xrep_tempfile_create(sc, S_IFREG);
 	if (error)
@@ -185,6 +191,12 @@ xrep_pptr_replay_update(
 		trace_xrep_pptr_createname(sc->tempip, &rp->pptr);
 
 		return xfs_parent_set(sc->tempip, &rp->pptr, &rp->pptr_scratch);
+	} else if (pptr->action == XREP_PPTR_REMOVE) {
+		/* Remove parent pointer. */
+		trace_xrep_pptr_removename(sc->tempip, &rp->pptr);
+
+		return xfs_parent_unset(sc->tempip, &rp->pptr,
+				&rp->pptr_scratch);
 	}
 
 	ASSERT(0);
@@ -259,6 +271,36 @@ xrep_pptr_add_pointer(
 	int			error;
 
 	trace_xrep_pptr_add_pointer(rp->sc->tempip, dp, diroffset, name);
+
+	error = xfblob_store(rp->pptr_names, &pptr.name_cookie, name->name,
+			name->len);
+	if (error)
+		return error;
+
+	return xfarray_append(rp->parent_ptrs, &pptr);
+}
+
+/*
+ * Remember that we want to remove a parent pointer from the tempfile.  These
+ * stashed actions will be replayed later.
+ */
+STATIC int
+xrep_pptr_remove_pointer(
+	struct xrep_pptrs	*rp,
+	const struct xfs_name	*name,
+	const struct xfs_inode	*dp,
+	xfs_dir2_dataptr_t	diroffset)
+{
+	struct xrep_pptr	pptr = {
+		.action		= XREP_PPTR_REMOVE,
+		.namelen	= name->len,
+		.p_ino		= dp->i_ino,
+		.p_gen		= VFS_IC(dp)->i_generation,
+		.p_diroffset	= diroffset,
+	};
+	int			error;
+
+	trace_xrep_pptr_remove_pointer(rp->sc->tempip, dp, diroffset, name);
 
 	error = xfblob_store(rp->pptr_names, &pptr.name_cookie, name->name,
 			name->len);
@@ -504,6 +546,12 @@ xrep_pptr_rebuild_tree(
 	if (error)
 		return error;
 
+	/*
+	 * Abort the inode scan so that the live hooks won't stash any more
+	 * directory updates.
+	 */
+	xchk_iscan_abort(&rp->iscan);
+
 	error = xrep_pptr_replay_updates(rp);
 	if (error)
 		return error;
@@ -524,6 +572,52 @@ xrep_pptr_rebuild_tree(
 
 	xrep_tempfile_ilock(sc);
 	return xchk_xattr_walk(sc, sc->tempip, xrep_pptr_dump_tempptr, rp);
+}
+
+/*
+ * Capture dirent updates being made by other threads which are relevant to the
+ * file being repaired.
+ */
+STATIC int
+xrep_pptr_live_update(
+	struct notifier_block		*nb,
+	unsigned long			action,
+	void				*data)
+{
+	struct xfs_dirent_update_params	*p = data;
+	struct xrep_pptrs		*rp;
+	struct xfs_scrub		*sc;
+	int				error;
+
+	rp = container_of(nb, struct xrep_pptrs, hooks.delta_hook.nb);
+	sc = rp->sc;
+
+	if (action != XFS_DIRENT_CHILD_DELTA)
+		return NOTIFY_DONE;
+
+	/*
+	 * This thread updated a dirent that points to the file that we're
+	 * repairing, so stash the update for replay against the temporary
+	 * file.
+	 */
+	if (p->ip->i_ino == sc->ip->i_ino &&
+	    xchk_iscan_want_live_update(&rp->iscan, p->dp->i_ino)) {
+		mutex_lock(&rp->lock);
+		if (p->delta > 0)
+			error = xrep_pptr_add_pointer(rp, p->name, p->dp,
+					p->diroffset);
+		else
+			error = xrep_pptr_remove_pointer(rp, p->name, p->dp,
+					p->diroffset);
+		mutex_unlock(&rp->lock);
+		if (error)
+			goto out_abort;
+	}
+
+	return NOTIFY_DONE;
+out_abort:
+	xchk_iscan_abort(&rp->iscan);
+	return NOTIFY_DONE;
 }
 
 /* Set up the filesystem scan so we can look for pptrs. */
@@ -549,8 +643,24 @@ xrep_pptr_setup_scan(
 	/* Retry iget every tenth of a second for up to 30 seconds. */
 	xchk_iscan_start(&rp->iscan, 30000, 100);
 
+	/*
+	 * Hook into the dirent update code.  The hook only operates on inodes
+	 * that were already scanned, and the scanner thread takes each inode's
+	 * ILOCK, which means that any in-progress inode updates will finish
+	 * before we can scan the inode.
+	 */
+	ASSERT(sc->flags & XCHK_FSHOOKS_DIRENTS);
+	xfs_hook_setup(&rp->hooks.delta_hook, xrep_pptr_live_update);
+	error = xfs_dirent_hook_add(sc->mp, &rp->hooks);
+	if (error)
+		goto out_scan;
+
 	return 0;
 
+out_scan:
+	xchk_iscan_finish(&rp->iscan);
+	mutex_destroy(&rp->lock);
+	xfblob_destroy(rp->pptr_names);
 out_entries:
 	xfarray_destroy(rp->parent_ptrs);
 	return error;
