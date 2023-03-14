@@ -67,12 +67,14 @@ xfs_getparent_listent(
 	 * pointer.  The attr list functions filtered out INCOMPLETE attrs.
 	 */
 	if (XFS_IS_CORRUPT(mp, !xfs_parent_namecheck(mp, rec, namelen, flags)) ||
-	    XFS_IS_CORRUPT(mp, !xfs_parent_valuecheck(mp, value, valuelen))) {
+	    XFS_IS_CORRUPT(mp, !xfs_parent_valuecheck(mp, namelen, value,
+						      valuelen))) {
 		context->seen_enough = -EFSCORRUPTED;
 		return;
 	}
 
-	xfs_parent_irec_from_disk(&gp->pptr_irec, rec, value, valuelen);
+	xfs_parent_irec_from_disk(&gp->pptr_irec, rec, namelen, value,
+			valuelen);
 
 	/*
 	 * We found a parent pointer, but we've filled up the buffer.  Signal
@@ -93,7 +95,7 @@ xfs_getparent_listent(
 	pptr = xfs_getparents_rec(ppi, ppi->gp_count);
 	pptr->gpr_ino = irec->p_ino;
 	pptr->gpr_gen = irec->p_gen;
-	pptr->gpr_diroffset = irec->p_diroffset;
+	pptr->gpr_rsvd2 = 0;
 	pptr->gpr_rsvd = 0;
 
 	memcpy(pptr->gpr_name, irec->p_name, irec->p_namelen);

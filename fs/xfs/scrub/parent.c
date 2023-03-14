@@ -323,7 +323,6 @@ struct xchk_pptr {
 	/* Parent pointer attr key. */
 	xfs_ino_t			p_ino;
 	uint32_t			p_gen;
-	xfs_dir2_dataptr_t		p_diroffset;
 
 	/* Length of the pptr name. */
 	uint8_t				namelen;
@@ -349,9 +348,6 @@ struct xchk_pptrs {
 
 	/* xattr key and da args for parent pointer revalidation. */
 	struct xfs_parent_scratch pptr_scratch;
-
-	/* Name buffer for revalidation. */
-	uint8_t			namebuf[MAXNAMELEN];
 };
 
 /* Look up the dotdot entry so that we can check it as we walk the pptrs. */
@@ -426,14 +422,13 @@ xchk_parent_dirent(
 	};
 	struct xfs_scrub	*sc = pp->sc;
 	xfs_ino_t		child_ino;
-	xfs_dir2_dataptr_t	child_diroffset;
 	int			error;
 
 	/*
 	 * Use the name attached to this parent pointer to look up the
 	 * directory entry in the alleged parent.
 	 */
-	error = xchk_dir_lookup(sc, dp, &xname, &child_ino, &child_diroffset);
+	error = xchk_dir_lookup(sc, dp, &xname, &child_ino, NULL);
 	if (error == -ENOENT) {
 		xchk_fblock_xref_set_corrupt(sc, XFS_ATTR_FORK, 0);
 		return 0;
@@ -443,15 +438,6 @@ xchk_parent_dirent(
 
 	/* Does the inode number match? */
 	if (child_ino != sc->ip->i_ino) {
-		xchk_fblock_xref_set_corrupt(sc, XFS_ATTR_FORK, 0);
-		return 0;
-	}
-
-	/* Does the directory offset match? */
-	if (pp->pptr.p_diroffset != child_diroffset) {
-		trace_xchk_parent_bad_dapos(sc->ip, pp->pptr.p_diroffset,
-				dp->i_ino, child_diroffset, xname.name,
-				xname.len);
 		xchk_fblock_xref_set_corrupt(sc, XFS_ATTR_FORK, 0);
 		return 0;
 	}
@@ -554,12 +540,12 @@ xchk_parent_scan_attr(
 		return -ECANCELED;
 	}
 
-	if (!xfs_parent_valuecheck(sc->mp, value, valuelen)) {
+	if (!xfs_parent_valuecheck(sc->mp, namelen, value, valuelen)) {
 		xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, 0);
 		return -ECANCELED;
 	}
 
-	xfs_parent_irec_from_disk(&pp->pptr, rec, value, valuelen);
+	xfs_parent_irec_from_disk(&pp->pptr, rec, namelen, value, valuelen);
 
 	error = xchk_parent_iget(pp, &dp);
 	if (error)
@@ -573,7 +559,6 @@ xchk_parent_scan_attr(
 		struct xchk_pptr	save_pp = {
 			.p_ino		= pp->pptr.p_ino,
 			.p_gen		= pp->pptr.p_gen,
-			.p_diroffset	= pp->pptr.p_diroffset,
 			.namelen	= pp->pptr.p_namelen,
 		};
 
@@ -614,28 +599,16 @@ xchk_parent_revalidate_pptr(
 	struct xchk_pptrs	*pp)
 {
 	struct xfs_scrub	*sc = pp->sc;
-	int			namelen;
+	int			error;
 
-	namelen = xfs_parent_lookup(sc->tp, sc->ip, &pp->pptr, pp->namebuf,
-			MAXNAMELEN, &pp->pptr_scratch);
-	if (namelen == -ENOATTR) {
-		/*  Parent pointer went away, nothing to revalidate. */
+	error = xfs_parent_lookup(sc->tp, sc->ip, &pp->pptr,
+			&pp->pptr_scratch);
+	if (error == -ENOATTR) {
+		/* Parent pointer went away, nothing to revalidate. */
 		return -ENOENT;
 	}
-	if (namelen < 0 && namelen != -EEXIST)
-		return namelen;
 
-	/*
-	 * The dirent name changed length while we were unlocked.  No need
-	 * to revalidate this.
-	 */
-	if (namelen != pp->pptr.p_namelen)
-		return -ENOENT;
-
-	/* The dirent name itself changed; there's nothing to revalidate. */
-	if (memcmp(pp->namebuf, pp->pptr.p_name, pp->pptr.p_namelen))
-		return -ENOENT;
-	return 0;
+	return error;
 }
 
 /*
@@ -655,7 +628,6 @@ xchk_parent_slow_pptr(
 	/* Restore the saved parent pointer into the irec. */
 	pp->pptr.p_ino = pptr->p_ino;
 	pp->pptr.p_gen = pptr->p_gen;
-	pp->pptr.p_diroffset = pptr->p_diroffset;
 
 	error = xfblob_load(pp->pptr_names, pptr->name_cookie, pp->pptr.p_name,
 			pptr->namelen);
@@ -695,7 +667,7 @@ xchk_parent_slow_pptr(
 	xchk_iunlock(sc, sc->ilock_flags);
 	pp->need_revalidate = true;
 
-	trace_xchk_parent_slowpath(sc->ip, pp->namebuf, pptr->namelen,
+	trace_xchk_parent_slowpath(sc->ip, pp->pptr.p_name, pptr->namelen,
 			dp->i_ino);
 
 	while (true) {

@@ -827,14 +827,43 @@ xfs_failaddr_t xfs_da3_blkinfo_verify(struct xfs_buf *bp,
 /*
  * Parent pointer attribute format definition
  *
- * EA name encodes the parent inode number, generation and the offset of
- * the dirent that points to the child inode. The EA value contains the
- * same name as the dirent in the parent directory.
+ * The EA name encodes the parent inode number, generation and as much of the
+ * dirent name as fits.  In other words, it contains up to 243 bytes of the
+ * dirent name.
+ *
+ * The EA value contains however much of the dirent name that does not fit in
+ * the EA name.
  */
 struct xfs_parent_name_rec {
 	__be64  p_ino;
 	__be32  p_gen;
-	__be32  p_diroffset;
-};
+	__u8	p_dname[];
+} __attribute__((packed));
+
+/* Maximum size of a parent pointer EA name. */
+#define XFS_PARENT_NAME_MAX_SIZE \
+	(MAXNAMELEN - 1)
+
+/* Maximum number of dirent name bytes stored in p_dname. */
+#define XFS_PARENT_MAX_DNAME_SIZE \
+	(XFS_PARENT_NAME_MAX_SIZE - sizeof(struct xfs_parent_name_rec))
+
+/* Maximum number of dirent name bytes stored in the xattr value. */
+#define XFS_PARENT_MAX_DNAME_VALUELEN \
+	sizeof(struct xfs_parent_name_rec)
+
+static inline unsigned int
+xfs_parent_name_rec_sizeof(
+	unsigned int		dnamelen)
+{
+	return sizeof(struct xfs_parent_name_rec) + dnamelen;
+}
+
+static inline unsigned int
+xfs_parent_name_dnamelen(
+	unsigned int		rec_sizeof)
+{
+	return rec_sizeof - sizeof(struct xfs_parent_name_rec);
+}
 
 #endif /* __XFS_DA_FORMAT_H__ */

@@ -93,9 +93,6 @@ struct xrep_dirent {
 	/* Child inode number. */
 	xfs_ino_t		ino;
 
-	/* Directory offset that we want.  We're not going to get it. */
-	xfs_dir2_dataptr_t	diroffset;
-
 	/* Length of the dirent name. */
 	uint8_t			namelen;
 
@@ -261,8 +258,7 @@ xrep_dir_createname(
 	struct xrep_dir		*rd,
 	const struct xfs_name	*name,
 	xfs_ino_t		inum,
-	xfs_extlen_t		total,
-	xfs_dir2_dataptr_t	diroffset)
+	xfs_extlen_t		total)
 {
 	struct xfs_scrub	*sc = rd->sc;
 	struct xfs_inode	*dp = rd->args.dp;
@@ -275,7 +271,7 @@ xrep_dir_createname(
 	if (error)
 		return error;
 
-	trace_xrep_dir_createname(dp, name, inum, diroffset);
+	trace_xrep_dir_createname(dp, name, inum);
 
 	/* reset cmpresult as if we haven't done a lookup */
 	rd->args.cmpresult = XFS_CMP_DIFFERENT;
@@ -307,8 +303,7 @@ STATIC int
 xrep_dir_removename(
 	struct xrep_dir		*rd,
 	const struct xfs_name	*name,
-	xfs_extlen_t		total,
-	xfs_dir2_dataptr_t	diroffset)
+	xfs_extlen_t		total)
 {
 	struct xfs_inode	*dp = rd->args.dp;
 	bool			is_block, is_leaf;
@@ -321,7 +316,7 @@ xrep_dir_removename(
 	rd->args.op_flags = 0;
 	rd->args.total = total;
 
-	trace_xrep_dir_removename(dp, name, rd->args.inumber, diroffset);
+	trace_xrep_dir_removename(dp, name, rd->args.inumber);
 
 	if (dp->i_df.if_format == XFS_DINODE_FMT_LOCAL)
 		return xfs_dir2_sf_removename(&rd->args);
@@ -385,8 +380,7 @@ xrep_dir_replay_update(
 			goto out_cancel;
 		}
 
-		error = xrep_dir_removename(rd, &xname, resblks,
-				dirent->diroffset);
+		error = xrep_dir_removename(rd, &xname, resblks);
 	} else {
 		/* Add this dirent.  The lookup must not succeed. */
 		if (error == 0)
@@ -394,8 +388,7 @@ xrep_dir_replay_update(
 		if (error != -ENOENT)
 			goto out_cancel;
 
-		error = xrep_dir_createname(rd, &xname, dirent->ino, resblks,
-				dirent->diroffset);
+		error = xrep_dir_createname(rd, &xname, dirent->ino, resblks);
 	}
 	if (error)
 		goto out_cancel;
@@ -465,19 +458,17 @@ STATIC int
 xrep_dir_add_dirent(
 	struct xrep_dir		*rd,
 	const struct xfs_name	*name,
-	xfs_ino_t		ino,
-	xfs_dir2_dataptr_t	diroffset)
+	xfs_ino_t		ino)
 {
 	struct xrep_dirent	dirent = {
 		.action		= XREP_DIRENT_ADD,
 		.ino		= ino,
 		.namelen	= name->len,
 		.ftype		= name->type,
-		.diroffset	= diroffset,
 	};
 	int			error;
 
-	trace_xrep_dir_add_dirent(rd->sc->tempip, name, ino, diroffset);
+	trace_xrep_dir_add_dirent(rd->sc->tempip, name, ino);
 
 	error = xfblob_store(rd->dir_names, &dirent.name_cookie, name->name,
 			name->len);
@@ -495,19 +486,17 @@ STATIC int
 xrep_dir_remove_dirent(
 	struct xrep_dir		*rd,
 	const struct xfs_name	*name,
-	xfs_ino_t		ino,
-	xfs_dir2_dataptr_t	diroffset)
+	xfs_ino_t		ino)
 {
 	struct xrep_dirent	dirent = {
 		.action		= XREP_DIRENT_REMOVE,
 		.ino		= ino,
 		.namelen	= name->len,
 		.ftype		= name->type,
-		.diroffset	= diroffset,
 	};
 	int			error;
 
-	trace_xrep_dir_remove_dirent(rd->sc->tempip, name, ino, diroffset);
+	trace_xrep_dir_remove_dirent(rd->sc->tempip, name, ino);
 
 	error = xfblob_store(rd->dir_names, &dirent.name_cookie, name->name,
 			name->len);
@@ -548,10 +537,10 @@ xrep_dir_scan_parent_pointer(
 
 	/* Does the ondisk parent pointer structure make sense? */
 	if (!xfs_parent_namecheck(sc->mp, rec, namelen, attr_flags) ||
-	    !xfs_parent_valuecheck(sc->mp, value, valuelen))
+	    !xfs_parent_valuecheck(sc->mp, namelen, value, valuelen))
 		return -EFSCORRUPTED;
 
-	xfs_parent_irec_from_disk(&rd->pptr, rec, value, valuelen);
+	xfs_parent_irec_from_disk(&rd->pptr, rec, namelen, value, valuelen);
 
 	/* Ignore parent pointers that point back to a different dir. */
 	if (rd->pptr.p_ino != sc->ip->i_ino ||
@@ -567,8 +556,7 @@ xrep_dir_scan_parent_pointer(
 	xname.type = xfs_mode_to_ftype(VFS_I(ip)->i_mode);
 
 	mutex_lock(&rd->lock);
-	error = xrep_dir_add_dirent(rd, &xname, ip->i_ino,
-			rd->pptr.p_diroffset);
+	error = xrep_dir_add_dirent(rd, &xname, ip->i_ino);
 	mutex_unlock(&rd->lock);
 	return error;
 }
@@ -605,7 +593,7 @@ xrep_dir_scan_dirent(
 	    xrep_dir_samename(name, &xfs_name_dot))
 		return 0;
 
-	trace_xrep_dir_replacename(sc->tempip, &xfs_name_dotdot, dp->i_ino, 0);
+	trace_xrep_dir_replacename(sc->tempip, &xfs_name_dotdot, dp->i_ino);
 
 	mutex_lock(&rd->lock);
 	rd->parent_ino = dp->i_ino;
@@ -774,7 +762,6 @@ xrep_dir_dump_tempdir(
 	xfs_ino_t		child_ino;
 	bool			child_dirent = true;
 	bool			compare_dirent = true;
-	xfs_dir2_dataptr_t	child_diroffset = XFS_DIR2_NULL_DATAPTR;
 	int			error;
 
 	/*
@@ -802,15 +789,13 @@ xrep_dir_dump_tempdir(
 		ino = sc->ip->i_ino;
 	}
 
-	trace_xrep_dir_dumpname(sc->tempip, name, ino, dapos);
+	trace_xrep_dir_dumpname(sc->tempip, name, ino);
 
 	/* Check that the dir being repaired has the same entry. */
 	if (compare_dirent) {
-		error = xchk_dir_lookup(sc, sc->ip, name, &child_ino,
-				&child_diroffset);
+		error = xchk_dir_lookup(sc, sc->ip, name, &child_ino, NULL);
 		if (error == -ENOENT) {
-			trace_xrep_dir_checkname(sc->ip, name, NULLFSINO,
-					XFS_DIR2_NULL_DATAPTR);
+			trace_xrep_dir_checkname(sc->ip, name, NULLFSINO);
 			ASSERT(error != -ENOENT);
 			return -EFSCORRUPTED;
 		}
@@ -818,16 +803,9 @@ xrep_dir_dump_tempdir(
 			return error;
 
 		if (ino != child_ino) {
-			trace_xrep_dir_checkname(sc->ip, name, child_ino,
-					child_diroffset);
+			trace_xrep_dir_checkname(sc->ip, name, child_ino);
 			ASSERT(ino == child_ino);
 			return -EFSCORRUPTED;
-		}
-
-		if (dapos != child_diroffset) {
-			trace_xrep_dir_badposname(sc->ip, name, child_ino,
-					child_diroffset);
-			/* We have no way to update this, so it. */
 		}
 	}
 
@@ -839,7 +817,7 @@ xrep_dir_dump_tempdir(
 	 */
 	if (child_dirent) {
 		mutex_lock(&rd->lock);
-		error = xrep_dir_remove_dirent(rd, name, ino, dapos);
+		error = xrep_dir_remove_dirent(rd, name, ino);
 		mutex_unlock(&rd->lock);
 	}
 
@@ -861,7 +839,6 @@ xrep_dir_dump_baddir(
 	void			*priv)
 {
 	xfs_ino_t		child_ino;
-	xfs_dir2_dataptr_t	child_diroffset = XFS_DIR2_NULL_DATAPTR;
 	int			error;
 
 	/* Ignore the directory's dot and dotdot entries. */
@@ -869,14 +846,12 @@ xrep_dir_dump_baddir(
 	    xrep_dir_samename(name, &xfs_name_dot))
 		return 0;
 
-	trace_xrep_dir_dumpname(sc->ip, name, ino, dapos);
+	trace_xrep_dir_dumpname(sc->ip, name, ino);
 
 	/* Check that the tempdir has the same entry. */
-	error = xchk_dir_lookup(sc, sc->tempip, name, &child_ino,
-			&child_diroffset);
+	error = xchk_dir_lookup(sc, sc->tempip, name, &child_ino, NULL);
 	if (error == -ENOENT) {
-		trace_xrep_dir_checkname(sc->tempip, name, NULLFSINO,
-				XFS_DIR2_NULL_DATAPTR);
+		trace_xrep_dir_checkname(sc->tempip, name, NULLFSINO);
 		ASSERT(error != -ENOENT);
 		return -EFSCORRUPTED;
 	}
@@ -884,16 +859,9 @@ xrep_dir_dump_baddir(
 		return error;
 
 	if (ino != child_ino) {
-		trace_xrep_dir_checkname(sc->tempip, name, child_ino,
-				child_diroffset);
+		trace_xrep_dir_checkname(sc->tempip, name, child_ino);
 		ASSERT(ino == child_ino);
 		return -EFSCORRUPTED;
-	}
-
-	if (dapos != child_diroffset) {
-		trace_xrep_dir_badposname(sc->ip, name, child_ino,
-				child_diroffset);
-		/* We have no way to update this, so we just leave it. */
 	}
 
 	return 0;
@@ -1027,11 +995,10 @@ xrep_dir_live_update(
 	    xchk_iscan_want_live_update(&rd->iscan, p->ip->i_ino)) {
 		mutex_lock(&rd->lock);
 		if (p->delta > 0)
-			error = xrep_dir_add_dirent(rd, p->name, p->ip->i_ino,
-					p->diroffset);
+			error = xrep_dir_add_dirent(rd, p->name, p->ip->i_ino);
 		else
 			error = xrep_dir_remove_dirent(rd, p->name,
-					p->ip->i_ino, p->diroffset);
+					p->ip->i_ino);
 		mutex_unlock(&rd->lock);
 		if (error)
 			goto out_abort;
@@ -1047,14 +1014,14 @@ xrep_dir_live_update(
 	    xchk_iscan_want_live_update(&rd->iscan, p->dp->i_ino)) {
 		if (p->delta > 0) {
 			trace_xrep_dir_add_dirent(sc->tempip, &xfs_name_dotdot,
-					p->dp->i_ino, 0);
+					p->dp->i_ino);
 
 			mutex_lock(&rd->lock);
 			rd->parent_ino = p->dp->i_ino;
 			mutex_unlock(&rd->lock);
 		} else {
 			trace_xrep_dir_remove_dirent(sc->tempip,
-					&xfs_name_dotdot, NULLFSINO, 0);
+					&xfs_name_dotdot, NULLFSINO);
 
 			mutex_lock(&rd->lock);
 			rd->parent_ino = NULLFSINO;

@@ -897,39 +897,6 @@ TRACE_EVENT(xchk_nlinks_live_update,
 		  __get_str(name))
 );
 
-TRACE_EVENT(xchk_parent_bad_dapos,
-	TP_PROTO(struct xfs_inode *ip, unsigned int p_diroffset,
-		 xfs_ino_t parent_ino, unsigned int dapos,
-		 const char *name, unsigned int namelen),
-	TP_ARGS(ip, p_diroffset, parent_ino, dapos, name, namelen),
-	TP_STRUCT__entry(
-		__field(dev_t, dev)
-		__field(xfs_ino_t, ino)
-		__field(unsigned int, p_diroffset)
-		__field(xfs_ino_t, parent_ino)
-		__field(unsigned int, dapos)
-		__field(unsigned int, namelen)
-		__dynamic_array(char, name, namelen)
-	),
-	TP_fast_assign(
-		__entry->dev = ip->i_mount->m_super->s_dev;
-		__entry->ino = ip->i_ino;
-		__entry->p_diroffset = p_diroffset;
-		__entry->parent_ino = parent_ino;
-		__entry->dapos = dapos;
-		__entry->namelen = namelen;
-		memcpy(__get_str(name), name, namelen);
-	),
-	TP_printk("dev %d:%d ino 0x%llx p_diroff 0x%x parent_ino 0x%llx parent_diroff 0x%x name '%.*s'",
-		  MAJOR(__entry->dev), MINOR(__entry->dev),
-		  __entry->ino,
-		  __entry->p_diroffset,
-		  __entry->parent_ino,
-		  __entry->dapos,
-		  __entry->namelen,
-		  __get_str(name))
-);
-
 DECLARE_EVENT_CLASS(xchk_pptr_class,
 	TP_PROTO(struct xfs_inode *ip, const unsigned char *name,
 		 unsigned int namelen, xfs_ino_t parent_ino),
@@ -1253,8 +1220,8 @@ TRACE_EVENT(xrep_tempfile_create,
 
 DECLARE_EVENT_CLASS(xrep_dirent_class,
 	TP_PROTO(struct xfs_inode *dp, const struct xfs_name *name,
-		 xfs_ino_t ino, unsigned int diroffset),
-	TP_ARGS(dp, name, ino, diroffset),
+		 xfs_ino_t ino),
+	TP_ARGS(dp, name, ino),
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_ino_t, dir_ino)
@@ -1262,7 +1229,6 @@ DECLARE_EVENT_CLASS(xrep_dirent_class,
 		__dynamic_array(char, name, name->len)
 		__field(xfs_ino_t, ino)
 		__field(uint8_t, ftype)
-		__field(unsigned int, diroffset)
 	),
 	TP_fast_assign(
 		__entry->dev = dp->i_mount->m_super->s_dev;
@@ -1271,12 +1237,10 @@ DECLARE_EVENT_CLASS(xrep_dirent_class,
 		memcpy(__get_str(name), name->name, name->len);
 		__entry->ino = ino;
 		__entry->ftype = name->type;
-		__entry->diroffset = diroffset;
 	),
-	TP_printk("dev %d:%d dir 0x%llx dapos 0x%x ftype %s name '%.*s' ino 0x%llx",
+	TP_printk("dev %d:%d dir 0x%llx ftype %s name '%.*s' ino 0x%llx",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->dir_ino,
-		  __entry->diroffset,
 		  __print_symbolic(__entry->ftype, XFS_DIR3_FTYPE_STR),
 		  __entry->namelen,
 		  __get_str(name),
@@ -1285,8 +1249,8 @@ DECLARE_EVENT_CLASS(xrep_dirent_class,
 #define DEFINE_XREP_DIRENT_CLASS(name) \
 DEFINE_EVENT(xrep_dirent_class, name, \
 	TP_PROTO(struct xfs_inode *dp, const struct xfs_name *name, \
-		 xfs_ino_t ino, unsigned int diroffset), \
-	TP_ARGS(dp, name, ino, diroffset))
+		 xfs_ino_t ino), \
+	TP_ARGS(dp, name, ino))
 DEFINE_XREP_DIRENT_CLASS(xrep_dir_add_dirent);
 DEFINE_XREP_DIRENT_CLASS(xrep_dir_remove_dirent);
 DEFINE_XREP_DIRENT_CLASS(xrep_dir_createname);
@@ -1294,7 +1258,6 @@ DEFINE_XREP_DIRENT_CLASS(xrep_dir_removename);
 DEFINE_XREP_DIRENT_CLASS(xrep_dir_replacename);
 DEFINE_XREP_DIRENT_CLASS(xrep_dir_dumpname);
 DEFINE_XREP_DIRENT_CLASS(xrep_dir_checkname);
-DEFINE_XREP_DIRENT_CLASS(xrep_dir_badposname);
 
 DECLARE_EVENT_CLASS(xrep_dir_class,
 	TP_PROTO(struct xfs_inode *dp, xfs_ino_t parent_ino),
@@ -1329,7 +1292,6 @@ DECLARE_EVENT_CLASS(xrep_pptr_class,
 		__field(xfs_ino_t, ino)
 		__field(xfs_ino_t, parent_ino)
 		__field(unsigned int, parent_gen)
-		__field(unsigned int, parent_diroffset)
 		__field(unsigned int, namelen)
 		__dynamic_array(char, name, pptr->p_namelen)
 	),
@@ -1338,16 +1300,14 @@ DECLARE_EVENT_CLASS(xrep_pptr_class,
 		__entry->ino = ip->i_ino;
 		__entry->parent_ino = pptr->p_ino;
 		__entry->parent_gen = pptr->p_gen;
-		__entry->parent_diroffset = pptr->p_diroffset;
 		__entry->namelen = pptr->p_namelen;
 		memcpy(__get_str(name), pptr->p_name, pptr->p_namelen);
 	),
-	TP_printk("dev %d:%d ino 0x%llx parent_ino 0x%llx parent_gen 0x%x parent_dapos 0x%x name '%.*s'",
+	TP_printk("dev %d:%d ino 0x%llx parent_ino 0x%llx parent_gen 0x%x name '%.*s'",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ino,
 		  __entry->parent_ino,
 		  __entry->parent_gen,
-		  __entry->parent_diroffset,
 		  __entry->namelen,
 		  __get_str(name))
 )
@@ -1362,14 +1322,13 @@ DEFINE_XREP_PPTR_CLASS(xrep_pptr_checkname);
 
 DECLARE_EVENT_CLASS(xrep_pptr_scan_class,
 	TP_PROTO(struct xfs_inode *ip, const struct xfs_inode *dp,
-		 unsigned int diroffset, const struct xfs_name *name),
-	TP_ARGS(ip, dp, diroffset, name),
+		 const struct xfs_name *name),
+	TP_ARGS(ip, dp, name),
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_ino_t, ino)
 		__field(xfs_ino_t, parent_ino)
 		__field(unsigned int, parent_gen)
-		__field(unsigned int, parent_diroffset)
 		__field(unsigned int, namelen)
 		__dynamic_array(char, name, name->len)
 	),
@@ -1378,24 +1337,22 @@ DECLARE_EVENT_CLASS(xrep_pptr_scan_class,
 		__entry->ino = ip->i_ino;
 		__entry->parent_ino = dp->i_ino;
 		__entry->parent_gen = VFS_IC(dp)->i_generation;
-		__entry->parent_diroffset = diroffset;
 		__entry->namelen = name->len;
 		memcpy(__get_str(name), name->name, name->len);
 	),
-	TP_printk("dev %d:%d ino 0x%llx parent_ino 0x%llx parent_gen 0x%x parent_dapos 0x%x name '%.*s'",
+	TP_printk("dev %d:%d ino 0x%llx parent_ino 0x%llx parent_gen 0x%x name '%.*s'",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ino,
 		  __entry->parent_ino,
 		  __entry->parent_gen,
-		  __entry->parent_diroffset,
 		  __entry->namelen,
 		  __get_str(name))
 )
 #define DEFINE_XREP_PPTR_SCAN_CLASS(name) \
 DEFINE_EVENT(xrep_pptr_scan_class, name, \
 	TP_PROTO(struct xfs_inode *ip, const struct xfs_inode *dp, \
-		 unsigned int diroffset, const struct xfs_name *name), \
-	TP_ARGS(ip, dp, diroffset, name))
+		 const struct xfs_name *name), \
+	TP_ARGS(ip, dp, name))
 DEFINE_XREP_PPTR_SCAN_CLASS(xrep_pptr_add_pointer);
 DEFINE_XREP_PPTR_SCAN_CLASS(xrep_pptr_remove_pointer);
 

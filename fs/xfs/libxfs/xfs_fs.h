@@ -769,7 +769,7 @@ struct xfs_scrub_metadata {
 struct xfs_getparents_rec {
 	__u64		gpr_ino;	/* Inode number */
 	__u32		gpr_gen;	/* Inode generation */
-	__u32		gpr_diroffset;	/* Directory offset */
+	__u32		gpr_rsvd2;	/* Reserved */
 	__u64		gpr_rsvd;	/* Reserved */
 	__u8		gpr_name[];	/* File name and null terminator */
 };

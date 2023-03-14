@@ -12,8 +12,8 @@ extern struct kmem_cache	*xfs_parent_intent_cache;
 bool xfs_parent_namecheck(struct xfs_mount *mp,
 		const struct xfs_parent_name_rec *rec, size_t reclen,
 		unsigned int attr_flags);
-bool xfs_parent_valuecheck(struct xfs_mount *mp, const void *value,
-		size_t valuelen);
+bool xfs_parent_valuecheck(struct xfs_mount *mp, size_t namelen,
+		const void *value, size_t valuelen);
 
 /*
  * Incore version of a parent pointer, also contains dirent name so callers
@@ -23,26 +23,30 @@ struct xfs_parent_name_irec {
 	/* Key fields for looking up a particular parent pointer. */
 	xfs_ino_t		p_ino;
 	uint32_t		p_gen;
-	xfs_dir2_dataptr_t	p_diroffset;
-
-	/* Attributes of a parent pointer. */
 	uint8_t			p_namelen;
 	unsigned char		p_name[MAXNAMELEN];
 };
 
 void xfs_parent_irec_from_disk(struct xfs_parent_name_irec *irec,
-		const struct xfs_parent_name_rec *rec,
+		const struct xfs_parent_name_rec *rec, int reclen,
 		const void *value, int valuelen);
-void xfs_parent_irec_to_disk(struct xfs_parent_name_rec *rec, void *value,
-		int *valuelen, const struct xfs_parent_name_irec *irec);
+int xfs_parent_irec_to_disk(struct xfs_parent_name_rec *rec, int *reclen,
+		void *value, int *valuelen,
+		const struct xfs_parent_name_irec *irec);
 
 /*
  * Dynamically allocd structure used to wrap the needed data to pass around
  * the defer ops machinery
  */
 struct xfs_parent_defer {
-	struct xfs_parent_name_rec	rec;
-	struct xfs_parent_name_rec	old_rec;
+	union {
+		struct xfs_parent_name_rec	rec;
+		__u8			dummy1[XFS_PARENT_NAME_MAX_SIZE];
+	};
+	union {
+		struct xfs_parent_name_rec	old_rec;
+		__u8			dummy2[XFS_PARENT_NAME_MAX_SIZE];
+	};
 	struct xfs_da_args		args;
 	bool				have_log;
 };
@@ -79,15 +83,14 @@ xfs_parent_start_locked(
 
 int xfs_parent_add(struct xfs_trans *tp, struct xfs_parent_defer *parent,
 		struct xfs_inode *dp, const struct xfs_name *parent_name,
-		xfs_dir2_dataptr_t diroffset, struct xfs_inode *child);
+		struct xfs_inode *child);
 int xfs_parent_replace(struct xfs_trans *tp,
 		struct xfs_parent_defer *new_parent, struct xfs_inode *old_dp,
-		xfs_dir2_dataptr_t old_diroffset,
-		const struct xfs_name *parent_name, struct xfs_inode *new_ip,
-		xfs_dir2_dataptr_t new_diroffset, struct xfs_inode *child);
-int xfs_parent_remove(struct xfs_trans *tp, struct xfs_inode *dp,
-		struct xfs_parent_defer *parent, xfs_dir2_dataptr_t diroffset,
-		struct xfs_inode *child);
+		const struct xfs_name *old_name, struct xfs_inode *new_ip,
+		const struct xfs_name *new_name, struct xfs_inode *child);
+int xfs_parent_remove(struct xfs_trans *tp,
+		struct xfs_parent_defer *parent, struct xfs_inode *dp,
+		const struct xfs_name *name, struct xfs_inode *child);
 
 void __xfs_parent_cancel(struct xfs_mount *mp, struct xfs_parent_defer *parent);
 
@@ -105,13 +108,16 @@ unsigned int xfs_pptr_calc_space_res(struct xfs_mount *mp,
 
 /* Scratchpad memory so that raw parent operations don't burn stack space. */
 struct xfs_parent_scratch {
-	struct xfs_parent_name_rec	rec;
+	union {
+		struct xfs_parent_name_rec	rec;
+		__u8			dummy1[XFS_PARENT_NAME_MAX_SIZE];
+	};
 	struct xfs_da_args		args;
 };
 
 int xfs_parent_lookup(struct xfs_trans *tp, struct xfs_inode *ip,
-		const struct xfs_parent_name_irec *pptr, unsigned char *name,
-		unsigned int namelen, struct xfs_parent_scratch *scratch);
+		const struct xfs_parent_name_irec *pptr,
+		struct xfs_parent_scratch *scratch);
 
 int xfs_parent_set(struct xfs_inode *ip,
 		const struct xfs_parent_name_irec *pptr,

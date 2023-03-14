@@ -54,9 +54,12 @@ xfs_parent_namecheck(
 	unsigned int				attr_flags)
 {
 	xfs_ino_t				p_ino;
-	xfs_dir2_dataptr_t			p_diroffset;
 
-	if (reclen != sizeof(struct xfs_parent_name_rec))
+	if (!(attr_flags & XFS_ATTR_PARENT))
+		return false;
+
+	if (reclen <= sizeof(struct xfs_parent_name_rec) ||
+	    reclen > XFS_PARENT_NAME_MAX_SIZE)
 		return false;
 
 	/* Only one namespace bit allowed. */
@@ -67,10 +70,6 @@ xfs_parent_namecheck(
 	if (!xfs_verify_ino(mp, p_ino))
 		return false;
 
-	p_diroffset = be32_to_cpu(rec->p_diroffset);
-	if (p_diroffset > XFS_DIR2_MAX_DATAPTR)
-		return false;
-
 	return true;
 }
 
@@ -78,10 +77,18 @@ xfs_parent_namecheck(
 bool
 xfs_parent_valuecheck(
 	struct xfs_mount		*mp,
+	size_t				namelen,
 	const void			*value,
 	size_t				valuelen)
 {
-	if (valuelen == 0 || valuelen >= MAXNAMELEN)
+	if (namelen > XFS_PARENT_NAME_MAX_SIZE)
+		return false;
+
+	if (namelen < XFS_PARENT_NAME_MAX_SIZE && valuelen != 0)
+		return false;
+
+	if (namelen == XFS_PARENT_NAME_MAX_SIZE &&
+	    valuelen > XFS_PARENT_MAX_DNAME_VALUELEN)
 		return false;
 
 	if (value == NULL)
@@ -90,19 +97,25 @@ xfs_parent_valuecheck(
 	return true;
 }
 
-/* Initializes a xfs_parent_name_rec to be stored as an attribute name */
-static inline void
+/*
+ * Initializes a xfs_parent_name_rec to be stored as an attribute name.
+ * Returns the number of name bytes stored in p_dname.
+ */
+static inline int
 xfs_init_parent_name_rec(
 	struct xfs_parent_name_rec	*rec,
-	const struct xfs_inode		*ip,
-	uint32_t			p_diroffset)
+	const struct xfs_inode		*dp,
+	const struct xfs_name		*name,
+	struct xfs_inode		*ip)
 {
-	xfs_ino_t			p_ino = ip->i_ino;
-	uint32_t			p_gen = VFS_IC(ip)->i_generation;
+	int				dnamelen;
 
-	rec->p_ino = cpu_to_be64(p_ino);
-	rec->p_gen = cpu_to_be32(p_gen);
-	rec->p_diroffset = cpu_to_be32(p_diroffset);
+	rec->p_ino = cpu_to_be64(dp->i_ino);
+	rec->p_gen = cpu_to_be32(VFS_IC(dp)->i_generation);
+
+	dnamelen = min_t(int, name->len, XFS_PARENT_MAX_DNAME_SIZE);
+	memcpy(rec->p_dname, name->name, dnamelen);
+	return dnamelen;
 }
 
 /*
@@ -113,53 +126,58 @@ void
 xfs_parent_irec_from_disk(
 	struct xfs_parent_name_irec	*irec,
 	const struct xfs_parent_name_rec *rec,
+	int				reclen,
 	const void			*value,
 	int				valuelen)
 {
+	int				dnamelen;
+
 	irec->p_ino = be64_to_cpu(rec->p_ino);
 	irec->p_gen = be32_to_cpu(rec->p_gen);
-	irec->p_diroffset = be32_to_cpu(rec->p_diroffset);
 
 	if (!value) {
 		irec->p_namelen = 0;
 		return;
 	}
 
-	ASSERT(valuelen > 0);
-	ASSERT(valuelen < MAXNAMELEN);
+	ASSERT(valuelen <= XFS_PARENT_MAX_DNAME_VALUELEN);
 
-	valuelen = min(valuelen, MAXNAMELEN);
-
-	irec->p_namelen = valuelen;
-	memcpy(irec->p_name, value, valuelen);
-	memset(&irec->p_name[valuelen], 0, sizeof(irec->p_name) - valuelen);
+	dnamelen = xfs_parent_name_dnamelen(reclen);
+	irec->p_namelen = dnamelen + valuelen;
+	memcpy(irec->p_name, rec->p_dname, dnamelen);
+	if (valuelen > 0)
+		memcpy(irec->p_name + dnamelen, value, valuelen);
 }
 
 /*
- * Convert an incore parent_name record to its ondisk format.  If @value or
- * @valuelen are NULL, they will not be written to.
+ * Convert an incore parent_name record to its ondisk format.  If @valuelen is
+ * NULL, neither it nor @value will be written to.
  */
-void
+int
 xfs_parent_irec_to_disk(
 	struct xfs_parent_name_rec	*rec,
+	int				*reclen,
 	void				*value,
 	int				*valuelen,
 	const struct xfs_parent_name_irec *irec)
 {
+	int				dnamelen;
+
 	rec->p_ino = cpu_to_be64(irec->p_ino);
 	rec->p_gen = cpu_to_be32(irec->p_gen);
-	rec->p_diroffset = cpu_to_be32(irec->p_diroffset);
+	dnamelen = min_t(int, irec->p_namelen, XFS_PARENT_MAX_DNAME_SIZE);
+	*reclen = xfs_parent_name_rec_sizeof(dnamelen);
+	memcpy(rec->p_dname, irec->p_name, dnamelen);
 
-	if (valuelen) {
-		ASSERT(*valuelen > 0);
-		ASSERT(*valuelen >= irec->p_namelen);
-		ASSERT(*valuelen < MAXNAMELEN);
+	if (!valuelen)
+		return dnamelen;
 
-		*valuelen = irec->p_namelen;
-	}
+	*valuelen = irec->p_namelen - dnamelen;
+	if (*valuelen)
+		memcpy(value, rec->p_dname + XFS_PARENT_MAX_DNAME_SIZE,
+				*valuelen);
 
-	if (value)
-		memcpy(value, irec->p_name, irec->p_namelen);
+	return dnamelen;
 }
 
 /*
@@ -193,9 +211,10 @@ __xfs_parent_init(
 	parent->args.geo = mp->m_attr_geo;
 	parent->args.whichfork = XFS_ATTR_FORK;
 	parent->args.attr_filter = XFS_ATTR_PARENT;
-	parent->args.op_flags = XFS_DA_OP_OKNOENT | XFS_DA_OP_LOGGED;
+	parent->args.op_flags = XFS_DA_OP_OKNOENT | XFS_DA_OP_LOGGED |
+				XFS_DA_OP_VLOOKUP;
 	parent->args.name = (const uint8_t *)&parent->rec;
-	parent->args.namelen = sizeof(struct xfs_parent_name_rec);
+	parent->args.namelen = 0;
 
 	*parentp = parent;
 	return 0;
@@ -208,20 +227,25 @@ xfs_parent_add(
 	struct xfs_parent_defer	*parent,
 	struct xfs_inode	*dp,
 	const struct xfs_name	*parent_name,
-	xfs_dir2_dataptr_t	diroffset,
 	struct xfs_inode	*child)
 {
 	struct xfs_da_args	*args = &parent->args;
+	int			dnamelen;
 
-	xfs_init_parent_name_rec(&parent->rec, dp, diroffset);
+	dnamelen = xfs_init_parent_name_rec(&parent->rec, dp, parent_name,
+			child);
+
+	args->namelen = xfs_parent_name_rec_sizeof(dnamelen);
 	args->hashval = xfs_da_hashname(args->name, args->namelen);
 
 	args->trans = tp;
 	args->dp = child;
-	if (parent_name) {
-		parent->args.value = (void *)parent_name->name;
-		parent->args.valuelen = parent_name->len;
-	}
+
+	parent->args.valuelen = parent_name->len - dnamelen;
+	if (parent->args.valuelen > 0)
+		parent->args.value = (void *)parent_name->name + dnamelen;
+	else
+		parent->args.value = NULL;
 
 	return xfs_attr_defer_add(args);
 }
@@ -230,17 +254,27 @@ xfs_parent_add(
 int
 xfs_parent_remove(
 	struct xfs_trans	*tp,
-	struct xfs_inode	*dp,
 	struct xfs_parent_defer	*parent,
-	xfs_dir2_dataptr_t	diroffset,
+	struct xfs_inode	*dp,
+	const struct xfs_name	*name,
 	struct xfs_inode	*child)
 {
 	struct xfs_da_args	*args = &parent->args;
+	int			dnamelen;
 
-	xfs_init_parent_name_rec(&parent->rec, dp, diroffset);
+	dnamelen = xfs_init_parent_name_rec(&parent->rec, dp, name, child);
+
+	args->namelen = xfs_parent_name_rec_sizeof(dnamelen);
 	args->trans = tp;
 	args->dp = child;
 	args->hashval = xfs_da_hashname(args->name, args->namelen);
+
+	parent->args.valuelen = name->len - dnamelen;
+	if (parent->args.valuelen > 0)
+		parent->args.value = (void *)name->name + dnamelen;
+	else
+		parent->args.value = NULL;
+
 	return xfs_attr_defer_remove(args);
 }
 
@@ -250,26 +284,37 @@ xfs_parent_replace(
 	struct xfs_trans	*tp,
 	struct xfs_parent_defer	*new_parent,
 	struct xfs_inode	*old_dp,
-	xfs_dir2_dataptr_t	old_diroffset,
-	const struct xfs_name	*parent_name,
+	const struct xfs_name	*old_name,
 	struct xfs_inode	*new_dp,
-	xfs_dir2_dataptr_t	new_diroffset,
+	const struct xfs_name	*new_name,
 	struct xfs_inode	*child)
 {
 	struct xfs_da_args	*args = &new_parent->args;
+	int			old_dnamelen, new_dnamelen;
 
-	xfs_init_parent_name_rec(&new_parent->old_rec, old_dp, old_diroffset);
-	xfs_init_parent_name_rec(&new_parent->rec, new_dp, new_diroffset);
+	old_dnamelen = xfs_init_parent_name_rec(&new_parent->old_rec, old_dp,
+			old_name, child);
+	new_dnamelen = xfs_init_parent_name_rec(&new_parent->rec, new_dp,
+			new_name, child);
+
 	new_parent->args.name = (const uint8_t *)&new_parent->old_rec;
-	new_parent->args.namelen = sizeof(struct xfs_parent_name_rec);
+	new_parent->args.namelen = xfs_parent_name_rec_sizeof(old_dnamelen);
 	new_parent->args.new_name = (const uint8_t *)&new_parent->rec;
-	new_parent->args.new_namelen = sizeof(struct xfs_parent_name_rec);
+	new_parent->args.new_namelen = xfs_parent_name_rec_sizeof(new_dnamelen);
 	args->trans = tp;
 	args->dp = child;
 
-	ASSERT(parent_name != NULL);
-	new_parent->args.value = (void *)parent_name->name;
-	new_parent->args.valuelen = parent_name->len;
+	new_parent->args.new_valuelen = new_name->len - new_dnamelen;
+	if (new_parent->args.new_valuelen > 0)
+		new_parent->args.new_value = (void *)new_name->name + new_dnamelen;
+	else
+		new_parent->args.new_value = NULL;
+
+	new_parent->args.valuelen = old_name->len - old_dnamelen;
+	if (new_parent->args.valuelen > 0)
+		new_parent->args.value = (void *)old_name->name + old_dnamelen;
+	else
+		new_parent->args.value = NULL;
 
 	args->hashval = xfs_da_hashname(args->name, args->namelen);
 	return xfs_attr_defer_replace(args);
@@ -299,42 +344,40 @@ xfs_pptr_calc_space_res(
 }
 
 /*
- * Look up the @name associated with the parent pointer (@pptr) of @ip.  Caller
- * must hold at least ILOCK_SHARED.  Returns the length of the dirent name, or
- * a negative errno.  The scratchpad need not be initialized.
+ * Look up the @name associated with the parent pointer (@pptr) of @ip.
+ * Caller must hold at least ILOCK_SHARED.  Returns 0 if the pointer is found,
+ * -ENOATTR if there is no match, or a negative errno.  The scratchpad need not
+ *  be initialized.
  */
 int
 xfs_parent_lookup(
 	struct xfs_trans		*tp,
 	struct xfs_inode		*ip,
 	const struct xfs_parent_name_irec *pptr,
-	unsigned char			*name,
-	unsigned int			namelen,
 	struct xfs_parent_scratch	*scr)
 {
-	int				error;
+	int				dnamelen;
+	int				reclen;
 
-	xfs_parent_irec_to_disk(&scr->rec, NULL, NULL, pptr);
+	dnamelen = xfs_parent_irec_to_disk(&scr->rec, &reclen, NULL, NULL, pptr);
 
 	memset(&scr->args, 0, sizeof(struct xfs_da_args));
 	scr->args.attr_filter	= XFS_ATTR_PARENT;
 	scr->args.dp		= ip;
 	scr->args.geo		= ip->i_mount->m_attr_geo;
 	scr->args.name		= (const unsigned char *)&scr->rec;
-	scr->args.namelen	= sizeof(struct xfs_parent_name_rec);
-	scr->args.op_flags	= XFS_DA_OP_OKNOENT;
+	scr->args.namelen	= reclen;
+	scr->args.op_flags	= XFS_DA_OP_OKNOENT | XFS_DA_OP_VLOOKUP;
 	scr->args.trans		= tp;
-	scr->args.valuelen	= namelen;
-	scr->args.value		= name;
+	scr->args.valuelen	= pptr->p_namelen - dnamelen;
 	scr->args.whichfork	= XFS_ATTR_FORK;
+
+	if (scr->args.valuelen)
+		scr->args.value	= (void *)pptr->p_name + dnamelen;
 
 	scr->args.hashval = xfs_da_hashname(scr->args.name, scr->args.namelen);
 
-	error = xfs_attr_get_ilocked(&scr->args);
-	if (error)
-		return error;
-
-	return scr->args.valuelen;
+	return xfs_attr_get_ilocked(&scr->args);
 }
 
 /*
@@ -349,17 +392,23 @@ xfs_parent_set(
 	const struct xfs_parent_name_irec *pptr,
 	struct xfs_parent_scratch	*scr)
 {
-	xfs_parent_irec_to_disk(&scr->rec, NULL, NULL, pptr);
+	int				dnamelen;
+	int				reclen;
+
+	dnamelen = xfs_parent_irec_to_disk(&scr->rec, &reclen, NULL, NULL, pptr);
 
 	memset(&scr->args, 0, sizeof(struct xfs_da_args));
 	scr->args.attr_filter	= XFS_ATTR_PARENT;
 	scr->args.dp		= ip;
 	scr->args.geo		= ip->i_mount->m_attr_geo;
 	scr->args.name		= (const unsigned char *)&scr->rec;
-	scr->args.namelen	= sizeof(struct xfs_parent_name_rec);
-	scr->args.valuelen	= pptr->p_namelen;
-	scr->args.value		= (void *)pptr->p_name;
+	scr->args.namelen	= reclen;
+	scr->args.op_flags	= XFS_DA_OP_VLOOKUP;
+	scr->args.valuelen	= pptr->p_namelen - dnamelen;
 	scr->args.whichfork	= XFS_ATTR_FORK;
+
+	if (scr->args.valuelen)
+		scr->args.value	= (void *)pptr->p_name + dnamelen;
 
 	return xfs_attr_set(&scr->args);
 }
@@ -376,16 +425,23 @@ xfs_parent_unset(
 	const struct xfs_parent_name_irec *pptr,
 	struct xfs_parent_scratch	*scr)
 {
-	xfs_parent_irec_to_disk(&scr->rec, NULL, NULL, pptr);
+	int				dnamelen;
+	int				reclen;
+
+	dnamelen = xfs_parent_irec_to_disk(&scr->rec, &reclen, NULL, NULL, pptr);
 
 	memset(&scr->args, 0, sizeof(struct xfs_da_args));
 	scr->args.attr_filter	= XFS_ATTR_PARENT;
 	scr->args.dp		= ip;
 	scr->args.geo		= ip->i_mount->m_attr_geo;
 	scr->args.name		= (const unsigned char *)&scr->rec;
-	scr->args.namelen	= sizeof(struct xfs_parent_name_rec);
-	scr->args.op_flags	= XFS_DA_OP_REMOVE;
+	scr->args.namelen	= reclen;
+	scr->args.op_flags	= XFS_DA_OP_REMOVE | XFS_DA_OP_VLOOKUP;
+	scr->args.valuelen	= pptr->p_namelen - dnamelen;
 	scr->args.whichfork	= XFS_ATTR_FORK;
+
+	if (scr->args.valuelen)
+		scr->args.value	= (void *)pptr->p_name + dnamelen;
 
 	return xfs_attr_set(&scr->args);
 }
