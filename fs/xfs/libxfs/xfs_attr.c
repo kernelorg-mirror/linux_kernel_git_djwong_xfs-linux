@@ -422,17 +422,17 @@ xfs_attr_complete_op(
 	bool			do_replace = args->op_flags & XFS_DA_OP_REPLACE;
 
 	args->op_flags &= ~XFS_DA_OP_REPLACE;
-	if (do_replace) {
-		args->attr_filter &= ~XFS_ATTR_INCOMPLETE;
-		if (args->new_namelen > 0) {
-			args->name = args->new_name;
-			args->namelen = args->new_namelen;
-			args->hashval = xfs_da_hashname(args->name,
-							args->namelen);
-		}
+	if (!do_replace)
+		return XFS_DAS_DONE;
+
+	args->attr_filter &= ~XFS_ATTR_INCOMPLETE;
+	if (args->new_namelen == 0)
 		return replace_state;
-	}
-	return XFS_DAS_DONE;
+
+	args->name = args->new_name;
+	args->namelen = args->new_namelen;
+	args->hashval = xfs_da_hashname(args->name, args->namelen);
+	return replace_state;
 }
 
 static int
