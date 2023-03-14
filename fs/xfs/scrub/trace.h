@@ -962,6 +962,8 @@ DEFINE_EVENT(xchk_pptr_class, name, \
 	TP_ARGS(ip, name, namelen, parent_ino))
 DEFINE_XCHK_PPTR_CLASS(xchk_parent_defer);
 DEFINE_XCHK_PPTR_CLASS(xchk_parent_slowpath);
+DEFINE_XCHK_PPTR_CLASS(xchk_dir_defer);
+DEFINE_XCHK_PPTR_CLASS(xchk_dir_slowpath);
 
 /* repair tracepoints */
 #if IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR)
