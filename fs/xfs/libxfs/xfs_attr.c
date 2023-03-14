@@ -426,8 +426,14 @@ xfs_attr_complete_op(
 		return XFS_DAS_DONE;
 
 	args->attr_filter &= ~XFS_ATTR_INCOMPLETE;
-	if (args->new_namelen == 0)
+	if (xfs_attr_intent_op(attr) != XFS_ATTRI_OP_FLAGS_NVREPLACE)
 		return replace_state;
+
+	/*
+	 * NVREPLACE operations require the caller to set the old and new names
+	 * explicitly.
+	 */
+	ASSERT(args->new_namelen > 0);
 
 	args->name = args->new_name;
 	args->namelen = args->new_namelen;
