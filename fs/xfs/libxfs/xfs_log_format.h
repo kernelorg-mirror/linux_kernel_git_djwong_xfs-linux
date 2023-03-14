@@ -117,7 +117,7 @@ struct xfs_unmount_log_format {
 #define XLOG_REG_TYPE_ATTRD_FORMAT	28
 #define XLOG_REG_TYPE_ATTR_NAME	29
 #define XLOG_REG_TYPE_ATTR_VALUE	30
-#define XLOG_REG_TYPE_ATTR_NNAME	31
+#define XLOG_REG_TYPE_ATTR_NEWNAME	31
 #define XLOG_REG_TYPE_MAX		31
 
 
