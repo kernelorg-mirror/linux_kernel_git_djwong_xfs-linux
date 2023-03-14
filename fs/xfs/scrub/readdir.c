@@ -314,7 +314,8 @@ xchk_dir_lookup(
 	struct xfs_scrub	*sc,
 	struct xfs_inode	*dp,
 	const struct xfs_name	*name,
-	xfs_ino_t		*ino)
+	xfs_ino_t		*ino,
+	xfs_dir2_dataptr_t	*diroffsetp)
 {
 	struct xfs_da_args	args = {
 		.dp		= dp,
@@ -326,9 +327,13 @@ xchk_dir_lookup(
 		.hashval	= xfs_dir2_hashname(dp->i_mount, name),
 		.whichfork	= XFS_DATA_FORK,
 		.op_flags	= XFS_DA_OP_OKNOENT,
+		.offset		= XFS_DIR2_NULL_DATAPTR,
 	};
 	bool			isblock, isleaf;
 	int			error;
+
+	if (diroffsetp)
+		*diroffsetp = XFS_DIR2_NULL_DATAPTR;
 
 	if (xfs_is_shutdown(dp->i_mount))
 		return -EIO;
@@ -369,7 +374,10 @@ xchk_dir_lookup(
 out_check_rval:
 	if (error == -EEXIST)
 		error = 0;
-	if (!error)
+	if (!error) {
 		*ino = args.inumber;
+		if (diroffsetp)
+			*diroffsetp = args.offset;
+	}
 	return error;
 }

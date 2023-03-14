@@ -14,6 +14,7 @@ int xchk_dir_walk(struct xfs_scrub *sc, struct xfs_inode *dp,
 		xchk_dirent_fn dirent_fn, void *priv);
 
 int xchk_dir_lookup(struct xfs_scrub *sc, struct xfs_inode *dp,
-		const struct xfs_name *name, xfs_ino_t *ino);
+		const struct xfs_name *name, xfs_ino_t *ino,
+		xfs_dir2_dataptr_t *diroffsetp);
 
 #endif /* __XFS_SCRUB_READDIR_H__ */
