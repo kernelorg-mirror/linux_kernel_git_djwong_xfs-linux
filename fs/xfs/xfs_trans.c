@@ -375,8 +375,10 @@ xfs_trans_mod_sb(
 		 */
 		if (delta < 0) {
 			tp->t_blk_res_used += (uint)-delta;
-			if (tp->t_blk_res_used > tp->t_blk_res)
+			if (tp->t_blk_res_used > tp->t_blk_res) {
+				xfs_err(mp, "URK blkres 0x%x used 0x%x", tp->t_blk_res, tp->t_blk_res_used);
 				xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_INCORE);
+			}
 		} else if (delta > 0 && (tp->t_flags & XFS_TRANS_RES_FDBLKS)) {
 			int64_t	blkres_delta;
 
