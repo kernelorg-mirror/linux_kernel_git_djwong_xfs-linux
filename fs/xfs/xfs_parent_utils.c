@@ -49,6 +49,7 @@ xfs_getparent_listent(
 	struct xfs_getparent_ctx	*gp;
 	struct xfs_pptr_info		*ppi;
 	struct xfs_parent_ptr		*pptr;
+	struct xfs_parent_name_rec	*rec = (void *)name;
 	struct xfs_parent_name_irec	*irec;
 	struct xfs_mount		*mp = context->dp->i_mount;
 	int				arraytop;
@@ -62,19 +63,16 @@ xfs_getparent_listent(
 		return;
 
 	/*
-	 * Report corruption for xattrs with any other flag set, or for a
-	 * parent pointer that has a remote value.  The attr list functions
-	 * filtered any INCOMPLETE attrs for us.
+	 * Report corruption for anything that doesn't look like a parent
+	 * pointer.  The attr list functions filtered out INCOMPLETE attrs.
 	 */
-	if (XFS_IS_CORRUPT(mp,
-			   hweight32(flags & XFS_ATTR_NSP_ONDISK_MASK) > 1) ||
-	    XFS_IS_CORRUPT(mp, value == NULL)) {
+	if (XFS_IS_CORRUPT(mp, !xfs_parent_namecheck(mp, rec, namelen, flags)) ||
+	    XFS_IS_CORRUPT(mp, !xfs_parent_valuecheck(mp, value, valuelen))) {
 		context->seen_enough = -EFSCORRUPTED;
 		return;
 	}
 
-	xfs_parent_irec_from_disk(&gp->pptr_irec, (void *)name, value,
-			valuelen);
+	xfs_parent_irec_from_disk(&gp->pptr_irec, rec, value, valuelen);
 
 	/*
 	 * We found a parent pointer, but we've filled up the buffer.  Signal
