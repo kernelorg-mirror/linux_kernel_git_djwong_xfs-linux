@@ -127,6 +127,9 @@ struct xrep_pptrs {
 
 	/* Parent pointer names. */
 	struct xfblob		*pptr_names;
+
+	/* Buffer for validation. */
+	unsigned char		namebuf[MAXNAMELEN];
 };
 
 /* Tear down all the incore stuff we created. */
@@ -490,7 +493,10 @@ xrep_pptr_scan_dirtree(
 	return 0;
 }
 
-/* Dump a parent pointer from the temporary file. */
+/*
+ * Dump a parent pointer from the temporary file and check it against the file
+ * we're rebuilding.  We are not committing any of this.
+ */
 STATIC int
 xrep_pptr_dump_tempptr(
 	struct xfs_scrub	*sc,
@@ -504,6 +510,8 @@ xrep_pptr_dump_tempptr(
 {
 	struct xrep_pptrs	*rp = priv;
 	const struct xfs_parent_name_rec *rec = (const void *)name;
+	struct xfs_inode	*other_ip;
+	int			pptr_namelen;
 
 	if (!(attr_flags & XFS_ATTR_PARENT))
 		return 0;
@@ -512,9 +520,39 @@ xrep_pptr_dump_tempptr(
 	    !xfs_parent_valuecheck(sc->mp, value, valuelen))
 		return -EFSCORRUPTED;
 
+	if (ip == sc->ip)
+		other_ip = sc->tempip;
+	else if (ip == sc->tempip)
+		other_ip = sc->ip;
+	else
+		return -EFSCORRUPTED;
+
 	xfs_parent_irec_from_disk(&rp->pptr, rec, value, valuelen);
 
 	trace_xrep_pptr_dumpname(sc->tempip, &rp->pptr);
+
+	pptr_namelen = xfs_parent_lookup(sc->tp, other_ip, &rp->pptr,
+			rp->namebuf, MAXNAMELEN, &rp->pptr_scratch);
+	if (pptr_namelen == -ENOATTR) {
+		trace_xrep_pptr_checkname(other_ip, &rp->pptr);
+		ASSERT(pptr_namelen != -ENOATTR);
+		return -EFSCORRUPTED;
+	}
+	if (pptr_namelen < 0)
+		return pptr_namelen;
+
+	if (pptr_namelen != rp->pptr.p_namelen) {
+		trace_xrep_pptr_checkname(other_ip, &rp->pptr);
+		ASSERT(pptr_namelen == rp->pptr.p_namelen);
+		return -EFSCORRUPTED;
+	}
+
+	if (memcmp(rp->namebuf, rp->pptr.p_name, rp->pptr.p_namelen)) {
+		trace_xrep_pptr_checkname(other_ip, &rp->pptr);
+		ASSERT(0);
+		return -EFSCORRUPTED;
+	}
+
 	return 0;
 }
 
@@ -570,8 +608,16 @@ xrep_pptr_rebuild_tree(
 
 	trace_xrep_pptr_rebuild_tree(sc->ip, 0);
 
-	xrep_tempfile_ilock(sc);
-	return xchk_xattr_walk(sc, sc->tempip, xrep_pptr_dump_tempptr, rp);
+	xchk_ilock(sc, XFS_ILOCK_EXCL);
+	error = xrep_tempfile_ilock_polled(sc);
+	if (error)
+		return error;
+
+	error = xchk_xattr_walk(sc, sc->tempip, xrep_pptr_dump_tempptr, rp);
+	if (error)
+		return error;
+
+	return xchk_xattr_walk(sc, sc->ip, xrep_pptr_dump_tempptr, rp);
 }
 
 /*

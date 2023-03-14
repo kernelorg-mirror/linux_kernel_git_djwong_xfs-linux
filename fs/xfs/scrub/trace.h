@@ -1356,6 +1356,7 @@ DEFINE_EVENT(xrep_pptr_class, name, \
 DEFINE_XREP_PPTR_CLASS(xrep_pptr_createname);
 DEFINE_XREP_PPTR_CLASS(xrep_pptr_removename);
 DEFINE_XREP_PPTR_CLASS(xrep_pptr_dumpname);
+DEFINE_XREP_PPTR_CLASS(xrep_pptr_checkname);
 
 DECLARE_EVENT_CLASS(xrep_pptr_scan_class,
 	TP_PROTO(struct xfs_inode *ip, const struct xfs_inode *dp,
