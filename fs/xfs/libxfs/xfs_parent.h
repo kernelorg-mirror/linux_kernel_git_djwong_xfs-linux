@@ -49,8 +49,9 @@ struct xfs_parent_defer {
  * Parent pointer attribute prototypes
  */
 void xfs_init_parent_name_rec(struct xfs_parent_name_rec *rec,
-			      struct xfs_inode *ip,
-			      uint32_t p_diroffset);
+		struct xfs_inode *ip, uint32_t p_diroffset);
+void xfs_init_parent_name_irec(struct xfs_parent_name_irec *irec,
+			       struct xfs_parent_name_rec *rec);
 int __xfs_parent_init(struct xfs_mount *mp, bool grab_log,
 		struct xfs_parent_defer **parentp);
 
@@ -78,18 +79,17 @@ xfs_parent_start_locked(
 	return 0;
 }
 
-int xfs_parent_defer_add(struct xfs_trans *tp, struct xfs_parent_defer *parent,
-			 struct xfs_inode *dp, struct xfs_name *parent_name,
-			 xfs_dir2_dataptr_t diroffset, struct xfs_inode *child);
-int xfs_parent_defer_replace(struct xfs_trans *tp,
+int xfs_parent_add(struct xfs_trans *tp, struct xfs_parent_defer *parent,
+		struct xfs_inode *dp, const struct xfs_name *parent_name,
+		xfs_dir2_dataptr_t diroffset, struct xfs_inode *child);
+int xfs_parent_replace(struct xfs_trans *tp,
 		struct xfs_parent_defer *new_parent, struct xfs_inode *old_dp,
-		xfs_dir2_dataptr_t old_diroffset, struct xfs_name *parent_name,
-		struct xfs_inode *new_ip, xfs_dir2_dataptr_t new_diroffset,
+		xfs_dir2_dataptr_t old_diroffset,
+		const struct xfs_name *parent_name, struct xfs_inode *new_ip,
+		xfs_dir2_dataptr_t new_diroffset, struct xfs_inode *child);
+int xfs_parent_remove(struct xfs_trans *tp, struct xfs_inode *dp,
+		struct xfs_parent_defer *parent, xfs_dir2_dataptr_t diroffset,
 		struct xfs_inode *child);
-int xfs_parent_defer_remove(struct xfs_trans *tp, struct xfs_inode *dp,
-			    struct xfs_parent_defer *parent,
-			    xfs_dir2_dataptr_t diroffset,
-			    struct xfs_inode *child);
 
 void __xfs_parent_cancel(struct xfs_mount *mp, struct xfs_parent_defer *parent);
 

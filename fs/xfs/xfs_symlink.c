@@ -348,7 +348,7 @@ xfs_symlink(
 	xfs_trans_log_inode(tp, dp, XFS_ILOG_CORE);
 
 	if (parent) {
-		error = xfs_parent_defer_add(tp, parent, dp, link_name,
+		error = xfs_parent_add(tp, parent, dp, link_name,
 					     diroffset, ip);
 		if (error)
 			goto out_trans_cancel;
