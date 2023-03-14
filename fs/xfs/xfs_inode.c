@@ -1042,8 +1042,7 @@ xfs_dirent_child_delta(
 	struct xfs_inode		*dp,
 	struct xfs_inode		*ip,
 	int				delta,
-	struct xfs_name			*name,
-	unsigned int			diroffset)
+	struct xfs_name			*name)
 {
 	if (xfs_hooks_switched_on(&xfs_dirents_hooks_switch)) {
 		struct xfs_dirent_update_params	p = {
@@ -1051,7 +1050,6 @@ xfs_dirent_child_delta(
 			.ip		= ip,
 			.delta		= delta,
 			.name		= name,
-			.diroffset	= diroffset,
 		};
 		struct xfs_mount	*mp = ip->i_mount;
 
@@ -1211,7 +1209,7 @@ xfs_create(
 	 * Create ip with a reference from dp, and add '.' and '..' references
 	 * if it's a directory.
 	 */
-	xfs_dirent_child_delta(dp, ip, 1, name, diroffset);
+	xfs_dirent_child_delta(dp, ip, 1, name);
 	if (is_dir) {
 		xfs_dirent_self_delta(ip, 1);
 		xfs_dirent_backref_delta(dp, ip, 1);
@@ -1481,7 +1479,7 @@ xfs_link(
 			goto error_return;
 	}
 
-	xfs_dirent_child_delta(tdp, sip, 1, target_name, diroffset);
+	xfs_dirent_child_delta(tdp, sip, 1, target_name);
 
 	/*
 	 * If this is a synchronous mount, make sure that the
@@ -2757,7 +2755,7 @@ xfs_remove(
 	 * Drop the link from dp to ip, and if ip was a directory, remove the
 	 * '.' and '..' references since we freed the directory.
 	 */
-	xfs_dirent_child_delta(dp, ip, -1, name, dir_offset);
+	xfs_dirent_child_delta(dp, ip, -1, name);
 	if (S_ISDIR(VFS_I(ip)->i_mode)) {
 		xfs_dirent_backref_delta(dp, ip, -1);
 		xfs_dirent_self_delta(ip, -1);
@@ -2873,22 +2871,18 @@ static inline void
 xfs_exchange_call_nlink_hooks(
 	struct xfs_inode	*src_dp,
 	struct xfs_name		*src_name,
-	xfs_dir2_dataptr_t	src_diroffset,
 	struct xfs_inode	*src_ip,
 	struct xfs_inode	*target_dp,
 	struct xfs_name		*target_name,
-	xfs_dir2_dataptr_t	target_diroffset,
 	struct xfs_inode	*target_ip)
 {
 	/* Exchange files in the source directory. */
-	xfs_dirent_child_delta(src_dp, src_ip, -1, src_name, src_diroffset);
-	xfs_dirent_child_delta(src_dp, target_ip, 1, src_name, src_diroffset);
+	xfs_dirent_child_delta(src_dp, src_ip, -1, src_name);
+	xfs_dirent_child_delta(src_dp, target_ip, 1, src_name);
 
 	/* Exchange files in the target directory. */
-	xfs_dirent_child_delta(target_dp, target_ip, -1, target_name,
-			target_diroffset);
-	xfs_dirent_child_delta(target_dp, src_ip, 1, target_name,
-			target_diroffset);
+	xfs_dirent_child_delta(target_dp, target_ip, -1, target_name);
+	xfs_dirent_child_delta(target_dp, src_ip, 1, target_name);
 
 	/* If the source file is a dir, update its dotdot entry. */
 	if (S_ISDIR(VFS_I(src_ip)->i_mode)) {
@@ -2907,11 +2901,9 @@ static inline void
 xfs_rename_call_nlink_hooks(
 	struct xfs_inode	*src_dp,
 	struct xfs_name		*src_name,
-	xfs_dir2_dataptr_t	src_diroffset,
 	struct xfs_inode	*src_ip,
 	struct xfs_inode	*target_dp,
 	struct xfs_name		*target_name,
-	xfs_dir2_dataptr_t	target_diroffset,
 	struct xfs_inode	*target_ip,
 	struct xfs_inode	*wip)
 {
@@ -2920,16 +2912,16 @@ xfs_rename_call_nlink_hooks(
 	 * move the source file to the target directory.
 	 */
 	if (target_ip)
-		xfs_dirent_child_delta(target_dp, target_ip, -1, target_name, target_diroffset);
-	xfs_dirent_child_delta(target_dp, src_ip, 1, target_name, target_diroffset);
+		xfs_dirent_child_delta(target_dp, target_ip, -1, target_name);
+	xfs_dirent_child_delta(target_dp, src_ip, 1, target_name);
 
 	/*
 	 * Remove the source file from the source directory, and possibly move
 	 * the whiteout file into its place.
 	 */
-	xfs_dirent_child_delta(src_dp, src_ip, -1, src_name, src_diroffset);
+	xfs_dirent_child_delta(src_dp, src_ip, -1, src_name);
 	if (wip)
-		xfs_dirent_child_delta(src_dp, wip, 1, src_name, src_diroffset);
+		xfs_dirent_child_delta(src_dp, wip, 1, src_name);
 
 	/* If the source file is a dir, update its dotdot entry. */
 	if (S_ISDIR(VFS_I(src_ip)->i_mode)) {
@@ -3086,8 +3078,7 @@ xfs_cross_rename(
 	xfs_trans_log_inode(tp, dp1, XFS_ILOG_CORE);
 
 	if (xfs_hooks_switched_on(&xfs_dirents_hooks_switch))
-		xfs_exchange_call_nlink_hooks(dp1, name1, old_diroffset, ip1,
-				dp2, name2, new_diroffset, ip2);
+		xfs_exchange_call_nlink_hooks(dp1, name1, ip1, dp2, name2, ip2);
 
 	return xfs_finish_rename(tp);
 
@@ -3563,9 +3554,8 @@ retry:
 		xfs_trans_log_inode(tp, target_dp, XFS_ILOG_CORE);
 
 	if (xfs_hooks_switched_on(&xfs_dirents_hooks_switch))
-		xfs_rename_call_nlink_hooks(src_dp, src_name, old_diroffset,
-				src_ip, target_dp, target_name, new_diroffset,
-				target_ip, wip);
+		xfs_rename_call_nlink_hooks(src_dp, src_name, src_ip,
+				target_dp, target_name, target_ip, wip);
 
 	error = xfs_finish_rename(tp);
 

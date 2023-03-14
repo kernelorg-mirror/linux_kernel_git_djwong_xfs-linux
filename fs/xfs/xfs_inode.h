@@ -598,13 +598,12 @@ struct xfs_dirent_update_params {
 	const struct xfs_inode	*dp;
 	const struct xfs_inode	*ip;
 	const struct xfs_name	*name;
-	unsigned int		diroffset;
 	int			delta;
 };
 
 #ifdef CONFIG_XFS_LIVE_HOOKS
 void xfs_dirent_child_delta(struct xfs_inode *dp, struct xfs_inode *ip,
-		int delta, struct xfs_name *name, unsigned int diroffset);
+		int delta, struct xfs_name *name);
 
 struct xfs_dirent_hook {
 	struct xfs_hook		delta_hook;
@@ -617,7 +616,7 @@ int xfs_dirent_hook_add(struct xfs_mount *mp, struct xfs_dirent_hook *hook);
 void xfs_dirent_hook_del(struct xfs_mount *mp, struct xfs_dirent_hook *hook);
 
 #else
-# define xfs_dirent_child_delta(dp, ip, delta, name, doff)	((void)0)
+# define xfs_dirent_child_delta(dp, ip, delta, name)	((void)0)
 #endif /* CONFIG_XFS_LIVE_HOOKS */
 
 #endif	/* __XFS_INODE_H__ */
