@@ -115,7 +115,7 @@ xfs_getparent_pointers(
 	gp->context.dp = ip;
 	gp->context.resynch = 1;
 	gp->context.put_listent = xfs_getparent_listent;
-	gp->context.bufsize = round_down(ppi->gp_ptrs_size, sizeof(uint32_t));
+	gp->context.bufsize = round_down(ppi->gp_bufsize, sizeof(uint32_t));
 	gp->context.firstu = gp->context.bufsize;
 
 	/* Copy the cursor provided by caller */
@@ -149,4 +149,3 @@ out_free:
 	kfree(gp);
 	return error;
 }
-
