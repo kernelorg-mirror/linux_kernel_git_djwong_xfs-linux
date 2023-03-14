@@ -33,6 +33,8 @@ struct xfs_parent_name_irec {
 void xfs_parent_irec_from_disk(struct xfs_parent_name_irec *irec,
 		const struct xfs_parent_name_rec *rec,
 		const void *value, int valuelen);
+void xfs_parent_irec_to_disk(struct xfs_parent_name_rec *rec, void *value,
+		int *valuelen, const struct xfs_parent_name_irec *irec);
 
 /*
  * Dynamically allocd structure used to wrap the needed data to pass around
@@ -48,10 +50,6 @@ struct xfs_parent_defer {
 /*
  * Parent pointer attribute prototypes
  */
-void xfs_init_parent_name_rec(struct xfs_parent_name_rec *rec,
-		struct xfs_inode *ip, uint32_t p_diroffset);
-void xfs_init_parent_name_irec(struct xfs_parent_name_irec *irec,
-			       struct xfs_parent_name_rec *rec);
 int __xfs_parent_init(struct xfs_mount *mp, bool grab_log,
 		struct xfs_parent_defer **parentp);
 

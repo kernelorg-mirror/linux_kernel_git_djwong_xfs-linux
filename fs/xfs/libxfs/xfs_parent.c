@@ -91,7 +91,7 @@ xfs_parent_valuecheck(
 }
 
 /* Initializes a xfs_parent_name_rec to be stored as an attribute name */
-void
+static inline void
 xfs_init_parent_name_rec(
 	struct xfs_parent_name_rec	*rec,
 	struct xfs_inode		*ip,
@@ -133,6 +133,33 @@ xfs_parent_irec_from_disk(
 	irec->p_namelen = valuelen;
 	memcpy(irec->p_name, value, valuelen);
 	memset(&irec->p_name[valuelen], 0, sizeof(irec->p_name) - valuelen);
+}
+
+/*
+ * Convert an incore parent_name record to its ondisk format.  If @value or
+ * @valuelen are NULL, they will not be written to.
+ */
+void
+xfs_parent_irec_to_disk(
+	struct xfs_parent_name_rec	*rec,
+	void				*value,
+	int				*valuelen,
+	const struct xfs_parent_name_irec *irec)
+{
+	rec->p_ino = cpu_to_be64(irec->p_ino);
+	rec->p_gen = cpu_to_be32(irec->p_gen);
+	rec->p_diroffset = cpu_to_be32(irec->p_diroffset);
+
+	if (valuelen) {
+		ASSERT(*valuelen > 0);
+		ASSERT(*valuelen >= irec->p_namelen);
+		ASSERT(*valuelen < MAXNAMELEN);
+
+		*valuelen = irec->p_namelen;
+	}
+
+	if (value)
+		memcpy(value, irec->p_name, irec->p_namelen);
 }
 
 /*
