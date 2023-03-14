@@ -432,9 +432,6 @@ xfs_attr_log_item(
 		attrp->alfi_oldname_len = attr->xattri_nameval->name.i_len;
 		attrp->alfi_newname_len = attr->xattri_nameval->newname.i_len;
 		attrp->alfi_newvalue_len = attr->xattri_nameval->newvalue.i_len;
-	} else if (xfs_attr_log_item_op(attrp) == XFS_ATTRI_OP_FLAGS_NVREPLACE) {
-		attrp->alfi_oldname_len = attr->xattri_nameval->name.i_len;
-		attrp->alfi_newname_len = attr->xattri_nameval->newname.i_len;
 	} else {
 		attrp->alfi_name_len = attr->xattri_nameval->name.i_len;
 	}
@@ -599,7 +596,6 @@ xfs_attri_validate(
 			return false;
 		break;
 	case XFS_ATTRI_OP_FLAGS_NVREPLACEXXX:
-	case XFS_ATTRI_OP_FLAGS_NVREPLACE:
 		if (attrp->alfi_oldname_len == 0 ||
 		    attrp->alfi_oldname_len > XATTR_NAME_MAX)
 			return false;
@@ -695,7 +691,6 @@ xfs_attri_item_recover(
 		fallthrough;
 	case XFS_ATTRI_OP_FLAGS_SET:
 	case XFS_ATTRI_OP_FLAGS_REPLACE:
-	case XFS_ATTRI_OP_FLAGS_NVREPLACE:
 		args->total = xfs_attr_calc_size(args, &local);
 		if (xfs_inode_hasattr(args->dp))
 			attr->xattri_dela_state = xfs_attr_init_replace_state(args);
@@ -789,9 +784,6 @@ xfs_attri_item_relog(
 		new_attrp->alfi_newname_len = old_attrp->alfi_newname_len;
 		new_attrp->alfi_oldname_len = old_attrp->alfi_oldname_len;
 		new_attrp->alfi_newvalue_len = old_attrp->alfi_newvalue_len;
-	} else if (xfs_attr_log_item_op(old_attrp) == XFS_ATTRI_OP_FLAGS_NVREPLACE) {
-		new_attrp->alfi_newname_len = old_attrp->alfi_newname_len;
-		new_attrp->alfi_oldname_len = old_attrp->alfi_oldname_len;
 	} else {
 		new_attrp->alfi_name_len = old_attrp->alfi_name_len;
 	}
@@ -885,17 +877,6 @@ xlog_recover_attri_commit_pass2(
 		newname_len = attri_formatp->alfi_newname_len;
 		value_len = attri_formatp->alfi_value_len;
 		newvalue_len = attri_formatp->alfi_newvalue_len;
-		break;
-	case XFS_ATTRI_OP_FLAGS_NVREPLACE:
-		/* Log item, attr name, new attr name, attr value */
-		if (item->ri_total != 4) {
-			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
-					     attri_formatp, len);
-			return -EFSCORRUPTED;
-		}
-		name_len = attri_formatp->alfi_oldname_len;
-		newname_len = attri_formatp->alfi_newname_len;
-		value_len = attri_formatp->alfi_value_len;
 		break;
 	default:
 		XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
@@ -1001,17 +982,9 @@ xlog_recover_attri_commit_pass2(
 			return -EFSCORRUPTED;
 		}
 		break;
-	case XFS_ATTRI_OP_FLAGS_NVREPLACE:
-		/* Old name-value replace operations do not have new values. */
-		if (attr_newvalue != NULL || newvalue_len != 0) {
-			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
-					     attri_formatp, len);
-			return -EFSCORRUPTED;
-		}
-		fallthrough;
 	case XFS_ATTRI_OP_FLAGS_NVREPLACEXXX:
 		/*
-		 * New name-value replace operations require the caller to
+		 * Name-value replace operations require the caller to
 		 * specify the old and new names and values explicitly.
 		 * Values are optional.
 		 */

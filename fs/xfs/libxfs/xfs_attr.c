@@ -426,8 +426,7 @@ xfs_attr_complete_op(
 		return XFS_DAS_DONE;
 
 	args->attr_filter &= ~XFS_ATTR_INCOMPLETE;
-	if (xfs_attr_intent_op(attr) != XFS_ATTRI_OP_FLAGS_NVREPLACE &&
-	    xfs_attr_intent_op(attr) != XFS_ATTRI_OP_FLAGS_NVREPLACEXXX)
+	if (xfs_attr_intent_op(attr) != XFS_ATTRI_OP_FLAGS_NVREPLACEXXX)
 		return replace_state;
 
 	/*
@@ -947,8 +946,6 @@ xfs_attr_defer_replace(
 
 	if (args->op_flags & XFS_DA_OP_VLOOKUP)
 		op_flag = XFS_ATTRI_OP_FLAGS_NVREPLACEXXX;
-	else if (args->new_namelen > 0)
-		op_flag = XFS_ATTRI_OP_FLAGS_NVREPLACE;
 
 	error = xfs_attr_intent_init(args, op_flag, &new);
 	if (error)
