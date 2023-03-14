@@ -33,7 +33,7 @@ static inline unsigned int
 xfs_getparents_rec_sizeof(
 	const struct xfs_parent_name_irec	*irec)
 {
-	return round_up(sizeof(struct xfs_parent_ptr) + irec->p_namelen + 1,
+	return round_up(sizeof(struct xfs_getparents_rec) + irec->p_namelen + 1,
 			sizeof(uint32_t));
 }
 
@@ -48,7 +48,7 @@ xfs_getparent_listent(
 {
 	struct xfs_getparent_ctx	*gp;
 	struct xfs_getparents		*ppi;
-	struct xfs_parent_ptr		*pptr;
+	struct xfs_getparents_rec	*pptr;
 	struct xfs_parent_name_rec	*rec = (void *)name;
 	struct xfs_parent_name_irec	*irec;
 	struct xfs_mount		*mp = context->dp->i_mount;
@@ -89,13 +89,13 @@ xfs_getparent_listent(
 	/* Format the parent pointer directly into the caller buffer. */
 	ppi->gp_offsets[ppi->gp_count] = context->firstu;
 	pptr = xfs_getparents_rec(ppi, ppi->gp_count);
-	pptr->xpp_ino = irec->p_ino;
-	pptr->xpp_gen = irec->p_gen;
-	pptr->xpp_diroffset = irec->p_diroffset;
-	pptr->xpp_rsvd = 0;
+	pptr->gpr_ino = irec->p_ino;
+	pptr->gpr_gen = irec->p_gen;
+	pptr->gpr_diroffset = irec->p_diroffset;
+	pptr->gpr_rsvd = 0;
 
-	memcpy(pptr->xpp_name, irec->p_name, irec->p_namelen);
-	pptr->xpp_name[irec->p_namelen] = 0;
+	memcpy(pptr->gpr_name, irec->p_name, irec->p_namelen);
+	pptr->gpr_name[irec->p_namelen] = 0;
 	ppi->gp_count++;
 }
 

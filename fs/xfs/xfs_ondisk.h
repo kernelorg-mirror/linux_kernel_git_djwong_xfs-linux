@@ -151,7 +151,7 @@ xfs_check_ondisk_structs(void)
 	XFS_CHECK_OFFSET(struct xfs_efi_log_format_64, efi_extents,	16);
 
 	/* parent pointer ioctls */
-	XFS_CHECK_STRUCT_SIZE(struct xfs_parent_ptr,            24);
+	XFS_CHECK_STRUCT_SIZE(struct xfs_getparents_rec,	24);
 	XFS_CHECK_STRUCT_SIZE(struct xfs_getparents,		96);
 
 	/*
