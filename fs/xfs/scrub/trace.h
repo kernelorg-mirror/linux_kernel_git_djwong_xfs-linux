@@ -1224,6 +1224,8 @@ DEFINE_XREP_DIRENT_CLASS(xrep_dir_createname);
 DEFINE_XREP_DIRENT_CLASS(xrep_dir_removename);
 DEFINE_XREP_DIRENT_CLASS(xrep_dir_replacename);
 DEFINE_XREP_DIRENT_CLASS(xrep_dir_dumpname);
+DEFINE_XREP_DIRENT_CLASS(xrep_dir_checkname);
+DEFINE_XREP_DIRENT_CLASS(xrep_dir_badposname);
 
 DECLARE_EVENT_CLASS(xrep_dir_class,
 	TP_PROTO(struct xfs_inode *dp, xfs_ino_t parent_ino),
