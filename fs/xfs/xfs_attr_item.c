@@ -78,7 +78,9 @@ xfs_attri_log_nameval_alloc(
 	const void			*newname,
 	unsigned int			newname_len,
 	const void			*value,
-	unsigned int			value_len)
+	unsigned int			value_len,
+	const void			*newvalue,
+	unsigned int			newvalue_len)
 {
 	struct xfs_attri_log_nameval	*nv;
 
@@ -87,7 +89,8 @@ xfs_attri_log_nameval_alloc(
 	 * this. But kvmalloc() utterly sucks, so we use our own version.
 	 */
 	nv = xlog_kvmalloc(sizeof(struct xfs_attri_log_nameval) +
-					name_len + newname_len + value_len);
+					name_len + newname_len + value_len +
+					newvalue_len);
 
 	nv->name.i_addr = nv + 1;
 	nv->name.i_len = name_len;
@@ -113,6 +116,17 @@ xfs_attri_log_nameval_alloc(
 		nv->value.i_len = 0;
 	}
 	nv->value.i_type = XLOG_REG_TYPE_ATTR_VALUE;
+
+	if (newvalue_len) {
+		nv->newvalue.i_addr = nv->name.i_addr + newname_len +
+							name_len + value_len;
+		nv->newvalue.i_len = newvalue_len;
+		memcpy(nv->newvalue.i_addr, newvalue, newvalue_len);
+	} else {
+		nv->newvalue.i_addr = NULL;
+		nv->newvalue.i_len = 0;
+	}
+	nv->newvalue.i_type = XLOG_REG_TYPE_ATTR_NEWVALUE;
 
 	refcount_set(&nv->refcount, 1);
 	return nv;
@@ -168,6 +182,11 @@ xfs_attri_item_size(
 		*nvecs += 1;
 		*nbytes += xlog_calc_iovec_len(nv->value.i_len);
 	}
+
+	if (nv->newvalue.i_len) {
+		*nvecs += 1;
+		*nbytes += xlog_calc_iovec_len(nv->newvalue.i_len);
+	}
 }
 
 /*
@@ -203,6 +222,9 @@ xfs_attri_item_format(
 	if (nv->value.i_len > 0)
 		attrip->attri_format.alfi_size++;
 
+	if (nv->newvalue.i_len > 0)
+		attrip->attri_format.alfi_size++;
+
 	xlog_copy_iovec(lv, &vecp, XLOG_REG_TYPE_ATTRI_FORMAT,
 			&attrip->attri_format,
 			sizeof(struct xfs_attri_log_format));
@@ -213,6 +235,9 @@ xfs_attri_item_format(
 
 	if (nv->value.i_len > 0)
 		xlog_copy_from_iovec(lv, &vecp, &nv->value);
+
+	if (nv->newvalue.i_len > 0)
+		xlog_copy_from_iovec(lv, &vecp, &nv->newvalue);
 }
 
 /*
@@ -406,6 +431,7 @@ xfs_attr_log_item(
 	if (xfs_attr_log_item_op(attrp) == XFS_ATTRI_OP_FLAGS_NVREPLACEXXX) {
 		attrp->alfi_oldname_len = attr->xattri_nameval->name.i_len;
 		attrp->alfi_newname_len = attr->xattri_nameval->newname.i_len;
+		attrp->alfi_newvalue_len = attr->xattri_nameval->newvalue.i_len;
 	} else if (xfs_attr_log_item_op(attrp) == XFS_ATTRI_OP_FLAGS_NVREPLACE) {
 		attrp->alfi_oldname_len = attr->xattri_nameval->name.i_len;
 		attrp->alfi_newname_len = attr->xattri_nameval->newname.i_len;
@@ -455,7 +481,8 @@ xfs_attr_create_intent(
 		 */
 		attr->xattri_nameval = xfs_attri_log_nameval_alloc(args->name,
 				args->namelen, args->new_name,
-				args->new_namelen, args->value, args->valuelen);
+				args->new_namelen, args->value, args->valuelen,
+				args->new_value, args->new_valuelen);
 	}
 
 	attrip = xfs_attri_init(mp, attr->xattri_nameval);
@@ -556,6 +583,8 @@ xfs_attri_validate(
 		if (attrp->alfi_name_len == 0 ||
 		    attrp->alfi_name_len > XATTR_NAME_MAX)
 			return false;
+		if (attrp->alfi_newvalue_len != 0)
+			return false;
 		break;
 	case XFS_ATTRI_OP_FLAGS_SET:
 	case XFS_ATTRI_OP_FLAGS_REPLACE:
@@ -565,6 +594,8 @@ xfs_attri_validate(
 		    attrp->alfi_name_len > XATTR_NAME_MAX)
 			return false;
 		if (attrp->alfi_value_len > XATTR_SIZE_MAX)
+			return false;
+		if (attrp->alfi_newvalue_len != 0)
 			return false;
 		break;
 	case XFS_ATTRI_OP_FLAGS_NVREPLACEXXX:
@@ -576,6 +607,8 @@ xfs_attri_validate(
 		    attrp->alfi_newname_len > XATTR_NAME_MAX)
 			return false;
 		if (attrp->alfi_value_len > XATTR_SIZE_MAX)
+			return false;
+		if (attrp->alfi_newvalue_len > XATTR_SIZE_MAX)
 			return false;
 		break;
 	default:
@@ -647,6 +680,8 @@ xfs_attri_item_recover(
 	args->hashval = xfs_da_hashname(args->name, args->namelen);
 	args->value = nv->value.i_addr;
 	args->valuelen = nv->value.i_len;
+	args->new_value = nv->newvalue.i_addr;
+	args->new_valuelen = nv->newvalue.i_len;
 	args->attr_filter = attrp->alfi_attr_filter & XFS_ATTRI_FILTER_MASK;
 	args->op_flags = XFS_DA_OP_RECOVERY | XFS_DA_OP_OKNOENT |
 			 XFS_DA_OP_LOGGED;
@@ -753,6 +788,7 @@ xfs_attri_item_relog(
 	if (xfs_attr_log_item_op(old_attrp) == XFS_ATTRI_OP_FLAGS_NVREPLACEXXX) {
 		new_attrp->alfi_newname_len = old_attrp->alfi_newname_len;
 		new_attrp->alfi_oldname_len = old_attrp->alfi_oldname_len;
+		new_attrp->alfi_newvalue_len = old_attrp->alfi_newvalue_len;
 	} else if (xfs_attr_log_item_op(old_attrp) == XFS_ATTRI_OP_FLAGS_NVREPLACE) {
 		new_attrp->alfi_newname_len = old_attrp->alfi_newname_len;
 		new_attrp->alfi_oldname_len = old_attrp->alfi_oldname_len;
@@ -779,11 +815,12 @@ xlog_recover_attri_commit_pass2(
 	struct xfs_attri_log_format     *attri_formatp;
 	struct xfs_attri_log_nameval	*nv;
 	const void			*attr_value = NULL;
+	const void			*attr_newvalue = NULL;
 	const void			*attr_name;
 	size_t				len;
 	const void			*attr_newname = NULL;
 	unsigned int			name_len = 0, newname_len = 0;
-	unsigned int			value_len;
+	unsigned int			value_len = 0, newvalue_len = 0;
 	int				op, i = 0;
 
 	/* Validate xfs_attri_log_format before the large memory allocation */
@@ -801,7 +838,6 @@ xlog_recover_attri_commit_pass2(
 		return -EFSCORRUPTED;
 	}
 
-	value_len = attri_formatp->alfi_value_len;
 	op = xfs_attr_log_item_op(attri_formatp);
 	switch (op) {
 	case XFS_ATTRI_OP_FLAGS_NVSET:
@@ -813,6 +849,7 @@ xlog_recover_attri_commit_pass2(
 			return -EFSCORRUPTED;
 		}
 		name_len = attri_formatp->alfi_name_len;
+		value_len = attri_formatp->alfi_value_len;
 		break;
 	case XFS_ATTRI_OP_FLAGS_SET:
 	case XFS_ATTRI_OP_FLAGS_REPLACE:
@@ -823,6 +860,7 @@ xlog_recover_attri_commit_pass2(
 			return -EFSCORRUPTED;
 		}
 		name_len = attri_formatp->alfi_name_len;
+		value_len = attri_formatp->alfi_value_len;
 		break;
 	case XFS_ATTRI_OP_FLAGS_REMOVE:
 		/* Log item, attr name */
@@ -834,14 +872,19 @@ xlog_recover_attri_commit_pass2(
 		name_len = attri_formatp->alfi_name_len;
 		break;
 	case XFS_ATTRI_OP_FLAGS_NVREPLACEXXX:
-		/* Log item, attr name, new attr name, optional attr value */
-		if (item->ri_total < 3 || item->ri_total > 4) {
+		/*
+		 * Log item, attr name, new attr name, optional attr value,
+		 * optional new attr value
+		 */
+		if (item->ri_total < 3 || item->ri_total > 5) {
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 					     attri_formatp, len);
 			return -EFSCORRUPTED;
 		}
 		name_len = attri_formatp->alfi_oldname_len;
 		newname_len = attri_formatp->alfi_newname_len;
+		value_len = attri_formatp->alfi_value_len;
+		newvalue_len = attri_formatp->alfi_newvalue_len;
 		break;
 	case XFS_ATTRI_OP_FLAGS_NVREPLACE:
 		/* Log item, attr name, new attr name, attr value */
@@ -852,6 +895,7 @@ xlog_recover_attri_commit_pass2(
 		}
 		name_len = attri_formatp->alfi_oldname_len;
 		newname_len = attri_formatp->alfi_newname_len;
+		value_len = attri_formatp->alfi_value_len;
 		break;
 	default:
 		XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
@@ -896,9 +940,8 @@ xlog_recover_attri_commit_pass2(
 		i++;
 	}
 
-
 	/* Validate the attr value, if present */
-	if (value_len != 0) {
+	if (value_len > 0) {
 		if (item->ri_buf[i].i_len != xlog_calc_iovec_len(value_len)) {
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 					attri_formatp, len);
@@ -906,6 +949,18 @@ xlog_recover_attri_commit_pass2(
 		}
 
 		attr_value = item->ri_buf[i].i_addr;
+		i++;
+	}
+
+	/* Validate the new attr value, if present */
+	if (newvalue_len > 0) {
+		if (item->ri_buf[i].i_len != xlog_calc_iovec_len(newvalue_len)) {
+			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
+					attri_formatp, len);
+			return -EFSCORRUPTED;
+		}
+
+		attr_newvalue = item->ri_buf[i].i_addr;
 		i++;
 	}
 
@@ -947,10 +1002,18 @@ xlog_recover_attri_commit_pass2(
 		}
 		break;
 	case XFS_ATTRI_OP_FLAGS_NVREPLACE:
+		/* Old name-value replace operations do not have new values. */
+		if (attr_newvalue != NULL || newvalue_len != 0) {
+			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
+					     attri_formatp, len);
+			return -EFSCORRUPTED;
+		}
+		fallthrough;
 	case XFS_ATTRI_OP_FLAGS_NVREPLACEXXX:
 		/*
-		 * Name-value replace operations require the caller to specify
-		 * the old and new name explicitly.  Values are optional.
+		 * New name-value replace operations require the caller to
+		 * specify the old and new names and values explicitly.
+		 * Values are optional.
 		 */
 		if (attr_name == NULL || name_len == 0) {
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
@@ -971,7 +1034,8 @@ xlog_recover_attri_commit_pass2(
 	 * reference.
 	 */
 	nv = xfs_attri_log_nameval_alloc(attr_name, name_len, attr_newname,
-			newname_len, attr_value, value_len);
+			newname_len, attr_value, value_len, attr_newvalue,
+			newvalue_len);
 
 	attrip = xfs_attri_init(mp, nv);
 	memcpy(&attrip->attri_format, attri_formatp, len);

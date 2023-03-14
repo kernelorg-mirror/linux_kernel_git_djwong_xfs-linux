@@ -432,13 +432,15 @@ xfs_attr_complete_op(
 
 	/*
 	 * NVREPLACE operations require the caller to set the old and new names
-	 * explicitly.
+	 * and values explicitly.
 	 */
 	ASSERT(args->new_namelen > 0);
 
 	args->name = args->new_name;
 	args->namelen = args->new_namelen;
 	args->hashval = xfs_da_hashname(args->name, args->namelen);
+	args->value = args->new_value;
+	args->valuelen = args->new_valuelen;
 	return replace_state;
 }
 
