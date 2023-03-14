@@ -53,9 +53,6 @@ struct xchk_dirent {
 	/* Child inode number. */
 	xfs_ino_t			ino;
 
-	/* Directory offset. */
-	xfs_dir2_dataptr_t		diroffset;
-
 	/* Length of the pptr name. */
 	uint8_t				namelen;
 };
@@ -180,7 +177,6 @@ xchk_dir_check_pptr_fast(
 		struct xchk_dirent	save_de = {
 			.namelen	= name->len,
 			.ino		= ip->i_ino,
-			.diroffset	= dapos,
 		};
 
 		/* Couldn't lock the inode, so save the dirent for later. */
@@ -257,7 +253,7 @@ xchk_dir_actor(
 	}
 
 	/* Verify that we can look up this name by hash. */
-	error = xchk_dir_lookup(sc, dp, name, &lookup_ino, NULL);
+	error = xchk_dir_lookup(sc, dp, name, &lookup_ino);
 	/* ENOENT means the hash lookup failed and the dir is corrupt */
 	if (error == -ENOENT)
 		error = -EFSCORRUPTED;
@@ -914,16 +910,13 @@ STATIC int
 xchk_dir_revalidate_dirent(
 	struct xchk_dir		*sd,
 	const struct xfs_name	*xname,
-	xfs_ino_t		ino,
-	xfs_dir2_dataptr_t	diroffset)
+	xfs_ino_t		ino)
 {
 	struct xfs_scrub	*sc = sd->sc;
 	xfs_ino_t		child_ino;
-	xfs_dir2_dataptr_t	child_diroffset = XFS_DIR2_NULL_DATAPTR;
 	int			error;
 
-	error = xchk_dir_lookup(sc, sc->ip, xname, &child_ino,
-			&child_diroffset);
+	error = xchk_dir_lookup(sc, sc->ip, xname, &child_ino);
 	if (error == -ENOENT) {
 		/* Directory entry went away, nothing to revalidate. */
 		return -ENOENT;
@@ -933,10 +926,6 @@ xchk_dir_revalidate_dirent(
 
 	/* The inode number changed, nothing to revalidate. */
 	if (ino != child_ino)
-		return -ENOENT;
-
-	/* The directory offset changed, nothing to revalidate. */
-	if (diroffset != child_diroffset)
 		return -ENOENT;
 
 	return 0;
@@ -962,8 +951,7 @@ xchk_dir_slow_dirent(
 
 	/* Check that the deferred dirent still exists. */
 	if (sd->need_revalidate) {
-		error = xchk_dir_revalidate_dirent(sd, &xname, dirent->ino,
-				dirent->diroffset);
+		error = xchk_dir_revalidate_dirent(sd, &xname, dirent->ino);
 		if (error == -ENOENT)
 			return 0;
 		if (!xchk_fblock_xref_process_error(sc, XFS_DATA_FORK, 0,
@@ -1015,8 +1003,7 @@ xchk_dir_slow_dirent(
 	lockmode = XFS_IOLOCK_SHARED | XFS_ILOCK_EXCL;
 
 	/* Revalidate, since we just cycled the locks. */
-	error = xchk_dir_revalidate_dirent(sd, &xname, dirent->ino,
-			dirent->diroffset);
+	error = xchk_dir_revalidate_dirent(sd, &xname, dirent->ino);
 	if (error == -ENOENT)
 		goto out_unlock;
 	if (!xchk_fblock_xref_process_error(sc, XFS_DATA_FORK, 0, &error))

@@ -364,8 +364,7 @@ xchk_parent_dotdot(
 	}
 
 	/* Look up '..' */
-	error = xchk_dir_lookup(sc, sc->ip, &xfs_name_dotdot, &pp->parent_ino,
-			NULL);
+	error = xchk_dir_lookup(sc, sc->ip, &xfs_name_dotdot, &pp->parent_ino);
 	if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, 0, &error))
 		return error;
 	if (!xfs_verify_dir_ino(sc->mp, pp->parent_ino)) {
@@ -428,7 +427,7 @@ xchk_parent_dirent(
 	 * Use the name attached to this parent pointer to look up the
 	 * directory entry in the alleged parent.
 	 */
-	error = xchk_dir_lookup(sc, dp, &xname, &child_ino, NULL);
+	error = xchk_dir_lookup(sc, dp, &xname, &child_ino);
 	if (error == -ENOENT) {
 		xchk_fblock_xref_set_corrupt(sc, XFS_ATTR_FORK, 0);
 		return 0;

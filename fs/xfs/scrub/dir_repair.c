@@ -793,7 +793,7 @@ xrep_dir_dump_tempdir(
 
 	/* Check that the dir being repaired has the same entry. */
 	if (compare_dirent) {
-		error = xchk_dir_lookup(sc, sc->ip, name, &child_ino, NULL);
+		error = xchk_dir_lookup(sc, sc->ip, name, &child_ino);
 		if (error == -ENOENT) {
 			trace_xrep_dir_checkname(sc->ip, name, NULLFSINO);
 			ASSERT(error != -ENOENT);
@@ -849,7 +849,7 @@ xrep_dir_dump_baddir(
 	trace_xrep_dir_dumpname(sc->ip, name, ino);
 
 	/* Check that the tempdir has the same entry. */
-	error = xchk_dir_lookup(sc, sc->tempip, name, &child_ino, NULL);
+	error = xchk_dir_lookup(sc, sc->tempip, name, &child_ino);
 	if (error == -ENOENT) {
 		trace_xrep_dir_checkname(sc->tempip, name, NULLFSINO);
 		ASSERT(error != -ENOENT);
