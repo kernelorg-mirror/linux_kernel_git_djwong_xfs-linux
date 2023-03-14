@@ -958,9 +958,9 @@ struct xfs_icreate_log {
 #define XFS_ATTRI_OP_FLAGS_SET		1	/* Set the attribute */
 #define XFS_ATTRI_OP_FLAGS_REMOVE	2	/* Remove the attribute */
 #define XFS_ATTRI_OP_FLAGS_REPLACE	3	/* Replace the attribute */
+#define XFS_ATTRI_OP_FLAGS_NVREPLACE	4	/* Replace attr name and val */
 #define XFS_ATTRI_OP_FLAGS_NVREMOVE	5	/* Remove attr w/ vlookup */
 #define XFS_ATTRI_OP_FLAGS_NVSET	6	/* Set attr with w/ vlookup */
-#define XFS_ATTRI_OP_FLAGS_NVREPLACEXXX	7	/* Replace attr name and val */
 #define XFS_ATTRI_OP_FLAGS_TYPE_MASK	0xFF	/* Flags type mask */
 
 /*
@@ -981,7 +981,7 @@ struct xfs_attri_log_format {
 	uint16_t	alfi_size;	/* size of this item */
 
 	/*
-	 * For NVREPLACEXXX, this is the length of the new xattr value.
+	 * For NVREPLACE, this is the length of the new xattr value.
 	 * alfi_value_len contains the length of the old xattr value.
 	 */
 	uint32_t	alfi_newvalue_len;

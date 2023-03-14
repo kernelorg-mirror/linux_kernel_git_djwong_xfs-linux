@@ -428,7 +428,7 @@ xfs_attr_log_item(
 	attrp->alfi_op_flags = attr->xattri_op_flags;
 	attrp->alfi_value_len = attr->xattri_nameval->value.i_len;
 
-	if (xfs_attr_log_item_op(attrp) == XFS_ATTRI_OP_FLAGS_NVREPLACEXXX) {
+	if (xfs_attr_log_item_op(attrp) == XFS_ATTRI_OP_FLAGS_NVREPLACE) {
 		attrp->alfi_oldname_len = attr->xattri_nameval->name.i_len;
 		attrp->alfi_newname_len = attr->xattri_nameval->newname.i_len;
 		attrp->alfi_newvalue_len = attr->xattri_nameval->newvalue.i_len;
@@ -595,7 +595,7 @@ xfs_attri_validate(
 		if (attrp->alfi_newvalue_len != 0)
 			return false;
 		break;
-	case XFS_ATTRI_OP_FLAGS_NVREPLACEXXX:
+	case XFS_ATTRI_OP_FLAGS_NVREPLACE:
 		if (attrp->alfi_oldname_len == 0 ||
 		    attrp->alfi_oldname_len > XATTR_NAME_MAX)
 			return false;
@@ -685,7 +685,7 @@ xfs_attri_item_recover(
 	ASSERT(xfs_sb_version_haslogxattrs(&mp->m_sb));
 
 	switch (xfs_attr_intent_op(attr)) {
-	case XFS_ATTRI_OP_FLAGS_NVREPLACEXXX:
+	case XFS_ATTRI_OP_FLAGS_NVREPLACE:
 	case XFS_ATTRI_OP_FLAGS_NVSET:
 		args->op_flags |= XFS_DA_OP_VLOOKUP;
 		fallthrough;
@@ -780,7 +780,7 @@ xfs_attri_item_relog(
 	new_attrp->alfi_ino = old_attrp->alfi_ino;
 	new_attrp->alfi_op_flags = old_attrp->alfi_op_flags;
 	new_attrp->alfi_value_len = old_attrp->alfi_value_len;
-	if (xfs_attr_log_item_op(old_attrp) == XFS_ATTRI_OP_FLAGS_NVREPLACEXXX) {
+	if (xfs_attr_log_item_op(old_attrp) == XFS_ATTRI_OP_FLAGS_NVREPLACE) {
 		new_attrp->alfi_newname_len = old_attrp->alfi_newname_len;
 		new_attrp->alfi_oldname_len = old_attrp->alfi_oldname_len;
 		new_attrp->alfi_newvalue_len = old_attrp->alfi_newvalue_len;
@@ -863,7 +863,7 @@ xlog_recover_attri_commit_pass2(
 		}
 		name_len = attri_formatp->alfi_name_len;
 		break;
-	case XFS_ATTRI_OP_FLAGS_NVREPLACEXXX:
+	case XFS_ATTRI_OP_FLAGS_NVREPLACE:
 		/*
 		 * Log item, attr name, new attr name, optional attr value,
 		 * optional new attr value
@@ -982,7 +982,7 @@ xlog_recover_attri_commit_pass2(
 			return -EFSCORRUPTED;
 		}
 		break;
-	case XFS_ATTRI_OP_FLAGS_NVREPLACEXXX:
+	case XFS_ATTRI_OP_FLAGS_NVREPLACE:
 		/*
 		 * Name-value replace operations require the caller to
 		 * specify the old and new names and values explicitly.

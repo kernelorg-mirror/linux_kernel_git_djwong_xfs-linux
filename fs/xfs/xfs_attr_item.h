@@ -13,9 +13,9 @@ struct kmem_zone;
 
 struct xfs_attri_log_nameval {
 	struct xfs_log_iovec	name;
-	struct xfs_log_iovec	newname;	/* NVREPLACEXXX only */
+	struct xfs_log_iovec	newname;	/* NVREPLACE only */
 	struct xfs_log_iovec	value;
-	struct xfs_log_iovec	newvalue;	/* NVREPLACEXXX only */
+	struct xfs_log_iovec	newvalue;	/* NVREPLACE only */
 	refcount_t		refcount;
 
 	/* name and value follow the end of this struct */
