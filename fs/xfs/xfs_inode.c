@@ -2649,7 +2649,6 @@ xfs_remove(
 	int			dontcare;
 	int                     error = 0;
 	uint			resblks;
-	xfs_dir2_dataptr_t	dir_offset;
 	struct xfs_parent_defer	*parent = NULL;
 
 	trace_xfs_remove(dp, name);
@@ -2739,7 +2738,7 @@ xfs_remove(
 	if (error)
 		goto out_trans_cancel;
 
-	error = xfs_dir_removename(tp, dp, name, ip->i_ino, resblks, &dir_offset);
+	error = xfs_dir_removename(tp, dp, name, ip->i_ino, resblks);
 	if (error) {
 		ASSERT(error != -ENOENT);
 		goto out_trans_cancel;
@@ -3184,7 +3183,6 @@ xfs_rename(
 	bool				retried = false;
 	int				error, nospace_error = 0;
 	xfs_dir2_dataptr_t		new_diroffset;
-	xfs_dir2_dataptr_t		old_diroffset;
 	struct xfs_parent_defer		*src_ip_pptr = NULL;
 	struct xfs_parent_defer		*tgt_ip_pptr = NULL;
 	struct xfs_parent_defer		*wip_pptr = NULL;
@@ -3522,7 +3520,7 @@ retry:
 					spaceres);
 	else
 		error = xfs_dir_removename(tp, src_dp, src_name, src_ip->i_ino,
-					   spaceres, &old_diroffset);
+					   spaceres);
 
 	if (error)
 		goto out_trans_cancel;

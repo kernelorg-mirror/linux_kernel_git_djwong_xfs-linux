@@ -1296,10 +1296,9 @@ xfs_dir2_leafn_remove(
 	/*
 	 * Extract the data block and offset from the entry.
 	 */
-	args->offset = be32_to_cpu(lep->address);
-	db = xfs_dir2_dataptr_to_db(args->geo, args->offset);
+	db = xfs_dir2_dataptr_to_db(geo, be32_to_cpu(lep->address));
 	ASSERT(dblk->blkno == db);
-	off = xfs_dir2_dataptr_to_off(args->geo, args->offset);
+	off = xfs_dir2_dataptr_to_off(geo, be32_to_cpu(lep->address));
 	ASSERT(dblk->index == off);
 
 	/*
