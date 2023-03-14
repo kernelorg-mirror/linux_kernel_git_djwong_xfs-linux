@@ -8,13 +8,13 @@
 
 static inline unsigned int
 xfs_getparents_arraytop(
-	const struct xfs_pptr_info	*ppi,
+	const struct xfs_getparents	*ppi,
 	unsigned int			nr)
 {
-	return sizeof(struct xfs_pptr_info) +
-			(nr * sizeof(ppi->pi_offsets[0]));
+	return sizeof(struct xfs_getparents) +
+			(nr * sizeof(ppi->gp_offsets[0]));
 }
 
-int xfs_getparent_pointers(struct xfs_inode *ip, struct xfs_pptr_info *ppi);
+int xfs_getparent_pointers(struct xfs_inode *ip, struct xfs_getparents *ppi);
 
 #endif	/* __XFS_PARENT_UTILS_H__ */
