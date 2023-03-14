@@ -136,6 +136,7 @@ xrep_tempfile_create(
 	xfs_setup_iops(sc->tempip);
 	xfs_finish_inode_setup(sc->tempip);
 
+	xfs_iunlock(sc->tempip, XFS_ILOCK_EXCL);
 	sc->temp_ilock_flags = 0;
 	return error;
 
@@ -149,6 +150,7 @@ out_release_inode:
 	 */
 	if (sc->tempip) {
 		xfs_finish_inode_setup(sc->tempip);
+		xfs_iunlock(sc->tempip, XFS_ILOCK_EXCL);
 		xchk_irele(sc, sc->tempip);
 	}
 out_release_dquots:
@@ -170,6 +172,26 @@ xrep_tempfile_iolock_nowait(
 	}
 
 	return false;
+}
+
+/*
+ * Take the temporary file's IOLOCK while holding a different inode's IOLOCK.
+ * In theory nobody else should hold the tempfile's IOLOCK, but we use trylock
+ * to avoid deadlocks and lockdep.
+ */
+int
+xrep_tempfile_iolock_polled(
+	struct xfs_scrub	*sc)
+{
+	int			error = 0;
+
+	while (!xrep_tempfile_iolock_nowait(sc)) {
+		if (xchk_should_terminate(sc, &error))
+			return error;
+		delay(1);
+	}
+
+	return 0;
 }
 
 /* Release IOLOCK_EXCL on the temporary file. */
@@ -201,6 +223,26 @@ xrep_tempfile_ilock_nowait(
 	}
 
 	return false;
+}
+
+/*
+ * Take the temporary file's ILOCK while holding a different inode's ILOCK.  In
+ * theory nobody else should hold the tempfile's ILOCK, but we use trylock to
+ * avoid deadlocks and lockdep.
+ */
+int
+xrep_tempfile_ilock_polled(
+	struct xfs_scrub	*sc)
+{
+	int			error = 0;
+
+	while (!xrep_tempfile_ilock_nowait(sc)) {
+		if (xchk_should_terminate(sc, &error))
+			return error;
+		delay(1);
+	}
+
+	return 0;
 }
 
 /* Unlock ILOCK_EXCL on the temporary file after an update. */

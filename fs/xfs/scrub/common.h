@@ -31,6 +31,9 @@ xchk_should_terminate(
 	return false;
 }
 
+void xchk_trans_cancel(struct xfs_scrub *sc);
+int xchk_trans_alloc_empty(struct xfs_scrub *sc);
+
 int xchk_trans_alloc(struct xfs_scrub *sc, uint resblks);
 bool xchk_process_error(struct xfs_scrub *sc, xfs_agnumber_t agno,
 		xfs_agblock_t bno, int *error);
@@ -158,5 +161,30 @@ void xchk_stop_reaping(struct xfs_scrub *sc);
 void xchk_start_reaping(struct xfs_scrub *sc);
 
 void xchk_fshooks_enable(struct xfs_scrub *sc, unsigned int scrub_fshooks);
+
+#ifdef CONFIG_XFS_ONLINE_REPAIR
+/* Decide if a repair is required. */
+static inline bool xchk_needs_repair(const struct xfs_scrub_metadata *sm)
+{
+	return sm->sm_flags & (XFS_SCRUB_OFLAG_CORRUPT |
+			       XFS_SCRUB_OFLAG_XCORRUPT |
+			       XFS_SCRUB_OFLAG_PREEN);
+}
+
+/*
+ * "Should we prepare for a repair?"
+ *
+ * Return true if the caller permits us to repair metadata and we're not
+ * setting up for a post-repair evaluation.
+ */
+static inline bool xchk_could_repair(const struct xfs_scrub *sc)
+{
+	return (sc->sm->sm_flags & XFS_SCRUB_IFLAG_REPAIR) &&
+		!(sc->flags & XREP_ALREADY_FIXED);
+}
+#else
+# define xchk_needs_repair(sc)		(false)
+# define xchk_could_repair(sc)		(false)
+#endif /* CONFIG_XFS_ONLINE_REPAIR */
 
 #endif	/* __XFS_SCRUB_COMMON_H__ */
