@@ -179,6 +179,7 @@ ifeq ($(CONFIG_XFS_ONLINE_REPAIR),y)
 xfs-y				+= $(addprefix scrub/, \
 				   agheader_repair.o \
 				   repair.o \
+				   tempfile.o \
 				   )
 endif
 endif
