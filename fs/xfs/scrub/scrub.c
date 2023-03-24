@@ -145,6 +145,21 @@ xchk_probe(
 
 /* Scrub setup and teardown */
 
+static inline void
+xchk_fshooks_disable(
+	struct xfs_scrub	*sc)
+{
+	if (!(sc->flags & XCHK_FSHOOKS_ALL))
+		return;
+
+	//trace_xchk_fshooks_disable(sc, sc->flags & XCHK_FSHOOKS_ALL);
+
+	if (sc->flags & XCHK_FSHOOKS_DIRENTS)
+		xfs_dirent_hook_disable();
+
+	sc->flags &= ~XCHK_FSHOOKS_ALL;
+}
+
 /* Free all the resources and finish the transactions. */
 STATIC int
 xchk_teardown(
@@ -177,6 +192,8 @@ xchk_teardown(
 		kvfree(sc->buf);
 		sc->buf = NULL;
 	}
+
+	xchk_fshooks_disable(sc);
 	return error;
 }
 

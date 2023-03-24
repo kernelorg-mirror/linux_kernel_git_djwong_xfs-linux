@@ -966,3 +966,23 @@ xchk_start_reaping(
 	}
 	sc->flags &= ~XCHK_REAPING_DISABLED;
 }
+
+/*
+ * Enable filesystem hooks (i.e. runtime code patching) before starting a scrub
+ * operation.  Callers must not hold any locks that intersect with the CPU
+ * hotplug lock (e.g. writeback locks) because code patching must halt the CPUs
+ * to change kernel code.
+ */
+void
+xchk_fshooks_enable(
+	struct xfs_scrub	*sc,
+	unsigned int		scrub_fshooks)
+{
+	ASSERT(!(scrub_fshooks & ~XCHK_FSHOOKS_ALL));
+	ASSERT(!(sc->flags & scrub_fshooks));
+
+	if (scrub_fshooks & XCHK_FSHOOKS_DIRENTS)
+		xfs_dirent_hook_enable();
+
+	sc->flags |= scrub_fshooks;
+}

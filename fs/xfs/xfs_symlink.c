@@ -351,6 +351,8 @@ xfs_symlink(
 			goto out_trans_cancel;
 	}
 
+	xfs_dirent_child_delta(dp, ip, 1, link_name);
+
 	/*
 	 * If this is a synchronous mount, make sure that the
 	 * symlink transaction goes to disk before returning to

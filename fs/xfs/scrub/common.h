@@ -157,4 +157,6 @@ int xchk_metadata_inode_forks(struct xfs_scrub *sc);
 void xchk_stop_reaping(struct xfs_scrub *sc);
 void xchk_start_reaping(struct xfs_scrub *sc);
 
+void xchk_fshooks_enable(struct xfs_scrub *sc, unsigned int scrub_fshooks);
+
 #endif	/* __XFS_SCRUB_COMMON_H__ */
