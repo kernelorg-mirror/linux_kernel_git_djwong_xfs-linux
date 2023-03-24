@@ -18,6 +18,8 @@
 #include "scrub/xfarray.h"
 #include "scrub/iscan.h"
 #include "xfs_da_format.h"
+#include "xfs_da_btree.h"
+#include "xfs_parent.h"
 
 /* Figure out which block the btree cursor was pointing to. */
 static inline xfs_fsblock_t
