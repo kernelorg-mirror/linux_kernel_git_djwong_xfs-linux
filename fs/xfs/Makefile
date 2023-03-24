@@ -162,6 +162,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   inode.o \
 				   iscan.o \
 				   parent.o \
+				   readdir.o \
 				   refcount.o \
 				   rmap.o \
 				   scrub.o \
