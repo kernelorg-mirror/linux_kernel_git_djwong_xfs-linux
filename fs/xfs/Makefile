@@ -180,6 +180,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   agheader_repair.o \
 				   repair.o \
 				   tempfile.o \
+				   xfblob.o \
 				   )
 endif
 endif
