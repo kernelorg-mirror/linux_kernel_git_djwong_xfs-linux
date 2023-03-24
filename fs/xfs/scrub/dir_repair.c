@@ -746,7 +746,10 @@ xrep_dir_scan_dirtree(
 	return 0;
 }
 
-/* Dump a dirent from the temporary dir. */
+/*
+ * Dump a dirent from the temporary dir and check it against the dir we're
+ * rebuilding.  We are not committing any of this.
+ */
 STATIC int
 xrep_dir_dump_tempdir(
 	struct xfs_scrub	*sc,
@@ -757,8 +760,10 @@ xrep_dir_dump_tempdir(
 	void			*priv)
 {
 	struct xrep_dir		*rd = priv;
+	xfs_ino_t		child_ino;
 	bool			child_dirent = true;
-	int			error = 0;
+	bool			compare_dirent = true;
+	int			error;
 
 	/*
 	 * The tempdir was created with a dotdot entry pointing to the root
@@ -781,10 +786,29 @@ xrep_dir_dump_tempdir(
 	}
 	if (xrep_dir_samename(name, &xfs_name_dot)) {
 		child_dirent = false;
+		compare_dirent = false;
 		ino = sc->ip->i_ino;
 	}
 
 	trace_xrep_dir_dumpname(sc->tempip, name, ino);
+
+	/* Check that the dir being repaired has the same entry. */
+	if (compare_dirent) {
+		error = xchk_dir_lookup(sc, sc->ip, name, &child_ino);
+		if (error == -ENOENT) {
+			trace_xrep_dir_checkname(sc->ip, name, NULLFSINO);
+			ASSERT(error != -ENOENT);
+			return -EFSCORRUPTED;
+		}
+		if (error)
+			return error;
+
+		if (ino != child_ino) {
+			trace_xrep_dir_checkname(sc->ip, name, child_ino);
+			ASSERT(ino == child_ino);
+			return -EFSCORRUPTED;
+		}
+	}
 
 	/*
 	 * Set ourselves up to free every dirent in the tempdir because
@@ -799,6 +823,49 @@ xrep_dir_dump_tempdir(
 	}
 
 	return error;
+}
+
+/*
+ * Dump a dirent from the dir we're rebuilding and check it against the
+ * temporary dir.  This assumes that the directory wasn't really corrupt to
+ * begin with.
+ */
+STATIC int
+xrep_dir_dump_baddir(
+	struct xfs_scrub	*sc,
+	struct xfs_inode	*dp,
+	xfs_dir2_dataptr_t	dapos,
+	const struct xfs_name	*name,
+	xfs_ino_t		ino,
+	void			*priv)
+{
+	xfs_ino_t		child_ino;
+	int			error;
+
+	/* Ignore the directory's dot and dotdot entries. */
+	if (xrep_dir_samename(name, &xfs_name_dotdot) ||
+	    xrep_dir_samename(name, &xfs_name_dot))
+		return 0;
+
+	trace_xrep_dir_dumpname(sc->ip, name, ino);
+
+	/* Check that the tempdir has the same entry. */
+	error = xchk_dir_lookup(sc, sc->tempip, name, &child_ino);
+	if (error == -ENOENT) {
+		trace_xrep_dir_checkname(sc->tempip, name, NULLFSINO);
+		ASSERT(error != -ENOENT);
+		return -EFSCORRUPTED;
+	}
+	if (error)
+		return error;
+
+	if (ino != child_ino) {
+		trace_xrep_dir_checkname(sc->tempip, name, child_ino);
+		ASSERT(ino == child_ino);
+		return -EFSCORRUPTED;
+	}
+
+	return 0;
 }
 
 /*
@@ -883,6 +950,10 @@ xrep_dir_rebuild_tree(
 	 * temporary directory to avoid leaking directory blocks.
 	 */
 	error = xrep_tempfile_ilock_polled(sc);
+	if (error)
+		return error;
+
+	error = xchk_dir_walk(sc, sc->ip, xrep_dir_dump_baddir, rd);
 	if (error)
 		return error;
 
