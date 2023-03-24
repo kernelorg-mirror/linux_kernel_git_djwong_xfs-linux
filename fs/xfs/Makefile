@@ -169,6 +169,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   scrub.o \
 				   symlink.o \
 				   xfarray.o \
+				   xfblob.o \
 				   xfile.o \
 				   )
 
@@ -182,7 +183,6 @@ xfs-y				+= $(addprefix scrub/, \
 				   dir_repair.o \
 				   repair.o \
 				   tempfile.o \
-				   xfblob.o \
 				   )
 endif
 endif
