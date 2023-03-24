@@ -179,6 +179,7 @@ xfs-$(CONFIG_XFS_QUOTA)		+= scrub/quota.o
 ifeq ($(CONFIG_XFS_ONLINE_REPAIR),y)
 xfs-y				+= $(addprefix scrub/, \
 				   agheader_repair.o \
+				   dir_repair.o \
 				   repair.o \
 				   tempfile.o \
 				   xfblob.o \
