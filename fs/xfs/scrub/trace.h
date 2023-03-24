@@ -1372,6 +1372,7 @@ DEFINE_EVENT(xrep_pptr_class, name, \
 	TP_PROTO(struct xfs_inode *ip, const struct xfs_parent_name_irec *pptr), \
 	TP_ARGS(ip, pptr))
 DEFINE_XREP_PPTR_CLASS(xrep_pptr_createname);
+DEFINE_XREP_PPTR_CLASS(xrep_pptr_removename);
 DEFINE_XREP_PPTR_CLASS(xrep_pptr_dumpname);
 
 DECLARE_EVENT_CLASS(xrep_pptr_scan_class,
@@ -1408,6 +1409,7 @@ DEFINE_EVENT(xrep_pptr_scan_class, name, \
 		 const struct xfs_name *name), \
 	TP_ARGS(ip, dp, name))
 DEFINE_XREP_PPTR_SCAN_CLASS(xrep_pptr_add_pointer);
+DEFINE_XREP_PPTR_SCAN_CLASS(xrep_pptr_remove_pointer);
 
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
 
