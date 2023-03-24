@@ -486,7 +486,10 @@ xrep_pptr_scan_dirtree(
 	return 0;
 }
 
-/* Dump a parent pointer from the temporary file. */
+/*
+ * Dump a parent pointer from the temporary file and check it against the file
+ * we're rebuilding.  We are not committing any of this.
+ */
 STATIC int
 xrep_pptr_dump_tempptr(
 	struct xfs_scrub	*sc,
@@ -500,6 +503,8 @@ xrep_pptr_dump_tempptr(
 {
 	struct xrep_pptrs	*rp = priv;
 	const struct xfs_parent_name_rec *rec = (const void *)name;
+	struct xfs_inode	*other_ip;
+	int			error;
 
 	if (!(attr_flags & XFS_ATTR_PARENT))
 		return 0;
@@ -508,10 +513,26 @@ xrep_pptr_dump_tempptr(
 	    !xfs_parent_valuecheck(sc->mp, value, valuelen))
 		return -EFSCORRUPTED;
 
+	if (ip == sc->ip)
+		other_ip = sc->tempip;
+	else if (ip == sc->tempip)
+		other_ip = sc->ip;
+	else
+		return -EFSCORRUPTED;
+
 	xfs_parent_irec_from_disk(&rp->pptr, rec, value, valuelen);
 
 	trace_xrep_pptr_dumpname(sc->tempip, &rp->pptr);
-	return 0;
+
+	error = xfs_parent_lookup(sc->tp, other_ip, &rp->pptr,
+			&rp->pptr_scratch);
+	if (error == -ENOATTR) {
+		trace_xrep_pptr_checkname(other_ip, &rp->pptr);
+		ASSERT(error != -ENOATTR);
+		return -EFSCORRUPTED;
+	}
+
+	return error;
 }
 
 /*
@@ -587,6 +608,10 @@ xrep_pptr_rebuild_tree(
 	 * will erase the attr fork for us.
 	 */
 	error = xrep_tempfile_ilock_polled(sc);
+	if (error)
+		return error;
+
+	error = xchk_xattr_walk(sc, sc->ip, xrep_pptr_dump_tempptr, rp);
 	if (error)
 		return error;
 
