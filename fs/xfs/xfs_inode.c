@@ -911,12 +911,16 @@ xfs_init_new_inode(
  */
 static int			/* error */
 xfs_droplink(
-	xfs_trans_t *tp,
-	xfs_inode_t *ip)
+	struct xfs_trans	*tp,
+	struct xfs_inode	*ip)
 {
+	struct inode		*inode = VFS_I(ip);
+
 	xfs_trans_ichgtime(tp, ip, XFS_ICHGTIME_CHG);
 
-	drop_nlink(VFS_I(ip));
+	if (inode->i_nlink != XFS_NLINK_PINNED)
+		drop_nlink(VFS_I(ip));
+
 	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
 
 	if (VFS_I(ip)->i_nlink)
@@ -933,9 +937,13 @@ xfs_bumplink(
 	struct xfs_trans	*tp,
 	struct xfs_inode	*ip)
 {
+	struct inode		*inode = VFS_I(ip);
+
 	xfs_trans_ichgtime(tp, ip, XFS_ICHGTIME_CHG);
 
-	inc_nlink(VFS_I(ip));
+	if (inode->i_nlink != XFS_NLINK_PINNED)
+		inc_nlink(VFS_I(ip));
+
 	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
 }
 
