@@ -93,8 +93,8 @@ xchk_setup_nlinks(
 
 /*
  * Add a delta to an nlink counter, being careful about integer overflow.
- * Clamp the value to U32_MAX because the ondisk format does not handle
- * link counts any higher.
+ * Clamp the value to XFS_NLINK_PINNED because the ondisk format does not
+ * handle link counts any higher.
  */
 static inline void
 careful_add(
@@ -103,7 +103,7 @@ careful_add(
 {
 	uint64_t	new_value = (uint64_t)(*nlinkp) + delta;
 
-	*nlinkp = min_t(uint64_t, new_value, U32_MAX);
+	*nlinkp = min_t(uint64_t, new_value, XFS_NLINK_PINNED);
 }
 
 /* Update incore link count information.  Caller must hold the nlinks lock. */
@@ -604,7 +604,7 @@ xchk_nlinks_compare_inode(
 	 * this.  The VFS won't let users increase the link count, but it will
 	 * let them decrease it.
 	 */
-	if (total_links > U32_MAX)
+	if (total_links > XFS_NLINK_PINNED)
 		xchk_ino_set_corrupt(sc, ip->i_ino);
 	else if (total_links > XFS_MAXLINK)
 		xchk_ino_set_warning(sc, ip->i_ino);
