@@ -1552,6 +1552,40 @@ DEFINE_IMAP_EVENT(xfs_map_blocks_alloc);
 DEFINE_IMAP_EVENT(xfs_iomap_alloc);
 DEFINE_IMAP_EVENT(xfs_iomap_found);
 
+DECLARE_EVENT_CLASS(xfs_writeback_class,
+	TP_PROTO(struct xfs_inode *ip, const struct writeback_control *wbc),
+	TP_ARGS(ip, wbc),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(loff_t, range_start)
+		__field(loff_t, range_end)
+		__field(long, nr_to_write)
+		__field(enum writeback_sync_modes, sync_mode)
+	),
+	TP_fast_assign(
+		__entry->dev = VFS_I(ip)->i_sb->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->range_start = wbc->range_start;
+		__entry->range_end = wbc->range_end;
+		__entry->nr_to_write = wbc->nr_to_write;
+		__entry->sync_mode = wbc->sync_mode;
+	),
+	TP_printk("dev %d:%d ino 0x%llx range_start 0x%llx range_end 0x%llx nr_to_write %ld sync_mode %u",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		   __entry->ino,
+		   __entry->range_start,
+		   __entry->range_end,
+		   __entry->nr_to_write,
+		   __entry->sync_mode)
+);
+#define DEFINE_WRITEBACK_EVENT(name)	\
+DEFINE_EVENT(xfs_writeback_class, name,	\
+	TP_PROTO(struct xfs_inode *ip, const struct writeback_control *wbc), \
+	TP_ARGS(ip, wbc))
+DEFINE_WRITEBACK_EVENT(xfs_vm_writepages);
+DEFINE_WRITEBACK_EVENT(xfs_dax_writepages);
+
 DECLARE_EVENT_CLASS(xfs_simple_io_class,
 	TP_PROTO(struct xfs_inode *ip, xfs_off_t offset, u64 count),
 	TP_ARGS(ip, offset, count),
