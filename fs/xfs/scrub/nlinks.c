@@ -43,8 +43,7 @@ int
 xchk_setup_nlinks(
 	struct xfs_scrub	*sc)
 {
-	/* Not ready for general consumption yet. */
-	return -EOPNOTSUPP;
+	xchk_fsgates_enable(sc, XCHK_FSGATES_DIRENTS);
 
 	sc->buf = kzalloc(sizeof(struct xchk_nlink_ctrs), XCHK_GFP_FLAGS);
 	if (!sc->buf)
@@ -63,27 +62,36 @@ xchk_setup_nlinks(
  * must be taken with certain errno values (i.e. EFSBADCRC, EFSCORRUPTED,
  * ECANCELED) that are absorbed into a scrub state flag update by
  * xchk_*_process_error.
+ *
+ * Because we are scanning a live filesystem, it's possible that another thread
+ * will try to update the link counts for an inode that we've already scanned.
+ * This will cause our counts to be incorrect.  Therefore, we hook all
+ * directory entry updates because that is when link count updates occur.  By
+ * shadowing transaction updates in this manner, live nlink check can ensure by
+ * locking the inode and the shadow structure that its own copies are not out
+ * of date.  Because the hook code runs in a different process context from the
+ * scrub code and the scrub state flags are not accessed atomically, failures
+ * in the hook code must abort the iscan and the scrubber must notice the
+ * aborted scan and set the incomplete flag.
+ *
+ * Note that we use jump labels and srcu notifier hooks to minimize the
+ * overhead when live nlinks is /not/ running.  Locking order for nlink
+ * observations is inode ILOCK -> iscan_lock/xchk_nlink_ctrs lock.
  */
 
-/* Add a delta to an nlink counter, being careful about integer overlow. */
-static inline int
+/*
+ * Add a delta to an nlink counter, being careful about integer overflow.
+ * Clamp the value to U32_MAX because the ondisk format does not handle
+ * link counts any higher.
+ */
+static inline void
 careful_add(
 	xfs_nlink_t	*nlinkp,
 	int		delta)
 {
 	uint64_t	new_value = (uint64_t)(*nlinkp) + delta;
 
-	if (new_value > U32_MAX) {
-		/*
-		 * We found a link count value that is large enough to overflow
-		 * an incore counter.  Cancel this scrub and let userspace know
-		 * that the check was incomplete.
-		 */
-		return -ECANCELED;
-	}
-
-	*nlinkp = new_value;
-	return 0;
+	*nlinkp = min_t(uint64_t, new_value, U32_MAX);
 }
 
 /* Update incore link count information.  Caller must hold the nlinks lock. */
@@ -108,21 +116,9 @@ xchk_nlinks_update_incore(
 	trace_xchk_nlinks_update_incore(xnc->sc->mp, ino, &nl, parents_delta,
 			backrefs_delta, children_delta);
 
-	if (parents_delta) {
-		error = careful_add(&nl.parents, parents_delta);
-		if (error)
-			return error;
-	}
-	if (backrefs_delta) {
-		error = careful_add(&nl.backrefs, backrefs_delta);
-		if (error)
-			return error;
-	}
-	if (children_delta) {
-		error = careful_add(&nl.children, children_delta);
-		if (error)
-			return error;
-	}
+	careful_add(&nl.parents, parents_delta);
+	careful_add(&nl.backrefs, backrefs_delta);
+	careful_add(&nl.children, children_delta);
 
 	nl.flags |= XCHK_NLINK_WRITTEN;
 	error = xfarray_store(xnc->nlinks, ino, &nl);
@@ -135,6 +131,63 @@ xchk_nlinks_update_incore(
 		error = -ECANCELED;
 	}
 	return error;
+}
+
+/*
+ * Apply a link count change from the regular filesystem into our shadow link
+ * count structure based on a directory update in progress.
+ */
+STATIC int
+xchk_nlinks_live_update(
+	struct notifier_block		*nb,
+	unsigned long			action,
+	void				*data)
+{
+	struct xfs_dir_update_params	*p = data;
+	struct xchk_nlink_ctrs		*xnc;
+	int				error;
+
+	xnc = container_of(nb, struct xchk_nlink_ctrs, hooks.dirent_hook.nb);
+
+	trace_xchk_nlinks_live_update(xnc->sc->mp, p->dp, action, p->ip->i_ino,
+			p->delta, p->name->name, p->name->len);
+
+	/*
+	 * If we've already scanned @dp, update the number of parents that link
+	 * to @ip.  If @ip is a subdirectory, update the number of child links
+	 * going out of @dp.
+	 */
+	if (xchk_iscan_want_live_update(&xnc->collect_iscan, p->dp->i_ino)) {
+		mutex_lock(&xnc->lock);
+		error = xchk_nlinks_update_incore(xnc, p->ip->i_ino, p->delta,
+				0, 0);
+		if (!error && S_ISDIR(VFS_IC(p->ip)->i_mode))
+			error = xchk_nlinks_update_incore(xnc, p->dp->i_ino, 0,
+					0, p->delta);
+		mutex_unlock(&xnc->lock);
+		if (error)
+			goto out_abort;
+	}
+
+	/*
+	 * If @ip is a subdirectory and we've already scanned it, update the
+	 * number of backrefs pointing to @dp.
+	 */
+	if (S_ISDIR(VFS_IC(p->ip)->i_mode) &&
+	    xchk_iscan_want_live_update(&xnc->collect_iscan, p->ip->i_ino)) {
+		mutex_lock(&xnc->lock);
+		error = xchk_nlinks_update_incore(xnc, p->dp->i_ino, 0,
+				p->delta, 0);
+		mutex_unlock(&xnc->lock);
+		if (error)
+			goto out_abort;
+	}
+
+	return NOTIFY_DONE;
+
+out_abort:
+	xchk_iscan_abort(&xnc->collect_iscan);
+	return NOTIFY_DONE;
 }
 
 /* Bump the observed link count for the inode referenced by this entry. */
@@ -216,12 +269,11 @@ xchk_nlinks_collect_dirent(
 	}
 
 	/*
-	 * If this dirent is a forward link to a subdirectory or the dot entry,
-	 * increment the number of child links of dp.
+	 * If this dirent is a forward link to a subdirectory, increment the
+	 * number of child links of dp.
 	 */
-	if (!dotdot && name->type == XFS_DIR3_FT_DIR) {
-		error = xchk_nlinks_update_incore(xnc, dp->i_ino, 0, 0,
-				1);
+	if (!dot && !dotdot && name->type == XFS_DIR3_FT_DIR) {
+		error = xchk_nlinks_update_incore(xnc, dp->i_ino, 0, 0, 1);
 		if (error)
 			goto out_unlock;
 	}
@@ -498,13 +550,13 @@ xchk_nlinks_compare_inode(
 	 * entries in this directory, take advantage of the fact that on a
 	 * consistent ftype=0 filesystem, the number of subdirectory
 	 * backreferences (dotdot entries) pointing towards this directory
-	 * should be one less than the number of subdirectory entries in the
+	 * should be equal to the number of subdirectory entries in the
 	 * directory.
 	 */
 	if (!xfs_has_ftype(sc->mp) && S_ISDIR(VFS_I(ip)->i_mode))
-		obs.children = obs.backrefs + 1;
+		obs.children = obs.backrefs;
 
-	total_links = xchk_nlink_total(&obs);
+	total_links = xchk_nlink_total(ip, &obs);
 	actual_nlink = VFS_I(ip)->i_nlink;
 
 	trace_xchk_nlinks_compare_inode(sc->mp, ip, &obs);
@@ -530,16 +582,11 @@ xchk_nlinks_compare_inode(
 		 * The collection phase ignores directories with zero link
 		 * count, so we ignore them here too.
 		 *
-		 * Linked directories must have at least one child (dot entry).
-		 */
-		if (obs.children < 1)
-			xchk_ino_set_corrupt(sc, ip->i_ino);
-		/*
 		 * The number of subdirectory backreferences (dotdot entries)
-		 * pointing towards this directory should be one less than the
+		 * pointing towards this directory should be equal to the
 		 * number of subdirectory entries in the directory.
 		 */
-		if (obs.children != obs.backrefs + 1)
+		if (obs.children != obs.backrefs)
 			xchk_ino_xref_set_corrupt(sc, ip->i_ino);
 	} else {
 		/*
@@ -560,14 +607,11 @@ xchk_nlinks_compare_inode(
 	if (ip == sc->mp->m_rootip) {
 		/*
 		 * For the root of a directory tree, both the '.' and '..'
-		 * entries should point to the root directory.  The dot entry
-		 * is counted as a child subdirectory (like any directory).
-		 * The dotdot entry is counted as a parent of the root /and/
-		 * a backref of the root directory.
+		 * entries should point to the root directory.  The dotdot
+		 * entry is counted as a parent of the root /and/ a backref of
+		 * the root directory.
 		 */
 		if (obs.parents != 1)
-			xchk_ino_set_corrupt(sc, ip->i_ino);
-		if (obs.children < 1)
 			xchk_ino_set_corrupt(sc, ip->i_ino);
 	} else if (actual_nlink > 0) {
 		/*
@@ -649,7 +693,7 @@ xchk_nlinks_compare_inum(
 	 * If we can't grab the inode, the link count had better be zero.  We
 	 * still hold the AGI to prevent inode allocation/freeing.
 	 */
-	if (xchk_nlink_total(&obs) != 0) {
+	if (xchk_nlink_total(NULL, &obs) != 0) {
 		xchk_ino_set_corrupt(xnc->sc, ino);
 		error = -ECANCELED;
 	}
@@ -763,6 +807,11 @@ xchk_nlinks_teardown_scan(
 {
 	struct xchk_nlink_ctrs	*xnc = priv;
 
+	/* Discourage any hook functions that might be running. */
+	xchk_iscan_abort(&xnc->collect_iscan);
+
+	xfs_dir_hook_del(xnc->sc->mp, &xnc->hooks);
+
 	xfarray_destroy(xnc->nlinks);
 	xnc->nlinks = NULL;
 
@@ -805,6 +854,19 @@ xchk_nlinks_setup_scan(
 	error = xfarray_create(mp, "file link counts",
 			min(XFS_MAXINUMBER + 1, max_inos),
 			sizeof(struct xchk_nlink), &xnc->nlinks);
+	if (error)
+		goto out_teardown;
+
+	/*
+	 * Hook into the directory entry code so that we can capture updates to
+	 * file link counts.  The hook only triggers for inodes that were
+	 * already scanned, and the scanner thread takes each inode's ILOCK,
+	 * which means that any in-progress inode updates will finish before we
+	 * can scan the inode.
+	 */
+	ASSERT(sc->flags & XCHK_FSGATES_DIRENTS);
+	xfs_hook_setup(&xnc->hooks.dirent_hook, xchk_nlinks_live_update);
+	error = xfs_dir_hook_add(mp, &xnc->hooks);
 	if (error)
 		goto out_teardown;
 
