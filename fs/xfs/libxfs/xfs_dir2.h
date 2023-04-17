@@ -303,5 +303,8 @@ int xfs_dir_rename_children(struct xfs_trans *tp, struct xfs_inode *src_dp,
 		const struct xfs_name *target_name,
 		struct xfs_inode *target_ip, unsigned int spaceres,
 		struct xfs_inode *wip);
+int xfs_dir_adopt_child(struct xfs_trans *tp, unsigned int parent_resblks,
+		unsigned int child_resblks, struct xfs_inode *dp,
+		const struct xfs_name *name, struct xfs_inode *ip);
 
 #endif	/* __XFS_DIR2_H__ */
