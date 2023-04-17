@@ -189,7 +189,6 @@ xfs_symlink(
 	error = xfs_dir_create_child(tp, resblks, dp, link_name, ip);
 	if (error)
 		goto out_trans_cancel;
-	xfs_dir_update_hook(dp, ip, 1, link_name);
 
 	/*
 	 * If this is a synchronous mount, make sure that the

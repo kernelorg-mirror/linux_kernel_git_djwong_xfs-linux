@@ -467,13 +467,7 @@ xrep_adoption_commit(
 	if (error)
 		return error;
 
-	error = xrep_orphanage_zap_dcache(adopt);
-	if (error)
-		return error;
-
-	/* Notify dirent hooks that we moved the file to /lost+found */
-	xfs_dir_update_hook(sc->orphanage, sc->ip, 1, xname);
-	return 0;
+	return xrep_orphanage_zap_dcache(adopt);
 }
 
 /* Release the orphanage. */
