@@ -311,5 +311,8 @@ int xfs_dir_remove_child(struct xfs_trans *tp, unsigned int resblks,
 
 int xfs_dir_exchange_children(struct xfs_trans *tp, struct xfs_dir_update *i1,
 		struct xfs_dir_update *i2, unsigned int spaceres);
+int xfs_dir_rename_children(struct xfs_trans *tp, struct xfs_dir_update *src,
+		struct xfs_dir_update *tgt, unsigned int spaceres,
+		struct xfs_inode *wip, struct xfs_parent_defer *wip_pptr);
 
 #endif	/* __XFS_DIR2_H__ */
