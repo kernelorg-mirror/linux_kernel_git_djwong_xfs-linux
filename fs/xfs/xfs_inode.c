@@ -2280,6 +2280,16 @@ xfs_rename(
 	struct xfs_inode		*target_ip,
 	unsigned int			flags)
 {
+	struct xfs_dir_update		src = {
+		.dp			= src_dp,
+		.name			= src_name,
+		.ip			= src_ip,
+	};
+	struct xfs_dir_update		tgt = {
+		.dp			= target_dp,
+		.name			= target_name,
+		.ip			= target_ip,
+	};
 	struct xfs_mount		*mp = src_dp->i_mount;
 	struct xfs_trans		*tp;
 	struct xfs_inode		*wip = NULL;	/* whiteout inode */
@@ -2292,8 +2302,6 @@ xfs_rename(
 	int				spaceres;
 	bool				retried = false;
 	int				error, nospace_error = 0;
-	struct xfs_parent_defer		*src_ip_pptr = NULL;
-	struct xfs_parent_defer		*tgt_ip_pptr = NULL;
 	struct xfs_parent_defer		*wip_pptr = NULL;
 
 	trace_xfs_rename(src_dp, target_dp, src_name, target_name);
@@ -2319,7 +2327,7 @@ xfs_rename(
 	xfs_sort_for_rename(src_dp, target_dp, src_ip, target_ip, wip,
 				inodes, &num_inodes);
 
-	error = xfs_parent_start(mp, &src_ip_pptr);
+	error = xfs_parent_start(mp, &src.parent);
 	if (error)
 		goto out_release_wip;
 
@@ -2330,7 +2338,7 @@ xfs_rename(
 	}
 
 	if (target_ip) {
-		error = xfs_parent_start_locked(mp, &tgt_ip_pptr);
+		error = xfs_parent_start_locked(mp, &tgt.parent);
 		if (error)
 			goto out_wip_pptr;
 	}
@@ -2353,7 +2361,7 @@ retry:
 	 * We don't allow reservationless renaming when parent pointers are
 	 * enabled because we can't back out if the xattrs must grow.
 	 */
-	if (src_ip_pptr && nospace_error) {
+	if (src.parent && nospace_error) {
 		error = nospace_error;
 		xfs_trans_cancel(tp);
 		goto out_tgt_ip_pptr;
@@ -2402,8 +2410,8 @@ retry:
 	/* RENAME_EXCHANGE is unique from here on. */
 	if (flags & RENAME_EXCHANGE) {
 		error = xfs_cross_rename(tp, src_dp, src_name, src_ip,
-				src_ip_pptr, target_dp, target_name, target_ip,
-				tgt_ip_pptr, spaceres);
+				src.parent, target_dp, target_name, target_ip,
+				tgt.parent, spaceres);
 		nospace_error = 0;
 		goto out_unlock;
 	}
@@ -2438,36 +2446,9 @@ retry:
 	 * We don't allow quotaless renaming when parent pointers are enabled
 	 * because we can't back out if the xattrs must grow.
 	 */
-	if (src_ip_pptr && nospace_error) {
+	if (src.parent && nospace_error) {
 		error = nospace_error;
 		goto out_trans_cancel;
-	}
-
-	/*
-	 * Check for expected errors before we dirty the transaction
-	 * so we can return an error without a transaction abort.
-	 */
-	if (target_ip == NULL) {
-		/*
-		 * If there's no space reservation, check the entry will
-		 * fit before actually inserting it.
-		 */
-		if (!spaceres) {
-			error = xfs_dir_canenter(tp, target_dp, target_name);
-			if (error)
-				goto out_trans_cancel;
-		}
-	} else {
-		/*
-		 * If target exists and it's a directory, check that whether
-		 * it can be destroyed.
-		 */
-		if (S_ISDIR(VFS_I(target_ip)->i_mode) &&
-		    (!xfs_dir_isempty(target_ip) ||
-		     (VFS_I(target_ip)->i_nlink > 2))) {
-			error = -EEXIST;
-			goto out_trans_cancel;
-		}
 	}
 
 	/*
@@ -2496,169 +2477,19 @@ retry:
 		}
 	}
 
-	/*
-	 * Directory entry creation below may acquire the AGF. Remove
-	 * the whiteout from the unlinked list first to preserve correct
-	 * AGI/AGF locking order. This dirties the transaction so failures
-	 * after this point will abort and log recovery will clean up the
-	 * mess.
-	 *
-	 * For whiteouts, we need to bump the link count on the whiteout
-	 * inode. After this point, we have a real link, clear the tmpfile
-	 * state flag from the inode so it doesn't accidentally get misused
-	 * in future.
-	 */
-	if (wip) {
-		struct xfs_perag	*pag;
-
-		ASSERT(VFS_I(wip)->i_nlink == 0);
-
-		pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, wip->i_ino));
-		error = xfs_iunlink_remove(tp, pag, wip);
-		xfs_perag_put(pag);
-		if (error)
-			goto out_trans_cancel;
-
-		xfs_bumplink(tp, wip);
-		VFS_I(wip)->i_state &= ~I_LINKABLE;
-	}
-
-	/*
-	 * Set up the target.
-	 */
-	if (target_ip == NULL) {
-		/*
-		 * If target does not exist and the rename crosses
-		 * directories, adjust the target directory link count
-		 * to account for the ".." reference from the new entry.
-		 */
-		error = xfs_dir_createname(tp, target_dp, target_name,
-					   src_ip->i_ino, spaceres);
-		if (error)
-			goto out_trans_cancel;
-
-		xfs_trans_ichgtime(tp, target_dp,
-					XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
-
-		if (new_parent && src_is_directory) {
-			xfs_bumplink(tp, target_dp);
-		}
-	} else { /* target_ip != NULL */
-		/*
-		 * Link the source inode under the target name.
-		 * If the source inode is a directory and we are moving
-		 * it across directories, its ".." entry will be
-		 * inconsistent until we replace that down below.
-		 *
-		 * In case there is already an entry with the same
-		 * name at the destination directory, remove it first.
-		 */
-		error = xfs_dir_replace(tp, target_dp, target_name,
-					src_ip->i_ino, spaceres);
-		if (error)
-			goto out_trans_cancel;
-
-		xfs_trans_ichgtime(tp, target_dp,
-					XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
-
-		/*
-		 * Decrement the link count on the target since the target
-		 * dir no longer points to it.
-		 */
-		error = xfs_droplink(tp, target_ip);
-		if (error)
-			goto out_trans_cancel;
-
-		if (src_is_directory) {
-			/*
-			 * Drop the link from the old "." entry.
-			 */
-			error = xfs_droplink(tp, target_ip);
-			if (error)
-				goto out_trans_cancel;
-		}
-	} /* target_ip != NULL */
-
-	/*
-	 * Remove the source.
-	 */
-	if (new_parent && src_is_directory) {
-		/*
-		 * Rewrite the ".." entry to point to the new
-		 * directory.
-		 */
-		error = xfs_dir_replace(tp, src_ip, &xfs_name_dotdot,
-					target_dp->i_ino, spaceres);
-		ASSERT(error != -EEXIST);
-		if (error)
-			goto out_trans_cancel;
-	}
-
-	/*
-	 * We always want to hit the ctime on the source inode.
-	 *
-	 * This isn't strictly required by the standards since the source
-	 * inode isn't really being changed, but old unix file systems did
-	 * it and some incremental backup programs won't work without it.
-	 */
-	xfs_trans_ichgtime(tp, src_ip, XFS_ICHGTIME_CHG);
-	xfs_trans_log_inode(tp, src_ip, XFS_ILOG_CORE);
-
-	/*
-	 * Adjust the link count on src_dp.  This is necessary when
-	 * renaming a directory, either within one parent when
-	 * the target existed, or across two parent directories.
-	 */
-	if (src_is_directory && (new_parent || target_ip != NULL)) {
-
-		/*
-		 * Decrement link count on src_directory since the
-		 * entry that's moved no longer points to it.
-		 */
-		error = xfs_droplink(tp, src_dp);
-		if (error)
-			goto out_trans_cancel;
-	}
-
-	/*
-	 * For whiteouts, we only need to update the source dirent with the
-	 * inode number of the whiteout inode rather than removing it
-	 * altogether.
-	 */
-	if (wip)
-		error = xfs_dir_replace(tp, src_dp, src_name, wip->i_ino,
-					spaceres);
-	else
-		error = xfs_dir_removename(tp, src_dp, src_name, src_ip->i_ino,
-					   spaceres);
-
+	error = xfs_dir_rename_children(tp, &src, &tgt, spaceres, wip,
+			wip_pptr);
 	if (error)
 		goto out_trans_cancel;
 
-	if (wip_pptr) {
-		error = xfs_parent_add(tp, wip_pptr, src_dp, src_name, wip);
-		if (error)
-			goto out_trans_cancel;
+	if (wip) {
+		/*
+		 * Now we have a real link, clear the "I'm a tmpfile" state
+		 * flag from the inode so it doesn't accidentally get misused in
+		 * future.
+		 */
+		VFS_I(wip)->i_state &= ~I_LINKABLE;
 	}
-
-	if (src_ip_pptr) {
-		error = xfs_parent_replace(tp, src_ip_pptr, src_dp, src_name,
-				target_dp, target_name, src_ip);
-		if (error)
-			goto out_trans_cancel;
-	}
-
-	if (tgt_ip_pptr) {
-		error = xfs_parent_remove(tp, tgt_ip_pptr, target_dp,
-				target_name, target_ip);
-		if (error)
-			goto out_trans_cancel;
-	}
-
-	xfs_trans_ichgtime(tp, src_dp, XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
-	xfs_trans_log_inode(tp, src_dp, XFS_ILOG_CORE);
-	if (new_parent)
-		xfs_trans_log_inode(tp, target_dp, XFS_ILOG_CORE);
 
 	/*
 	 * Inform our hook clients that we've finished a rename operation as
@@ -2684,11 +2515,11 @@ out_trans_cancel:
 out_unlock:
 	xfs_iunlock_rename(inodes, num_inodes);
 out_tgt_ip_pptr:
-	xfs_parent_finish(mp, tgt_ip_pptr);
+	xfs_parent_finish(mp, tgt.parent);
 out_wip_pptr:
 	xfs_parent_finish(mp, wip_pptr);
 out_src_ip_pptr:
-	xfs_parent_finish(mp, src_ip_pptr);
+	xfs_parent_finish(mp, src.parent);
 out_release_wip:
 	if (wip)
 		xfs_irele(wip);
