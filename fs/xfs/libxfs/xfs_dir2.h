@@ -284,6 +284,25 @@ static inline unsigned char xfs_ascii_ci_xfrm(unsigned char c)
 	return c;
 }
 
+struct xfs_dir_update_params {
+	const struct xfs_inode	*dp;
+	const struct xfs_inode	*ip;
+	const struct xfs_name	*name;
+	int			delta;
+};
+
+#ifdef CONFIG_XFS_LIVE_HOOKS
+struct xfs_dir_hook {
+	struct xfs_hook		delta_hook;
+};
+
+void xfs_dir_hook_disable(void);
+void xfs_dir_hook_enable(void);
+
+int xfs_dir_hook_add(struct xfs_mount *mp, struct xfs_dir_hook *hook);
+void xfs_dir_hook_del(struct xfs_mount *mp, struct xfs_dir_hook *hook);
+#endif /* CONFIG_XFS_LIVE_HOOKS */
+
 int xfs_dir_create_child(struct xfs_trans *tp, unsigned int resblks,
 		struct xfs_inode *dp, const struct xfs_name *name,
 		struct xfs_inode *ip);
