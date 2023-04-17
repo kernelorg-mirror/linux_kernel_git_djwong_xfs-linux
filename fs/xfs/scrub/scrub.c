@@ -22,6 +22,7 @@
 #include "xfs_xchgrange.h"
 #include "xfs_swapext.h"
 #include "xfs_icache.h"
+#include "xfs_dir2.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
