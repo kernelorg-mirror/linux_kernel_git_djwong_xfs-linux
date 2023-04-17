@@ -501,8 +501,12 @@ xrep_adoption_commit(
 	struct xrep_adoption	*adopt)
 {
 	struct xfs_scrub	*sc = adopt->sc;
-	struct xfs_name		*xname = &adopt->xname;
-	bool			isdir = S_ISDIR(VFS_I(sc->ip)->i_mode);
+	struct xfs_dir_update	du = {
+		.dp		= sc->orphanage,
+		.name		= &adopt->xname,
+		.ip		= sc->ip,
+		.parent		= adopt->parent,
+	};
 	int			error;
 
 	trace_xrep_adoption_commit(sc->orphanage, &adopt->xname, sc->ip->i_ino);
@@ -511,43 +515,17 @@ xrep_adoption_commit(
 	if (error)
 		goto out_parent;
 
-	/*
-	 * Create the new name in the orphanage, and bump the link count of
-	 * the orphanage if we just added a directory.
-	 */
-	error = xfs_dir_createname(sc->tp, sc->orphanage, xname, sc->ip->i_ino,
-			adopt->orphanage_blkres);
+	error = xfs_dir_adopt_child(sc->tp, adopt->orphanage_blkres,
+			adopt->child_blkres, &du);
 	if (error)
 		goto out_parent;
-
-	xfs_trans_ichgtime(sc->tp, sc->orphanage,
-			XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
-	if (isdir)
-		xfs_bumplink(sc->tp, sc->orphanage);
-	xfs_trans_log_inode(sc->tp, sc->orphanage, XFS_ILOG_CORE);
-
-	/* Replace the dotdot entry in the child directory. */
-	if (isdir) {
-		error = xfs_dir_replace(sc->tp, sc->ip, &xfs_name_dotdot,
-				sc->orphanage->i_ino, adopt->child_blkres);
-		if (error)
-			goto out_parent;
-	}
-
-	/* Add a parent pointer from the file back to the lost+found. */
-	if (adopt->parent) {
-		error = xfs_parent_add(sc->tp, adopt->parent, sc->orphanage,
-				xname, sc->ip);
-		if (error)
-			goto out_parent;
-	}
 
 	/*
 	 * Notify dirent hooks that we moved the file to /lost+found, and
 	 * finish all the deferred work so that we know the adoption is fully
 	 * recorded in the log.
 	 */
-	xfs_dir_update_hook(sc->orphanage, sc->ip, 1, xname);
+	xfs_dir_update_hook(sc->orphanage, sc->ip, 1, du.name);
 	error = xrep_defer_finish(sc);
 	if (error)
 		goto out_parent;
