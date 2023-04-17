@@ -22,6 +22,12 @@ struct xchk_nlink_ctrs {
 	 */
 	struct xchk_iscan	collect_iscan;
 	struct xchk_iscan	compare_iscan;
+
+	/*
+	 * Hook into directory updates so that we can receive live updates
+	 * from other writer threads.
+	 */
+	struct xfs_dir_hook	hooks;
 };
 
 /*
@@ -80,10 +86,13 @@ struct xchk_nlink {
 
 /* Compute total link count, using large enough variables to detect overflow. */
 static inline uint64_t
-xchk_nlink_total(const struct xchk_nlink *live)
+xchk_nlink_total(struct xfs_inode *ip, const struct xchk_nlink *live)
 {
 	uint64_t	ret = live->parents;
 
+	/* Add one link count for the dot entry of any linked directory. */
+	if (ip && S_ISDIR(VFS_I(ip)->i_mode) && VFS_I(ip)->i_nlink)
+		ret++;
 	return ret + live->children;
 }
 
