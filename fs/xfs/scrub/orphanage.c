@@ -454,7 +454,6 @@ xrep_adoption_commit(
 {
 	struct xfs_scrub	*sc = adopt->sc;
 	struct xfs_name		*xname = &adopt->xname;
-	bool			isdir = S_ISDIR(VFS_I(sc->ip)->i_mode);
 	int			error;
 
 	trace_xrep_adoption_commit(sc->orphanage, &adopt->xname, sc->ip->i_ino);
@@ -463,28 +462,10 @@ xrep_adoption_commit(
 	if (error)
 		return error;
 
-	/*
-	 * Create the new name in the orphanage, and bump the link count of
-	 * the orphanage if we just added a directory.
-	 */
-	error = xfs_dir_createname(sc->tp, sc->orphanage, xname, sc->ip->i_ino,
-			adopt->orphanage_blkres);
+	error = xfs_dir_adopt_child(sc->tp, adopt->orphanage_blkres,
+			adopt->child_blkres, sc->orphanage, xname, sc->ip);
 	if (error)
 		return error;
-
-	xfs_trans_ichgtime(sc->tp, sc->orphanage,
-			XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
-	if (isdir)
-		xfs_bumplink(sc->tp, sc->orphanage);
-	xfs_trans_log_inode(sc->tp, sc->orphanage, XFS_ILOG_CORE);
-
-	/* Replace the dotdot entry in the child directory. */
-	if (isdir) {
-		error = xfs_dir_replace(sc->tp, sc->ip, &xfs_name_dotdot,
-				sc->orphanage->i_ino, adopt->child_blkres);
-		if (error)
-			return error;
-	}
 
 	error = xrep_orphanage_zap_dcache(adopt);
 	if (error)
