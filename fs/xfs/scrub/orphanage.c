@@ -521,11 +521,9 @@ xrep_adoption_commit(
 		goto out_parent;
 
 	/*
-	 * Notify dirent hooks that we moved the file to /lost+found, and
-	 * finish all the deferred work so that we know the adoption is fully
+	 * Finish all the deferred work so that we know the adoption is fully
 	 * recorded in the log.
 	 */
-	xfs_dir_update_hook(sc->orphanage, sc->ip, 1, du.name);
 	error = xrep_defer_finish(sc);
 	if (error)
 		goto out_parent;
