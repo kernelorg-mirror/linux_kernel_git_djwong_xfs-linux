@@ -1337,3 +1337,51 @@ xfs_dir_rename_children(
 
 	return 0;
 }
+
+/*
+ * Add a lost child @ip to the given directory @dp with the given name.
+ * Callers must hold the ILOCK of both files.  This should only be called by
+ * repair tools.
+ */
+int
+xfs_dir_adopt_child(
+	struct xfs_trans	*tp,
+	unsigned int		parent_resblks,
+	unsigned int		child_resblks,
+	struct xfs_dir_update	*du)
+{
+	struct xfs_inode	*dp = du->dp;
+	const struct xfs_name	*name = du->name;
+	struct xfs_inode	*ip = du->ip;
+	struct xfs_parent_defer	*parent = du->parent;
+	bool			isdir = S_ISDIR(VFS_I(ip)->i_mode);
+	int			error;
+
+	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL));
+	ASSERT(xfs_isilocked(dp, XFS_ILOCK_EXCL));
+
+	error = xfs_dir_createname(tp, dp, name, ip->i_ino, parent_resblks);
+	if (error)
+		return error;
+
+	xfs_trans_ichgtime(tp, dp, XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
+	if (isdir)
+		xfs_bumplink(tp, dp);
+	xfs_trans_log_inode(tp, dp, XFS_ILOG_CORE);
+
+	/* Replace the dotdot entry in the child directory. */
+	if (isdir) {
+		error = xfs_dir_replace(tp, ip, &xfs_name_dotdot, dp->i_ino,
+				child_resblks);
+		if (error)
+			return error;
+	}
+
+	if (parent) {
+		error = xfs_parent_add(tp, parent, dp, name, ip);
+		if (error)
+			return error;
+	}
+
+	return 0;
+}

@@ -308,6 +308,8 @@ int xfs_dir_add_child(struct xfs_trans *tp, unsigned int resblks,
 		struct xfs_dir_update *du);
 int xfs_dir_remove_child(struct xfs_trans *tp, unsigned int resblks,
 		struct xfs_dir_update *du);
+int xfs_dir_adopt_child(struct xfs_trans *tp, unsigned int parent_resblks,
+		unsigned int child_resblks, struct xfs_dir_update *du);
 
 int xfs_dir_exchange_children(struct xfs_trans *tp, struct xfs_dir_update *i1,
 		struct xfs_dir_update *i2, unsigned int spaceres);
