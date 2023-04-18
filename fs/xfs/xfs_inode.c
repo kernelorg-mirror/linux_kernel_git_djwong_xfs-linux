@@ -1801,7 +1801,7 @@ out_iflags_unlock:
  * inodes that are in memory - they all must be marked stale and attached to
  * the cluster buffer.
  */
-static int
+int
 xfs_ifree_cluster(
 	struct xfs_trans	*tp,
 	struct xfs_perag	*pag,
