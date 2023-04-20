@@ -1762,6 +1762,24 @@ int freeze_super(struct super_block *sb)
 }
 EXPORT_SYMBOL(freeze_super);
 
+/**
+ * freeze_super_excl - lock the filesystem exclusively and force it into a
+ * consistent state.
+ * @sb: the super to lock
+ * @cookie: magic cookie to associate with this freeze so that only the caller
+ * can thaw the filesystem
+ *
+ * Syncs the super to make sure the filesystem is consistent and calls the fs's
+ * freeze_fs.  Subsequent calls to this without first thawing the fs will
+ * return -EBUSY.  The filesystem must not already be frozen, and can only be
+ * thawed by passing the same cookie to thaw_super_excl.
+ */
+int freeze_super_excl(struct super_block *sb, unsigned long cookie)
+{
+	return __freeze_super(sb, cookie);
+}
+EXPORT_SYMBOL(freeze_super_excl);
+
 static int thaw_super_locked(struct super_block *sb, unsigned long cookie)
 {
 	int error;
@@ -1812,6 +1830,21 @@ int thaw_super(struct super_block *sb)
 	return thaw_super_locked(sb, USERSPACE_FREEZE_COOKIE);
 }
 EXPORT_SYMBOL(thaw_super);
+
+/**
+ * thaw_super_excl -- unfreeze filesystem
+ * @sb: the super to thaw
+ * @cookie: magic cookie passed to freeze_super_excl
+ *
+ * Releases an exclusive freeze on a filesystem and marks it writeable again
+ * after freeze_super().
+ */
+int thaw_super_excl(struct super_block *sb, unsigned long cookie)
+{
+	down_write(&sb->s_umount);
+	return thaw_super_locked(sb, cookie);
+}
+EXPORT_SYMBOL(thaw_super_excl);
 
 /*
  * Create workqueue for deferred direct IO completions. We allocate the
