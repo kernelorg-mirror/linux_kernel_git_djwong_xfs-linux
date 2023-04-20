@@ -39,7 +39,10 @@
 #include <uapi/linux/mount.h>
 #include "internal.h"
 
-static int thaw_super_locked(struct super_block *sb);
+static int thaw_super_locked(struct super_block *sb, unsigned long cookie);
+
+/* Freeze cookie denoting that userspace froze the filesystem. */
+#define USERSPACE_FREEZE_COOKIE	((unsigned long)freeze_super)
 
 static LIST_HEAD(super_blocks);
 static DEFINE_SPINLOCK(sb_lock);
@@ -1027,7 +1030,7 @@ static void do_thaw_all_callback(struct super_block *sb)
 	down_write(&sb->s_umount);
 	if (sb->s_root && sb->s_flags & SB_BORN) {
 		emergency_thaw_bdev(sb);
-		thaw_super_locked(sb);
+		thaw_super_locked(sb, USERSPACE_FREEZE_COOKIE);
 	} else {
 		up_write(&sb->s_umount);
 	}
@@ -1636,12 +1639,17 @@ static void sb_freeze_unlock(struct super_block *sb, int level)
 }
 
 /**
- * freeze_super - lock the filesystem and force it into a consistent state
+ * __freeze_super - lock the filesystem and force it into a consistent state
  * @sb: the super to lock
+ * @cookie: magic value telling us who tried to freeze the fs
  *
  * Syncs the super to make sure the filesystem is consistent and calls the fs's
  * freeze_fs.  Subsequent calls to this without first thawing the fs will return
  * -EBUSY.
+ *
+ * If a filesystem freeze is initiated, the sb->s_writers.freeze_cookie value
+ * is set to the @cookie.  The filesystem can only be thawed with the same
+ * cookie value.
  *
  * During this function, sb->s_writers.frozen goes through these values:
  *
@@ -1668,7 +1676,7 @@ static void sb_freeze_unlock(struct super_block *sb, int level)
  *
  * sb->s_writers.frozen is protected by sb->s_umount.
  */
-int freeze_super(struct super_block *sb)
+static int __freeze_super(struct super_block *sb, unsigned long cookie)
 {
 	int ret;
 
@@ -1684,6 +1692,7 @@ int freeze_super(struct super_block *sb)
 		return 0;	/* sic - it's "nothing to do" */
 	}
 
+	sb->s_writers.freeze_cookie = cookie;
 	if (sb_rdonly(sb)) {
 		/* Nothing to do really... */
 		sb->s_writers.frozen = SB_FREEZE_COMPLETE;
@@ -1704,6 +1713,7 @@ int freeze_super(struct super_block *sb)
 	/* All writers are done so after syncing there won't be dirty data */
 	ret = sync_filesystem(sb);
 	if (ret) {
+		sb->s_writers.freeze_cookie = 0;
 		sb->s_writers.frozen = SB_UNFROZEN;
 		sb_freeze_unlock(sb, SB_FREEZE_PAGEFAULT);
 		wake_up(&sb->s_writers.wait_unfrozen);
@@ -1720,6 +1730,7 @@ int freeze_super(struct super_block *sb)
 		if (ret) {
 			printk(KERN_ERR
 				"VFS:Filesystem freeze failed\n");
+			sb->s_writers.freeze_cookie = 0;
 			sb->s_writers.frozen = SB_UNFROZEN;
 			sb_freeze_unlock(sb, SB_FREEZE_FS);
 			wake_up(&sb->s_writers.wait_unfrozen);
@@ -1736,18 +1747,33 @@ int freeze_super(struct super_block *sb)
 	up_write(&sb->s_umount);
 	return 0;
 }
+
+/*
+ * freeze_super - lock the filesystem and force it into a consistent state
+ * @sb: the super to lock
+ *
+ * Syncs the super to make sure the filesystem is consistent and calls the fs's
+ * freeze_fs.  Subsequent calls to this without first thawing the fs will return
+ * -EBUSY.  See the comment for __freeze_super for more information.
+ */
+int freeze_super(struct super_block *sb)
+{
+	return __freeze_super(sb, USERSPACE_FREEZE_COOKIE);
+}
 EXPORT_SYMBOL(freeze_super);
 
-static int thaw_super_locked(struct super_block *sb)
+static int thaw_super_locked(struct super_block *sb, unsigned long cookie)
 {
 	int error;
 
-	if (sb->s_writers.frozen != SB_FREEZE_COMPLETE) {
+	if (sb->s_writers.frozen != SB_FREEZE_COMPLETE ||
+	    sb->s_writers.freeze_cookie != cookie) {
 		up_write(&sb->s_umount);
 		return -EINVAL;
 	}
 
 	if (sb_rdonly(sb)) {
+		sb->s_writers.freeze_cookie = 0;
 		sb->s_writers.frozen = SB_UNFROZEN;
 		goto out;
 	}
@@ -1765,6 +1791,7 @@ static int thaw_super_locked(struct super_block *sb)
 		}
 	}
 
+	sb->s_writers.freeze_cookie = 0;
 	sb->s_writers.frozen = SB_UNFROZEN;
 	sb_freeze_unlock(sb, SB_FREEZE_FS);
 out:
@@ -1782,7 +1809,7 @@ out:
 int thaw_super(struct super_block *sb)
 {
 	down_write(&sb->s_umount);
-	return thaw_super_locked(sb);
+	return thaw_super_locked(sb, USERSPACE_FREEZE_COOKIE);
 }
 EXPORT_SYMBOL(thaw_super);
 
