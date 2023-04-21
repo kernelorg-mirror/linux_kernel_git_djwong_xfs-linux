@@ -916,6 +916,15 @@ xfs_fs_freeze(
 	int			ret;
 
 	/*
+	 * Online fsck freezes the filesystem to pause writer threads and
+	 * background garbage collection so that the free space counters do not
+	 * change.  The gc threads are already paused, so return without
+	 * changing the space reservations or flushing the log.
+	 */
+	if (sb->s_writers.freeze_cookie == XFS_FREEZE_SCRUB_COOKIE(mp))
+		return 0;
+
+	/*
 	 * The filesystem is now frozen far enough that memory reclaim
 	 * cannot safely operate on the filesystem. Hence we need to
 	 * set a GFP_NOFS context here to avoid recursion deadlocks.
@@ -946,8 +955,15 @@ xfs_fs_unfreeze(
 {
 	struct xfs_mount	*mp = XFS_M(sb);
 
-	xfs_restore_resvblks(mp);
-	xfs_log_work_queue(mp);
+	/*
+	 * Online fsck froze the filesystem to pause writer threads to check
+	 * the free space counters.  We didn't pause the log or touch the
+	 * reserve pool, so we only need to reactivate the gc threads.
+	 */
+	if (sb->s_writers.freeze_cookie != XFS_FREEZE_SCRUB_COOKIE(mp)) {
+		xfs_restore_resvblks(mp);
+		xfs_log_work_queue(mp);
+	}
 
 	/*
 	 * Don't reactivate the inodegc worker on a readonly filesystem because
