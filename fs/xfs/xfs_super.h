@@ -100,4 +100,6 @@ extern struct workqueue_struct *xfs_discard_wq;
 
 #define XFS_M(sb)		((struct xfs_mount *)((sb)->s_fs_info))
 
+#define XFS_FREEZE_SCRUB_COOKIE(mp)	((unsigned long)(mp) | 1)
+
 #endif	/* __XFS_SUPER_H__ */
