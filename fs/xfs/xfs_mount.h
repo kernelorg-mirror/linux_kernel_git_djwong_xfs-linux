@@ -66,6 +66,9 @@ struct xfs_inodegc {
 	/* approximate count of inodes in the list */
 	unsigned int		items;
 	unsigned int		shrinker_hits;
+#ifdef DEBUG
+	unsigned int		cpu;
+#endif
 };
 
 /*
