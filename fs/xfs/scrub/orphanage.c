@@ -262,7 +262,7 @@ xrep_adoption_init(
 	unsigned int		child_blkres = 0;
 
 	adopt->sc = sc;
-	adopt->orphanage_blkres = XFS_LINK_SPACE_RES(mp, MAXNAMELEN);
+	adopt->orphanage_blkres = xfs_link_space_res(mp, MAXNAMELEN);
 	if (S_ISDIR(VFS_I(sc->ip)->i_mode))
 		child_blkres = XFS_RENAME_SPACE_RES(sc->mp,
 							xfs_name_dotdot.len);
