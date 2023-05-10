@@ -27,6 +27,7 @@
 #include "xfs_error.h"
 #include "xfs_log_priv.h"
 #include "xfs_log_recover.h"
+#include "xfs_parent.h"
 
 struct kmem_cache		*xfs_attri_cache;
 struct kmem_cache		*xfs_attrd_cache;
@@ -647,7 +648,8 @@ xfs_attri_item_recover(
 	 */
 	attrp = &attrip->attri_format;
 	if (!xfs_attri_validate(mp, attrp) ||
-	    !xfs_attr_namecheck(nv->name.i_addr, nv->name.i_len))
+	    !xfs_attr_namecheck(mp, nv->name.i_addr, nv->name.i_len,
+				attrp->alfi_attr_filter))
 		return -EFSCORRUPTED;
 
 	error = xlog_recover_iget(mp,  attrp->alfi_ino, &ip);
@@ -900,7 +902,8 @@ xlog_recover_attri_commit_pass2(
 	}
 
 	attr_name = item->ri_buf[i].i_addr;
-	if (!xfs_attr_namecheck(attr_name, name_len)) {
+	if (!xfs_attr_namecheck(mp, attr_name, name_len,
+				attri_formatp->alfi_attr_filter)) {
 		XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 				attri_formatp, len);
 		return -EFSCORRUPTED;
@@ -917,7 +920,8 @@ xlog_recover_attri_commit_pass2(
 		}
 
 		attr_new_name = item->ri_buf[i].i_addr;
-		if (!xfs_attr_namecheck(attr_new_name, new_name_len)) {
+		if (!xfs_attr_namecheck(mp, attr_new_name, new_name_len,
+					attri_formatp->alfi_attr_filter)) {
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 					item->ri_buf[i].i_addr,
 					item->ri_buf[i].i_len);
@@ -935,6 +939,13 @@ xlog_recover_attri_commit_pass2(
 		}
 
 		attr_value = item->ri_buf[i].i_addr;
+		if ((attri_formatp->alfi_attr_filter & XFS_ATTR_PARENT) &&
+		    !xfs_parent_valuecheck(mp, attr_value, value_len)) {
+			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
+					item->ri_buf[i].i_addr,
+					item->ri_buf[i].i_len);
+			return -EFSCORRUPTED;
+		}
 		i++;
 	}
 
@@ -947,6 +958,13 @@ xlog_recover_attri_commit_pass2(
 		}
 
 		attr_new_value = item->ri_buf[i].i_addr;
+		if ((attri_formatp->alfi_attr_filter & XFS_ATTR_PARENT) &&
+		    !xfs_parent_valuecheck(mp, attr_new_value, new_value_len)) {
+			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
+					item->ri_buf[i].i_addr,
+					item->ri_buf[i].i_len);
+			return -EFSCORRUPTED;
+		}
 		i++;
 	}
 
