@@ -1249,8 +1249,12 @@ xchk_metadata_inode_forks(
 		return 0;
 	}
 
-	/* They also should never have extended attributes. */
-	if (xfs_inode_hasattr(sc->ip)) {
+	/*
+	 * Metadata files can only have extended attributes if parent pointers
+	 * and the metadata directory tree are enabled.
+	 */
+	if (xfs_inode_hasattr(sc->ip) &&
+	    !(xfs_has_parent(sc->mp) && xfs_has_metadir(sc->mp))) {
 		xchk_ino_set_corrupt(sc, sc->ip->i_ino);
 		return 0;
 	}
