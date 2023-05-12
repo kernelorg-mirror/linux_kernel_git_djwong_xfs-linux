@@ -47,6 +47,8 @@ struct xrep_adoption {
 
 	struct xfs_scrub	*sc;
 
+	struct xfs_parent_defer	*parent;
+
 	/* Block reservations for orphanage and child (if directory). */
 	unsigned int		orphanage_blkres;
 	unsigned int		child_blkres;
