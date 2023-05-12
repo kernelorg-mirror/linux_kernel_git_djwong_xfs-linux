@@ -21,6 +21,9 @@
 #include "xfs_rmap.h"
 #include "xfs_xchgrange.h"
 #include "xfs_swapext.h"
+#include "xfs_da_format.h"
+#include "xfs_da_btree.h"
+#include "xfs_xattr.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -176,6 +179,9 @@ xchk_fsgates_disable(
 
 	if (sc->flags & XREP_FSGATES_ATOMIC_XCHG)
 		xfs_xchg_range_rele_log_assist(sc->mp);
+
+	if (sc->flags & XREP_FSGATES_LARP)
+		xfs_attr_rele_log_assist(sc->mp);
 
 	sc->flags &= ~FSGATES_MASK;
 }

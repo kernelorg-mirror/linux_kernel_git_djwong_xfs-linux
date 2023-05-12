@@ -19,6 +19,10 @@
 #include "xfs_icache.h"
 #include "xfs_bmap.h"
 #include "xfs_bmap_btree.h"
+#include "xfs_parent.h"
+#include "xfs_da_format.h"
+#include "xfs_da_btree.h"
+#include "xfs_xattr.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/repair.h"
@@ -95,6 +99,31 @@ out_dqrele:
 	xfs_qm_dqrele(gdqp);
 	xfs_qm_dqrele(pdqp);
 	return error;
+}
+
+/*
+ * Enable logged extended attributes for parent pointers.  This must get done
+ * before we create transactions and start making changes.
+ */
+STATIC int
+xrep_adoption_grab_log_assist(
+	struct xfs_scrub	*sc)
+{
+	int			error;
+
+	if (!xfs_has_parent(sc->mp))
+		return 0;
+
+	ASSERT(!(sc->flags & XREP_FSGATES_LARP));
+
+	error = xfs_attr_grab_log_assist(sc->mp);
+	if (error)
+		return error;
+
+	trace_xchk_fsgates_enable(sc, XREP_FSGATES_LARP);
+
+	sc->flags |= XREP_FSGATES_LARP;
+	return 0;
 }
 
 #define ORPHANAGE	"lost+found"
@@ -188,6 +217,12 @@ out_unlock_root:
 out_dput_root:
 	dput(root_dentry);
 out:
+	/*
+	 * Turn on whatever log features are required for an adoption to be
+	 * committed correctly.
+	 */
+	if (!error)
+		error = xrep_adoption_grab_log_assist(sc);
 	return error;
 }
 
@@ -267,6 +302,14 @@ xrep_adoption_init(
 		child_blkres = xfs_rename_space_res(mp, 0, false,
 						xfs_name_dotdot.len, false);
 	adopt->child_blkres = child_blkres;
+
+	if (xfs_has_parent(mp)) {
+		ASSERT(sc->flags & XREP_FSGATES_LARP);
+		return xfs_parent_start_locked(mp, &adopt->parent);
+	} else {
+		adopt->parent = NULL;
+	}
+
 	return 0;
 }
 
@@ -466,7 +509,7 @@ xrep_adoption_commit(
 
 	error = xrep_orphanage_check_dcache(adopt);
 	if (error)
-		return error;
+		goto out_parent;
 
 	/*
 	 * Create the new name in the orphanage, and bump the link count of
@@ -475,7 +518,7 @@ xrep_adoption_commit(
 	error = xfs_dir_createname(sc->tp, sc->orphanage, xname, sc->ip->i_ino,
 			adopt->orphanage_blkres);
 	if (error)
-		return error;
+		goto out_parent;
 
 	xfs_trans_ichgtime(sc->tp, sc->orphanage,
 			XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
@@ -488,7 +531,15 @@ xrep_adoption_commit(
 		error = xfs_dir_replace(sc->tp, sc->ip, &xfs_name_dotdot,
 				sc->orphanage->i_ino, adopt->child_blkres);
 		if (error)
-			return error;
+			goto out_parent;
+	}
+
+	/* Add a parent pointer from the file back to the lost+found. */
+	if (adopt->parent) {
+		error = xfs_parent_add(sc->tp, adopt->parent, sc->orphanage,
+				xname, sc->ip);
+		if (error)
+			goto out_parent;
 	}
 
 	/*
@@ -499,11 +550,14 @@ xrep_adoption_commit(
 	xfs_dir_update_hook(sc->orphanage, sc->ip, 1, xname);
 	error = xrep_defer_finish(sc);
 	if (error)
-		return error;
+		goto out_parent;
 
 	/* Remove negative dentries from the lost+found's dcache */
 	xrep_orphanage_zap_dcache(adopt);
-	return 0;
+out_parent:
+	xfs_parent_finish(sc->mp, adopt->parent);
+	adopt->parent = NULL;
+	return error;
 }
 
 /* Cancel a proposed relocation of a file to the orphanage. */
@@ -521,6 +575,8 @@ xrep_adoption_cancel(
 	 * state to manage, we'll need to give that back.
 	 */
 	trace_xrep_adoption_cancel(sc->orphanage, sc->ip, error);
+	xfs_parent_finish(sc->mp, adopt->parent);
+	adopt->parent = NULL;
 }
 
 /* Release the orphanage. */
