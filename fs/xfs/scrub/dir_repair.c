@@ -1283,7 +1283,8 @@ xrep_dir_scan_file(
 	if (!xrep_dir_want_scan(rd, ip))
 		goto scan_done;
 
-	error = xchk_xattr_walk(rd->sc, ip, xrep_dir_scan_parent_pointer, rd);
+	error = xchk_xattr_walk(rd->sc, ip, xrep_dir_scan_parent_pointer, NULL,
+			rd);
 	if (error)
 		goto scan_done;
 
