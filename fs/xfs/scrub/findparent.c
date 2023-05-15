@@ -24,6 +24,7 @@
 #include "xfs_trans_space.h"
 #include "xfs_health.h"
 #include "xfs_swapext.h"
+#include "xfs_parent.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
@@ -33,6 +34,7 @@
 #include "scrub/findparent.h"
 #include "scrub/readdir.h"
 #include "scrub/tempfile.h"
+#include "scrub/listxattr.h"
 
 /*
  * Finding the Parent of a Directory
@@ -452,4 +454,53 @@ out_dput:
 	dput(dentry);
 out:
 	return ret;
+}
+
+/* Pass back the parent inumber if this a parent pointer */
+STATIC int
+xrep_findparent_from_pptr(
+	struct xfs_scrub	*sc,
+	struct xfs_inode	*ip,
+	unsigned int		attr_flags,
+	const unsigned char	*name,
+	unsigned int		namelen,
+	const void		*value,
+	unsigned int		valuelen,
+	void			*priv)
+{
+	struct xfs_parent_name_irec	pptr;
+	struct xfs_mount	*mp = sc->mp;
+	const void		*rec = name;
+	xfs_ino_t		*inop = priv;
+
+	if (!(attr_flags & XFS_ATTR_PARENT))
+		return 0;
+
+	if (!xfs_parent_namecheck(mp, rec, namelen, attr_flags) ||
+	    !xfs_parent_valuecheck(mp, value, valuelen))
+		return -EFSCORRUPTED;
+
+	xfs_parent_irec_from_disk(&pptr, rec, value, valuelen);
+	*inop = pptr.p_ino;
+	return -ECANCELED;
+}
+
+/*
+ * Find the first parent of the inode being scrubbed by walking parent
+ * pointers.  Caller must hold sc->ip's ILOCK.
+ */
+int
+xrep_findparent_from_pptrs(
+	struct xfs_scrub	*sc,
+	xfs_ino_t		*inop)
+{
+	int			error;
+
+	*inop = NULLFSINO;
+
+	error = xchk_xattr_walk(sc, sc->ip, xrep_findparent_from_pptr, NULL,
+			inop);
+	if (error && error != -ECANCELED)
+		return error;
+	return 0;
 }
