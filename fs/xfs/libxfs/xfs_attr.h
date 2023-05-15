@@ -654,4 +654,6 @@ xfs_attri_can_use_without_log_assistance(
 	return false;
 }
 
+int xfs_attr_add_fork(struct xfs_inode *ip, int size, int rsvd);
+
 #endif	/* __XFS_ATTR_H__ */
