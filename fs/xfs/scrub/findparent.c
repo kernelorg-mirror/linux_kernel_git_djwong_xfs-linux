@@ -24,6 +24,7 @@
 #include "xfs_trans_space.h"
 #include "xfs_health.h"
 #include "xfs_swapext.h"
+#include "xfs_parent.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
@@ -33,6 +34,7 @@
 #include "scrub/findparent.h"
 #include "scrub/readdir.h"
 #include "scrub/tempfile.h"
+#include "scrub/listxattr.h"
 
 /*
  * Finding the Parent of a Directory
@@ -450,4 +452,46 @@ out_dput:
 	dput(dentry);
 out:
 	return ret;
+}
+
+/* Pass back the parent inumber if this a parent pointer */
+STATIC int
+xrep_findparent_from_pptr(
+	struct xfs_scrub		*sc,
+	struct xfs_inode		*ip,
+	const struct xfs_parent_name_irec *pptr,
+	void				*priv)
+{
+	xfs_ino_t			*inop = priv;
+
+	*inop = pptr->p_ino;
+	return -ECANCELED;
+}
+
+/*
+ * Find the first parent of the inode being scrubbed by walking parent
+ * pointers.  Caller must hold sc->ip's ILOCK.
+ */
+int
+xrep_findparent_from_pptrs(
+	struct xfs_scrub		*sc,
+	xfs_ino_t			*inop)
+{
+	struct xfs_parent_name_irec	pptr;
+	int				error;
+
+	*inop = NULLFSINO;
+
+	/*
+	 * If the extended attributes look as though they has been zapped by
+	 * the inode record repair code, we cannot scan for parent pointers.
+	 */
+	if (xchk_pptr_looks_zapped(sc->ip))
+		return -EBUSY;
+
+	error = xchk_pptr_walk(sc, sc->ip, xrep_findparent_from_pptr, &pptr,
+			inop);
+	if (error && error != -ECANCELED)
+		return error;
+	return 0;
 }

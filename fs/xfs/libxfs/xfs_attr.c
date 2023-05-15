@@ -986,7 +986,7 @@ xfs_attr_defer_remove(
 	return 0;
 }
 
-STATIC int
+int
 xfs_attr_add_fork(
 	struct xfs_inode	*ip,		/* incore inode pointer */
 	int			size,		/* space new attribute needs */
