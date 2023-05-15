@@ -53,4 +53,6 @@ int xrep_findparent_confirm(struct xfs_scrub *sc, xfs_ino_t *parent_ino);
 xfs_ino_t xrep_findparent_self_reference(struct xfs_scrub *sc);
 xfs_ino_t xrep_findparent_from_dcache(struct xfs_scrub *sc);
 
+int xrep_findparent_from_pptrs(struct xfs_scrub *sc, xfs_ino_t *inop);
+
 #endif /* __XFS_SCRUB_FINDPARENT_H__ */
