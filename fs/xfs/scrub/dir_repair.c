@@ -28,6 +28,7 @@
 #include "xfs_swapext.h"
 #include "xfs_xchgrange.h"
 #include "xfs_ag.h"
+#include "xfs_parent.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
@@ -131,8 +132,14 @@ struct xrep_dir {
 	/* Should we move this directory to the orphanage? */
 	bool			move_orphanage;
 
-	/* Directory entry name, plus the trailing null. */
-	unsigned char		namebuf[MAXNAMELEN];
+	/*
+	 * Scratch buffer for reading parent pointers from child files.  The
+	 * p_name field is used to flush stashed dirents into the temporary
+	 * directory in between parent pointers.  At the very end of the
+	 * repair, it can also be used to compute the lost+found filename
+	 * if we need to reparent the directory.
+	 */
+	struct xfs_parent_name_irec pptr;
 };
 
 /* Tear down all the incore stuff we created. */
@@ -694,7 +701,7 @@ xrep_dir_replay_update(
 	struct xfs_name			name = {
 		.len			= dirent->namelen,
 		.type			= dirent->ftype,
-		.name			= rd->namebuf,
+		.name			= rd->pptr.p_name,
 	};
 	struct xfs_mount		*mp = rd->sc->mp;
 	xfs_ino_t			ino;
@@ -769,10 +776,10 @@ xrep_dir_replay_updates(
 
 		/* The dirent name is stored in the in-core buffer. */
 		error = xfblob_load(rd->dir_names, dirent.name_cookie,
-				rd->namebuf, dirent.namelen);
+				rd->pptr.p_name, dirent.namelen);
 		if (error)
 			return error;
-		rd->namebuf[MAXNAMELEN - 1] = 0;
+		rd->pptr.p_name[MAXNAMELEN - 1] = 0;
 
 		error = xrep_dir_replay_update(rd, &dirent);
 		if (error)
@@ -1406,7 +1413,7 @@ xrep_dir_move_to_orphanage(
 	if (error)
 		goto err_adoption;
 
-	error = xrep_adoption_compute_name(&rd->adoption, rd->namebuf);
+	error = xrep_adoption_compute_name(&rd->adoption, rd->pptr.p_name);
 	if (error)
 		goto err_adoption;
 
