@@ -24,6 +24,15 @@ struct xfs_dir3_icleaf_hdr;
 extern const struct xfs_name	xfs_name_dotdot;
 extern const struct xfs_name	xfs_name_dot;
 
+static inline bool
+xfs_dir2_samename(
+	const struct xfs_name	*n1,
+	const struct xfs_name	*n2)
+{
+	return n1 == n2 || (n1->len == n2->len &&
+			    !memcmp(n1->name, n2->name, n1->len));
+}
+
 /*
  * Convert inode mode to directory entry filetype
  */
