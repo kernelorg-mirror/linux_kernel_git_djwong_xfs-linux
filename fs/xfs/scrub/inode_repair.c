@@ -1625,14 +1625,14 @@ xrep_inode_pptr(
 		return 0;
 
 	/* The root directory doesn't have a parent pointer. */
-	if (ip == mp->m_rootip)
+	if (ip == mp->m_rootip || ip == mp->m_metadirip)
 		return 0;
 
 	/*
-	 * Metadata inodes are rooted in the superblock and do not have any
-	 * parents.
+	 * Prior to metadata directories, all metadata inodes are rooted in the
+	 * superblock and do not have any parents.
 	 */
-	if (xfs_is_metadata_inode(ip))
+	if (!xfs_has_metadir(mp) && xfs_is_metadata_inode(ip))
 		return 0;
 
 	/* Inode already has an attr fork; no further work possible here. */
