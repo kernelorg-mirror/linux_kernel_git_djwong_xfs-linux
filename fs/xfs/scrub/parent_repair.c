@@ -1320,7 +1320,7 @@ out_findparents:
 	 * so that we can decide if we're moving this file to the orphanage.
 	 * For this purpose, root directories are their own parents.
 	 */
-	if (sc->ip == sc->mp->m_rootip) {
+	if (sc->ip == sc->mp->m_rootip || sc->ip == sc->mp->m_metadirip) {
 		xrep_findparent_scan_found(&rp->pscan, sc->ip->i_ino);
 	} else {
 		error = xrep_findparent_from_pptrs(sc, &parent_ino);
