@@ -584,7 +584,7 @@ static int freeze_go_sync(struct gfs2_glock *gl)
 	if (gl->gl_state == LM_ST_SHARED && !gfs2_withdrawn(sdp) &&
 	    !test_bit(SDF_NORECOVERY, &sdp->sd_flags)) {
 		atomic_set(&sdp->sd_freeze_state, SFS_STARTING_FREEZE);
-		error = freeze_super(sdp->sd_vfs);
+		error = freeze_super(sdp->sd_vfs, FREEZE_HOLDER_USERSPACE);
 		if (error) {
 			fs_info(sdp, "GFS2: couldn't freeze filesystem: %d\n",
 				error);

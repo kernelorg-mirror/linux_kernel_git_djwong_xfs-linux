@@ -1145,7 +1145,8 @@ enum {
 #define SB_FREEZE_LEVELS (SB_FREEZE_COMPLETE - 1)
 
 struct sb_writers {
-	int				frozen;		/* Is sb frozen? */
+	unsigned short			frozen;		/* Is sb frozen? */
+	unsigned short			freeze_holders;	/* Who froze fs? */
 	wait_queue_head_t		wait_unfrozen;	/* wait for thaw */
 	struct percpu_rw_semaphore	rw_sem[SB_FREEZE_LEVELS];
 };
@@ -1899,6 +1900,10 @@ extern loff_t vfs_dedupe_file_range_one(struct file *src_file, loff_t src_pos,
 					struct file *dst_file, loff_t dst_pos,
 					loff_t len, unsigned int remap_flags);
 
+enum freeze_holder {
+	FREEZE_HOLDER_KERNEL	= (1U << 0),
+	FREEZE_HOLDER_USERSPACE	= (1U << 1),
+};
 
 struct super_operations {
    	struct inode *(*alloc_inode)(struct super_block *sb);
@@ -1911,9 +1916,9 @@ struct super_operations {
 	void (*evict_inode) (struct inode *);
 	void (*put_super) (struct super_block *);
 	int (*sync_fs)(struct super_block *sb, int wait);
-	int (*freeze_super) (struct super_block *);
+	int (*freeze_super) (struct super_block *, enum freeze_holder who);
 	int (*freeze_fs) (struct super_block *);
-	int (*thaw_super) (struct super_block *);
+	int (*thaw_super) (struct super_block *, enum freeze_holder who);
 	int (*unfreeze_fs) (struct super_block *);
 	int (*statfs) (struct dentry *, struct kstatfs *);
 	int (*remount_fs) (struct super_block *, int *, char *);
@@ -2286,8 +2291,8 @@ extern int unregister_filesystem(struct file_system_type *);
 extern int vfs_statfs(const struct path *, struct kstatfs *);
 extern int user_statfs(const char __user *, struct kstatfs *);
 extern int fd_statfs(int, struct kstatfs *);
-extern int freeze_super(struct super_block *super);
-extern int thaw_super(struct super_block *super);
+extern int freeze_super(struct super_block *super, enum freeze_holder who);
+extern int thaw_super(struct super_block *super, enum freeze_holder who);
 extern __printf(2, 3)
 int super_setup_bdi_name(struct super_block *sb, char *fmt, ...);
 extern int super_setup_bdi(struct super_block *sb);
