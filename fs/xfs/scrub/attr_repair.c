@@ -713,7 +713,7 @@ xrep_xattr_flush_stashed(
 	 * allocate whatever transaction it wants.
 	 *
 	 * We still hold IOLOCK_EXCL on the inode being repaired, which
-	 * prevents anyone from accessing the damaged xattr data while we
+	 * prevents anyone from modifying the damaged xattr data while we
 	 * repair it.
 	 */
 	error = xrep_trans_commit(rx->sc);
@@ -1426,6 +1426,7 @@ xrep_xattr_finalize_tempfile(
 		 * because the VFS does not take the IOLOCK when moving a
 		 * directory child during a rename.
 		 */
+		ASSERT(xfarray_length(rx->pptr_recs) == 0);
 		if (xfarray_length(rx->pptr_recs) == 0)
 			break;
 
