@@ -50,7 +50,7 @@
  * only the IOLOCK on that directory.  The scan itself takes the ILOCK of each
  * directory visited.
  *
- * Unfortunately, the VFS (as of 6.2) complicates things because it does not
+ * Unfortunately, the VFS (as of 6.4) complicates things because it does not
  * take the i_rwsem of a child directory that is being moved from one parent to
  * another.  Because we cannot hold @sc->ip's ILOCK during the scan, it is
  * necessary to use dirent hooks to update the parent scan results.  Callers

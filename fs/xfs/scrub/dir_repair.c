@@ -1683,6 +1683,7 @@ xrep_dir_finalize_tempdir(
 		 * because the VFS does not take the IOLOCK when moving a
 		 * directory child during a rename.
 		 */
+		ASSERT(xfarray_length(rd->dir_entries) == 0);
 		if (xfarray_length(rd->dir_entries) == 0)
 			break;
 
