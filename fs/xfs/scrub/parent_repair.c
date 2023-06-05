@@ -1211,6 +1211,7 @@ xrep_parent_finalize_tempfile(
 		 * because the VFS does not take the IOLOCK when moving a
 		 * directory child during a rename.
 		 */
+		ASSERT(xfarray_length(rp->pptr_recs) == 0);
 		if (xfarray_length(rp->pptr_recs) == 0)
 			break;
 
