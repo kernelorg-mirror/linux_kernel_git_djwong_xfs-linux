@@ -1647,6 +1647,15 @@ static int freeze_frozen_super(struct super_block *sb, enum freeze_holder who)
 	return 0;
 }
 
+static void wait_for_partially_frozen(struct super_block *sb)
+{
+	up_write(&sb->s_umount);
+	wait_var_event(&sb->s_writers.frozen,
+			sb->s_writers.frozen == SB_UNFROZEN ||
+			sb->s_writers.frozen == SB_FREEZE_COMPLETE);
+	down_write(&sb->s_umount);
+}
+
 /**
  * freeze_super - lock the filesystem and force it into a consistent state
  * @sb: the super to lock
@@ -1690,11 +1699,13 @@ static int freeze_frozen_super(struct super_block *sb, enum freeze_holder who)
  */
 int freeze_super(struct super_block *sb, enum freeze_holder who)
 {
+	bool try_again = true;
 	int ret;
 
 	atomic_inc(&sb->s_active);
 	down_write(&sb->s_umount);
 
+retry:
 	if (sb->s_writers.frozen == SB_FREEZE_COMPLETE) {
 		ret = freeze_frozen_super(sb, who);
 		deactivate_locked_super(sb);
@@ -1702,8 +1713,14 @@ int freeze_super(struct super_block *sb, enum freeze_holder who)
 	}
 
 	if (sb->s_writers.frozen != SB_UNFROZEN) {
-		deactivate_locked_super(sb);
-		return -EBUSY;
+		if (!try_again) {
+			deactivate_locked_super(sb);
+			return -EBUSY;
+		}
+
+		wait_for_partially_frozen(sb);
+		try_again = false;
+		goto retry;
 	}
 
 	if (!(sb->s_flags & SB_BORN)) {
@@ -1716,6 +1733,7 @@ int freeze_super(struct super_block *sb, enum freeze_holder who)
 		/* Nothing to do really... */
 		sb->s_writers.freeze_holders |= who;
 		sb->s_writers.frozen = SB_FREEZE_COMPLETE;
+		wake_up_var(&sb->s_writers.frozen);
 		up_write(&sb->s_umount);
 		return 0;
 	}
@@ -1736,6 +1754,7 @@ int freeze_super(struct super_block *sb, enum freeze_holder who)
 		sb->s_writers.frozen = SB_UNFROZEN;
 		sb_freeze_unlock(sb, SB_FREEZE_PAGEFAULT);
 		wake_up(&sb->s_writers.wait_unfrozen);
+		wake_up_var(&sb->s_writers.frozen);
 		deactivate_locked_super(sb);
 		return ret;
 	}
@@ -1752,6 +1771,7 @@ int freeze_super(struct super_block *sb, enum freeze_holder who)
 			sb->s_writers.frozen = SB_UNFROZEN;
 			sb_freeze_unlock(sb, SB_FREEZE_FS);
 			wake_up(&sb->s_writers.wait_unfrozen);
+			wake_up_var(&sb->s_writers.frozen);
 			deactivate_locked_super(sb);
 			return ret;
 		}
@@ -1762,6 +1782,7 @@ int freeze_super(struct super_block *sb, enum freeze_holder who)
 	 */
 	sb->s_writers.freeze_holders |= who;
 	sb->s_writers.frozen = SB_FREEZE_COMPLETE;
+	wake_up_var(&sb->s_writers.frozen);
 	lockdep_sb_freeze_release(sb);
 	up_write(&sb->s_umount);
 	return 0;
@@ -1810,6 +1831,7 @@ static int thaw_super_locked(struct super_block *sb, enum freeze_holder who)
 	if (sb_rdonly(sb)) {
 		sb->s_writers.freeze_holders &= ~who;
 		sb->s_writers.frozen = SB_UNFROZEN;
+		wake_up_var(&sb->s_writers.frozen);
 		goto out;
 	}
 
@@ -1828,6 +1850,7 @@ static int thaw_super_locked(struct super_block *sb, enum freeze_holder who)
 
 	sb->s_writers.freeze_holders &= ~who;
 	sb->s_writers.frozen = SB_UNFROZEN;
+	wake_up_var(&sb->s_writers.frozen);
 	sb_freeze_unlock(sb, SB_FREEZE_FS);
 out:
 	wake_up(&sb->s_writers.wait_unfrozen);
