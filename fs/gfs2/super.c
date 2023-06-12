@@ -682,7 +682,7 @@ void gfs2_freeze_func(struct work_struct *work)
 		gfs2_assert_withdraw(sdp, 0);
 	} else {
 		atomic_set(&sdp->sd_freeze_state, SFS_UNFROZEN);
-		error = thaw_super(sb);
+		error = thaw_super(sb, FREEZE_HOLDER_USERSPACE);
 		if (error) {
 			fs_info(sdp, "GFS2: couldn't thaw filesystem: %d\n",
 				error);
@@ -702,7 +702,7 @@ void gfs2_freeze_func(struct work_struct *work)
  *
  */
 
-static int gfs2_freeze(struct super_block *sb)
+static int gfs2_freeze(struct super_block *sb, enum freeze_holder who)
 {
 	struct gfs2_sbd *sdp = sb->s_fs_info;
 	int error;
@@ -747,7 +747,7 @@ out:
  *
  */
 
-static int gfs2_unfreeze(struct super_block *sb)
+static int gfs2_unfreeze(struct super_block *sb, enum freeze_holder who)
 {
 	struct gfs2_sbd *sdp = sb->s_fs_info;
 

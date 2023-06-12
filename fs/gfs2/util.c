@@ -191,7 +191,7 @@ static void signal_our_withdraw(struct gfs2_sbd *sdp)
 		/* Make sure gfs2_unfreeze works if partially-frozen */
 		flush_work(&sdp->sd_freeze_work);
 		atomic_set(&sdp->sd_freeze_state, SFS_FROZEN);
-		thaw_super(sdp->sd_vfs);
+		thaw_super(sdp->sd_vfs, FREEZE_HOLDER_USERSPACE);
 	} else {
 		wait_on_bit(&i_gl->gl_flags, GLF_DEMOTE,
 			    TASK_UNINTERRUPTIBLE);
