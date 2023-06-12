@@ -2166,7 +2166,7 @@ out_unlock:
 	if (err)
 		return err;
 
-	freeze_super(sbi->sb);
+	freeze_super(sbi->sb, FREEZE_HOLDER_USERSPACE);
 	f2fs_down_write(&sbi->gc_lock);
 	f2fs_down_write(&sbi->cp_global_sem);
 
@@ -2217,6 +2217,6 @@ recover_out:
 out_err:
 	f2fs_up_write(&sbi->cp_global_sem);
 	f2fs_up_write(&sbi->gc_lock);
-	thaw_super(sbi->sb);
+	thaw_super(sbi->sb, FREEZE_HOLDER_USERSPACE);
 	return err;
 }
