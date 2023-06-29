@@ -141,4 +141,32 @@ static inline int xfsb_bitmap_walk(struct xfsb_bitmap *bitmap,
 	return xbitmap_walk(&bitmap->fsbitmap, fn, priv);
 }
 
+/* Bitmaps, but for type-checked for xfs_ino_t */
+
+struct xino_bitmap {
+	struct xbitmap	inobitmap;
+};
+
+static inline void xino_bitmap_init(struct xino_bitmap *bitmap)
+{
+	xbitmap_init(&bitmap->inobitmap);
+}
+
+static inline void xino_bitmap_destroy(struct xino_bitmap *bitmap)
+{
+	xbitmap_destroy(&bitmap->inobitmap);
+}
+
+static inline int xino_bitmap_set(struct xino_bitmap *bitmap, xfs_ino_t ino)
+{
+	return xbitmap_set(&bitmap->inobitmap, ino, 1);
+}
+
+static inline int xino_bitmap_test(struct xino_bitmap *bitmap, xfs_ino_t ino)
+{
+	uint64_t	len = 1;
+
+	return xbitmap_test(&bitmap->inobitmap, ino, &len);
+}
+
 #endif	/* __XFS_SCRUB_BITMAP_H__ */
