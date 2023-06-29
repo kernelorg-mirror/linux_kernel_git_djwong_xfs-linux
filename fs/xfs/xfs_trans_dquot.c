@@ -156,6 +156,8 @@ xfs_trans_mod_ino_dquot(
 	unsigned int			field,
 	int64_t				delta)
 {
+	ASSERT(!xfs_is_metadir_inode(ip) || XFS_IS_DQDETACHED(mp, ip));
+
 	xfs_trans_mod_dquot(tp, dqp, field, delta);
 
 	if (xfs_hooks_switched_on(&xfs_dqtrx_hooks_switch)) {
@@ -235,6 +237,8 @@ xfs_trans_mod_dquot_byino(
 	if (!XFS_IS_QUOTA_ON(mp) ||
 	    xfs_is_quota_inode(&mp->m_sb, ip->i_ino))
 		return;
+
+	ASSERT(!xfs_is_metadir_inode(ip) || XFS_IS_DQDETACHED(mp, ip));
 
 	if (XFS_IS_UQUOTA_ON(mp) && ip->i_udquot)
 		xfs_trans_mod_ino_dquot(tp, ip, ip->i_udquot, field, delta);
@@ -954,6 +958,7 @@ xfs_trans_reserve_quota_nblks(
 
 	ASSERT(!xfs_is_quota_inode(&mp->m_sb, ip->i_ino));
 	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL));
+	ASSERT(!xfs_is_metadir_inode(ip) || XFS_IS_DQDETACHED(mp, ip));
 
 	if (force)
 		qflags |= XFS_QMOPT_FORCE_RES;
