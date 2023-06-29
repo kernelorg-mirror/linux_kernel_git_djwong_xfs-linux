@@ -169,6 +169,7 @@ xfs-y				+= $(addprefix scrub/, \
 				   common.o \
 				   dabtree.o \
 				   dir.o \
+				   dirloop.o \
 				   fscounters.o \
 				   health.o \
 				   ialloc.o \

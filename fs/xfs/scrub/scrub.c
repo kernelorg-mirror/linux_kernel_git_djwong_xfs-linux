@@ -450,6 +450,13 @@ static const struct xchk_meta_ops meta_scrub_ops[] = {
 		.has	= xfs_has_rtreflink,
 		.repair	= xrep_rtrefcountbt,
 	},
+	[XFS_SCRUB_TYPE_DIRLOOP] = {	/* directory loop detector */
+		.type	= ST_INODE,
+		.setup	= xchk_setup_dirloop,
+		.scrub	= xchk_dirloop,
+		.has	= xfs_has_parent,
+		.repair	= xrep_notsupported,
+	},
 };
 
 static int

@@ -83,6 +83,7 @@ static const char *name_map[XFS_SCRUB_TYPE_NR] = {
 	[XFS_SCRUB_TYPE_RGBITMAP]	= "rgbitmap",
 	[XFS_SCRUB_TYPE_RTRMAPBT]	= "rtrmapbt",
 	[XFS_SCRUB_TYPE_RTREFCBT]	= "rtrefcountbt",
+	[XFS_SCRUB_TYPE_DIRLOOP]	= "dirloop",
 };
 
 /* Format the scrub stats into a text buffer, similar to pcp style. */
