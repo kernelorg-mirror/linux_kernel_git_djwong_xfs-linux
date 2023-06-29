@@ -187,6 +187,7 @@ DEFINE_EVENT(xchk_class, name, \
 	TP_ARGS(ip, sm, error))
 
 DEFINE_SCRUB_EVENT(xchk_start);
+DEFINE_SCRUB_EVENT(xchk_dirloop_done);
 DEFINE_SCRUB_EVENT(xchk_done);
 DEFINE_SCRUB_EVENT(xchk_deadlock_retry);
 DEFINE_SCRUB_EVENT(xrep_attempt);
@@ -1602,6 +1603,129 @@ DEFINE_XCHK_PPTR_EVENT(xchk_dir_defer);
 DEFINE_XCHK_PPTR_EVENT(xchk_dir_slowpath);
 DEFINE_XCHK_PPTR_EVENT(xchk_parent_defer);
 DEFINE_XCHK_PPTR_EVENT(xchk_parent_slowpath);
+
+DECLARE_EVENT_CLASS(xchk_dirloop_class,
+	TP_PROTO(struct xfs_inode *ip, struct xfs_inode *child_ip,
+		 unsigned long long step_nr,
+		 const struct xfs_parent_name_irec *pptr),
+	TP_ARGS(ip, child_ip, step_nr, pptr),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(unsigned long long, step_nr)
+		__field(xfs_ino_t, child_ino)
+		__field(xfs_ino_t, parent_ino)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, pptr->p_namelen)
+	),
+	TP_fast_assign(
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->step_nr = step_nr;
+		__entry->child_ino = child_ip->i_ino;
+		__entry->parent_ino = pptr->p_ino;
+		__entry->namelen = pptr->p_namelen;
+		memcpy(__get_str(name), pptr->p_name, pptr->p_namelen);
+	),
+	TP_printk("dev %d:%d ino 0x%llx step %llu child 0x%llx parent 0x%llx name '%.*s'",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->step_nr,
+		  __entry->child_ino,
+		  __entry->parent_ino,
+		  __entry->namelen,
+		  __get_str(name))
+);
+#define DEFINE_XCHK_DIRLOOP_EVENT(name) \
+DEFINE_EVENT(xchk_dirloop_class, name, \
+	TP_PROTO(struct xfs_inode *ip, struct xfs_inode *child_ip, \
+		 unsigned long long step_nr, \
+		 const struct xfs_parent_name_irec *pptr), \
+	TP_ARGS(ip, child_ip, step_nr, pptr))
+DEFINE_XCHK_DIRLOOP_EVENT(xchk_dirloop_walk_pstart_parents);
+DEFINE_XCHK_DIRLOOP_EVENT(xchk_dirloop_grow_path);
+DEFINE_XCHK_DIRLOOP_EVENT(xchk_dirloop_walk_pend_parents);
+
+TRACE_EVENT(xchk_dirloop_dump,
+	TP_PROTO(struct xfs_inode *ip, xfs_ino_t rootino, unsigned int nr_paths),
+	TP_ARGS(ip, rootino, nr_paths),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(xfs_ino_t, rootino)
+		__field(unsigned long long, nr_paths)
+	),
+	TP_fast_assign(
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->rootino = rootino;
+		__entry->nr_paths = nr_paths
+	),
+	TP_printk("dev %d:%d ino 0x%llx rootino 0x%llx nr_paths %llu",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->rootino,
+		  __entry->nr_paths)
+);
+
+TRACE_EVENT(xchk_dirloop_dump_path,
+	TP_PROTO(struct xfs_inode *ip, unsigned long long path_nr,
+		 unsigned long long nr_components, int outcome),
+	TP_ARGS(ip, path_nr, nr_components, outcome),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(unsigned long long, path_nr)
+		__field(unsigned long long, nr_components)
+		__field(int, outcome)
+	),
+	TP_fast_assign(
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->path_nr = path_nr;
+		__entry->nr_components = nr_components;
+		__entry->outcome = outcome;
+	),
+	TP_printk("dev %d:%d ino 0x%llx path_nr %llu nr_components %llu outcome %d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->path_nr,
+		  __entry->nr_components,
+		  __entry->outcome)
+);
+
+TRACE_EVENT(xchk_dirloop_dump_path_part,
+	TP_PROTO(struct xfs_inode *ip, unsigned long long path_nr,
+		 unsigned long long component_nr,
+		 const struct xfs_parent_name_irec *pptr),
+	TP_ARGS(ip, path_nr, component_nr, pptr),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(unsigned long long, path_nr)
+		__field(unsigned long long, component_nr)
+		__field(xfs_ino_t, parent_ino)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, pptr->p_namelen)
+	),
+	TP_fast_assign(
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->path_nr = path_nr;
+		__entry->component_nr = component_nr;
+		__entry->parent_ino = pptr->p_ino;
+		__entry->namelen = pptr->p_namelen;
+		memcpy(__get_str(name), pptr->p_name, pptr->p_namelen);
+	),
+	TP_printk("dev %d:%d ino 0x%llx path_nr %llu component_nr %llu parent 0x%llx name '%.*s'",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->path_nr,
+		  __entry->component_nr,
+		  __entry->parent_ino,
+		  __entry->namelen,
+		  __get_str(name))
+);
 
 /* repair tracepoints */
 #if IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR)
