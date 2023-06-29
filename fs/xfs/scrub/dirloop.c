@@ -23,7 +23,7 @@
 /* Set us up to look for directory loops. */
 int
 xchk_setup_dirloop(
-	struct xfs_scrub	*sc)
+	struct xfs_scrub		*sc)
 {
 	return xchk_setup_inode_contents(sc, 0);
 }
@@ -31,13 +31,14 @@ xchk_setup_dirloop(
 /* Look for directory loops. */
 int
 xchk_dirloop(
-	struct xfs_scrub	*sc)
+	struct xfs_scrub		*sc)
 {
 	/*
 	 * Nondirectories do not point downwards to other files, so they cannot
-	 * cause a cycle in the directory tree.
+	 * cause a cycle in the directory tree.  Unlinked directories cannot be
+	 * part of a cycle, so we skip them.
 	 */
-	if (!S_ISDIR(VFS_I(sc->ip)->i_mode))
+	if (!S_ISDIR(VFS_I(sc->ip)->i_mode) || VFS_I(sc->ip)->i_nlink == 0)
 		return -ENOENT;
 
 	return 0;
