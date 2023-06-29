@@ -450,6 +450,7 @@ static const struct ioctl_sick_map ino_map[] = {
 	{ XFS_SICK_INO_XATTR,	XFS_BS_SICK_XATTR },
 	{ XFS_SICK_INO_SYMLINK,	XFS_BS_SICK_SYMLINK },
 	{ XFS_SICK_INO_PARENT,	XFS_BS_SICK_PARENT },
+	{ XFS_SICK_INO_DIRTREE,	XFS_BS_SICK_DIRTREE },
 	{ 0, 0 },
 };
 
