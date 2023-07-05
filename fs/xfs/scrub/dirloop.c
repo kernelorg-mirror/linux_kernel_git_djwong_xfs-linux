@@ -35,6 +35,9 @@ xchk_dirloop_buf_cleanup(
 	struct xchk_dirloop		*dl = buf;
 	struct xchk_dirloop_path	*path, *n;
 
+	if (dl->rootip)
+		xfs_dir_hook_del(dl->sc->mp, &dl->hooks);
+
 	xchk_dirloop_for_each_path_safe(dl, path, n) {
 		list_del_init(&path->list);
 		xino_bitmap_destroy(&path->seen_inodes);
@@ -45,6 +48,7 @@ xchk_dirloop_buf_cleanup(
 		xfarray_destroy(dl->path_components);
 	if (dl->path_names)
 		xfblob_destroy(dl->path_names);
+	mutex_destroy(&dl->lock);
 }
 
 STATIC xfs_ino_t
@@ -69,6 +73,8 @@ xchk_setup_dirloop(
 	char				*descr;
 	int				error;
 
+	xchk_fsgates_enable(sc, XCHK_FSGATES_DIRENTS);
+
 	dl = kvzalloc(sizeof(struct xchk_dirloop), XCHK_GFP_FLAGS);
 	if (!dl)
 		return -ENOMEM;
@@ -76,6 +82,7 @@ xchk_setup_dirloop(
 	INIT_LIST_HEAD(&dl->path_list);
 	sc->buf = dl;
 	sc->buf_cleanup = xchk_dirloop_buf_cleanup;
+	mutex_init(&dl->lock);
 
 	descr = kasprintf(XCHK_GFP_FLAGS,
 			"XFS (%s): inode 0x%llx dirloop path names",
@@ -316,12 +323,13 @@ xchk_dirloop_grow_path_once(
 		return error;
 
 	lock_mode = xfs_ilock_attr_map_shared(dp);
+	mutex_lock(&dl->lock);
 
 	/* We've reached the root directory; the path is ok. */
 	if (dl->pptr.p_ino == dl->rootip->i_ino) {
 		path->outcome = PATH_OK;
 		error = 0;
-		goto out_iunlock;
+		goto out_scanlock;
 	}
 
 	/*
@@ -331,7 +339,7 @@ xchk_dirloop_grow_path_once(
 	if (dl->pptr.p_ino == sc->ip->i_ino) {
 		path->outcome = PATH_DELETE;
 		error = 0;
-		goto out_iunlock;
+		goto out_scanlock;
 	}
 
 	/*
@@ -342,7 +350,7 @@ xchk_dirloop_grow_path_once(
 	if (xino_bitmap_test(&path->seen_inodes, dl->pptr.p_ino)) {
 		path->outcome = PATH_LOOP;
 		error = 0;
-		goto out_iunlock;
+		goto out_scanlock;
 	}
 
 	/*
@@ -353,7 +361,7 @@ xchk_dirloop_grow_path_once(
 		dl->invalid = true;
 		path->outcome = PATH_STALE;
 		error = -ECANCELED;
-		goto out_iunlock;
+		goto out_scanlock;
 	}
 
 	/*
@@ -377,8 +385,9 @@ xchk_dirloop_grow_path_once(
 		else
 			path->outcome = PATH_CORRUPT;
 		error = 0;
-		goto out_iunlock;
+		goto out_scanlock;
 	}
+	mutex_unlock(&dl->lock);
 
 	/*
 	 * Walk the parent pointers of @dp to find the parent of this
@@ -395,23 +404,27 @@ xchk_dirloop_grow_path_once(
 		 * finding this directory's parent, or zero parents despite
 		 * having a nonzero link count.  Keep looking for other paths.
 		 */
+		mutex_lock(&dl->lock);
 		path->outcome = PATH_CORRUPT;
 		error = 0;
-		goto out_iunlock;
+		goto out_scanlock;
 	}
 	if (error)
-		goto out_iunlock;
+		goto out_ilock;
 
 	/* Append to the path components */
+	mutex_lock(&dl->lock);
 	error = xchk_dirloop_path_append(dl, dp, path);
 	if (error)
-		goto out_iunlock;
+		goto out_scanlock;
 
 	if (path->second_component == XFARRAY_NULLIDX)
 		path->second_component =
 				xfarray_length(dl->path_components) - 1;
 
-out_iunlock:
+out_scanlock:
+	mutex_unlock(&dl->lock);
+out_ilock:
 	xfs_iunlock(dp, lock_mode);
 	xchk_irele(sc, dp);
 	return error;
@@ -459,6 +472,7 @@ xchk_dirloop_grow_path(
 	 * must drop @sc->ip's ILOCK during the walk.
 	 */
 	is_metadir = xfs_is_metadir_inode(sc->ip);
+	mutex_unlock(&dl->lock);
 	xchk_iunlock(sc, XFS_ILOCK_EXCL);
 
 	/* Grow this path towards the root one directory at a time. */
@@ -469,6 +483,7 @@ xchk_dirloop_grow_path(
 	} while (path->outcome == PATH_SCANNING);
 
 	xchk_ilock(sc, XFS_ILOCK_EXCL);
+	mutex_lock(&dl->lock);
 	return error;
 }
 
@@ -525,6 +540,146 @@ xchk_dirloop_dump_path(
 	     i < path->nr_components;
 	     i++, idx++)
 		xchk_dirloop_dump_path_part(dl, path, path_nr, idx, i);
+}
+
+/*
+ * Decide if this path component has been touched by this live update.  Returns
+ * 1 for yes, 0 for no, or a negative errno.
+ */
+STATIC int
+xchk_dirloop_path_part_is_stale(
+	struct xchk_dirloop		*dl,
+	struct xchk_dirloop_path	*path,
+	unsigned int			component_nr,
+	struct xfs_dir_update_params	*p,
+	struct xchk_dirloop_path_part	*component)
+{
+	xfs_ino_t			child_ino = component->parent_ino;
+	unsigned int			child_gen = component->parent_gen;
+	int				error;
+
+	error = xfarray_load(dl->path_components, component_nr, component);
+	if (error)
+		return error;
+
+	/* The child being updated is not the child in this path component. */
+	if (p->ip->i_ino != child_ino)
+		return 0;
+
+	/*
+	 * The child has changed since we scanned the path component, so the
+	 * path is stale.
+	 */
+	if (VFS_IC(p->ip)->i_generation != child_gen)
+		return 1;
+
+	/* The dirent names cannot possibly match. */
+	if (p->name->len != component->name_len)
+		return 0;
+
+	error = xfblob_load(dl->path_names, component->name_cookie,
+			dl->hook_namebuf, component->name_len);
+	if (error)
+		return error;
+
+	/* The child and dirent name match, so the path is stale. */
+	if (memcmp(dl->hook_namebuf, p->name->name, p->name->len) == 0)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * Decide if this path has been touched by this live update.  Returns 1 for
+ * yes, 0 for no, or a negative errno.
+ */
+STATIC int
+xchk_dirloop_path_is_stale(
+	struct xchk_dirloop		*dl,
+	struct xchk_dirloop_path	*path,
+	struct xfs_dir_update_params	*p)
+{
+	struct xchk_dirloop_path_part	component = {
+		.parent_ino		= dl->ino,
+		.parent_gen		= dl->gen,
+	};
+	xfarray_idx_t			idx;
+	unsigned int			i;
+	int				ret;
+
+	/*
+	 * The child being updated has not been seen by this path at all; this
+	 * path is not stale.
+	 */
+	if (!xino_bitmap_test(&path->seen_inodes, p->ip->i_ino))
+		return 0;
+
+	if (path->first_component == XFARRAY_NULLIDX)
+		return 0;
+
+	ret = xchk_dirloop_path_part_is_stale(dl, path, path->first_component,
+			p, &component);
+	if (ret < 0)
+		return ret;
+	if (ret == 1)
+		return 1;
+
+	for (i = 1, idx = path->second_component;
+	     i < path->nr_components;
+	     i++, idx++) {
+		ret = xchk_dirloop_path_part_is_stale(dl, path, idx, p,
+				&component);
+		if (ret < 0)
+			return ret;
+		if (ret == 1)
+			return 1;
+	}
+
+	return 0;
+}
+
+/*
+ * Decide if a directory update from the regular filesystem touches any of the
+ * paths we've scanned, and invalidate the scan data if true.
+ */
+STATIC int
+xchk_dirloop_live_update(
+	struct notifier_block		*nb,
+	unsigned long			action,
+	void				*data)
+{
+	struct xfs_dir_update_params	*p = data;
+	struct xchk_dirloop		*dl;
+	struct xchk_dirloop_path	*path;
+
+	dl = container_of(nb, struct xchk_dirloop, hooks.dirent_hook.nb);
+
+	trace_xchk_dirloop_live_update(dl->sc->mp, p->dp, action, p->ip->i_ino,
+			p->delta, p->name->name, p->name->len);
+
+	mutex_lock(&dl->lock);
+
+	if (dl->invalid)
+		goto out_unlock;
+
+	list_for_each_entry(path, &dl->path_list, list) {
+		int			ret;
+
+		ret = xchk_dirloop_path_is_stale(dl, path, p);
+		if (ret < 0) {
+			dl->aborted = true;
+			break;
+		}
+		if (ret == 1) {
+			trace_xchk_dirloop_invalidate(dl->sc->mp, dl->ino);
+			dl->invalid = true;
+			break;
+		}
+	}
+
+out_unlock:
+	mutex_unlock(&dl->lock);
+	return NOTIFY_DONE;
 }
 
 /* Delete all the collected path information. */
@@ -600,6 +755,8 @@ xchk_dirloop_find_paths_to_root(
 			}
 			if (error)
 				return error;
+			if (dl->aborted)
+				return 0;
 		}
 	} while (dl->invalid);
 
@@ -682,6 +839,22 @@ xchk_dirloop(
 	if (sc->ip == dl->rootip)
 		return 0;
 
+	/*
+	 * Hook into the directory entry code so that we can capture updates to
+	 * paths that we have already scanned.  The scanner thread takes each
+	 * directory's ILOCK, which means that any in-progress directory update
+	 * will finish before we can scan the directory.
+	 */
+	dl->ino = sc->ip->i_ino;
+	dl->gen = VFS_I(sc->ip)->i_generation;
+	mutex_lock(&dl->lock);
+
+	ASSERT(sc->flags & XCHK_FSGATES_DIRENTS);
+	xfs_hook_setup(&dl->hooks.dirent_hook, xchk_dirloop_live_update);
+	error = xfs_dir_hook_add(sc->mp, &dl->hooks);
+	if (error)
+		goto out_scanlock;
+
 	/* Trace each parent pointer's path to the root. */
 	error = xchk_dirloop_find_paths_to_root(dl);
 	if (error == -EFSCORRUPTED) {
@@ -692,20 +865,26 @@ xchk_dirloop(
 		 */
 		xchk_ino_xref_set_corrupt(sc, sc->ip->i_ino);
 		xchk_set_incomplete(sc);
-		return 0;
+		error = 0;
+		goto out_scanlock;
 	}
 	if (error)
-		return error;
+		goto out_scanlock;
+	if (dl->aborted) {
+		xchk_set_incomplete(sc);
+		goto out_scanlock;
+	}
 
 	/* Assess what we found in our path evaluation. */
 	error = xchk_dirloop_evaluate_paths(dl, &oc);
 	if (error == -EFSCORRUPTED) {
 		/* Found too many paths to cross-reference. */
 		xchk_ino_xref_set_corrupt(sc, sc->ip->i_ino);
-		return 0;
+		error = 0;
+		goto out_scanlock;
 	}
 	if (error)
-		return error;
+		goto out_scanlock;
 
 	if (oc.bad || oc.good + oc.suspect != 1)
 		xchk_ino_set_corrupt(sc, sc->ip->i_ino);
@@ -717,5 +896,8 @@ xchk_dirloop(
 	xchk_dirloop_for_each_path(dl, path)
 		xchk_dirloop_dump_path(dl, path, nr++);
 
-	return 0;
+out_scanlock:
+	mutex_unlock(&dl->lock);
+	trace_xchk_dirloop_done(sc->ip, sc->sm, error);
+	return error;
 }

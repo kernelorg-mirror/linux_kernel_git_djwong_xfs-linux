@@ -1646,6 +1646,22 @@ DEFINE_XCHK_DIRLOOP_EVENT(xchk_dirloop_walk_pstart_parents);
 DEFINE_XCHK_DIRLOOP_EVENT(xchk_dirloop_grow_path);
 DEFINE_XCHK_DIRLOOP_EVENT(xchk_dirloop_walk_pend_parents);
 
+TRACE_EVENT(xchk_dirloop_invalidate,
+	TP_PROTO(struct xfs_mount *mp, xfs_ino_t ino),
+	TP_ARGS(mp, ino),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->ino = ino;
+	),
+	TP_printk("dev %d:%d ino 0x%llx",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino)
+);
+
 TRACE_EVENT(xchk_dirloop_dump,
 	TP_PROTO(struct xfs_inode *ip, xfs_ino_t rootino, unsigned int nr_paths),
 	TP_ARGS(ip, rootino, nr_paths),
@@ -1723,6 +1739,38 @@ TRACE_EVENT(xchk_dirloop_dump_path_part,
 		  __entry->path_nr,
 		  __entry->component_nr,
 		  __entry->parent_ino,
+		  __entry->namelen,
+		  __get_str(name))
+);
+
+TRACE_EVENT(xchk_dirloop_live_update,
+	TP_PROTO(struct xfs_mount *mp, const struct xfs_inode *dp,
+		 int action, xfs_ino_t child, int delta,
+		 const char *name, unsigned int namelen),
+	TP_ARGS(mp, dp, action, child, delta, name, namelen),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, dir)
+		__field(int, action)
+		__field(xfs_ino_t, child)
+		__field(int, delta)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, namelen)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->dir = dp ? dp->i_ino : NULLFSINO;
+		__entry->action = action;
+		__entry->child = child;
+		__entry->delta = delta;
+		__entry->namelen = namelen;
+		memcpy(__get_str(name), name, namelen);
+	),
+	TP_printk("dev %d:%d dir 0x%llx child 0x%llx nlink_delta %d name '%.*s'",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->dir,
+		  __entry->child,
+		  __entry->delta,
 		  __entry->namelen,
 		  __get_str(name))
 );

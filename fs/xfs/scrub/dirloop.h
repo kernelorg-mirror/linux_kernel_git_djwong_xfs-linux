@@ -70,9 +70,28 @@ struct xchk_dirloop {
 	/* Root inode that we're looking for. */
 	struct xfs_inode	*rootip;
 
+	/*
+	 * Handle for the inode that we're scanning.  The hook is not removed
+	 * until after @sc->ip is released, so save an extra copy here.
+	 */
+	xfs_ino_t		ino;
+	unsigned int		gen;
+
 	/* Scratch buffer for scanning pptr xattrs */
 	struct xfs_parent_scratch scratch;
 	struct xfs_parent_name_irec pptr;
+
+	/*
+	 * Hook into directory updates so that we can receive live updates
+	 * from other writer threads.
+	 */
+	struct xfs_dir_hook	hooks;
+
+	/* lock for everything below here */
+	struct mutex		lock;
+
+	/* buffer for the live update functions to use for dirent names */
+	unsigned char		hook_namebuf[MAXNAMELEN];
 
 	/*
 	 * All path components observed during this scan.  Each of the path
@@ -93,7 +112,10 @@ struct xchk_dirloop {
 	unsigned long long	nr_paths;
 
 	/* Have the path data been invalidated by a concurrent update? */
-	bool			invalid;
+	bool			invalid:1;
+
+	/* Has the scan been aborted? */
+	bool			aborted:1;
 };
 
 #define xchk_dirloop_for_each_path_safe(dl, path, n) \
