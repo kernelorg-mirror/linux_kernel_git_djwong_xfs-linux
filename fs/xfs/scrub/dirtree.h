@@ -27,6 +27,11 @@ enum xchk_dirpath_outcome {
 	XCHK_DIRPATH_LOOP,		/* cycle detected further up in the dir tree */
 	XCHK_DIRPATH_STALE,		/* path is stale */
 	XCHK_DIRPATH_OK,		/* path reaches the root */
+
+	XREP_DIRPATH_DELETING,		/* path is being deleted */
+	XREP_DIRPATH_DELETED,		/* path has been deleted */
+	XREP_DIRPATH_ADOPTING,		/* path is being adopted */
+	XREP_DIRPATH_ADOPTED,		/* path has been adopted */
 };
 
 /*
@@ -65,6 +70,9 @@ struct xchk_dirtree_outcomes {
 
 	/* Number of XCHK_DIRPATH_OK */
 	unsigned int			good;
+
+	/* Directory needs to be added to lost+found */
+	bool				needs_adoption;
 };
 
 struct xchk_dirtree {
@@ -80,15 +88,29 @@ struct xchk_dirtree {
 	 */
 	xfs_ino_t		scan_ino;
 
+	/*
+	 * If we start deleting redundant paths to this subdirectory, this is
+	 * the inode number of the surviving parent and the dotdot entry will
+	 * be set to this value.  If the value is NULLFSINO, then use @root_ino
+	 * as a stand-in until the orphanage can adopt the subdirectory.
+	 */
+	xfs_ino_t		parent_ino;
+
 	/* Scratch buffer for scanning pptr xattrs */
 	struct xfs_parent_scratch scratch;
 	struct xfs_parent_name_irec pptr;
+
+	/* Information for reparenting this directory. */
+	struct xrep_adoption	adoption;
 
 	/*
 	 * Hook into directory updates so that we can receive live updates
 	 * from other writer threads.
 	 */
 	struct xfs_dir_hook	hooks;
+
+	/* Parent pointer update arguments. */
+	struct xfs_parent_args	ppargs;
 
 	/* lock for everything below here */
 	struct mutex		lock;
@@ -138,5 +160,12 @@ xchk_dirtree_parentless(const struct xchk_dirtree *dl)
 		return true;
 	return false;
 }
+
+int xchk_dirtree_find_paths_to_root(struct xchk_dirtree *dl);
+int xchk_dirpath_append(struct xchk_dirtree *dl, struct xfs_inode *ip,
+		struct xchk_dirpath *path,
+		const struct xfs_parent_name_irec *pptr);
+void xchk_dirtree_evaluate(struct xchk_dirtree *dl,
+		struct xchk_dirtree_outcomes *oc);
 
 #endif /* __XFS_SCRUB_DIRTREE_H__ */
