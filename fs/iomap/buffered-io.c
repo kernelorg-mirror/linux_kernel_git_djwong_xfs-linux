@@ -1773,9 +1773,11 @@ iomap_writepage_map(struct iomap_writepage_ctx *wpc,
 	int error = 0, count = 0, i;
 	LIST_HEAD(submit_list);
 
+	WARN_ON_ONCE(end_pos <= pos);
+
 	if (!ifs && nblocks > 1) {
 		ifs = ifs_alloc(inode, folio, 0);
-		iomap_set_range_dirty(folio, 0, folio_size(folio));
+		iomap_set_range_dirty(folio, 0, end_pos - pos);
 	}
 
 	WARN_ON_ONCE(ifs && atomic_read(&ifs->write_bytes_pending) != 0);
@@ -1830,7 +1832,12 @@ iomap_writepage_map(struct iomap_writepage_ctx *wpc,
 		}
 	}
 
-	iomap_clear_range_dirty(folio, 0, end_pos - folio_pos(folio));
+	/*
+	 * We can have dirty bits set past end of file in page_mkwrite path
+	 * while mapping the last partial folio. Hence it's better to clear
+	 * all the dirty bits in the folio here.
+	 */
+	iomap_clear_range_dirty(folio, 0, folio_size(folio));
 	folio_start_writeback(folio);
 	folio_unlock(folio);
 
