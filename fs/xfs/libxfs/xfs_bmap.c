@@ -1024,7 +1024,10 @@ xfs_bmap_add_attrfork(
 	int			error;		/* error return value */
 
 	mp = ip->i_mount;
-	ASSERT(!XFS_NOT_DQATTACHED(mp, ip));
+	if (xfs_is_metadir_inode(ip))
+		ASSERT(XFS_IS_DQDETACHED(ip->i_mount, ip));
+	else
+		ASSERT(!XFS_NOT_DQATTACHED(mp, ip));
 
 	blks = XFS_ADDAFORK_SPACE_RES(mp);
 
