@@ -17,6 +17,7 @@
 #include "xfs_attr_leaf.h"
 #include "xfs_attr_sf.h"
 #include "xfs_trans.h"
+#include "xfs_parent.h"
 #include "scrub/scrub.h"
 #include "scrub/bitmap.h"
 #include "scrub/listxattr.h"
@@ -306,4 +307,61 @@ xchk_xattr_walk(
 		return xchk_xattr_walk_leaf(sc, ip, attr_fn, priv);
 
 	return xchk_xattr_walk_node(sc, ip, attr_fn, priv);
+}
+
+struct xchk_pptr_walk {
+	struct xfs_parent_name_irec	*pptr_buf;
+	xchk_pptr_fn			fn;
+	void				*priv;
+};
+
+STATIC int
+xchk_pptr_walk_attr(
+	struct xfs_scrub	*sc,
+	struct xfs_inode	*ip,
+	unsigned int		attr_flags,
+	const unsigned char	*name,
+	unsigned int		namelen,
+	const void		*value,
+	unsigned int		valuelen,
+	void			*priv)
+{
+	struct xchk_pptr_walk	*pw = priv;
+	const struct xfs_parent_name_rec *rec = (const void *)name;
+
+	/* Ignore anything that isn't a parent pointer. */
+	if (!(attr_flags & XFS_ATTR_PARENT))
+		return 0;
+
+	/* Does the ondisk parent pointer structure make sense? */
+	if (!xfs_parent_namecheck(sc->mp, rec, namelen, attr_flags) ||
+	    !xfs_parent_valuecheck(sc->mp, value, valuelen))
+		return -EFSCORRUPTED;
+
+	xfs_parent_irec_from_disk(pw->pptr_buf, rec, value, valuelen);
+	return pw->fn(sc, ip, pw->pptr_buf, pw->priv);
+}
+
+/*
+ * Walk every parent pointer of this file.  The parent pointer will be
+ * formatted into the provided pptr_buf, which is then passed to the callback
+ * function.
+ */
+int
+xchk_pptr_walk(
+	struct xfs_scrub		*sc,
+	struct xfs_inode		*ip,
+	xchk_pptr_fn			pptr_fn,
+	struct xfs_parent_name_irec	*pptr_buf,
+	void				*priv)
+{
+	struct xchk_pptr_walk		pw = {
+		.fn			= pptr_fn,
+		.pptr_buf		= pptr_buf,
+		.priv			= priv,
+	};
+
+	ASSERT(xfs_has_parent(sc->mp));
+
+	return xchk_xattr_walk(sc, ip, xchk_pptr_walk_attr, &pw);
 }
