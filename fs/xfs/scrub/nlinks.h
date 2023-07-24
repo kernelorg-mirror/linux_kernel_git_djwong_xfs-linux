@@ -23,6 +23,9 @@ struct xchk_nlink_ctrs {
 	struct xchk_iscan	collect_iscan;
 	struct xchk_iscan	compare_iscan;
 
+	/* Parent pointer for finding backrefs. */
+	struct xfs_parent_name_irec pptr;
+
 	/*
 	 * Hook into directory updates so that we can receive live updates
 	 * from other writer threads.
