@@ -20,6 +20,7 @@
 #include "xfs_bmap.h"
 #include "xfs_bmap_btree.h"
 #include "xfs_parent.h"
+#include "xfs_attr_sf.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/repair.h"
@@ -267,6 +268,8 @@ xrep_adoption_init(
 	if (S_ISDIR(VFS_I(sc->ip)->i_mode))
 		child_blkres = xfs_rename_space_res(mp, 0, false,
 						xfs_name_dotdot.len, false);
+	if (xfs_has_parent(sc->mp))
+		child_blkres += XFS_ADDAFORK_SPACE_RES(sc->mp);
 	adopt->child_blkres = child_blkres;
 	return xfs_parent_start(mp, &adopt->parent);
 }
@@ -446,6 +449,17 @@ xrep_orphanage_zap_dcache(
 	dput(d_orphanage);
 }
 
+static inline int
+xrep_pptr_attr_sizeof(
+	const struct xrep_adoption	*adopt)
+{
+	size_t				res = sizeof(struct xfs_attr_sf_hdr);
+
+	res += xfs_attr_sf_entsize_byname(sizeof(struct xfs_parent_name_rec),
+			adopt->xname.len);
+	return res;
+}
+
 /*
  * Move the current file to the orphanage.
  *
@@ -468,6 +482,19 @@ xrep_adoption_commit(
 	error = xrep_orphanage_check_dcache(adopt);
 	if (error)
 		goto out_parent;
+
+	/*
+	 * If this filesystem has parent pointers, ensure that the file being
+	 * moved to the orphanage has an attribute fork.  This is required
+	 * because the parent pointer code does not itself add attr forks.
+	 */
+	if (!xfs_inode_has_attr_fork(sc->ip) && xfs_has_parent(sc->mp)) {
+		int sf_size = xrep_pptr_attr_sizeof(adopt);
+
+		error = xfs_bmap_add_attrfork(sc->tp, sc->ip, sf_size, true);
+		if (error)
+			goto out_parent;
+	}
 
 	/* Create the new name in the orphanage. */
 	error = xfs_dir_createname(sc->tp, sc->orphanage, xname, sc->ip->i_ino,
