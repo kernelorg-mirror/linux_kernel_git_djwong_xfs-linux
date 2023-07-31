@@ -21,6 +21,8 @@
 #include "xfs_rmap.h"
 #include "xfs_xchgrange.h"
 #include "xfs_swapext.h"
+#include "xfs_dir2.h"
+#include "xfs_parent.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
