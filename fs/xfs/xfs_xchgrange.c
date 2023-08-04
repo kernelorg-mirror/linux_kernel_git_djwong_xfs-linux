@@ -1083,6 +1083,17 @@ xfs_xchg_range_grab_log_assist(
 	int			error = 0;
 
 	/*
+	 * Directory parent pointers are signalled with a permanently set
+	 * INCOMPAT bit in the superblock, so it is not necessary to set an
+	 * INCOMPAT_LOG bit to protect swapext log intent items from older
+	 * kernels.
+	 */
+	if (xfs_has_parent(mp)) {
+		*use_logging = true;
+		return 0;
+	}
+
+	/*
 	 * Protect ourselves from an idle log clearing the atomic swapext
 	 * log incompat feature bit.
 	 */
@@ -1133,7 +1144,8 @@ void
 xfs_xchg_range_rele_log_assist(
 	struct xfs_mount	*mp)
 {
-	xlog_drop_incompat_feat(mp->m_log, XLOG_INCOMPAT_FEAT_SWAPEXT);
+	if (!xfs_has_parent(mp))
+		xlog_drop_incompat_feat(mp->m_log, XLOG_INCOMPAT_FEAT_SWAPEXT);
 }
 
 /* Decide if we can use the old data fork exchange code. */

@@ -567,7 +567,7 @@ xfs_attri_validate(
 {
 	unsigned int			op = xfs_attr_log_item_op(attrp);
 
-	if (!xfs_sb_version_haslogxattrs(&mp->m_sb))
+	if (!xfs_sb_version_haslogxattrs(&mp->m_sb) && !xfs_has_parent(mp))
 		return false;
 
 	if (attrp->alfi_op_flags & ~XFS_ATTRI_OP_FLAGS_TYPE_MASK)

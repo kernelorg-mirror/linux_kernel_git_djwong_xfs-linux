@@ -377,7 +377,7 @@ xfs_sxi_validate(
 {
 	struct xfs_swap_extent		*sx = &sxi_lip->sxi_format.sxi_extent;
 
-	if (!xfs_sb_version_haslogswapext(&mp->m_sb))
+	if (!xfs_sb_version_haslogswapext(&mp->m_sb) && !xfs_has_parent(mp))
 		return false;
 
 	if (sxi_lip->sxi_format.__pad != 0)

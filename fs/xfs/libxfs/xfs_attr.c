@@ -900,8 +900,12 @@ xfs_attr_intent_init(
 	unsigned int		op_flags,	/* op flag (set or remove) */
 	struct xfs_attr_intent	**attr)		/* new xfs_attr_intent */
 {
-
 	struct xfs_attr_intent	*new;
+
+	/* Must have an INCOMPAT feature to protect attr log intent items */
+	ASSERT(!(args->op_flags & XFS_DA_OP_LOGGED) ||
+	       (xfs_has_parent(args->dp->i_mount) ||
+		xfs_sb_version_haslogxattrs(&args->dp->i_mount->m_sb)));
 
 	new = kmem_cache_zalloc(xfs_attr_intent_cache, GFP_NOFS | __GFP_NOFAIL);
 	new->xattri_op_flags = op_flags;
