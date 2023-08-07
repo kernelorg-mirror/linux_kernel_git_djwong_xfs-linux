@@ -18,6 +18,7 @@
 #include "xfs_bmap.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
+#include "scrub/quota.h"
 
 /* Convert a scrub type code to a DQ flag, or return 0 if error. */
 static inline xfs_dqtype_t
@@ -320,7 +321,7 @@ xchk_quota(
 	xchk_iunlock(sc, sc->ilock_flags);
 	sqi.sc = sc;
 	sqi.last_id = 0;
-	error = xfs_qm_dqiterate(mp, dqtype, xchk_quota_item, &sqi);
+	error = xchk_dqiterate(mp, dqtype, xchk_quota_item, &sqi);
 	xchk_ilock(sc, XFS_ILOCK_EXCL);
 	if (error == -ECANCELED)
 		error = 0;
