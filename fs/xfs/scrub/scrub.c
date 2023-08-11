@@ -765,6 +765,31 @@ xfs_scrubv_previous_failures(
 	return false;
 }
 
+/*
+ * If the caller provided us with a nonzero inode number that isn't the ioctl
+ * file, try to grab a reference to it to eliminate all further untrusted inode
+ * lookups.  If we can't get the inode, let each scrub function try again.
+ */
+STATIC struct xfs_inode *
+xchk_scrubv_open_by_handle(
+	struct xfs_mount		*mp,
+	const struct xfs_scrub_vec_head	*vhead)
+{
+	struct xfs_inode		*ip;
+	int				error;
+
+	error = xfs_iget(mp, NULL, vhead->svh_ino, XFS_IGET_UNTRUSTED, 0, &ip);
+	if (error)
+		return NULL;
+
+	if (VFS_I(ip)->i_generation != vhead->svh_gen) {
+		xfs_irele(ip);
+		return NULL;
+	}
+
+	return ip;
+}
+
 /* Vectored scrub implementation to reduce ioctl calls. */
 int
 xfs_scrubv_metadata(
@@ -773,7 +798,9 @@ xfs_scrubv_metadata(
 {
 	struct xfs_inode		*ip_in = XFS_I(file_inode(file));
 	struct xfs_mount		*mp = ip_in->i_mount;
+	struct xfs_inode		*handle_ip = NULL;
 	struct xfs_scrub_vec		*v;
+	bool				set_dontcache = false;
 	unsigned int			i;
 	int				error = 0;
 
@@ -792,8 +819,27 @@ xfs_scrubv_metadata(
 		    (v->sv_flags & ~XFS_SCRUB_FLAGS_OUT))
 			return -EINVAL;
 
+		/*
+		 * If we detect at least one inode-type scrub, we might
+		 * consider setting dontcache at the end.
+		 */
+		if (v->sv_type < XFS_SCRUB_TYPE_NR &&
+		    meta_scrub_ops[v->sv_type].type == ST_INODE)
+			set_dontcache = true;
+
 		trace_xchk_scrubv_item(mp, vhead, v);
 	}
+
+	/*
+	 * If the caller wants us to do a scrub-by-handle and the file used to
+	 * call the ioctl is not the same file, load the incore inode and pin
+	 * it across all the scrubv actions to avoid repeated UNTRUSTED
+	 * lookups.  The reference is not passed to deeper layers of scrub
+	 * because each scrubber gets to decide its own strategy for getting an
+	 * inode.
+	 */
+	if (vhead->svh_ino && vhead->svh_ino != ip_in->i_ino)
+		handle_ip = xchk_scrubv_open_by_handle(mp, vhead);
 
 	/* Run all the scrubbers. */
 	for (i = 0, v = vhead->svh_vecs; i < vhead->svh_nr; i++, v++) {
@@ -818,6 +864,10 @@ xfs_scrubv_metadata(
 		v->sv_ret = xfs_scrub_metadata(file, &sm);
 		v->sv_flags = sm.sm_flags;
 
+		/* Leave the inode in memory if something's wrong with it. */
+		if (xchk_needs_repair(&sm))
+			set_dontcache = false;
+
 		if (vhead->svh_rest_us) {
 			ktime_t		expires;
 
@@ -832,5 +882,16 @@ xfs_scrubv_metadata(
 		}
 	}
 
+	/*
+	 * If we're holding the only reference to an inode opened via handle
+	 * and the scan was clean, mark it dontcache so that we don't pollute
+	 * the cache.
+	 */
+	if (handle_ip) {
+		if (set_dontcache &&
+		    atomic_read(&VFS_I(handle_ip)->i_count) == 1)
+			d_mark_dontcache(VFS_I(handle_ip));
+		xfs_irele(handle_ip);
+	}
 	return error;
 }
