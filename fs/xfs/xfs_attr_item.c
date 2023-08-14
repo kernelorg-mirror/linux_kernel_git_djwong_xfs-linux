@@ -503,7 +503,8 @@ xfs_attri_validate(
 	unsigned int			op = attrp->alfi_op_flags &
 					     XFS_ATTRI_OP_FLAGS_TYPE_MASK;
 
-	if (!xfs_sb_version_haslogxattrs(&mp->m_sb))
+	if (!xfs_sb_version_haslogxattrs(&mp->m_sb) &&
+	    !xfs_attri_can_use_without_log_assistance(mp))
 		return false;
 
 	if (attrp->__pad != 0)
