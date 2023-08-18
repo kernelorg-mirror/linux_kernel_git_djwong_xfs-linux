@@ -17,10 +17,15 @@
 #include "xfs_quota.h"
 #include "xfs_qm.h"
 #include "xfs_dir2.h"
+#include "xfs_parent.h"
+#include "xfs_bmap_btree.h"
+#include "xfs_trans_space.h"
+#include "xfs_attr.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
 #include "scrub/readdir.h"
+#include "scrub/repair.h"
 
 /*
  * Metadata Directory Tree Paths
@@ -39,6 +44,9 @@ struct xchk_metapath {
 	/* Name for lookup */
 	struct xfs_name			xname;
 
+	/* Directory update for repairs */
+	struct xfs_dir_update		du;
+
 	/* Path for this metadata file */
 	const struct xfs_imeta_path	*path;
 
@@ -47,6 +55,14 @@ struct xchk_metapath {
 
 	/* Locks held on dp */
 	unsigned int			dp_ilock_flags;
+
+	/* Transaction block reservations */
+	unsigned int			link_resblks;
+	unsigned int			unlink_resblks;
+
+	/* Parent pointer updates */
+	struct xfs_parent_args		link_ppargs;
+	struct xfs_parent_args		unlink_ppargs;
 };
 
 /* Release resources tracked in the buffer. */
@@ -248,3 +264,154 @@ out_cancel:
 	xchk_trans_cancel(sc);
 	return error;
 }
+
+#ifdef CONFIG_XFS_ONLINE_REPAIR
+/* Create the dirent represented by the final component of the path. */
+STATIC int
+xrep_metapath_link(
+	struct xchk_metapath	*mpath)
+{
+	struct xfs_scrub	*sc = mpath->sc;
+
+	mpath->du.dp = mpath->dp;
+	mpath->du.name = &mpath->xname;
+	mpath->du.ip = sc->ip;
+
+	if (xfs_has_parent(sc->mp))
+		mpath->du.ppargs = &mpath->link_ppargs;
+	else
+		mpath->du.ppargs = NULL;
+
+	trace_xrep_metapath_link(sc, mpath->path, mpath->dp, sc->ip->i_ino);
+
+	return xfs_dir_add_child(sc->tp, mpath->link_resblks, &mpath->du);
+}
+
+/* Remove the dirent at the final component of the path. */
+STATIC int
+xrep_metapath_unlink(
+	struct xchk_metapath	*mpath,
+	xfs_ino_t		wrong_ino)
+{
+	struct xfs_scrub	*sc = mpath->sc;
+
+	mpath->du.dp = mpath->dp;
+	mpath->du.name = &mpath->xname;
+	mpath->du.ip = sc->ip;
+
+	if (xfs_has_parent(sc->mp))
+		mpath->du.ppargs = &mpath->unlink_ppargs;
+	else
+		mpath->du.ppargs = NULL;
+
+	trace_xrep_metapath_unlink(sc, mpath->path, mpath->dp, wrong_ino);
+
+	return xfs_dir_add_child(sc->tp, mpath->unlink_resblks, &mpath->du);
+}
+
+/*
+ * Make sure the metadata directory path points to the child being examined.
+ *
+ * Repair needs to be able to create a directory structure, create its own
+ * transactions, and take ILOCKs.  This function /must/ be called after all
+ * other repairs have completed.
+ */
+int
+xrep_metapath(
+	struct xfs_scrub	*sc)
+{
+	struct xchk_metapath	*mpath = sc->buf;
+	struct xfs_mount	*mp = sc->mp;
+	xfs_ino_t		ino = NULLFSINO;
+	int			error = 0;
+
+	/*
+	 * Make sure the directory path exists all the way down to where the
+	 * parent pointer should be.
+	 */
+	error = xfs_imeta_ensure_dirpath(sc->mp, mpath->path);
+	if (error)
+		return error;
+
+	/* Make sure the parent is attached now. */
+	error = xchk_trans_alloc_empty(sc);
+	if (error)
+		return error;
+	if (!xchk_metapath_try_attach_parent(mpath)) {
+		xchk_trans_cancel(sc);
+		return -EFSCORRUPTED;
+	}
+	xchk_trans_cancel(sc);
+
+	/*
+	 * Make sure the child file actually has an attr fork to receive a new
+	 * parent pointer if the fs has parent pointers.
+	 */
+	if (xfs_has_parent(mp)) {
+		error = xfs_attr_add_fork(sc->ip,
+				sizeof(struct xfs_attr_sf_hdr), 1);
+		if (error)
+			return error;
+	}
+
+	/* Compute block reservation required to unlink and link a file. */
+	mpath->unlink_resblks = xfs_remove_space_res(mp, MAXNAMELEN);
+	mpath->link_resblks = xfs_link_space_res(mp, MAXNAMELEN);
+
+	/* Allocate parent pointer tracking. */
+	xfs_parent_args_init(mp, &mpath->link_ppargs);
+	xfs_parent_args_init(mp, &mpath->unlink_ppargs);
+
+	/* Allocate transaction, lock inodes, join to transaction. */
+	error = xchk_trans_alloc(sc, mpath->link_resblks +
+				     mpath->unlink_resblks);
+	if (error)
+		return error;
+
+	error = xchk_metapath_ilock_both(mpath);
+	if (error) {
+		xchk_trans_cancel(sc);
+		return error;
+	}
+	xfs_trans_ijoin(sc->tp, mpath->dp, 0);
+	xfs_trans_ijoin(sc->tp, sc->ip, 0);
+
+	/* Figure out what to do about this file. */
+	error = xchk_dir_lookup(sc, mpath->dp, &mpath->xname, &ino);
+	trace_xrep_metapath_lookup(sc, mpath->path, mpath->dp, ino);
+	if (error == -ENOENT) {
+		/* Add new link */
+		error = xrep_metapath_link(mpath);
+		if (error)
+			goto out_cancel;
+		goto out_commit;
+	}
+	if (error)
+		goto out_cancel;
+
+	if (ino == sc->ip->i_ino)
+		goto out_cancel;
+
+	/* Remove the dirent at the end of the path and finish deferred ops. */
+	error = xrep_metapath_unlink(mpath, ino);
+	if (error)
+		goto out_cancel;
+	error = xrep_defer_finish(sc);
+	if (error)
+		goto out_cancel;
+
+	/* Add new dirent link, having not unlocked the inodes, and commit. */
+	error = xrep_metapath_link(mpath);
+	if (error)
+		goto out_cancel;
+
+out_commit:
+	error = xrep_trans_commit(sc);
+	goto out_ilock;
+out_cancel:
+	xchk_trans_cancel(sc);
+out_ilock:
+	xchk_metapath_iunlock(mpath);
+	return error;
+}
+#endif /* CONFIG_XFS_ONLINE_REPAIR */
