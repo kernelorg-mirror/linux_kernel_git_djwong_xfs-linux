@@ -32,6 +32,7 @@ struct xfs_parent_name_irec;
 enum xchk_dirpath_outcome;
 struct xchk_dirtree;
 struct xchk_dirtree_outcomes;
+struct xfs_imeta_path;
 
 /*
  * ftrace's __print_symbolic requires that all enum values be wrapped in the
@@ -81,6 +82,7 @@ TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_NLINKS);
 TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_HEALTHY);
 TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_DIRTREE);
 TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_BARRIER);
+TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_METAPATH);
 
 #define XFS_SCRUB_TYPE_STRINGS \
 	{ XFS_SCRUB_TYPE_PROBE,		"probe" }, \
@@ -112,7 +114,8 @@ TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_BARRIER);
 	{ XFS_SCRUB_TYPE_NLINKS,	"nlinks" }, \
 	{ XFS_SCRUB_TYPE_HEALTHY,	"healthy" }, \
 	{ XFS_SCRUB_TYPE_DIRTREE,	"dirtree" }, \
-	{ XFS_SCRUB_TYPE_BARRIER,	"barrier" }
+	{ XFS_SCRUB_TYPE_BARRIER,	"barrier" }, \
+	{ XFS_SCRUB_TYPE_METAPATH,	"metapath" }
 
 #define XFS_SCRUB_FLAG_STRINGS \
 	{ XFS_SCRUB_IFLAG_REPAIR,		"repair" }, \
@@ -1924,6 +1927,46 @@ TRACE_EVENT(xchk_dirtree_live_update,
 		  __entry->namelen,
 		  __get_str(name))
 );
+
+DECLARE_EVENT_CLASS(xchk_metapath_class,
+	TP_PROTO(struct xfs_scrub *sc, const struct xfs_imeta_path *path,
+		 struct xfs_inode *dp, xfs_ino_t ino),
+	TP_ARGS(sc, path, dp, ino),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, scrub_ino)
+		__field(xfs_ino_t, parent_ino)
+		__field(xfs_ino_t, ino)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, strlen(path->im_path[path->im_depth - 1]))
+	),
+	TP_fast_assign(
+		const unsigned char *p;
+
+		__entry->dev = sc->mp->m_super->s_dev;
+		__entry->scrub_ino = sc->ip ? sc->ip->i_ino : NULLFSINO;
+		__entry->parent_ino = dp ? dp->i_ino : NULLFSINO;
+		__entry->ino = ino;
+
+		p = path->im_path[path->im_depth - 1];
+		__entry->namelen = strlen(p);
+		memcpy(__get_str(name), p, __entry->namelen);
+	),
+	TP_printk("dev %d:%d ino 0x%llx parent_ino 0x%llx name '%.*s' ino 0x%llx",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->scrub_ino,
+		  __entry->parent_ino,
+		  __entry->namelen,
+		  __get_str(name),
+		  __entry->ino)
+);
+#define DEFINE_XCHK_METAPATH_EVENT(name) \
+DEFINE_EVENT(xchk_metapath_class, name, \
+	TP_PROTO(struct xfs_scrub *sc, const struct xfs_imeta_path *path, \
+		 struct xfs_inode *dp, xfs_ino_t ino), \
+	TP_ARGS(sc, path, dp, ino))
+DEFINE_XCHK_METAPATH_EVENT(xchk_metapath_try_attach_parent);
+DEFINE_XCHK_METAPATH_EVENT(xchk_metapath_lookup);
 
 /* repair tracepoints */
 #if IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR)
