@@ -21,6 +21,8 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_trans_space.h"
 #include "xfs_attr.h"
+#include "xfs_rtgroup.h"
+#include "xfs_rtrmap_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -89,12 +91,24 @@ xchk_setup_metapath(
 	struct xchk_metapath	*mpath;
 	struct xfs_mount	*mp = sc->mp;
 	struct xfs_inode	*ip = NULL;
+	struct xfs_rtgroup	*rtg;
+	struct xfs_imeta_path	*path;
 	int			error;
 
 	if (!xfs_has_metadir(mp))
 		return -ENOENT;
-	if (sc->sm->sm_gen || sc->sm->sm_agno)
+	if (sc->sm->sm_gen)
 		return -EINVAL;
+
+	switch (sc->sm->sm_ino) {
+	case XFS_SCRUB_METAPATH_RTRMAPBT:
+		/* empty */
+		break;
+	default:
+		if (sc->sm->sm_agno)
+			return -EINVAL;
+		break;
+	}
 
 	mpath = kzalloc(sizeof(struct xchk_metapath), XCHK_GFP_FLAGS);
 	if (!mpath)
@@ -127,6 +141,17 @@ xchk_setup_metapath(
 		mpath->path = &XFS_IMETA_PRJQUOTA;
 		if (XFS_IS_PQUOTA_ON(mp))
 			ip = xfs_quota_inode(mp, XFS_DQTYPE_PROJ);
+		break;
+	case XFS_SCRUB_METAPATH_RTRMAPBT:
+		error = xfs_rtrmapbt_create_path(mp, sc->sm->sm_agno, &path);
+		if (error)
+			return error;
+		mpath->path = path;
+		rtg = xfs_rtgroup_get(mp, sc->sm->sm_agno);
+		if (rtg) {
+			ip = rtg->rtg_rmapip;
+			xfs_rtgroup_put(rtg);
+		}
 		break;
 	default:
 		return -EINVAL;
