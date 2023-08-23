@@ -3354,6 +3354,7 @@ xlog_recover(
 	struct xlog	*log)
 {
 	xfs_daddr_t	head_blk, tail_blk;
+	bool		unknown_rocompat = false;
 	int		error;
 
 	/* find the tail of the log */
@@ -3369,6 +3370,12 @@ xlog_recover(
 	if (xfs_has_crc(log->l_mp) &&
 	    !xfs_log_check_lsn(log->l_mp, log->l_mp->m_sb.sb_lsn))
 		return -EINVAL;
+
+	/* Detect unknown rocompat features in the superblock */
+	if (xfs_has_crc(log->l_mp) &&
+	    xfs_sb_has_ro_compat_feature(&log->l_mp->m_sb,
+					 XFS_SB_FEAT_RO_COMPAT_UNKNOWN))
+		unknown_rocompat = true;
 
 	if (tail_blk != head_blk) {
 		/* There used to be a comment here:
@@ -3400,6 +3407,24 @@ xlog_recover(
 "Superblock has unknown incompatible log features (0x%x) enabled.",
 				(log->l_mp->m_sb.sb_features_log_incompat &
 					XFS_SB_FEAT_INCOMPAT_LOG_UNKNOWN));
+			xfs_warn(log->l_mp,
+"The log can not be fully and/or safely recovered by this kernel.");
+			xfs_warn(log->l_mp,
+"Please recover the log on a kernel that supports the unknown features.");
+			return -EINVAL;
+		}
+
+		/*
+		 * Don't allow log recovery on a ro mount if there are unknown
+		 * ro compat bits set.  We used to allow this, but BUI/CUI log
+		 * items are protected by the REFLINK rocompat bit so now we
+		 * cannot.
+		 */
+		if (xfs_is_readonly(log->l_mp) && unknown_rocompat) {
+			xfs_alert(log->l_mp,
+"Superblock has unknown read-only compatible features (0x%x) enabled.",
+				 (log->l_mp->m_sb.sb_features_ro_compat &
+						XFS_SB_FEAT_RO_COMPAT_UNKNOWN));
 			xfs_warn(log->l_mp,
 "The log can not be fully and/or safely recovered by this kernel.");
 			xfs_warn(log->l_mp,
