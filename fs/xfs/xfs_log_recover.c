@@ -3450,6 +3450,13 @@ xlog_recover(
 
 		error = xlog_do_recover(log, head_blk, tail_blk);
 		set_bit(XLOG_RECOVERY_NEEDED, &log->l_opstate);
+	} else if (unknown_rocompat) {
+		/*
+		 * Log recovery wasn't needed, but if the superblock has
+		 * unknown rocompat features, don't allow log writes at all
+		 * because the sb write verifier will trip.
+		 */
+		set_bit(XLOG_READONLY, &log->l_opstate);
 	}
 	return error;
 }

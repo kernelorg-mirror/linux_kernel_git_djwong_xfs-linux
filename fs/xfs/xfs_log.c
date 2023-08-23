@@ -391,6 +391,8 @@ xfs_log_writable(
 		return false;
 	if (xlog_is_shutdown(mp->m_log))
 		return false;
+	if (xlog_is_readonly(mp->m_log))
+		return false;
 	return true;
 }
 
@@ -408,6 +410,8 @@ xfs_log_regrant(
 
 	if (xlog_is_shutdown(log))
 		return -EIO;
+	if (xlog_is_readonly(log))
+		return -EROFS;
 
 	XFS_STATS_INC(mp, xs_try_logspace);
 
@@ -471,6 +475,8 @@ xfs_log_reserve(
 
 	if (xlog_is_shutdown(log))
 		return -EIO;
+	if (xlog_is_readonly(log))
+		return -EROFS;
 
 	XFS_STATS_INC(mp, xs_try_logspace);
 

@@ -461,6 +461,7 @@ struct xlog {
 #define XLOG_IO_ERROR		2	/* log hit an I/O error, and being
 				   shutdown */
 #define XLOG_TAIL_WARN		3	/* log tail verify warning issued */
+#define XLOG_READONLY		4	/* cannot write to the log */
 
 static inline bool
 xlog_recovery_needed(struct xlog *log)
@@ -478,6 +479,12 @@ static inline bool
 xlog_is_shutdown(struct xlog *log)
 {
 	return test_bit(XLOG_IO_ERROR, &log->l_opstate);
+}
+
+static inline bool
+xlog_is_readonly(struct xlog *log)
+{
+	return test_bit(XLOG_READONLY, &log->l_opstate);
 }
 
 /*
