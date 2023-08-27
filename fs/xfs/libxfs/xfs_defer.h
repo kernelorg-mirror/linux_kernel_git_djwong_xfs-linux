@@ -20,6 +20,7 @@ enum xfs_defer_ops_type {
 	XFS_DEFER_OPS_TYPE_FREE,
 	XFS_DEFER_OPS_TYPE_AGFL_FREE,
 	XFS_DEFER_OPS_TYPE_ATTR,
+	XFS_DEFER_OPS_TYPE_BARRIER,
 	XFS_DEFER_OPS_TYPE_MAX,
 };
 
@@ -140,5 +141,7 @@ void xfs_defer_resources_rele(struct xfs_defer_resources *dres);
 
 int __init xfs_defer_init_item_caches(void);
 void xfs_defer_destroy_item_caches(void);
+
+void xfs_defer_add_barrier(struct xfs_trans *tp);
 
 #endif /* __XFS_DEFER_H__ */
