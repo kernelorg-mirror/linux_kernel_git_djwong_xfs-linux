@@ -717,7 +717,7 @@ xfs_efi_item_recover(
 			error = xfs_free_extent_later(tp, fake.xefi_startblock,
 					fake.xefi_blockcount,
 					&XFS_RMAP_OINFO_ANY_OWNER,
-					fake.xefi_agresv);
+					fake.xefi_agresv, false);
 			if (!error) {
 				requeue_only = true;
 				continue;
