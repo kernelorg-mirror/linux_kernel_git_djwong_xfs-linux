@@ -3350,6 +3350,17 @@ xfs_bmap_btalloc_accounting(
 		args->len);
 }
 
+static inline bool
+xfs_bmap_use_forcealign(
+	const struct xfs_bmalloca	*ap)
+{
+	if (!xfs_inode_force_align(ap->ip))
+		return false;
+
+	return  (ap->flags & XFS_BMAPI_COWFORK) ||
+		(ap->datatype & XFS_ALLOC_USERDATA);
+}
+
 static int
 xfs_bmap_compute_alignments(
 	struct xfs_bmalloca	*ap,
@@ -3364,6 +3375,17 @@ xfs_bmap_compute_alignments(
 		stripe_align = mp->m_swidth;
 	else if (mp->m_dalign)
 		stripe_align = mp->m_dalign;
+
+	/*
+	 * File data mappings with forced alignment can use the stripe
+	 * alignment if it's a multiple of the forcealign value.  Otherwise,
+	 * use the regular forcealign value.
+	 */
+	if (xfs_bmap_use_forcealign(ap)) {
+		if (!stripe_align || stripe_align % mp->m_sb.sb_rextsize)
+			stripe_align = mp->m_sb.sb_rextsize;
+		args->alignment = stripe_align;
+	}
 
 	if (ap->flags & XFS_BMAPI_COWFORK)
 		align = xfs_get_cowextsz_hint(ap->ip);
@@ -3436,6 +3458,9 @@ xfs_bmap_exact_minlen_extent_alloc(
 	int			error;
 
 	ASSERT(ap->length);
+
+	if (xfs_inode_force_align(ap->ip))
+		return -ENOSPC;
 
 	if (ap->minlen != 1) {
 		ap->blkno = NULLFSBLOCK;
@@ -3510,6 +3535,7 @@ xfs_bmap_btalloc_at_eof(
 {
 	struct xfs_mount	*mp = args->mp;
 	struct xfs_perag	*caller_pag = args->pag;
+	int			orig_alignment = args->alignment;
 	int			error;
 
 	/*
@@ -3584,10 +3610,10 @@ xfs_bmap_btalloc_at_eof(
 
 	/*
 	 * Allocation failed, so turn return the allocation args to their
-	 * original non-aligned state so the caller can proceed on allocation
-	 * failure as if this function was never called.
+	 * original state so the caller can proceed on allocation failure as
+	 * if this function was never called.
 	 */
-	args->alignment = 1;
+	args->alignment = orig_alignment;
 	return 0;
 }
 
@@ -3609,6 +3635,10 @@ xfs_bmap_btalloc_low_space(
 	struct xfs_alloc_arg	*args)
 {
 	int			error;
+
+	/* Don't try unaligned last-chance allocations with forcealign */
+	if (xfs_inode_force_align(ap->ip))
+		return -ENOSPC;
 
 	if (args->minlen > ap->minlen) {
 		args->minlen = ap->minlen;
@@ -4114,7 +4144,9 @@ xfs_bmap_alloc_userdata(
 		if (bma->offset == 0)
 			bma->datatype |= XFS_ALLOC_INITIAL_USER_DATA;
 
-		if (mp->m_dalign && bma->length >= mp->m_dalign) {
+		/* forcealign mode reuses the stripe unit alignment code */
+		if (xfs_inode_force_align(bma->ip) ||
+		    (mp->m_dalign && bma->length >= mp->m_dalign)) {
 			error = xfs_bmap_isaeof(bma, whichfork);
 			if (error)
 				return error;
@@ -6390,6 +6422,10 @@ xfs_extlen_t
 xfs_get_extsz_hint(
 	struct xfs_inode	*ip)
 {
+	/* forcealign means we align to rextsize */
+	if (xfs_inode_force_align(ip))
+		return ip->i_mount->m_sb.sb_rextsize;
+
 	/*
 	 * No point in aligning allocations if we need to COW to actually
 	 * write to them.
@@ -6413,6 +6449,10 @@ xfs_get_cowextsz_hint(
 	struct xfs_inode	*ip)
 {
 	xfs_extlen_t		a, b;
+
+	/* forcealign means we align to rextsize */
+	if (xfs_inode_force_align(ip))
+		return ip->i_mount->m_sb.sb_rextsize;
 
 	a = 0;
 	if (ip->i_diflags2 & XFS_DIFLAG2_COWEXTSIZE)
