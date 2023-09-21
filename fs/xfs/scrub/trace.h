@@ -2559,6 +2559,7 @@ DEFINE_REPAIR_DINODE_EVENT(xrep_dinode_zap_forks);
 DEFINE_REPAIR_DINODE_EVENT(xrep_dinode_zap_dfork);
 DEFINE_REPAIR_DINODE_EVENT(xrep_dinode_zap_afork);
 DEFINE_REPAIR_DINODE_EVENT(xrep_dinode_ensure_forkoff);
+DEFINE_REPAIR_DINODE_EVENT(xrep_dinode_forcealign);
 
 DECLARE_EVENT_CLASS(xrep_inode_class,
 	TP_PROTO(struct xfs_scrub *sc),
