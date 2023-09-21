@@ -583,6 +583,46 @@ xrep_dinode_extsize_hints(
 	}
 }
 
+/* Fix forcealign flag. */
+STATIC void
+xrep_dinode_forcealign(
+	struct xfs_scrub	*sc,
+	struct xfs_dinode	*dip)
+{
+	uint64_t		flags2;
+	uint16_t		flags;
+	uint16_t		mode;
+
+	trace_xrep_dinode_forcealign(sc, dip);
+
+	if (dip->di_version < 3)
+		return;
+
+	mode = be16_to_cpu(dip->di_mode);
+	flags = be16_to_cpu(dip->di_flags);
+	flags2 = be64_to_cpu(dip->di_flags2);
+
+	if (!(flags2 & XFS_DIFLAG2_FORCEALIGN))
+		return;
+
+	if (!xfs_has_forcealign(sc->mp))
+		flags2 &= ~XFS_DIFLAG2_FORCEALIGN;
+
+	if (!S_ISDIR(mode) && !S_ISREG(mode))
+		flags2 &= ~XFS_DIFLAG2_FORCEALIGN;
+
+	if (flags & XFS_DIFLAG_REALTIME)
+		flags2 &= ~XFS_DIFLAG2_FORCEALIGN;
+
+	if (dip->di_extsize != 0)
+		flags2 &= ~XFS_DIFLAG2_FORCEALIGN;
+
+	if (dip->di_cowextsize != 0)
+		flags2 &= ~XFS_DIFLAG2_FORCEALIGN;
+
+	dip->di_flags2 = cpu_to_be64(flags2);
+}
+
 /* Count extents and blocks for an inode given an rmap. */
 STATIC int
 xrep_dinode_walk_rmap(
@@ -1431,6 +1471,7 @@ xrep_dinode_core(
 	xrep_dinode_flags(sc, dip, ri->rt_extents > 0);
 	xrep_dinode_size(sc, dip);
 	xrep_dinode_extsize_hints(sc, dip);
+	xrep_dinode_forcealign(sc, dip);
 	xrep_dinode_zap_forks(ri, dip);
 
 	/* Write out the inode. */

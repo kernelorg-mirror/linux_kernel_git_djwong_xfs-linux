@@ -1721,6 +1721,10 @@ xfs_fs_fill_super(
 		xfs_warn(mp,
 "EXPERIMENTAL realtime allocation group feature in use. Use at your own risk!");
 
+	if (xfs_has_forcealign(mp))
+		xfs_warn(mp,
+"EXPERIMENTAL forced data extent alignment feature in use. Use at your own risk!");
+
 	if (xfs_has_reflink(mp)) {
 		/*
 		 * Reflink doesn't support pagecache pages that span multiple
