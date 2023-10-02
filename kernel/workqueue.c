@@ -2191,7 +2191,7 @@ static struct worker *create_worker(struct worker_pool *pool)
 		snprintf(id_buf, sizeof(id_buf), "u%d:%d", pool->id, id);
 
 	worker->task = kthread_create_on_node(worker_thread, worker, pool->node,
-					      "kworker/%s", id_buf);
+					      "%s", id_buf);
 	if (IS_ERR(worker->task)) {
 		if (PTR_ERR(worker->task) == -EINTR) {
 			pr_err("workqueue: Interrupted when creating a worker thread \"kworker/%s\"\n",
