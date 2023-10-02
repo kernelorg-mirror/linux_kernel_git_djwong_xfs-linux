@@ -127,7 +127,8 @@ install_linux_image_dbg () {
 
 	rm -rf ${pdir}
 
-	for module in $(find ${image_pdir}/lib/modules/ -name *.ko -printf '%P\n'); do
+	# Original single-threaded version of below; disabled
+	for module in $(find ${image_pdir}/lib/modules/ -name *.ko -printf '%P\n' > /dev/null); do
 		module=lib/modules/${module}
 		mkdir -p $(dirname ${pdir}/usr/lib/debug/${module})
 		# only keep debug symbols in the debug file
@@ -137,6 +138,27 @@ install_linux_image_dbg () {
 		# then add a link to those
 		${OBJCOPY} --add-gnu-debuglink=${pdir}/usr/lib/debug/${module} ${image_pdir}/${module}
 	done
+
+	# Use all available processors for parallel activities.  The packaging
+	# script is single-threaded, at least in all the contexts where we'll
+	# be building .debs.
+	local procs
+	procs=$(getconf _NPROCESSORS_ONLN)
+
+	# Split off the debug information from the main module files.
+	find ${image_pdir}/lib/modules/ -name *.ko -printf '%P\0' | \
+		xargs -0 -P ${procs} -I '{}' sh -c "
+module=lib/modules/\$1
+
+mkdir -p \$(dirname ${pdir}/usr/lib/debug/\${module})
+# only keep debug symbols in the debug file
+${OBJCOPY} --only-keep-debug ${image_pdir}/\${module} ${pdir}/usr/lib/debug/\${module} || exit 255
+
+# strip original module from debug symbols
+${OBJCOPY} --strip-debug ${image_pdir}/\${module} || exit 255
+# then add a link to those
+${OBJCOPY} --add-gnu-debuglink=${pdir}/usr/lib/debug/\${module} ${image_pdir}/\${module} || exit 255
+	" -- {}
 
 	# re-sign stripped modules
 	if is_enabled CONFIG_MODULE_SIG_ALL; then
