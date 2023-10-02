@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 diff_patch=$1
+rm -f "${diff_patch}" ; exit 0 # djwong build tools
 
 mkdir -p "$(dirname "${diff_patch}")"
 

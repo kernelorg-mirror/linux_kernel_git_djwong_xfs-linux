@@ -27,6 +27,20 @@ build-arch:
 	$(shell $(srctree)/scripts/package/deb-build-option) \
 	olddefconfig all
 
+	# build djwong tools package
+	$(MAKE) -f $(srctree)/Makefile ARCH=${ARCH} \
+	KERNELRELEASE=$(KERNELRELEASE) NO_JEVENTS=1 \
+	$(shell $(srctree)/scripts/package/deb-build-option) \
+	-k tools/perf || \
+	$(MAKE) -f $(srctree)/Makefile ARCH=${ARCH} \
+	KERNELRELEASE=$(KERNELRELEASE) NO_JEVENTS=1 NO_LIBTRACEEVENT=1 NO_LIBELF=1 \
+	$(shell $(srctree)/scripts/package/deb-build-option) \
+	-k tools/perf
+	-$(MAKE) -f $(srctree)/Makefile ARCH=${ARCH} \
+	KERNELRELEASE=$(KERNELRELEASE) \
+	$(shell $(srctree)/scripts/package/deb-build-option) \
+	-k tools/turbostat tools/x86_energy_perf_policy
+
 .PHONY: clean
 clean:
 	rm -rf debian/files debian/linux-*
