@@ -1438,8 +1438,11 @@ static ssize_t urandom_read_iter(struct kiocb *kiocb, struct iov_iter *iter)
 	 * Opportunistically attempt to initialize the RNG on platforms that
 	 * have fast cycle counters, but don't (for now) require it to succeed.
 	 */
+#if 0
+	/* XXX crashes on arm64 */
 	if (!crng_ready())
 		try_to_generate_entropy();
+#endif
 
 	if (!crng_ready()) {
 		if (!ratelimit_disable && maxwarn <= 0)
