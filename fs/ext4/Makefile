@@ -5,6 +5,14 @@
 
 obj-$(CONFIG_EXT4_FS) += ext4.o
 
+ifeq ($(CONFIG_EXT4_GCOV_ALL),y)
+GCOV_PROFILE := y
+endif
+
+ifeq ($(CONFIG_EXT4_GCOV_NONE),y)
+GCOV_PROFILE := n
+endif
+
 ext4-y	:= balloc.o bitmap.o block_validity.o dir.o ext4_jbd2.o extents.o \
 		extents_status.o file.o fsmap.o fsync.o hash.o ialloc.o \
 		indirect.o inline.o inode.o ioctl.o mballoc.o migrate.o \

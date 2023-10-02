@@ -7,6 +7,82 @@
 # 
 
 
+ifeq ($(CONFIG_FS_GCOV_ALL),y)
+GCOV_PROFILE_aio.o := y
+GCOV_PROFILE_anon_inodes.o := y
+GCOV_PROFILE_attr.o := y
+GCOV_PROFILE_bad_inode.o := y
+GCOV_PROFILE_binfmt_elf_fdpic.o := y
+GCOV_PROFILE_binfmt_elf.o := y
+GCOV_PROFILE_binfmt_elf_test.o := y
+GCOV_PROFILE_binfmt_flat.o := y
+GCOV_PROFILE_binfmt_misc.o := y
+GCOV_PROFILE_binfmt_script.o := y
+GCOV_PROFILE_buffer.o := y
+GCOV_PROFILE_char_dev.o := y
+GCOV_PROFILE_compat_binfmt_elf.o := y
+GCOV_PROFILE_coredump.o := y
+GCOV_PROFILE_dax.o := y
+GCOV_PROFILE_dcache.o := y
+GCOV_PROFILE_direct-io.o := y
+GCOV_PROFILE_d_path.o := y
+GCOV_PROFILE_drop_caches.o := y
+GCOV_PROFILE_eventfd.o := y
+GCOV_PROFILE_eventpoll.o := y
+GCOV_PROFILE_exec.o := y
+GCOV_PROFILE_fcntl.o := y
+GCOV_PROFILE_fhandle.o := y
+GCOV_PROFILE_file.o := y
+GCOV_PROFILE_filesystems.o := y
+GCOV_PROFILE_file_table.o := y
+GCOV_PROFILE_fs_context.o := y
+GCOV_PROFILE_fsopen.o := y
+GCOV_PROFILE_fs_parser.o := y
+GCOV_PROFILE_fs_pin.o := y
+GCOV_PROFILE_fs_struct.o := y
+GCOV_PROFILE_fs_types.o := y
+GCOV_PROFILE_fs-writeback.o := y
+GCOV_PROFILE_init.o := y
+GCOV_PROFILE_inode.o := y
+GCOV_PROFILE_ioctl.o := y
+GCOV_PROFILE_kernel_read_file.o := y
+GCOV_PROFILE_libfs.o := y
+GCOV_PROFILE_locks.o := y
+GCOV_PROFILE_mbcache.o := y
+GCOV_PROFILE_mnt_idmapping.o := y
+GCOV_PROFILE_mpage.o := y
+GCOV_PROFILE_namei.o := y
+GCOV_PROFILE_namespace.o := y
+GCOV_PROFILE_no-block.o := y
+GCOV_PROFILE_nsfs.o := y
+GCOV_PROFILE_open.o := y
+GCOV_PROFILE_pipe.o := y
+GCOV_PROFILE_pnode.o := y
+GCOV_PROFILE_posix_acl.o := y
+GCOV_PROFILE_proc_namespace.o := y
+GCOV_PROFILE_readdir.o := y
+GCOV_PROFILE_read_write.o := y
+GCOV_PROFILE_remap_range.o := y
+GCOV_PROFILE_select.o := y
+GCOV_PROFILE_seq_file.o := y
+GCOV_PROFILE_signalfd.o := y
+GCOV_PROFILE_splice.o := y
+GCOV_PROFILE_stack.o := y
+GCOV_PROFILE_statfs.o := y
+GCOV_PROFILE_stat.o := y
+GCOV_PROFILE_super.o := y
+GCOV_PROFILE_sync.o := y
+GCOV_PROFILE_sysctls.o := y
+GCOV_PROFILE_timerfd.o := y
+GCOV_PROFILE_userfaultfd.o := y
+GCOV_PROFILE_utimes.o := y
+GCOV_PROFILE_xattr.o := y
+endif
+
+ifeq ($(CONFIG_FS_GCOV_NONE),y)
+GCOV_PROFILE := n
+endif
+
 obj-y :=	open.o read_write.o file_table.o super.o \
 		char_dev.o stat.o exec.o pipe.o namei.o fcntl.o \
 		ioctl.o readdir.o select.o dcache.o inode.o \

@@ -109,3 +109,19 @@ config BTRFS_FS_REF_VERIFY
 	  reference problems or verifying they didn't break something.
 
 	  If unsure, say N.
+
+config BTRFS_GCOV_ALL
+	bool "Generate gcov data for all of BTRFS?"
+	default n
+	depends on BTRFS_FS && GCOV_KERNEL && !GCOV_PROFILE_ALL
+	help
+	  Tell the compiler to generate gcov information for all of BTRFS
+	  even though it isn't globally enabled.
+
+config BTRFS_GCOV_NONE
+	bool "Omit gcov data for all of BTRFS?"
+	default n
+	depends on BTRFS_FS && GCOV_KERNEL && GCOV_PROFILE_ALL
+	help
+	  Tell the compiler to generate gcov information for none of BTRFS
+	  even when it will be generated for the rest of the kernel.

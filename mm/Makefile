@@ -67,6 +67,20 @@ obj-y += init-mm.o
 obj-y += memblock.o
 obj-y += $(memory-hotplug-y)
 
+ifeq ($(CONFIG_PAGECACHE_GCOV_ALL),y)
+GCOV_PROFILE_page-writeback.o := y
+GCOV_PROFILE_filemap.o := y
+GCOV_PROFILE_readahead.o := y
+GCOV_PROFILE_truncate.o := y
+endif
+
+ifeq ($(CONFIG_PAGECACHE_GCOV_NONE),y)
+GCOV_PROFILE_page-writeback.o := n
+GCOV_PROFILE_filemap.o := n
+GCOV_PROFILE_readahead.o := n
+GCOV_PROFILE_truncate.o := n
+endif
+
 ifdef CONFIG_MMU
 	obj-$(CONFIG_ADVISE_SYSCALLS)	+= madvise.o
 endif
