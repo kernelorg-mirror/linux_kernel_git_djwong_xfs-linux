@@ -145,7 +145,17 @@ install_linux_image_dbg () {
 	local procs
 	procs=$(getconf _NPROCESSORS_ONLN)
 
-	# Split off the debug information from the main module files.
+	# Decompress the modules, if they were xz-compressed.  This MUST be
+	# performed before the find statement below.
+	find ${image_pdir}/lib/modules/ -name *.ko.xz -printf '%P\0' | \
+		xargs -0 -P $procs -I '{}' sh -c "
+module=lib/modules/\$1
+echo \"  XZD     \$(basename \${module})\"
+xz -d -f ${image_pdir}/\${module} || exit 255
+" -- {}
+
+	# Split off the debug information from the main module files now that
+	# we've undone the effects of compression.
 	find ${image_pdir}/lib/modules/ -name *.ko -printf '%P\0' | \
 		xargs -0 -P ${procs} -I '{}' sh -c "
 module=lib/modules/\$1
@@ -160,7 +170,7 @@ ${OBJCOPY} --strip-debug ${image_pdir}/\${module} || exit 255
 ${OBJCOPY} --add-gnu-debuglink=${pdir}/usr/lib/debug/\${module} ${image_pdir}/\${module} || exit 255
 	" -- {}
 
-	# re-sign stripped modules
+	# re-sign stripped modules, which will recompress them for us.
 	if is_enabled CONFIG_MODULE_SIG_ALL; then
 		${MAKE} -f ${srctree}/Makefile INSTALL_MOD_PATH="${image_pdir}" modules_sign
 	fi
