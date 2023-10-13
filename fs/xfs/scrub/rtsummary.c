@@ -31,6 +31,16 @@
  * (potentially large) amount of data in pageable memory.
  */
 
+struct xchk_rtsummary {
+	uint64_t		rextents;
+	uint64_t		rbmblocks;
+	uint64_t		rsumsize;
+	unsigned int		rsumlevels;
+
+	/* Memory buffer for the summary comparison. */
+	xfs_suminfo_t		words[];
+};
+
 /* Set us up to check the rtsummary file. */
 int
 xchk_setup_rtsummary(
@@ -38,7 +48,15 @@ xchk_setup_rtsummary(
 {
 	struct xfs_mount	*mp = sc->mp;
 	char			*descr;
+	struct xchk_rtsummary	*rts;
+	uint64_t		rsumbytes;
 	int			error;
+
+	rts = kvzalloc(struct_size(rts, words, mp->m_blockwsize),
+			XCHK_GFP_FLAGS);
+	if (!rts)
+		return -ENOMEM;
+	sc->buf = rts;
 
 	/*
 	 * Create an xfile to construct a new rtsummary file.  The xfile allows
@@ -53,11 +71,6 @@ xchk_setup_rtsummary(
 	error = xchk_trans_alloc(sc, 0);
 	if (error)
 		return error;
-
-	/* Allocate a memory buffer for the summary comparison. */
-	sc->buf = kvmalloc(mp->m_sb.sb_blocksize, XCHK_GFP_FLAGS);
-	if (!sc->buf)
-		return -ENOMEM;
 
 	error = xchk_install_live_inode(sc, mp->m_rsumip);
 	if (error)
@@ -75,6 +88,18 @@ xchk_setup_rtsummary(
 	 */
 	xfs_ilock(mp->m_rbmip, XFS_ILOCK_SHARED | XFS_ILOCK_RTBITMAP);
 	xchk_ilock(sc, XFS_ILOCK_EXCL | XFS_ILOCK_RTSUM);
+
+	/*
+	 * Now that we've locked the rtbitmap and rtsummary, we can't race with
+	 * growfsrt trying to expand the summary or change the size of the rt
+	 * volume.  Hence it is safe to compute and check the geometry values.
+	 */
+	rts->rextents = div_u64(mp->m_sb.sb_rblocks, mp->m_sb.sb_rextsize);
+	rts->rbmblocks = howmany_64(rts->rextents,
+				    NBBY * mp->m_sb.sb_blocksize);
+	rts->rsumlevels = rts->rextents ? xfs_highbit32(rts->rextents) + 1 : 0;
+	rsumbytes = sizeof(xfs_suminfo_t) * rts->rsumlevels * rts->rbmblocks;
+	rts->rsumsize = roundup_64(rsumbytes, mp->m_sb.sb_blocksize);
 	return 0;
 }
 
@@ -181,15 +206,26 @@ STATIC int
 xchk_rtsum_compare(
 	struct xfs_scrub	*sc)
 {
-	struct xfs_mount	*mp = sc->mp;
-	struct xfs_buf		*bp;
 	struct xfs_bmbt_irec	map;
-	xfs_fileoff_t		off;
+	struct xfs_iext_cursor	icur;
+	struct xfs_mount	*mp = sc->mp;
+	struct xfs_inode	*ip = sc->ip;
+	struct xchk_rtsummary	*rts = sc->buf;
+	struct xfs_buf		*bp;
+	xfs_fileoff_t		off = 0;
+	xfs_fileoff_t		endoff;
 	xchk_rtsumoff_t		sumoff = 0;
-	int			nmap;
+	int			error = 0;
 
-	for (off = 0; off < XFS_B_TO_FSB(mp, mp->m_rsumsize); off++) {
-		int		error = 0;
+	/* Mappings may not cross or lie beyond EOF. */
+	endoff = XFS_B_TO_FSB(mp, ip->i_disk_size);
+	if (xfs_iext_lookup_extent(ip, &ip->i_df, endoff, &icur, &map)) {
+		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, endoff);
+		return 0;
+	}
+
+	while (off < endoff) {
+		int		nmap = 1;
 
 		if (xchk_should_terminate(sc, &error))
 			return error;
@@ -197,8 +233,7 @@ xchk_rtsum_compare(
 			return 0;
 
 		/* Make sure we have a written extent. */
-		nmap = 1;
-		error = xfs_bmapi_read(mp->m_rsumip, off, 1, &map, &nmap,
+		error = xfs_bmapi_read(ip, off, endoff - off, &map, &nmap,
 				XFS_DATA_FORK);
 		if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, off, &error))
 			return error;
@@ -208,19 +243,23 @@ xchk_rtsum_compare(
 			return 0;
 		}
 
+		off += map.br_blockcount;
+	}
+
+	for (off = 0; off < endoff; off++) {
 		/* Read a block's worth of ondisk rtsummary file. */
 		error = xfs_rtbuf_get(mp, sc->tp, off, 1, &bp);
 		if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, off, &error))
 			return error;
 
 		/* Read a block's worth of computed rtsummary file. */
-		error = xfsum_copyout(sc, sumoff, sc->buf, mp->m_blockwsize);
+		error = xfsum_copyout(sc, sumoff, rts->words, mp->m_blockwsize);
 		if (error) {
 			xfs_trans_brelse(sc->tp, bp);
 			return error;
 		}
 
-		if (memcmp(bp->b_addr, sc->buf,
+		if (memcmp(bp->b_addr, rts->words,
 					mp->m_blockwsize << XFS_WORDLOG) != 0)
 			xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, off);
 
@@ -237,7 +276,42 @@ xchk_rtsummary(
 	struct xfs_scrub	*sc)
 {
 	struct xfs_mount	*mp = sc->mp;
+	struct xchk_rtsummary	*rts = sc->buf;
 	int			error = 0;
+
+	/* Is sb_rextents correct? */
+	if (mp->m_sb.sb_rextents != rts->rextents) {
+		xchk_ino_set_corrupt(sc, mp->m_rbmip->i_ino);
+		goto out_rbm;
+	}
+
+	/* Is m_rsumlevels correct? */
+	if (mp->m_rsumlevels != rts->rsumlevels) {
+		xchk_ino_set_corrupt(sc, mp->m_rsumip->i_ino);
+		goto out_rbm;
+	}
+
+	/* Is m_rsumsize correct? */
+	if (mp->m_rsumsize != rts->rsumsize) {
+		xchk_ino_set_corrupt(sc, mp->m_rsumip->i_ino);
+		goto out_rbm;
+	}
+
+	/* The summary file length must be aligned to an fsblock. */
+	if (mp->m_rsumip->i_disk_size & mp->m_blockmask) {
+		xchk_ino_set_corrupt(sc, mp->m_rsumip->i_ino);
+		goto out_rbm;
+	}
+
+	/*
+	 * Is the summary file itself large enough to handle the rt volume?
+	 * growfsrt expands the summary file before updating sb_rextents, so
+	 * the file can be larger than rsumsize.
+	 */
+	if (mp->m_rsumip->i_disk_size < rts->rsumsize) {
+		xchk_ino_set_corrupt(sc, mp->m_rsumip->i_ino);
+		goto out_rbm;
+	}
 
 	/* Invoke the fork scrubber. */
 	error = xchk_metadata_inode_forks(sc);
