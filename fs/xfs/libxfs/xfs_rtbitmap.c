@@ -549,10 +549,10 @@ xfs_rtmodify_summary_int(
 		if (mp->m_rsum_cache) {
 			xfs_suminfo_t	val = xfs_suminfo_get(mp, sp);
 
-			if (val == 0 && log == mp->m_rsum_cache[bbno])
-				mp->m_rsum_cache[bbno]++;
-			if (val != 0 && log < mp->m_rsum_cache[bbno])
+			if (val == 0 && log + 1 == mp->m_rsum_cache[bbno])
 				mp->m_rsum_cache[bbno] = log;
+			if (val != 0 && log >= mp->m_rsum_cache[bbno])
+				mp->m_rsum_cache[bbno] = log + 1;
 		}
 		xfs_trans_log_buf(args->trans, bp, first, first + sizeof(*sp) - 1);
 	}
