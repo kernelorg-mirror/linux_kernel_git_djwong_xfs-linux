@@ -459,6 +459,23 @@ xfs_rtfind_forw(
 	return 0;
 }
 
+inline xfs_suminfo_t
+xfs_suminfo_get(
+	struct xfs_mount	*mp,
+	union xfs_suminfo_raw	*infoptr)
+{
+	return infoptr->old;
+}
+
+inline void
+xfs_suminfo_add(
+	struct xfs_mount	*mp,
+	union xfs_suminfo_raw	*infoptr,
+	int			delta)
+{
+	infoptr->old += delta;
+}
+
 /*
  * Read and/or modify the summary information for a given extent size,
  * bitmap block combination.
@@ -483,7 +500,7 @@ xfs_rtmodify_summary_int(
 	int		error;		/* error value */
 	xfs_fileoff_t	sb;		/* summary fsblock */
 	xfs_rtsumoff_t	so;		/* index into the summary file */
-	xfs_suminfo_t	*sp;		/* pointer to returned data */
+	union xfs_suminfo_raw *sp;		/* pointer to returned data */
 	unsigned int	infoword;
 
 	/*
@@ -526,17 +543,19 @@ xfs_rtmodify_summary_int(
 	if (delta) {
 		uint first = (uint)((char *)sp - (char *)bp->b_addr);
 
-		*sp += delta;
+		xfs_suminfo_add(mp, sp, delta);
 		if (mp->m_rsum_cache) {
-			if (*sp == 0 && log == mp->m_rsum_cache[bbno])
+			xfs_suminfo_t	val = xfs_suminfo_get(mp, sp);
+
+			if (val == 0 && log == mp->m_rsum_cache[bbno])
 				mp->m_rsum_cache[bbno]++;
-			if (*sp != 0 && log < mp->m_rsum_cache[bbno])
+			if (val != 0 && log < mp->m_rsum_cache[bbno])
 				mp->m_rsum_cache[bbno] = log;
 		}
 		xfs_trans_log_buf(tp, bp, first, first + sizeof(*sp) - 1);
 	}
 	if (sum)
-		*sum = *sp;
+		*sum = xfs_suminfo_get(mp, sp);
 	return 0;
 }
 
