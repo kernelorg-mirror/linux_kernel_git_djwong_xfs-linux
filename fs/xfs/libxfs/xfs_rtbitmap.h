@@ -209,12 +209,12 @@ xfs_rtsumoffs_to_infoword(
 }
 
 /* Return a pointer to a summary info word within a rt summary block. */
-static inline xfs_suminfo_t *
+static inline union xfs_suminfo_raw *
 xfs_rsumblock_infoptr(
 	struct xfs_buf		*bp,
 	unsigned int		index)
 {
-	xfs_suminfo_t		*info = bp->b_addr;
+	union xfs_suminfo_raw	*info = bp->b_addr;
 
 	return info + index;
 }
@@ -294,6 +294,10 @@ xfs_filblks_t xfs_rtsummary_blockcount(struct xfs_mount *mp,
 		unsigned int rsumlevels, xfs_extlen_t rbmblocks);
 unsigned long long xfs_rtsummary_wordcount(struct xfs_mount *mp,
 		unsigned int rsumlevels, xfs_extlen_t rbmblocks);
+xfs_suminfo_t xfs_suminfo_get(struct xfs_mount *mp,
+		union xfs_suminfo_raw *infoptr);
+void xfs_suminfo_add(struct xfs_mount *mp, union xfs_suminfo_raw *infoptr,
+		int delta);
 #else /* CONFIG_XFS_RT */
 # define xfs_rtfree_extent(t,b,l)			(-ENOSYS)
 # define xfs_rtfree_blocks(t,rb,rl)			(-ENOSYS)
