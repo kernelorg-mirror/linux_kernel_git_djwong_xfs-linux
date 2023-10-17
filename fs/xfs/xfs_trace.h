@@ -3968,9 +3968,7 @@ TRACE_EVENT(xfs_reflink_remap_blocks,
 		  __entry->dest_lblk)
 );
 DEFINE_DOUBLE_IO_EVENT(xfs_reflink_remap_range);
-#ifdef CONFIG_XFS_RT
 DEFINE_DOUBLE_IO_EVENT(xfs_reflink_adjust_bigalloc_len);
-#endif /* CONFIG_XFS_RT */
 DEFINE_INODE_ERROR_EVENT(xfs_reflink_remap_range_error);
 DEFINE_INODE_ERROR_EVENT(xfs_reflink_set_inode_flag_error);
 DEFINE_INODE_ERROR_EVENT(xfs_reflink_update_inode_size_error);
@@ -4014,9 +4012,7 @@ TRACE_EVENT(xfs_ioctl_clone,
 DEFINE_SIMPLE_IO_EVENT(xfs_reflink_unshare);
 DEFINE_SIMPLE_IO_EVENT(xfs_file_cow_around);
 DEFINE_INODE_ERROR_EVENT(xfs_reflink_unshare_error);
-#ifdef CONFIG_XFS_RT
 DEFINE_SIMPLE_IO_EVENT(xfs_convert_bigalloc_file_space);
-#endif /* CONFIG_XFS_RT */
 
 /* copy on write */
 DEFINE_INODE_IREC_EVENT(xfs_reflink_trim_around_shared);
