@@ -333,7 +333,8 @@ static inline bool xfs_inode_force_align(struct xfs_inode *ip)
 
 static inline bool xfs_inode_has_bigallocunit(struct xfs_inode *ip)
 {
-	return XFS_IS_REALTIME_INODE(ip) && ip->i_mount->m_sb.sb_rextsize > 1;
+	return (xfs_inode_force_align(ip) || XFS_IS_REALTIME_INODE(ip)) &&
+	       ip->i_mount->m_sb.sb_rextsize > 1;
 }
 
 /* Decide if we need to unshare the blocks around a range that we're writing. */
