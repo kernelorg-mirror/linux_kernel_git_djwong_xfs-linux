@@ -220,7 +220,6 @@ xchk_rtsum_compare(
 	struct xfs_mount	*mp = sc->mp;
 	struct xfs_inode	*ip = sc->ip;
 	struct xchk_rtsummary	*rts = sc->buf;
-	struct xfs_buf		*bp;
 	xfs_fileoff_t		off = 0;
 	xfs_fileoff_t		endoff;
 	xfs_rtsumoff_t		sumoff = 0;
@@ -262,7 +261,7 @@ xchk_rtsum_compare(
 		union xfs_suminfo_raw	*ondisk_info;
 
 		/* Read a block's worth of ondisk rtsummary file. */
-		error = xfs_rtbuf_get(&rts->args, off, 1, &bp);
+		error = xfs_rtsummary_read_buf(&rts->args, off);
 		if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, off, &error))
 			return error;
 
@@ -273,7 +272,7 @@ xchk_rtsum_compare(
 			return error;
 		}
 
-		ondisk_info = xfs_rsumblock_infoptr(bp, 0);
+		ondisk_info = xfs_rsumblock_infoptr(rts->args.sumbp, 0);
 		if (memcmp(ondisk_info, rts->words,
 					mp->m_blockwsize << XFS_WORDLOG) != 0)
 			xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, off);
