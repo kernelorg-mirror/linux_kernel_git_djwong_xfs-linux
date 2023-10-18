@@ -82,8 +82,12 @@ xrep_rtsummary_prep_buf(
 	int			error;
 
 	bp->b_ops = &xfs_rtbuf_ops;
+	rts->args.mp = sc->mp;
+	rts->args.tp = sc->tp;
+	rts->args.sumbp = bp;
+	ondisk = xfs_rsumblock_infoptr(&rts->args, 0);
+	rts->args.sumbp = NULL;
 
-	ondisk = xfs_rsumblock_infoptr(bp, 0);
 	error = xfsum_copyout(sc, rts->prep_wordoff, ondisk, mp->m_blockwsize);
 	if (error)
 		return error;

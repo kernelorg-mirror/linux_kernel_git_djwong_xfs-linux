@@ -272,7 +272,7 @@ xchk_rtsum_compare(
 			return error;
 		}
 
-		ondisk_info = xfs_rsumblock_infoptr(rts->args.sumbp, 0);
+		ondisk_info = xfs_rsumblock_infoptr(&rts->args, 0);
 		if (memcmp(ondisk_info, rts->words,
 					mp->m_blockwsize << XFS_WORDLOG) != 0)
 			xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, off);
