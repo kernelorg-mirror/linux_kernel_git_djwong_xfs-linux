@@ -166,7 +166,7 @@ xrep_rtsummary(
 
 	/* Reset incore state and blow out the summary cache. */
 	if (mp->m_rsum_cache)
-		memset(mp->m_rsum_cache, 0, mp->m_sb.sb_rbmblocks);
+		memset(mp->m_rsum_cache, 0xFF, mp->m_sb.sb_rbmblocks);
 
 	mp->m_rsumlevels = rts->rsumlevels;
 	mp->m_rsumsize = rts->rsumsize;
