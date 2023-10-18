@@ -10,6 +10,7 @@ struct xchk_rtsummary {
 #ifdef CONFIG_XFS_ONLINE_REPAIR
 	struct xrep_tempswap	tempswap;
 #endif
+	struct xfs_rtalloc_args	args;
 
 	uint64_t		rextents;
 	uint64_t		rbmblocks;

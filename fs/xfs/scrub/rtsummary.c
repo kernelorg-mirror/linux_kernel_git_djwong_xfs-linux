@@ -226,6 +226,9 @@ xchk_rtsum_compare(
 	xfs_rtsumoff_t		sumoff = 0;
 	int			error = 0;
 
+	rts->args.mp = sc->mp;
+	rts->args.tp = sc->tp;
+
 	/* Mappings may not cross or lie beyond EOF. */
 	endoff = XFS_B_TO_FSB(mp, ip->i_disk_size);
 	if (xfs_iext_lookup_extent(ip, &ip->i_df, endoff, &icur, &map)) {
@@ -259,7 +262,7 @@ xchk_rtsum_compare(
 		union xfs_suminfo_raw	*ondisk_info;
 
 		/* Read a block's worth of ondisk rtsummary file. */
-		error = xfs_rtbuf_get(mp, sc->tp, off, 1, &bp);
+		error = xfs_rtbuf_get(&rts->args, off, 1, &bp);
 		if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, off, &error))
 			return error;
 
