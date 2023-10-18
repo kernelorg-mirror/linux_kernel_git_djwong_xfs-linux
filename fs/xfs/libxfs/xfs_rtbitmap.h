@@ -6,6 +6,17 @@
 #ifndef __XFS_RTBITMAP_H__
 #define	__XFS_RTBITMAP_H__
 
+struct xfs_rtalloc_args {
+	struct xfs_mount	*mp;
+	struct xfs_trans	*tp;
+
+	struct xfs_buf		*rbmbp;	/* bitmap block buffer */
+	struct xfs_buf		*sumbp;	/* summary block buffer */
+
+	xfs_fileoff_t		rbmoff;	/* bitmap block number */
+	xfs_fileoff_t		sumoff;	/* summary block number */
+};
+
 static inline xfs_rtblock_t
 xfs_rtx_to_rtb(
 	struct xfs_mount	*mp,
@@ -161,10 +172,10 @@ xfs_rbmblock_to_rtx(
 /* Return a pointer to a bitmap word within a rt bitmap block. */
 static inline union xfs_rtword_raw *
 xfs_rbmblock_wordptr(
-	struct xfs_buf		*bp,
+	struct xfs_rtalloc_args	*args,
 	unsigned int		index)
 {
-	union xfs_rtword_raw	*words = bp->b_addr;
+	union xfs_rtword_raw	*words = args->rbmbp->b_addr;
 
 	return words + index;
 }
@@ -172,10 +183,10 @@ xfs_rbmblock_wordptr(
 /* Convert an ondisk bitmap word to its incore representation. */
 static inline xfs_rtword_t
 xfs_rtbitmap_getword(
-	struct xfs_buf		*bp,
+	struct xfs_rtalloc_args	*args,
 	unsigned int		index)
 {
-	union xfs_rtword_raw	*word = xfs_rbmblock_wordptr(bp, index);
+	union xfs_rtword_raw	*word = xfs_rbmblock_wordptr(args, index);
 
 	return word->old;
 }
@@ -183,11 +194,11 @@ xfs_rtbitmap_getword(
 /* Set an ondisk bitmap word from an incore representation. */
 static inline void
 xfs_rtbitmap_setword(
-	struct xfs_buf		*bp,
+	struct xfs_rtalloc_args	*args,
 	unsigned int		index,
 	xfs_rtword_t		value)
 {
-	union xfs_rtword_raw	*word = xfs_rbmblock_wordptr(bp, index);
+	union xfs_rtword_raw	*word = xfs_rbmblock_wordptr(args, index);
 
 	word->old = value;
 }
@@ -234,10 +245,10 @@ xfs_rtsumoffs_to_infoword(
 /* Return a pointer to a summary info word within a rt summary block. */
 static inline union xfs_suminfo_raw *
 xfs_rsumblock_infoptr(
-	struct xfs_buf		*bp,
+	struct xfs_rtalloc_args	*args,
 	unsigned int		index)
 {
-	union xfs_suminfo_raw	*info = bp->b_addr;
+	union xfs_suminfo_raw	*info = args->sumbp->b_addr;
 
 	return info + index;
 }
@@ -245,10 +256,10 @@ xfs_rsumblock_infoptr(
 /* Get the current value of a summary counter. */
 static inline xfs_suminfo_t
 xfs_suminfo_get(
-	struct xfs_buf		*bp,
+	struct xfs_rtalloc_args	*args,
 	unsigned int		index)
 {
-	union xfs_suminfo_raw	*info = xfs_rsumblock_infoptr(bp, index);
+	union xfs_suminfo_raw	*info = xfs_rsumblock_infoptr(args, index);
 
 	return info->old;
 }
@@ -256,11 +267,11 @@ xfs_suminfo_get(
 /* Add to the current value of a summary counter and return the new value. */
 static inline xfs_suminfo_t
 xfs_suminfo_add(
-	struct xfs_buf		*bp,
+	struct xfs_rtalloc_args	*args,
 	unsigned int		index,
 	int			delta)
 {
-	union xfs_suminfo_raw	*info = xfs_rsumblock_infoptr(bp, index);
+	union xfs_suminfo_raw	*info = xfs_rsumblock_infoptr(args, index);
 
 	info->old += delta;
 	return info->old;
@@ -281,17 +292,6 @@ typedef int (*xfs_rtalloc_query_range_fn)(
 	void				*priv);
 
 #ifdef CONFIG_XFS_RT
-struct xfs_rtalloc_args {
-	struct xfs_mount	*mp;
-	struct xfs_trans	*tp;
-
-	struct xfs_buf		*rbmbp;	/* bitmap block buffer */
-	struct xfs_buf		*sumbp;	/* summary block buffer */
-
-	xfs_fileoff_t		rbmoff;	/* bitmap block number */
-	xfs_fileoff_t		sumoff;	/* summary block number */
-};
-
 void xfs_rtbuf_cache_relse(struct xfs_rtalloc_args *args);
 
 int xfs_rtbuf_get(struct xfs_rtalloc_args *args, xfs_fileoff_t block,
