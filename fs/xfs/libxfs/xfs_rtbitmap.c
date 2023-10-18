@@ -48,6 +48,23 @@ const struct xfs_buf_ops xfs_rtbuf_ops = {
 	.verify_write = xfs_rtbuf_verify_write,
 };
 
+/* Release cached rt bitmap and summary buffers. */
+void
+xfs_rtbuf_cache_relse(
+	struct xfs_rtalloc_args	*args)
+{
+	if (args->rbmbp) {
+		xfs_trans_brelse(args->tp, args->rbmbp);
+		args->rbmbp = NULL;
+		args->rbmoff = NULLFILEOFF;
+	}
+	if (args->sumbp) {
+		xfs_trans_brelse(args->tp, args->sumbp);
+		args->sumbp = NULL;
+		args->sumoff = NULLFILEOFF;
+	}
+}
+
 /*
  * Get a buffer for the bitmap or summary file block specified.
  * The buffer is returned read and locked.
@@ -60,13 +77,42 @@ xfs_rtbuf_get(
 	struct xfs_buf		**bpp)	/* output: buffer for the block */
 {
 	struct xfs_mount	*mp = args->mp;
+	struct xfs_buf		**cbpp;	/* cached block buffer */
+	xfs_fileoff_t		*coffp;	/* cached block number */
 	struct xfs_buf		*bp;	/* block buffer, result */
 	struct xfs_inode	*ip;	/* bitmap or summary inode */
 	struct xfs_bmbt_irec	map;
+	enum xfs_blft		type;
 	int			nmap = 1;
 	int			error;
 
-	ip = issum ? mp->m_rsumip : mp->m_rbmip;
+	if (issum) {
+		cbpp = &args->sumbp;
+		coffp = &args->sumoff;
+		ip = mp->m_rsumip;
+		type = XFS_BLFT_RTSUMMARY_BUF;
+	} else {
+		cbpp = &args->rbmbp;
+		coffp = &args->rbmoff;
+		ip = mp->m_rbmip;
+		type = XFS_BLFT_RTBITMAP_BUF;
+	}
+
+	/*
+	 * If we have a cached buffer, and the block number matches, use that.
+	 */
+	if (*cbpp && *coffp == block) {
+		*bpp = *cbpp;
+		return 0;
+	}
+	/*
+	 * Otherwise we have to have to get the buffer.  If there was an old
+	 * one, get rid of it first.
+	 */
+	if (*cbpp) {
+		xfs_trans_brelse(args->tp, *cbpp);
+		*cbpp = NULL;
+	}
 
 	error = xfs_bmapi_read(ip, block, 1, &map, &nmap, 0);
 	if (error)
@@ -88,9 +134,9 @@ xfs_rtbuf_get(
 	if (error)
 		return error;
 
-	xfs_trans_buf_set_type(args->tp, bp, issum ? XFS_BLFT_RTSUMMARY_BUF
-						   : XFS_BLFT_RTBITMAP_BUF);
-	*bpp = bp;
+	xfs_trans_buf_set_type(args->tp, bp, type);
+	*cbpp = *bpp = bp;
+	*coffp = block;
 	return 0;
 }
 
@@ -160,7 +206,6 @@ xfs_rtfind_back(
 			/*
 			 * Different.  Mark where we are and return.
 			 */
-			xfs_trans_brelse(args->tp, bp);
 			i = bit - XFS_RTHIBIT(wdiff);
 			*rtx = start - i + 1;
 			return 0;
@@ -174,7 +219,6 @@ xfs_rtfind_back(
 			/*
 			 * If done with this block, get the previous one.
 			 */
-			xfs_trans_brelse(args->tp, bp);
 			error = xfs_rtbuf_get(args, --block, 0, &bp);
 			if (error) {
 				return error;
@@ -201,7 +245,6 @@ xfs_rtfind_back(
 			/*
 			 * Different, mark where we are and return.
 			 */
-			xfs_trans_brelse(args->tp, bp);
 			i += XFS_NBWORD - 1 - XFS_RTHIBIT(wdiff);
 			*rtx = start - i + 1;
 			return 0;
@@ -215,7 +258,6 @@ xfs_rtfind_back(
 			/*
 			 * If done with this block, get the previous one.
 			 */
-			xfs_trans_brelse(args->tp, bp);
 			error = xfs_rtbuf_get(args, --block, 0, &bp);
 			if (error) {
 				return error;
@@ -243,7 +285,6 @@ xfs_rtfind_back(
 			/*
 			 * Different, mark where we are and return.
 			 */
-			xfs_trans_brelse(args->tp, bp);
 			i += XFS_NBWORD - 1 - XFS_RTHIBIT(wdiff);
 			*rtx = start - i + 1;
 			return 0;
@@ -253,7 +294,6 @@ xfs_rtfind_back(
 	/*
 	 * No match, return that we scanned the whole area.
 	 */
-	xfs_trans_brelse(args->tp, bp);
 	*rtx = start - i + 1;
 	return 0;
 }
@@ -323,7 +363,6 @@ xfs_rtfind_forw(
 			/*
 			 * Different.  Mark where we are and return.
 			 */
-			xfs_trans_brelse(args->tp, bp);
 			i = XFS_RTLOBIT(wdiff) - bit;
 			*rtx = start + i - 1;
 			return 0;
@@ -337,7 +376,6 @@ xfs_rtfind_forw(
 			/*
 			 * If done with this block, get the previous one.
 			 */
-			xfs_trans_brelse(args->tp, bp);
 			error = xfs_rtbuf_get(args, ++block, 0, &bp);
 			if (error) {
 				return error;
@@ -364,7 +402,6 @@ xfs_rtfind_forw(
 			/*
 			 * Different, mark where we are and return.
 			 */
-			xfs_trans_brelse(args->tp, bp);
 			i += XFS_RTLOBIT(wdiff);
 			*rtx = start + i - 1;
 			return 0;
@@ -378,7 +415,6 @@ xfs_rtfind_forw(
 			/*
 			 * If done with this block, get the next one.
 			 */
-			xfs_trans_brelse(args->tp, bp);
 			error = xfs_rtbuf_get(args, ++block, 0, &bp);
 			if (error) {
 				return error;
@@ -404,7 +440,6 @@ xfs_rtfind_forw(
 			/*
 			 * Different, mark where we are and return.
 			 */
-			xfs_trans_brelse(args->tp, bp);
 			i += XFS_RTLOBIT(wdiff);
 			*rtx = start + i - 1;
 			return 0;
@@ -414,7 +449,6 @@ xfs_rtfind_forw(
 	/*
 	 * No match, return that we scanned the whole area.
 	 */
-	xfs_trans_brelse(args->tp, bp);
 	*rtx = start + i - 1;
 	return 0;
 }
@@ -449,8 +483,6 @@ xfs_rtmodify_summary_int(
 	int			log,	/* log2 of extent size */
 	xfs_fileoff_t		bbno,	/* bitmap block number */
 	int			delta,	/* change to make to summary info */
-	struct xfs_buf		**rbpp,	/* in/out: summary block buffer */
-	xfs_fileoff_t		*rsb,	/* in/out: summary block number */
 	xfs_suminfo_t		*sum)	/* out: summary info for this block */
 {
 	struct xfs_mount	*mp = args->mp;
@@ -468,30 +500,11 @@ xfs_rtmodify_summary_int(
 	 * Compute the block number in the summary file.
 	 */
 	sb = xfs_rtsumoffs_to_block(mp, so);
-	/*
-	 * If we have an old buffer, and the block number matches, use that.
-	 */
-	if (*rbpp && *rsb == sb)
-		bp = *rbpp;
-	/*
-	 * Otherwise we have to get the buffer.
-	 */
-	else {
-		/*
-		 * If there was an old one, get rid of it first.
-		 */
-		if (*rbpp)
-			xfs_trans_brelse(args->tp, *rbpp);
-		error = xfs_rtbuf_get(args, sb, 1, &bp);
-		if (error) {
-			return error;
-		}
-		/*
-		 * Remember this buffer and block for the next call.
-		 */
-		*rbpp = bp;
-		*rsb = sb;
-	}
+
+	error = xfs_rtbuf_get(args, sb, 1, &bp);
+	if (error)
+		return error;
+
 	/*
 	 * Point to the summary information, modify/log it, and/or copy it out.
 	 */
@@ -519,11 +532,9 @@ xfs_rtmodify_summary(
 	struct xfs_rtalloc_args	*args,
 	int			log,	/* log2 of extent size */
 	xfs_fileoff_t		bbno,	/* bitmap block number */
-	int			delta,	/* change to make to summary info */
-	struct xfs_buf		**rbpp,	/* in/out: summary block buffer */
-	xfs_fileoff_t		*rsb)	/* in/out: summary block number */
+	int			delta)	/* in/out: summary block number */
 {
-	return xfs_rtmodify_summary_int(args, log, bbno, delta, rbpp, rsb, NULL);
+	return xfs_rtmodify_summary_int(args, log, bbno, delta, NULL);
 }
 
 /* Log rtbitmap block from the word @from to the byte before @next. */
@@ -694,9 +705,7 @@ int
 xfs_rtfree_range(
 	struct xfs_rtalloc_args	*args,
 	xfs_rtxnum_t		start,	/* starting rtext to free */
-	xfs_rtxlen_t		len,	/* length to free */
-	struct xfs_buf		**rbpp,	/* in/out: summary block buffer */
-	xfs_fileoff_t		*rsb)	/* in/out: summary block number */
+	xfs_rtxlen_t		len)	/* in/out: summary block number */
 {
 	struct xfs_mount	*mp = args->mp;
 	xfs_rtxnum_t		end;	/* end of the freed extent */
@@ -725,7 +734,7 @@ xfs_rtfree_range(
 	 * Find the next allocated block (end of allocated extent).
 	 */
 	error = xfs_rtfind_forw(args, end, mp->m_sb.sb_rextents - 1,
-		&postblock);
+			&postblock);
 	if (error)
 		return error;
 	/*
@@ -734,8 +743,8 @@ xfs_rtfree_range(
 	 */
 	if (preblock < start) {
 		error = xfs_rtmodify_summary(args,
-			XFS_RTBLOCKLOG(start - preblock),
-			xfs_rtx_to_rbmblock(mp, preblock), -1, rbpp, rsb);
+				XFS_RTBLOCKLOG(start - preblock),
+				xfs_rtx_to_rbmblock(mp, preblock), -1);
 		if (error) {
 			return error;
 		}
@@ -746,8 +755,8 @@ xfs_rtfree_range(
 	 */
 	if (postblock > end) {
 		error = xfs_rtmodify_summary(args,
-			XFS_RTBLOCKLOG(postblock - end),
-			xfs_rtx_to_rbmblock(mp, end + 1), -1, rbpp, rsb);
+				XFS_RTBLOCKLOG(postblock - end),
+				xfs_rtx_to_rbmblock(mp, end + 1), -1);
 		if (error) {
 			return error;
 		}
@@ -756,10 +765,9 @@ xfs_rtfree_range(
 	 * Increment the summary information corresponding to the entire
 	 * (new) free extent.
 	 */
-	error = xfs_rtmodify_summary(args,
-		XFS_RTBLOCKLOG(postblock + 1 - preblock),
-		xfs_rtx_to_rbmblock(mp, preblock), 1, rbpp, rsb);
-	return error;
+	return xfs_rtmodify_summary(args,
+			XFS_RTBLOCKLOG(postblock + 1 - preblock),
+			xfs_rtx_to_rbmblock(mp, preblock), 1);
 }
 
 /*
@@ -829,7 +837,6 @@ xfs_rtcheck_range(
 			/*
 			 * Different, compute first wrong bit and return.
 			 */
-			xfs_trans_brelse(args->tp, bp);
 			i = XFS_RTLOBIT(wdiff) - bit;
 			*new = start + i;
 			*stat = 0;
@@ -844,7 +851,6 @@ xfs_rtcheck_range(
 			/*
 			 * If done with this block, get the next one.
 			 */
-			xfs_trans_brelse(args->tp, bp);
 			error = xfs_rtbuf_get(args, ++block, 0, &bp);
 			if (error) {
 				return error;
@@ -871,7 +877,6 @@ xfs_rtcheck_range(
 			/*
 			 * Different, compute first wrong bit and return.
 			 */
-			xfs_trans_brelse(args->tp, bp);
 			i += XFS_RTLOBIT(wdiff);
 			*new = start + i;
 			*stat = 0;
@@ -886,7 +891,6 @@ xfs_rtcheck_range(
 			/*
 			 * If done with this block, get the next one.
 			 */
-			xfs_trans_brelse(args->tp, bp);
 			error = xfs_rtbuf_get(args, ++block, 0, &bp);
 			if (error) {
 				return error;
@@ -912,7 +916,6 @@ xfs_rtcheck_range(
 			/*
 			 * Different, compute first wrong bit and return.
 			 */
-			xfs_trans_brelse(args->tp, bp);
 			i += XFS_RTLOBIT(wdiff);
 			*new = start + i;
 			*stat = 0;
@@ -923,7 +926,6 @@ xfs_rtcheck_range(
 	/*
 	 * Successful, return.
 	 */
-	xfs_trans_brelse(args->tp, bp);
 	*new = start + i;
 	*stat = 1;
 	return 0;
@@ -968,8 +970,6 @@ xfs_rtfree_extent(
 		.tp		= tp,
 	};
 	int			error;
-	xfs_fsblock_t		sb;	/* summary file block number */
-	struct xfs_buf		*sumbp = NULL; /* summary file block buffer */
 
 	ASSERT(mp->m_rbmip->i_itemp != NULL);
 	ASSERT(xfs_isilocked(mp->m_rbmip, XFS_ILOCK_EXCL));
@@ -981,10 +981,10 @@ xfs_rtfree_extent(
 	/*
 	 * Free the range of realtime blocks.
 	 */
-	error = xfs_rtfree_range(&args, start, len, &sumbp, &sb);
-	if (error) {
-		return error;
-	}
+	error = xfs_rtfree_range(&args, start, len);
+	if (error)
+		goto out;
+
 	/*
 	 * Mark more blocks free in the superblock.
 	 */
@@ -1000,7 +1000,10 @@ xfs_rtfree_extent(
 		*(uint64_t *)&VFS_I(mp->m_rbmip)->i_atime = 0;
 		xfs_trans_log_inode(tp, mp->m_rbmip, XFS_ILOG_CORE);
 	}
-	return 0;
+	error = 0;
+out:
+	xfs_rtbuf_cache_relse(&args);
+	return error;
 }
 
 /*
@@ -1091,6 +1094,7 @@ xfs_rtalloc_query_range(
 		rtstart = rtend + 1;
 	}
 
+	xfs_rtbuf_cache_relse(&args);
 	return error;
 }
 
@@ -1129,6 +1133,7 @@ xfs_rtalloc_extent_is_free(
 	int				error;
 
 	error = xfs_rtcheck_range(&args, start, len, 1, &end, &matches);
+	xfs_rtbuf_cache_relse(&args);
 	if (error)
 		return error;
 
