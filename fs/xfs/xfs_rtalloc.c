@@ -501,6 +501,9 @@ xfs_rtallocate_extent_near(
 		 * allocating one.
 		 */
 		if (maxlog >= 0) {
+			xfs_extlen_t maxavail =
+				min_t(xfs_rtblock_t, maxlen,
+				      (1ULL << (maxlog + 1)) - 1);
 			/*
 			 * On the positive side of the starting location.
 			 */
@@ -510,7 +513,7 @@ xfs_rtallocate_extent_near(
 				 * this block.
 				 */
 				error = xfs_rtallocate_extent_block(args,
-						bbno + i, minlen, maxlen, len,
+						bbno + i, minlen, maxavail, len,
 						&n, prod, &r);
 				if (error) {
 					return error;
@@ -557,7 +560,7 @@ xfs_rtallocate_extent_near(
 						continue;
 					error = xfs_rtallocate_extent_block(args,
 							bbno + j, minlen,
-							maxlen, len, &n, prod,
+							maxavail, len, &n, prod,
 							&r);
 					if (error) {
 						return error;
@@ -579,7 +582,7 @@ xfs_rtallocate_extent_near(
 				 * that we found.
 				 */
 				error = xfs_rtallocate_extent_block(args,
-						bbno + i, minlen, maxlen, len,
+						bbno + i, minlen, maxavail, len,
 						&n, prod, &r);
 				if (error) {
 					return error;
