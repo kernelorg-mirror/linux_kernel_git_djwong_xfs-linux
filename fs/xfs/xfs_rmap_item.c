@@ -225,6 +225,11 @@ static const struct xfs_item_ops xfs_rud_item_ops = {
 	.iop_intent	= xfs_rud_item_intent,
 };
 
+static inline struct xfs_rmap_intent *ri_entry(const struct list_head *e)
+{
+	return list_entry(e, struct xfs_rmap_intent, ri_list);
+}
+
 static struct xfs_rud_log_item *
 xfs_trans_get_rud(
 	struct xfs_trans		*tp,
@@ -278,11 +283,8 @@ xfs_rmap_update_diff_items(
 	const struct list_head		*a,
 	const struct list_head		*b)
 {
-	struct xfs_rmap_intent		*ra;
-	struct xfs_rmap_intent		*rb;
-
-	ra = container_of(a, struct xfs_rmap_intent, ri_list);
-	rb = container_of(b, struct xfs_rmap_intent, ri_list);
+	struct xfs_rmap_intent		*ra = ri_entry(a);
+	struct xfs_rmap_intent		*rb = ri_entry(b);
 
 	return ra->ri_pag->pag_agno - rb->ri_pag->pag_agno;
 }
@@ -404,10 +406,8 @@ xfs_rmap_update_finish_item(
 	struct list_head		*item,
 	struct xfs_btree_cur		**state)
 {
-	struct xfs_rmap_intent		*ri;
+	struct xfs_rmap_intent		*ri = ri_entry(item);
 	int				error;
-
-	ri = container_of(item, struct xfs_rmap_intent, ri_list);
 
 	error = xfs_trans_log_finish_rmap_update(tp, RUD_ITEM(done), ri,
 			state);
@@ -430,9 +430,7 @@ STATIC void
 xfs_rmap_update_cancel_item(
 	struct list_head		*item)
 {
-	struct xfs_rmap_intent		*ri;
-
-	ri = container_of(item, struct xfs_rmap_intent, ri_list);
+	struct xfs_rmap_intent		*ri = ri_entry(item);
 
 	xfs_rmap_update_put_group(ri);
 	kmem_cache_free(xfs_rmap_intent_cache, ri);
