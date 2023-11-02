@@ -398,6 +398,17 @@ xfs_rmap_update_put_group(
 	xfs_perag_intent_put(ri->ri_pag);
 }
 
+/* Cancel a deferred rmap update. */
+STATIC void
+xfs_rmap_update_cancel_item(
+	struct list_head		*item)
+{
+	struct xfs_rmap_intent		*ri = ri_entry(item);
+
+	xfs_rmap_update_put_group(ri);
+	kmem_cache_free(xfs_rmap_intent_cache, ri);
+}
+
 /* Process a deferred rmap update. */
 STATIC int
 xfs_rmap_update_finish_item(
@@ -411,9 +422,7 @@ xfs_rmap_update_finish_item(
 
 	error = xfs_trans_log_finish_rmap_update(tp, RUD_ITEM(done), ri,
 			state);
-
-	xfs_rmap_update_put_group(ri);
-	kmem_cache_free(xfs_rmap_intent_cache, ri);
+	xfs_rmap_update_cancel_item(item);
 	return error;
 }
 
@@ -423,17 +432,6 @@ xfs_rmap_update_abort_intent(
 	struct xfs_log_item	*intent)
 {
 	xfs_rui_release(RUI_ITEM(intent));
-}
-
-/* Cancel a deferred rmap update. */
-STATIC void
-xfs_rmap_update_cancel_item(
-	struct list_head		*item)
-{
-	struct xfs_rmap_intent		*ri = ri_entry(item);
-
-	xfs_rmap_update_put_group(ri);
-	kmem_cache_free(xfs_rmap_intent_cache, ri);
 }
 
 const struct xfs_defer_op_type xfs_rmap_update_defer_type = {
