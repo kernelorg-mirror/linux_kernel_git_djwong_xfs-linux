@@ -713,6 +713,7 @@ xfs_scrub_metadata(
 	sc->sm = sm;
 	sc->ops = &meta_scrub_ops[sm->sm_type];
 	sc->sick_mask = xchk_health_mask_for_scrub_type(sm->sm_type);
+	sc->resched_widget = INIT_XFS_COND_RESCHED;
 retry_op:
 	/*
 	 * When repairs are allowed, prevent freezing or readonly remount while
