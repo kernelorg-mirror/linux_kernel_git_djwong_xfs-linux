@@ -8,6 +8,30 @@
 
 struct xfs_scrub;
 
+struct xfs_cond_resched {
+	unsigned long	next_resched;
+	unsigned int	resched_nr;
+};
+
+#define INIT_XFS_COND_RESCHED	\
+	(struct xfs_cond_resched){ \
+		.next_resched = (jiffies + (HZ / 10)), \
+		.resched_nr = 0, \
+	}
+
+static inline void xfs_cond_resched(struct xfs_cond_resched *widget)
+{
+	if (likely(++widget->resched_nr < 1000))
+		return;
+
+	widget->resched_nr = 0;
+	if (likely(widget->next_resched > jiffies))
+		return;
+
+	cond_resched();
+	*widget = INIT_XFS_COND_RESCHED;
+}
+
 /*
  * Standard flags for allocating memory within scrub.  NOFS context is
  * configured by the process allocation scope.  Scrub and repair must be able
@@ -140,6 +164,9 @@ struct xfs_scrub {
 	 * status with whatever we find.
 	 */
 	unsigned int			sick_mask;
+
+	/* next time we want to cond_resched() */
+	struct xfs_cond_resched		resched_widget;
 
 	/* State tracking for single-AG operations. */
 	struct xchk_ag			sa;

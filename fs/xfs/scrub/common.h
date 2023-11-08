@@ -21,7 +21,7 @@ xchk_should_terminate(
 	 * few seconds so that we don't run afoul of the soft lockup watchdog
 	 * or RCU stall detector.
 	 */
-	cond_resched();
+	xfs_cond_resched(&sc->resched_widget);
 
 	if (fatal_signal_pending(current)) {
 		if (*error == 0)
