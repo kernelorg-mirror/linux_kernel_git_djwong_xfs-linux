@@ -10,9 +10,9 @@
 #include "xfs_log_format.h"
 #include "xfs_trans_resv.h"
 #include "xfs_mount.h"
+#include "scrub/scrub.h"
 #include "scrub/xfile.h"
 #include "scrub/xfarray.h"
-#include "scrub/scrub.h"
 #include "scrub/trace.h"
 #include <linux/shmem_fs.h>
 
@@ -607,6 +607,7 @@ xfile_dump(
 	loff_t			holepos = 0;
 	loff_t			datapos;
 	loff_t			ret;
+	struct xchk_relax	relax = INIT_XCHK_RELAX;
 	unsigned int		pflags;
 	bool			all_zeroes = true;
 	int			error = 0;
@@ -633,12 +634,9 @@ xfile_dump(
 			unsigned int	pagepos;
 			unsigned int	pagelen;
 
-			cond_resched();
-
-			if (fatal_signal_pending(current)) {
-				error = -EINTR;
+			error = xchk_maybe_relax(&relax);
+			if (error)
 				goto out_pflags;
-			}
 
 			pagelen = min_t(u64, datalen, PAGE_SIZE);
 
