@@ -1681,6 +1681,16 @@ xfs_rtpick_extent(
 
 	ASSERT(xfs_isilocked(mp->m_rbmip, XFS_ILOCK_EXCL));
 
+	if (xfs_has_rtgroups(mp)) {
+		xfs_rtblock_t	rtbno;
+
+		rtbno = xfs_rgbno_to_rtb(mp, mp->m_rtgrotor, 0);
+		*pick = xfs_rtb_to_rtx(mp, rtbno);
+
+		mp->m_rtgrotor = (mp->m_rtgrotor + 1) % mp->m_sb.sb_rgcount;
+		return 0;
+	}
+
 	seqp = (uint64_t *)&VFS_I(mp->m_rbmip)->i_atime;
 	if (!(mp->m_rbmip->i_diflags & XFS_DIFLAG_NEWRTBM)) {
 		mp->m_rbmip->i_diflags |= XFS_DIFLAG_NEWRTBM;

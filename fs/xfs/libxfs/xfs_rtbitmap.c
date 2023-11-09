@@ -1062,8 +1062,13 @@ xfs_rtfree_extent(
 	    mp->m_sb.sb_rextents) {
 		if (!(mp->m_rbmip->i_diflags & XFS_DIFLAG_NEWRTBM))
 			mp->m_rbmip->i_diflags |= XFS_DIFLAG_NEWRTBM;
-		*(uint64_t *)&VFS_I(mp->m_rbmip)->i_atime = 0;
-		xfs_trans_log_inode(tp, mp->m_rbmip, XFS_ILOG_CORE);
+
+		if (xfs_has_rtgroups(mp)) {
+			mp->m_rtgrotor = 0;
+		} else {
+			*(uint64_t *)&VFS_I(mp->m_rbmip)->i_atime = 0;
+			xfs_trans_log_inode(tp, mp->m_rbmip, XFS_ILOG_CORE);
+		}
 	}
 	error = 0;
 out:
