@@ -648,6 +648,47 @@ xfs_efi_validate_ext(
 	return xfs_verify_fsbext(mp, extp->ext_start, extp->ext_len);
 }
 
+static int
+xfs_efi_recover_extent(
+	struct xfs_trans		*tp,
+	const struct xfs_extent		*extp,
+	struct xfs_efd_log_item		*efdp,
+	bool				*requeue_only)
+{
+	struct xfs_extent_free_item	fake = {
+		.xefi_owner		= XFS_RMAP_OWN_UNKNOWN,
+		.xefi_agresv		= XFS_AG_RESV_NONE,
+		.xefi_startblock	= extp->ext_start,
+		.xefi_blockcount	= extp->ext_len,
+	};
+	struct xfs_mount		*mp = tp->t_mountp;
+	int				error;
+
+	if (*requeue_only)
+		goto requeue;
+
+	xfs_extent_free_get_group(mp, &fake);
+	error = xfs_trans_free_extent(tp, efdp, &fake);
+	xfs_extent_free_put_group(&fake);
+	if (error == 0 || error != -EAGAIN)
+		return error;
+
+	*requeue_only = true;
+requeue:
+	/*
+	 * If we can't free the extent without potentially deadlocking,
+	 * requeue the rest of the extents to a new so that they get
+	 * run again later with a new transaction context.
+	 */
+	return xfs_free_extent_later(tp, fake.xefi_startblock,
+			fake.xefi_blockcount, &XFS_RMAP_OINFO_ANY_OWNER,
+			fake.xefi_agresv, 0);
+}
+
+#define for_each_efi_extent(efip, i, extp) \
+	for ((i) = 0, (extp) = &(efip)->efi_format.efi_extents[i]; \
+	     (i) < (efip)->efi_format.efi_nextents; \
+	     (i)++, (extp)++)
 /*
  * Process an extent free intent item that was recovered from
  * the log.  We need to free the extents that it describes.
@@ -662,6 +703,7 @@ xfs_efi_item_recover(
 	struct xfs_mount		*mp = lip->li_log->l_mp;
 	struct xfs_efd_log_item		*efdp;
 	struct xfs_trans		*tp;
+	struct xfs_extent		*extp;
 	int				i;
 	int				error = 0;
 	bool				requeue_only = false;
@@ -671,9 +713,8 @@ xfs_efi_item_recover(
 	 * EFI.  If any are bad, then assume that all are bad and
 	 * just toss the EFI.
 	 */
-	for (i = 0; i < efip->efi_format.efi_nextents; i++) {
-		if (!xfs_efi_validate_ext(mp,
-					&efip->efi_format.efi_extents[i])) {
+	for_each_efi_extent(efip, i, extp) {
+		if (!xfs_efi_validate_ext(mp, extp)) {
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 					&efip->efi_format,
 					sizeof(efip->efi_format));
@@ -687,40 +728,8 @@ xfs_efi_item_recover(
 		return error;
 	efdp = xfs_trans_get_efd(tp, efip, efip->efi_format.efi_nextents);
 
-	for (i = 0; i < efip->efi_format.efi_nextents; i++) {
-		struct xfs_extent_free_item	fake = {
-			.xefi_owner		= XFS_RMAP_OWN_UNKNOWN,
-			.xefi_agresv		= XFS_AG_RESV_NONE,
-		};
-		struct xfs_extent		*extp;
-
-		extp = &efip->efi_format.efi_extents[i];
-
-		fake.xefi_startblock = extp->ext_start;
-		fake.xefi_blockcount = extp->ext_len;
-
-		if (!requeue_only) {
-			xfs_extent_free_get_group(mp, &fake);
-			error = xfs_trans_free_extent(tp, efdp, &fake);
-			xfs_extent_free_put_group(&fake);
-		}
-
-		/*
-		 * If we can't free the extent without potentially deadlocking,
-		 * requeue the rest of the extents to a new so that they get
-		 * run again later with a new transaction context.
-		 */
-		if (error == -EAGAIN || requeue_only) {
-			error = xfs_free_extent_later(tp, fake.xefi_startblock,
-					fake.xefi_blockcount,
-					&XFS_RMAP_OINFO_ANY_OWNER,
-					fake.xefi_agresv, 0);
-			if (!error) {
-				requeue_only = true;
-				continue;
-			}
-		}
-
+	for_each_efi_extent(efip, i, extp) {
+		error = xfs_efi_recover_extent(tp, extp, efdp, &requeue_only);
 		if (error == -EFSCORRUPTED)
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 					extp, sizeof(*extp));
