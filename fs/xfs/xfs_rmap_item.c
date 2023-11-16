@@ -22,6 +22,7 @@
 #include "xfs_log_recover.h"
 #include "xfs_ag.h"
 #include "xfs_btree.h"
+#include "xfs_trace.h"
 
 struct kmem_cache	*xfs_rui_cache;
 struct kmem_cache	*xfs_rud_cache;
@@ -382,21 +383,18 @@ xfs_rmap_update_create_done(
 	return &xfs_trans_get_rud(tp, RUI_ITEM(intent))->rud_item;
 }
 
-/* Take a passive ref to the AG containing the space we're rmapping. */
+/* Add this deferred RUI to the transaction. */
 void
-xfs_rmap_update_get_group(
-	struct xfs_mount	*mp,
+xfs_rmap_defer_add(
+	struct xfs_trans	*tp,
 	struct xfs_rmap_intent	*ri)
 {
-	ri->ri_pag = xfs_perag_intent_get(mp, ri->ri_bmap.br_startblock);
-}
+	struct xfs_mount	*mp = tp->t_mountp;
 
-/* Release a passive AG ref after finishing rmapping work. */
-static inline void
-xfs_rmap_update_put_group(
-	struct xfs_rmap_intent	*ri)
-{
-	xfs_perag_intent_put(ri->ri_pag);
+	trace_xfs_rmap_defer(mp, ri);
+
+	ri->ri_pag = xfs_perag_intent_get(mp, ri->ri_bmap.br_startblock);
+	xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_RMAP, &ri->ri_list);
 }
 
 /* Cancel a deferred rmap update. */
@@ -406,7 +404,7 @@ xfs_rmap_update_cancel_item(
 {
 	struct xfs_rmap_intent		*ri = ri_entry(item);
 
-	xfs_rmap_update_put_group(ri);
+	xfs_perag_intent_put(ri->ri_pag);
 	kmem_cache_free(xfs_rmap_intent_cache, ri);
 }
 
@@ -552,9 +550,9 @@ xfs_rui_recover_extent(
 	if (map->me_flags & XFS_RMAP_EXTENT_UNWRITTEN)
 		fake.ri_bmap.br_state = XFS_EXT_UNWRITTEN;
 
-	xfs_rmap_update_get_group(mp, &fake);
+	fake.ri_pag = xfs_perag_intent_get(mp, map->me_startblock);
 	error = xfs_trans_log_finish_rmap_update(tp, rudp, &fake, rcur);
-	xfs_rmap_update_put_group(&fake);
+	xfs_perag_intent_put(fake.ri_pag);
 	return error;
 }
 
