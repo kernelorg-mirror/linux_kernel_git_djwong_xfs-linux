@@ -24,6 +24,7 @@
 #include "xfs_rmap.h"
 #include "xfs_ag.h"
 #include "xfs_health.h"
+#include "xfs_refcount_item.h"
 
 struct kmem_cache	*xfs_refcount_intent_cache;
 
@@ -1443,10 +1444,7 @@ __xfs_refcount_add(
 	ri->ri_startblock = startblock;
 	ri->ri_blockcount = blockcount;
 
-	trace_xfs_refcount_defer(tp->t_mountp, ri);
-
-	xfs_refcount_update_get_group(tp->t_mountp, ri);
-	xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_REFCOUNT, &ri->ri_list);
+	xfs_refcount_defer_add(tp, ri);
 }
 
 /*

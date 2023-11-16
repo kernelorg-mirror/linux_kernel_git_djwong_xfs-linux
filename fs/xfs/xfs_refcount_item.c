@@ -22,6 +22,7 @@
 #include "xfs_log_recover.h"
 #include "xfs_ag.h"
 #include "xfs_btree.h"
+#include "xfs_trace.h"
 
 struct kmem_cache	*xfs_cui_cache;
 struct kmem_cache	*xfs_cud_cache;
@@ -360,21 +361,18 @@ xfs_refcount_update_create_done(
 	return &xfs_trans_get_cud(tp, CUI_ITEM(intent))->cud_item;
 }
 
-/* Take a passive ref to the AG containing the space we're refcounting. */
+/* Add this deferred CUI to the transaction. */
 void
-xfs_refcount_update_get_group(
-	struct xfs_mount		*mp,
+xfs_refcount_defer_add(
+	struct xfs_trans		*tp,
 	struct xfs_refcount_intent	*ri)
 {
-	ri->ri_pag = xfs_perag_intent_get(mp, ri->ri_startblock);
-}
+	struct xfs_mount		*mp = tp->t_mountp;
 
-/* Release a passive AG ref after finishing refcounting work. */
-static inline void
-xfs_refcount_update_put_group(
-	struct xfs_refcount_intent	*ri)
-{
-	xfs_perag_intent_put(ri->ri_pag);
+	trace_xfs_refcount_defer(mp, ri);
+
+	ri->ri_pag = xfs_perag_intent_get(mp, ri->ri_startblock);
+	xfs_defer_add(tp, XFS_DEFER_OPS_TYPE_REFCOUNT, &ri->ri_list);
 }
 
 /* Cancel a deferred refcount update. */
@@ -384,7 +382,7 @@ xfs_refcount_update_cancel_item(
 {
 	struct xfs_refcount_intent	*ri = ci_entry(item);
 
-	xfs_refcount_update_put_group(ri);
+	xfs_perag_intent_put(ri->ri_pag);
 	kmem_cache_free(xfs_refcount_intent_cache, ri);
 }
 
@@ -497,9 +495,9 @@ xfs_cui_recover_extent(
 	 * Update the metadata.  If there is more work to be done, @fake will
 	 * be returned to us with blockcount > 0 and an updated startblock.
 	 */
-	xfs_refcount_update_get_group(mp, &fake);
+	fake.ri_pag = xfs_perag_intent_get(mp, pmap->pe_startblock);
 	error = xfs_trans_log_finish_refcount_update(tp, cudp, &fake, rcur);
-	xfs_refcount_update_put_group(&fake);
+	xfs_perag_intent_put(fake.ri_pag);
 	if (error || fake.ri_blockcount == 0)
 		return error;
 
