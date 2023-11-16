@@ -480,6 +480,70 @@ xfs_rui_validate_map(
 	return xfs_verify_fsbext(mp, map->me_startblock, map->me_len);
 }
 
+STATIC int
+xfs_rui_recover_extent(
+	struct xfs_trans		*tp,
+	const struct xfs_map_extent	*map,
+	struct xfs_rud_log_item		*rudp,
+	struct xfs_btree_cur		**rcur)
+{
+	struct xfs_rmap_intent		fake = {
+		.ri_owner		= map->me_owner,
+		.ri_bmap		= {
+			.br_startblock	= map->me_startblock,
+			.br_startoff	= map->me_startoff,
+			.br_blockcount	= map->me_len,
+			.br_state	= XFS_EXT_NORM,
+		},
+		.ri_whichfork		= XFS_DATA_FORK,
+	};
+	struct xfs_mount		*mp = tp->t_mountp;
+	int				error;
+
+	switch (map->me_flags & XFS_RMAP_EXTENT_TYPE_MASK) {
+	case XFS_RMAP_EXTENT_MAP:
+		fake.ri_type = XFS_RMAP_MAP;
+		break;
+	case XFS_RMAP_EXTENT_MAP_SHARED:
+		fake.ri_type = XFS_RMAP_MAP_SHARED;
+		break;
+	case XFS_RMAP_EXTENT_UNMAP:
+		fake.ri_type = XFS_RMAP_UNMAP;
+		break;
+	case XFS_RMAP_EXTENT_UNMAP_SHARED:
+		fake.ri_type = XFS_RMAP_UNMAP_SHARED;
+		break;
+	case XFS_RMAP_EXTENT_CONVERT:
+		fake.ri_type = XFS_RMAP_CONVERT;
+		break;
+	case XFS_RMAP_EXTENT_CONVERT_SHARED:
+		fake.ri_type = XFS_RMAP_CONVERT_SHARED;
+		break;
+	case XFS_RMAP_EXTENT_ALLOC:
+		fake.ri_type = XFS_RMAP_ALLOC;
+		break;
+	case XFS_RMAP_EXTENT_FREE:
+		fake.ri_type = XFS_RMAP_FREE;
+		break;
+	default:
+		return -EFSCORRUPTED;
+	}
+
+	if (map->me_flags & XFS_RMAP_EXTENT_ATTR_FORK)
+		fake.ri_whichfork = XFS_ATTR_FORK;
+	if (map->me_flags & XFS_RMAP_EXTENT_UNWRITTEN)
+		fake.ri_bmap.br_state = XFS_EXT_UNWRITTEN;
+
+	xfs_rmap_update_get_group(mp, &fake);
+	error = xfs_trans_log_finish_rmap_update(tp, rudp, &fake, rcur);
+	xfs_rmap_update_put_group(&fake);
+	return error;
+}
+
+#define for_each_rui_mapping(ruip, i, map) \
+	for ((i) = 0, (map) = &(ruip)->rui_format.rui_extents[0]; \
+	     (i) < (ruip)->rui_format.rui_nextents; \
+	     (i)++, (map)++)
 /*
  * Process an rmap update intent item that was recovered from the log.
  * We need to update the rmapbt.
@@ -494,6 +558,7 @@ xfs_rui_item_recover(
 	struct xfs_rud_log_item		*rudp;
 	struct xfs_trans		*tp;
 	struct xfs_btree_cur		*rcur = NULL;
+	struct xfs_map_extent		*map;
 	struct xfs_mount		*mp = lip->li_log->l_mp;
 	int				i;
 	int				error = 0;
@@ -503,9 +568,8 @@ xfs_rui_item_recover(
 	 * RUI.  If any are bad, then assume that all are bad and
 	 * just toss the RUI.
 	 */
-	for (i = 0; i < ruip->rui_format.rui_nextents; i++) {
-		if (!xfs_rui_validate_map(mp,
-					&ruip->rui_format.rui_extents[i])) {
+	for_each_rui_mapping(ruip, i, map) {
+		if (!xfs_rui_validate_map(mp, map)) {
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 					&ruip->rui_format,
 					sizeof(ruip->rui_format));
@@ -520,60 +584,11 @@ xfs_rui_item_recover(
 		return error;
 	rudp = xfs_trans_get_rud(tp, ruip);
 
-	for (i = 0; i < ruip->rui_format.rui_nextents; i++) {
-		struct xfs_rmap_intent	fake = { };
-		struct xfs_map_extent	*map;
-
-		map = &ruip->rui_format.rui_extents[i];
-		switch (map->me_flags & XFS_RMAP_EXTENT_TYPE_MASK) {
-		case XFS_RMAP_EXTENT_MAP:
-			fake.ri_type = XFS_RMAP_MAP;
-			break;
-		case XFS_RMAP_EXTENT_MAP_SHARED:
-			fake.ri_type = XFS_RMAP_MAP_SHARED;
-			break;
-		case XFS_RMAP_EXTENT_UNMAP:
-			fake.ri_type = XFS_RMAP_UNMAP;
-			break;
-		case XFS_RMAP_EXTENT_UNMAP_SHARED:
-			fake.ri_type = XFS_RMAP_UNMAP_SHARED;
-			break;
-		case XFS_RMAP_EXTENT_CONVERT:
-			fake.ri_type = XFS_RMAP_CONVERT;
-			break;
-		case XFS_RMAP_EXTENT_CONVERT_SHARED:
-			fake.ri_type = XFS_RMAP_CONVERT_SHARED;
-			break;
-		case XFS_RMAP_EXTENT_ALLOC:
-			fake.ri_type = XFS_RMAP_ALLOC;
-			break;
-		case XFS_RMAP_EXTENT_FREE:
-			fake.ri_type = XFS_RMAP_FREE;
-			break;
-		default:
-			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
-					&ruip->rui_format,
-					sizeof(ruip->rui_format));
-			error = -EFSCORRUPTED;
-			goto abort_error;
-		}
-
-		fake.ri_owner = map->me_owner;
-		fake.ri_whichfork = (map->me_flags & XFS_RMAP_EXTENT_ATTR_FORK) ?
-				XFS_ATTR_FORK : XFS_DATA_FORK;
-		fake.ri_bmap.br_startblock = map->me_startblock;
-		fake.ri_bmap.br_startoff = map->me_startoff;
-		fake.ri_bmap.br_blockcount = map->me_len;
-		fake.ri_bmap.br_state = (map->me_flags & XFS_RMAP_EXTENT_UNWRITTEN) ?
-				XFS_EXT_UNWRITTEN : XFS_EXT_NORM;
-
-		xfs_rmap_update_get_group(mp, &fake);
-		error = xfs_trans_log_finish_rmap_update(tp, rudp, &fake,
-				&rcur);
+	for_each_rui_mapping(ruip, i, map) {
+		error = xfs_rui_recover_extent(tp, map, rudp, &rcur);
 		if (error == -EFSCORRUPTED)
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 					map, sizeof(*map));
-		xfs_rmap_update_put_group(&fake);
 		if (error)
 			goto abort_error;
 
