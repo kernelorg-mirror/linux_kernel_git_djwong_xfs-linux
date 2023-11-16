@@ -27,6 +27,7 @@
 #include "xfs_ag_resv.h"
 #include "xfs_bmap.h"
 #include "xfs_health.h"
+#include "xfs_extfree_item.h"
 
 struct kmem_cache	*xfs_extfree_item_cache;
 
@@ -2546,16 +2547,6 @@ xfs_agfl_reset(
 	clear_bit(XFS_AGSTATE_AGFL_NEEDS_RESET, &pag->pag_opstate);
 }
 
-static enum xfs_defer_ops_type
-xfs_extent_free_item_optype(
-	struct xfs_extent_free_item	*xefi,
-	unsigned int			free_flags)
-{
-	if (xefi->xefi_agresv == XFS_AG_RESV_AGFL)
-		return XFS_DEFER_OPS_TYPE_AGFL_FREE;
-	return XFS_DEFER_OPS_TYPE_FREE;
-}
-
 /*
  * Add the extent to the list of extents to be free at transaction end.
  * The list is maintained sorted (by block number).
@@ -2572,7 +2563,6 @@ xfs_defer_extent_free(
 {
 	struct xfs_extent_free_item	*xefi;
 	struct xfs_mount		*mp = tp->t_mountp;
-	enum xfs_defer_ops_type		optype;
 
 	ASSERT(len <= XFS_MAX_BMBT_EXTLEN);
 	ASSERT(!isnullstartblock(bno));
@@ -2601,11 +2591,7 @@ xfs_defer_extent_free(
 		xefi->xefi_owner = XFS_RMAP_OWN_NULL;
 	}
 
-	trace_xfs_extent_free_defer(mp, xefi);
-
-	xfs_extent_free_get_group(mp, xefi);
-	optype = xfs_extent_free_item_optype(xefi, free_flags);
-	*dfpp = xfs_defer_add(tp, optype, &xefi->xefi_list);
+	xfs_extent_free_defer_add(tp, xefi, dfpp);
 	return 0;
 }
 
