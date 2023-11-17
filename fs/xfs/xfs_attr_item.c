@@ -438,6 +438,11 @@ xfs_attr_free_item(
 		kmem_cache_free(xfs_attr_intent_cache, attr);
 }
 
+static inline struct xfs_attr_intent *attri_entry(const struct list_head *e)
+{
+	return list_entry(e, struct xfs_attr_intent, xattri_list);
+}
+
 /* Process an attr. */
 STATIC int
 xfs_attr_finish_item(
@@ -446,11 +451,10 @@ xfs_attr_finish_item(
 	struct list_head		*item,
 	struct xfs_btree_cur		**state)
 {
-	struct xfs_attr_intent		*attr;
+	struct xfs_attr_intent		*attr = attri_entry(item);
 	struct xfs_attrd_log_item	*done_item = NULL;
 	int				error;
 
-	attr = container_of(item, struct xfs_attr_intent, xattri_list);
 	if (done)
 		done_item = ATTRD_ITEM(done);
 
@@ -480,9 +484,8 @@ STATIC void
 xfs_attr_cancel_item(
 	struct list_head		*item)
 {
-	struct xfs_attr_intent		*attr;
+	struct xfs_attr_intent		*attr = attri_entry(item);
 
-	attr = container_of(item, struct xfs_attr_intent, xattri_list);
 	xfs_attr_free_item(attr);
 }
 
