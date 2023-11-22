@@ -2627,14 +2627,21 @@ xlog_recover_cancel_intents(
 
 /*
  * Transfer ownership of the recovered log intent item to the recovery
- * transaction.
+ * transaction and try to finish the work.  If there is more work to be done,
+ * the dfp will remain attached to the transaction.
  */
-void
-xlog_recover_transfer_intent(
+int
+xlog_recover_finish_intent(
 	struct xfs_trans		*tp,
 	struct xfs_defer_pending	*dfp)
 {
-	dfp->dfp_intent = NULL;
+	int				error;
+
+	list_move(&dfp->dfp_list, &tp->t_dfops);
+	error = xfs_defer_finish_one(tp, dfp);
+	if (error == -EAGAIN)
+		return 0;
+	return error;
 }
 
 /*
