@@ -2568,7 +2568,6 @@ xlog_recover_process_intents(
 
 	list_for_each_entry_safe(dfp, n, &log->l_dfops, dfp_list) {
 		struct xfs_log_item	*lip = dfp->dfp_intent;
-		const struct xfs_item_ops *ops = lip->li_ops;
 
 		ASSERT(xlog_item_is_intent(lip));
 
@@ -2587,12 +2586,10 @@ xlog_recover_process_intents(
 		 *
 		 * The recovery function can free @dfp.
 		 */
-		error = ops->iop_recover(dfp, &capture_list);
-		if (error) {
-			trace_xlog_intent_recovery_failed(log->l_mp, error,
-					ops->iop_recover);
+		error = xfs_defer_finish_recovery(log->l_mp, dfp,
+				&capture_list);
+		if (error)
 			break;
-		}
 	}
 	if (error)
 		goto err;
