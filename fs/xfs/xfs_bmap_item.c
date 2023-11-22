@@ -437,15 +437,6 @@ xfs_bmap_update_cancel_item(
 	kmem_cache_free(xfs_bmap_intent_cache, bi);
 }
 
-const struct xfs_defer_op_type xfs_bmap_update_defer_type = {
-	.max_items	= XFS_BUI_MAX_FAST_EXTENTS,
-	.create_intent	= xfs_bmap_update_create_intent,
-	.abort_intent	= xfs_bmap_update_abort_intent,
-	.create_done	= xfs_bmap_update_create_done,
-	.finish_item	= xfs_bmap_update_finish_item,
-	.cancel_item	= xfs_bmap_update_cancel_item,
-};
-
 /* Is this recovered BUI ok? */
 static inline bool
 xfs_bui_validate(
@@ -508,7 +499,7 @@ xfs_bui_recover_work(
  * We need to update some inode's bmbt.
  */
 STATIC int
-xfs_bui_item_recover(
+xfs_bmap_recover_work(
 	struct xfs_defer_pending	*dfp,
 	struct list_head		*capture_list)
 {
@@ -587,6 +578,16 @@ err_rele:
 	return error;
 }
 
+const struct xfs_defer_op_type xfs_bmap_update_defer_type = {
+	.max_items	= XFS_BUI_MAX_FAST_EXTENTS,
+	.create_intent	= xfs_bmap_update_create_intent,
+	.abort_intent	= xfs_bmap_update_abort_intent,
+	.create_done	= xfs_bmap_update_create_done,
+	.finish_item	= xfs_bmap_update_finish_item,
+	.cancel_item	= xfs_bmap_update_cancel_item,
+	.recover_work	= xfs_bmap_recover_work,
+};
+
 STATIC bool
 xfs_bui_item_match(
 	struct xfs_log_item	*lip,
@@ -627,7 +628,6 @@ static const struct xfs_item_ops xfs_bui_item_ops = {
 	.iop_format	= xfs_bui_item_format,
 	.iop_unpin	= xfs_bui_item_unpin,
 	.iop_release	= xfs_bui_item_release,
-	.iop_recover	= xfs_bui_item_recover,
 	.iop_match	= xfs_bui_item_match,
 	.iop_relog	= xfs_bui_item_relog,
 };
