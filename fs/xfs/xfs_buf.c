@@ -2152,6 +2152,14 @@ xfs_buf_delwri_queue_here(
 
 	ASSERT(!(bp->b_flags & _XBF_DELWRI_Q));
 
+	/*
+	 * The buffer is locked.  The _delwri_queue below will bhold the buffer
+	 * so it cannot be reclaimed until the blocks are written to disk.
+	 * Mark this buffer XBF_DONE (i.e. uptodate) so that a subsequent
+	 * xfs_buf_read will not pointlessly reread the contents from the disk.
+	 */
+	bp->b_flags |= XBF_DONE;
+
 	xfs_buf_delwri_queue(bp, buffer_list);
 }
 
