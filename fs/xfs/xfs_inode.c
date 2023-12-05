@@ -37,6 +37,7 @@
 #include "xfs_reflink.h"
 #include "xfs_ag.h"
 #include "xfs_log_priv.h"
+#include "xfs_health.h"
 
 struct kmem_cache *xfs_inode_cache;
 
@@ -661,6 +662,8 @@ xfs_lookup(
 
 	if (xfs_is_shutdown(dp->i_mount))
 		return -EIO;
+	if (xfs_ifork_zapped(dp, XFS_DATA_FORK))
+		return -EIO;
 
 	error = xfs_dir_lookup(NULL, dp, name, &inum, ci_name);
 	if (error)
@@ -978,6 +981,8 @@ xfs_create(
 
 	if (xfs_is_shutdown(mp))
 		return -EIO;
+	if (xfs_ifork_zapped(dp, XFS_DATA_FORK))
+		return -EIO;
 
 	prid = xfs_get_initial_prid(dp);
 
@@ -1216,6 +1221,8 @@ xfs_link(
 	ASSERT(!S_ISDIR(VFS_I(sip)->i_mode));
 
 	if (xfs_is_shutdown(mp))
+		return -EIO;
+	if (xfs_ifork_zapped(tdp, XFS_DATA_FORK))
 		return -EIO;
 
 	error = xfs_qm_dqattach(sip);
@@ -2506,6 +2513,8 @@ xfs_remove(
 
 	if (xfs_is_shutdown(mp))
 		return -EIO;
+	if (xfs_ifork_zapped(dp, XFS_DATA_FORK))
+		return -EIO;
 
 	error = xfs_qm_dqattach(dp);
 	if (error)
@@ -3757,4 +3766,20 @@ xfs_inode_reload_unlinked(
 	xfs_trans_cancel(tp);
 
 	return error;
+}
+
+/* Has this inode fork been zapped by repair? */
+bool
+xfs_ifork_zapped(
+	const struct xfs_inode	*ip,
+	int			whichfork)
+{
+	switch (whichfork) {
+	case XFS_DATA_FORK:
+		return ip->i_sick & XFS_SICK_INO_DFORK_ZAPPED;
+	case XFS_ATTR_FORK:
+		return ip->i_sick & XFS_SICK_INO_AFORK_ZAPPED;
+	default:
+		return false;
+	}
 }

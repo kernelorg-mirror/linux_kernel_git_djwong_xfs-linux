@@ -36,6 +36,7 @@
 #include "xfs_rtbitmap.h"
 #include "xfs_attr_leaf.h"
 #include "xfs_log_priv.h"
+#include "xfs_health.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
@@ -119,6 +120,9 @@ struct xrep_inode {
 
 	/* Number of (data device) extents for the attr fork. */
 	xfs_aextnum_t		attr_extents;
+
+	/* Sick state to set after zapping parts of the inode. */
+	unsigned int		ino_sick_mask;
 
 	/* Must we remove all access from this file? */
 	bool			zap_acls;
@@ -705,6 +709,8 @@ xrep_dinode_zap_dfork(
 
 	trace_xrep_dinode_zap_dfork(sc, dip);
 
+	ri->ino_sick_mask |= XFS_SICK_INO_DFORK_ZAPPED;
+
 	xrep_dinode_set_data_nextents(dip, 0);
 	ri->data_blocks = 0;
 	ri->rt_blocks = 0;
@@ -803,6 +809,8 @@ xrep_dinode_zap_afork(
 	struct xfs_scrub	*sc = ri->sc;
 
 	trace_xrep_dinode_zap_afork(sc, dip);
+
+	ri->ino_sick_mask |= XFS_SICK_INO_AFORK_ZAPPED;
 
 	dip->di_aformat = XFS_DINODE_FMT_EXTENTS;
 	xrep_dinode_set_attr_nextents(dip, 0);
@@ -1140,6 +1148,8 @@ xrep_dinode_core(
 		return error;
 
 	xchk_ilock(sc, XFS_ILOCK_EXCL);
+	if (ri->ino_sick_mask)
+		xfs_inode_mark_sick(sc->ip, ri->ino_sick_mask);
 	return 0;
 }
 

@@ -19,9 +19,11 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_rmap.h"
 #include "xfs_rmap_btree.h"
+#include "xfs_health.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/btree.h"
+#include "scrub/health.h"
 #include "xfs_ag.h"
 
 /* Set us up with an inode's bmap. */
@@ -863,8 +865,16 @@ xchk_bmap(
 	case XFS_ATTR_FORK:
 		if (!xfs_has_attr(mp) && !xfs_has_attr2(mp))
 			xchk_ino_set_corrupt(sc, sc->ip->i_ino);
+		if (xfs_inode_has_sickness(sc->ip, XFS_SICK_INO_AFORK_ZAPPED)) {
+			xchk_fblock_set_corrupt(sc, whichfork, 0);
+			return 0;
+		}
 		break;
 	default:
+		if (xfs_inode_has_sickness(sc->ip, XFS_SICK_INO_DFORK_ZAPPED)) {
+			xchk_fblock_set_corrupt(sc, whichfork, 0);
+			return 0;
+		}
 		ASSERT(whichfork == XFS_DATA_FORK);
 		break;
 	}
@@ -943,7 +953,15 @@ int
 xchk_bmap_data(
 	struct xfs_scrub	*sc)
 {
-	return xchk_bmap(sc, XFS_DATA_FORK);
+	int			error;
+
+	error = xchk_bmap(sc, XFS_DATA_FORK);
+	if (error)
+		return error;
+
+	/* If the data fork is clean, it is clearly not zapped. */
+	xchk_mark_healthy_if_clean(sc, XFS_SICK_INO_DFORK_ZAPPED);
+	return 0;
 }
 
 /* Scrub an inode's attr fork. */
@@ -951,7 +969,15 @@ int
 xchk_bmap_attr(
 	struct xfs_scrub	*sc)
 {
-	return xchk_bmap(sc, XFS_ATTR_FORK);
+	int			error;
+
+	error = xchk_bmap(sc, XFS_ATTR_FORK);
+	if (error)
+		return error;
+
+	/* If the attr fork is clean, it is clearly not zapped. */
+	xchk_mark_healthy_if_clean(sc, XFS_SICK_INO_AFORK_ZAPPED);
+	return 0;
 }
 
 /* Scrub an inode's CoW fork. */

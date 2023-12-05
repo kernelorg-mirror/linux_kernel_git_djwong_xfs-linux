@@ -118,6 +118,20 @@ xchk_health_mask_for_scrub_type(
 }
 
 /*
+ * If the scrub state is clean, add @mask to the scrub sick mask to clear
+ * additional sick flags from the metadata object's sick state.
+ */
+void
+xchk_mark_healthy_if_clean(
+	struct xfs_scrub	*sc,
+	unsigned int		mask)
+{
+	if (!(sc->sm->sm_flags & (XFS_SCRUB_OFLAG_CORRUPT |
+				  XFS_SCRUB_OFLAG_XCORRUPT)))
+		sc->sick_mask |= mask;
+}
+
+/*
  * Update filesystem health assessments based on what we found and did.
  *
  * If the scrubber finds errors, we mark sick whatever's mentioned in

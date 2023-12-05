@@ -108,6 +108,8 @@ xfs_readlink(
 
 	if (xfs_is_shutdown(mp))
 		return -EIO;
+	if (xfs_ifork_zapped(ip, XFS_DATA_FORK))
+		return -EIO;
 
 	xfs_ilock(ip, XFS_ILOCK_SHARED);
 
