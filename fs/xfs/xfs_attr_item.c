@@ -27,6 +27,7 @@
 #include "xfs_error.h"
 #include "xfs_log_priv.h"
 #include "xfs_log_recover.h"
+#include "xfs_parent.h"
 
 struct kmem_cache		*xfs_attri_cache;
 struct kmem_cache		*xfs_attrd_cache;
@@ -1055,6 +1056,13 @@ xlog_recover_attri_commit_pass2(
 		}
 
 		attr_value = item->ri_buf[i].i_addr;
+		if ((attri_formatp->alfi_attr_filter & XFS_ATTR_PARENT) &&
+		    !xfs_parent_valuecheck(mp, attr_value, value_len)) {
+			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
+					item->ri_buf[i].i_addr,
+					item->ri_buf[i].i_len);
+			return -EFSCORRUPTED;
+		}
 		i++;
 	}
 
@@ -1067,6 +1075,13 @@ xlog_recover_attri_commit_pass2(
 		}
 
 		attr_new_value = item->ri_buf[i].i_addr;
+		if ((attri_formatp->alfi_attr_filter & XFS_ATTR_PARENT) &&
+		    !xfs_parent_valuecheck(mp, attr_new_value, new_value_len)) {
+			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
+					item->ri_buf[i].i_addr,
+					item->ri_buf[i].i_len);
+			return -EFSCORRUPTED;
+		}
 		i++;
 	}
 
