@@ -6,6 +6,8 @@
 #ifndef __XFS_EXCHRANGE_H__
 #define __XFS_EXCHRANGE_H__
 
+bool xfs_exchrange_possible(struct xfs_mount *mp);
+
 /* Update the mtime/cmtime of file1 and file2 */
 #define __XFS_EXCHANGE_RANGE_UPD_CMTIME1	(1ULL << 63)
 #define __XFS_EXCHANGE_RANGE_UPD_CMTIME2	(1ULL << 62)
