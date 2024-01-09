@@ -4671,19 +4671,19 @@ DECLARE_EVENT_CLASS(xfbtree_freesp_class,
 	TP_ARGS(xfbt, cur, fileoff),
 	TP_STRUCT__entry(
 		__field(unsigned long, xfino)
-		__field(xfs_btnum_t, btnum)
+		__string(name, cur->bc_ops->name)
 		__field(int, nlevels)
 		__field(xfs_fileoff_t, fileoff)
 	),
 	TP_fast_assign(
 		__entry->xfino = xfbtree_ino(xfbt);
-		__entry->btnum = cur->bc_btnum;
+		__assign_str(name, cur->bc_ops->name);
 		__entry->nlevels = cur->bc_nlevels;
 		__entry->fileoff = fileoff;
 	),
-	TP_printk("xfino 0x%lx btree %s nlevels %d fileoff 0x%llx",
+	TP_printk("xfino 0x%lx %sbt nlevels %d fileoff 0x%llx",
 		  __entry->xfino,
-		  __print_symbolic(__entry->btnum, XFS_BTNUM_STRINGS),
+		  __get_str(name),
 		  __entry->nlevels,
 		  (unsigned long long)__entry->fileoff)
 )
