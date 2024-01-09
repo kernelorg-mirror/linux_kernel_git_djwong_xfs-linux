@@ -510,6 +510,10 @@ void
 xfs_btree_mark_sick(
 	struct xfs_btree_cur		*cur)
 {
+
+	if (cur->bc_ops->type == XFS_BTREE_TYPE_MEM)
+		return;
+
 	switch (cur->bc_ops->type) {
 	case XFS_BTREE_TYPE_AG:
 		ASSERT(cur->bc_ops->sick_mask);

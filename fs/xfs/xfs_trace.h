@@ -2500,12 +2500,19 @@ TRACE_EVENT(xfs_btree_alloc_block,
 	),
 	TP_fast_assign(
 		__entry->dev = cur->bc_mp->m_super->s_dev;
-		if (cur->bc_ops->type == XFS_BTREE_TYPE_INODE) {
+		switch (cur->bc_ops->type) {
+		case XFS_BTREE_TYPE_INODE:
 			__entry->agno = 0;
 			__entry->ino = cur->bc_ino.ip->i_ino;
-		} else {
+			break;
+		case XFS_BTREE_TYPE_AG:
 			__entry->agno = cur->bc_ag.pag->pag_agno;
 			__entry->ino = 0;
+			break;
+		case XFS_BTREE_TYPE_MEM:
+			__entry->agno = 0;
+			__entry->ino = 0;
+			break;
 		}
 		__assign_str(name, cur->bc_ops->name);
 		__entry->error = error;
