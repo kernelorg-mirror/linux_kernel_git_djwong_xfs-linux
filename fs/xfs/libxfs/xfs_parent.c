@@ -166,6 +166,7 @@ xfs_parent_args_free(
 {
 	kmem_cache_free(xfs_parent_args_cache, ppargs);
 }
+
 /*
  * Allocate memory to control a logged parent pointer update as part of a
  * dirent operation.
@@ -230,6 +231,22 @@ xfs_parent_setname(
 			child->i_ino, parent_name->name, parent_name->len);
 }
 
+/* Set up the second step of a replace operation. */
+static void
+xfs_parent_setnewname(
+	struct xfs_parent_args	*ppargs,
+	struct xfs_trans	*tp,
+	struct xfs_inode	*dp,
+	const struct xfs_name	*parent_name,
+	struct xfs_inode	*child)
+{
+	xfs_parent_rec_init(&ppargs->new_rec, dp);
+	ppargs->args.new_name = parent_name->name;
+	ppargs->args.new_namelen = parent_name->len;
+	ppargs->args.new_value = &ppargs->new_rec;
+	ppargs->args.new_valuelen = sizeof(struct xfs_parent_rec);
+}
+
 /* Add a parent pointer to reflect a dirent addition. */
 void
 xfs_parent_addname(
@@ -264,5 +281,34 @@ xfs_parent_removename(
 
 	xfs_parent_setname(ppargs, tp, dp, parent_name, child);
 	xfs_attr_defer_parent(&ppargs->args, XFS_ATTR_DEFER_REMOVE);
+	return 0;
+}
+
+/* Replace one parent pointer with another to reflect a rename. */
+int
+xfs_parent_replacename(
+	struct xfs_trans	*tp,
+	struct xfs_parent_args	*ppargs,
+	struct xfs_inode	*old_dp,
+	const struct xfs_name	*old_name,
+	struct xfs_inode	*new_dp,
+	const struct xfs_name	*new_name,
+	struct xfs_inode	*child)
+{
+	struct xfs_da_args	*args = &ppargs->args;
+
+	/*
+	 * For regular attrs, replacing an attr from a !hasattr inode becomes
+	 * an attr-set operation.  For replacing a parent pointer, however, we
+	 * require that the old pointer must exist.
+	 */
+	if (XFS_IS_CORRUPT(child->i_mount, !xfs_inode_hasattr(child))) {
+		xfs_inode_mark_sick(child, XFS_SICK_INO_PARENT);
+		return -EFSCORRUPTED;
+	}
+
+	xfs_parent_setname(ppargs, tp, old_dp, old_name, child);
+	xfs_parent_setnewname(ppargs, tp, new_dp, new_name, child);
+	xfs_attr_defer_parent(args, XFS_ATTR_DEFER_REPLACE);
 	return 0;
 }
