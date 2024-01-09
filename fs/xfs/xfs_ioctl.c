@@ -48,6 +48,8 @@
 #include <linux/mount.h>
 #include <linux/namei.h>
 #include <linux/fileattr.h>
+#include <linux/security.h>
+#include <linux/fsnotify.h>
 
 /*
  * xfs_find_handle maps from userspace xfs_fsop_handlereq structure to
@@ -2381,6 +2383,73 @@ xfs_ioc_commit_range(
 	return error;
 }
 
+#ifdef CONFIG_XFS_EXPERIMENTAL_IOCTLS
+static int
+xfs_ioc_map_freesp(
+	struct file			*file,
+	struct xfs_map_freesp __user	*argp)
+{
+	struct xfs_map_freesp		args;
+	struct inode			*inode = file_inode(file);
+	int				error;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	if (copy_from_user(&args, argp, sizeof(args)))
+		return -EFAULT;
+
+	if (args.flags || args.pad)
+		return -EINVAL;
+
+	if (args.offset < 0 || args.len <= 0)
+		return -EINVAL;
+
+	if (!(file->f_mode & FMODE_WRITE))
+		return -EBADF;
+
+	/*
+	 * We can only allow pure fallocate on append only files
+	 */
+	if (IS_APPEND(inode))
+		return -EPERM;
+
+	if (IS_IMMUTABLE(inode))
+		return -EPERM;
+
+	/*
+	 * We cannot allow any fallocate operation on an active swapfile
+	 */
+	if (IS_SWAPFILE(inode))
+		return -ETXTBSY;
+
+	if (S_ISFIFO(inode->i_mode))
+		return -ESPIPE;
+
+	if (S_ISDIR(inode->i_mode))
+		return -EISDIR;
+
+	if (!S_ISREG(inode->i_mode))
+		return -ENODEV;
+
+	/* Check for wrap through zero too */
+	if (args.offset + args.len > inode->i_sb->s_maxbytes)
+		return -EFBIG;
+	if (args.offset + args.len < 0)
+		return -EFBIG;
+
+	file_start_write(file);
+	error = xfs_file_map_freesp(file, &args);
+	if (!error)
+		fsnotify_modify(file);
+
+	file_end_write(file);
+	return error;
+}
+#else
+# define xfs_ioc_map_freesp(...)		(-ENOTTY)
+#endif
+
 /*
  * These long-unused ioctls were removed from the official ioctl API in 5.17,
  * but retain these definitions so that we can log warnings about them.
@@ -2635,6 +2704,9 @@ xfs_file_ioctl(
 		return xfs_ioc_start_commit(filp, arg);
 	case XFS_IOC_COMMIT_RANGE:
 		return xfs_ioc_commit_range(filp, arg);
+
+	case XFS_IOC_MAP_FREESP:
+		return xfs_ioc_map_freesp(filp, arg);
 
 	default:
 		return -ENOTTY;
