@@ -1977,6 +1977,58 @@ out:
 	return error;
 }
 
+#ifdef CONFIG_XFS_EXPERIMENTAL_IOCTLS
+STATIC int
+xfs_ioc_scrubv_metadata(
+	struct file			*filp,
+	void				__user *arg)
+{
+	struct xfs_scrub_vec_head	__user *uhead = arg;
+	struct xfs_scrub_vec_head	head;
+	struct xfs_scrub_vec_head	*vhead;
+	size_t				bytes;
+	int				error;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	if (copy_from_user(&head, uhead, sizeof(head)))
+		return -EFAULT;
+
+	if (head.svh_reserved)
+		return -EINVAL;
+
+	bytes = sizeof_xfs_scrub_vec(head.svh_nr);
+	if (bytes > PAGE_SIZE)
+		return -ENOMEM;
+	vhead = kvmalloc(bytes, GFP_KERNEL | __GFP_RETRY_MAYFAIL);
+	if (!vhead)
+		return -ENOMEM;
+	memcpy(vhead, &head, sizeof(struct xfs_scrub_vec_head));
+
+	if (copy_from_user(&vhead->svh_vecs, &uhead->svh_vecs,
+				head.svh_nr * sizeof(struct xfs_scrub_vec))) {
+		error = -EFAULT;
+		goto err_free;
+	}
+
+	error = xfs_scrubv_metadata(filp, vhead);
+	if (error)
+		goto err_free;
+
+	if (copy_to_user(uhead, vhead, bytes)) {
+		error = -EFAULT;
+		goto err_free;
+	}
+
+err_free:
+	kvfree(vhead);
+	return error;
+}
+#else
+# define xfs_ioc_scrubv_metadata(...)		(-ENOTTY)
+#endif
+
 static inline int
 xfs_fs_eofblocks_from_user(
 	struct xfs_fs_eofblocks		*src,
@@ -2254,6 +2306,8 @@ xfs_file_ioctl(
 	case FS_IOC_GETFSMAP:
 		return xfs_ioc_getfsmap(ip, arg);
 
+	case XFS_IOC_SCRUBV_METADATA:
+		return xfs_ioc_scrubv_metadata(filp, arg);
 	case XFS_IOC_SCRUB_METADATA:
 		return xfs_ioc_scrub_metadata(filp, arg);
 
