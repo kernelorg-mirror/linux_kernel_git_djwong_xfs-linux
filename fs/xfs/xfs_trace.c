@@ -55,6 +55,24 @@ xfbtree_ino(
 }
 #endif /* CONFIG_XFS_BTREE_IN_MEM */
 
+static inline void
+xfs_rmapbt_crack_agno_opdev(
+	struct xfs_btree_cur	*cur,
+	xfs_agnumber_t		*agno,
+	dev_t			*opdev)
+{
+	if (cur->bc_ops->geom_flags & XFS_BTGEO_IN_MEM) {
+		*agno = 0;
+		*opdev = (dev_t)-1;
+	} else if (cur->bc_ops->geom_flags & XFS_BTGEO_ROOT_IN_INODE) {
+		*agno = cur->bc_ino.rtg->rtg_rgno;
+		*opdev = cur->bc_mp->m_rtdev_targp->bt_dev;
+	} else {
+		*agno = cur->bc_ag.pag->pag_agno;
+		*opdev = cur->bc_mp->m_super->s_dev;
+	}
+}
+
 /*
  * We include this last to have the helpers above available for the trace
  * event implementations.
