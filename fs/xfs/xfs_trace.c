@@ -46,6 +46,7 @@
 #include "xfs_rtgroup.h"
 #include "xfs_rmap.h"
 #include "xfs_refcount.h"
+#include "xfs_fsrefs.h"
 
 #ifdef CONFIG_XFS_BTREE_IN_MEM
 static inline unsigned long
