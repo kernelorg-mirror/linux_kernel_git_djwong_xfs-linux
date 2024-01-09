@@ -296,6 +296,7 @@ struct xfs_btree_cur
 		} bc_ag;
 		struct {
 			struct xfs_perag	*pag;
+			struct xfs_rtgroup	*rtg;
 			struct xfbtree		*xfbtree;
 		} bc_mem;
 	};
