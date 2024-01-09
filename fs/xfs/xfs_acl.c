@@ -135,6 +135,7 @@ xfs_get_acl(struct inode *inode, int type, bool rcu)
 		.dp		= ip,
 		.attr_filter	= XFS_ATTR_ROOT,
 		.valuelen	= XFS_ACL_MAX_SIZE(mp),
+		.owner		= ip->i_ino,
 	};
 	int			error;
 
@@ -178,6 +179,7 @@ __xfs_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 	struct xfs_da_args	args = {
 		.dp		= ip,
 		.attr_filter	= XFS_ATTR_ROOT,
+		.owner		= ip->i_ino,
 	};
 	int			error;
 
