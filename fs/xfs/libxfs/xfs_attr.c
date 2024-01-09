@@ -424,10 +424,10 @@ xfs_attr_complete_op(
 
 	args->op_flags &= ~XFS_DA_OP_REPLACE;
 	args->attr_filter &= ~XFS_ATTR_INCOMPLETE;
-	if (do_replace)
-		return replace_state;
+	if (!do_replace)
+		return XFS_DAS_DONE;
 
-	return XFS_DAS_DONE;
+	return replace_state;
 }
 
 static int
