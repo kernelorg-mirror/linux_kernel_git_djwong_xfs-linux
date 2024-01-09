@@ -9,6 +9,10 @@
 #include "xfs_buf_mem.h"
 #include "xfs_trace.h"
 #include <linux/shmem_fs.h>
+#include "xfs_log_format.h"
+#include "xfs_trans.h"
+#include "xfs_buf_item.h"
+#include "xfs_error.h"
 
 /*
  * Buffer Cache for In-Memory Files
