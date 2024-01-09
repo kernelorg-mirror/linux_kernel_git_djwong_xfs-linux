@@ -39,6 +39,6 @@ bool	xfs_validate_stripe_geometry(struct xfs_mount *mp,
 		__s64 sunit, __s64 swidth, int sectorsize, bool may_repair,
 		bool silent);
 
-uint8_t xfs_compute_rextslog(xfs_rtbxlen_t rtextents);
+uint8_t xfs_compute_rextslog(const struct xfs_sb *sbp, xfs_rtbxlen_t rtextents);
 
 #endif	/* __XFS_SB_H__ */
