@@ -119,7 +119,7 @@ xfs_qm_newmount(
 			 * mounting, and get on with the boring life
 			 * without disk quotas.
 			 */
-			xfs_qm_mount_quotas(mp);
+			return xfs_qm_mount_quotas(mp);
 		} else {
 			/*
 			 * Clear the quota flags, but remember them. This
