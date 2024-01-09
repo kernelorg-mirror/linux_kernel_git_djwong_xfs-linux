@@ -33,6 +33,13 @@ xfs_attr_grab_log_assist(
 	int			error = 0;
 
 	/*
+	 * As a performance optimization, skip the log force and super write
+	 * if the filesystem featureset already protects the attri log items.
+	 */
+	if (xfs_attri_can_use_without_log_assistance(mp))
+		return 0;
+
+	/*
 	 * If log-assisted xattrs are already enabled, the caller can use the
 	 * log assisted swap functions without needing to do any more work.
 	 */
