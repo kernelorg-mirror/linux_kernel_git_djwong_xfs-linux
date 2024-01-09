@@ -338,7 +338,8 @@ retry:
 		 */
 		fsc->fdblocks -= pag->pag_meta_resv.ar_reserved;
 		fsc->fdblocks -= pag->pag_rmapbt_resv.ar_orig_reserved;
-
+		if (xfs_perag_prohibits_alloc(pag))
+			fsc->fdblocks -= xfs_ag_fdblocks(pag);
 	}
 	if (pag)
 		xfs_perag_rele(pag);
