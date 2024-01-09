@@ -15,4 +15,6 @@ bool xfs_is_falloc_aligned(struct xfs_inode *ip, loff_t pos,
 bool xfs_truncate_needs_cow_around(struct xfs_inode *ip, loff_t pos);
 int xfs_file_unshare_at(struct xfs_inode *ip, loff_t pos);
 
+int xfs_file_map_freesp(struct file *file, const struct xfs_map_freesp *mf);
+
 #endif /* __XFS_FILE_H__ */
