@@ -497,10 +497,11 @@ static const struct iomap_writeback_ops xfs_writeback_ops = {
 
 STATIC int
 xfs_vm_writepages(
-	struct address_space	*mapping,
-	struct writeback_control *wbc)
+	struct address_space		*mapping,
+	struct writeback_control	*wbc)
 {
-	struct xfs_writepage_ctx wpc = { };
+	struct xfs_writepage_ctx	wpc = { };
+	struct xfs_inode		*ip = XFS_I(mapping->host);
 
 	/*
 	 * Writing back data in a transaction context can result in recursive
@@ -509,16 +510,20 @@ xfs_vm_writepages(
 	if (WARN_ON_ONCE(current->journal_info))
 		return 0;
 
-	xfs_iflags_clear(XFS_I(mapping->host), XFS_ITRUNCATED);
+	trace_xfs_vm_writepages(ip, wbc);
+
+	xfs_iflags_clear(ip, XFS_ITRUNCATED);
 	return iomap_writepages(mapping, wbc, &wpc.ctx, &xfs_writeback_ops);
 }
 
 STATIC int
 xfs_dax_writepages(
-	struct address_space	*mapping,
-	struct writeback_control *wbc)
+	struct address_space		*mapping,
+	struct writeback_control	*wbc)
 {
-	struct xfs_inode	*ip = XFS_I(mapping->host);
+	struct xfs_inode		*ip = XFS_I(mapping->host);
+
+	trace_xfs_dax_writepages(ip, wbc);
 
 	xfs_iflags_clear(ip, XFS_ITRUNCATED);
 	return dax_writeback_mapping_range(mapping,
