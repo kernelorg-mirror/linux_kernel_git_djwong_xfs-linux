@@ -504,18 +504,18 @@ static const struct rhashtable_params xfs_buf_hash_params = {
 };
 
 int
-xfs_buf_hash_init(
-	struct xfs_perag	*pag)
+xfs_buf_cache_init(
+	struct xfs_buf_cache	*bch)
 {
-	spin_lock_init(&pag->pag_buf_lock);
-	return rhashtable_init(&pag->pag_buf_hash, &xfs_buf_hash_params);
+	spin_lock_init(&bch->bc_lock);
+	return rhashtable_init(&bch->bc_hash, &xfs_buf_hash_params);
 }
 
 void
-xfs_buf_hash_destroy(
-	struct xfs_perag	*pag)
+xfs_buf_cache_destroy(
+	struct xfs_buf_cache	*bch)
 {
-	rhashtable_destroy(&pag->pag_buf_hash);
+	rhashtable_destroy(&bch->bc_hash);
 }
 
 static int
@@ -578,7 +578,7 @@ xfs_buf_find_lock(
 
 static inline int
 xfs_buf_lookup(
-	struct xfs_perag	*pag,
+	struct xfs_buf_cache	*bch,
 	struct xfs_buf_map	*map,
 	xfs_buf_flags_t		flags,
 	struct xfs_buf		**bpp)
@@ -587,7 +587,7 @@ xfs_buf_lookup(
 	int			error;
 
 	rcu_read_lock();
-	bp = rhashtable_lookup(&pag->pag_buf_hash, map, xfs_buf_hash_params);
+	bp = rhashtable_lookup(&bch->bc_hash, map, xfs_buf_hash_params);
 	if (!bp || !atomic_inc_not_zero(&bp->b_hold)) {
 		rcu_read_unlock();
 		return -ENOENT;
@@ -612,6 +612,7 @@ xfs_buf_lookup(
 static int
 xfs_buf_find_insert(
 	struct xfs_buftarg	*btp,
+	struct xfs_buf_cache	*bch,
 	struct xfs_perag	*pag,
 	struct xfs_buf_map	*cmap,
 	struct xfs_buf_map	*map,
@@ -640,18 +641,18 @@ xfs_buf_find_insert(
 			goto out_free_buf;
 	}
 
-	spin_lock(&pag->pag_buf_lock);
-	bp = rhashtable_lookup_get_insert_fast(&pag->pag_buf_hash,
+	spin_lock(&bch->bc_lock);
+	bp = rhashtable_lookup_get_insert_fast(&bch->bc_hash,
 			&new_bp->b_rhash_head, xfs_buf_hash_params);
 	if (IS_ERR(bp)) {
 		error = PTR_ERR(bp);
-		spin_unlock(&pag->pag_buf_lock);
+		spin_unlock(&bch->bc_lock);
 		goto out_free_buf;
 	}
 	if (bp) {
 		/* found an existing buffer */
 		atomic_inc(&bp->b_hold);
-		spin_unlock(&pag->pag_buf_lock);
+		spin_unlock(&bch->bc_lock);
 		error = xfs_buf_find_lock(bp, flags);
 		if (error)
 			xfs_buf_rele(bp);
@@ -662,15 +663,36 @@ xfs_buf_find_insert(
 
 	/* The new buffer keeps the perag reference until it is freed. */
 	new_bp->b_pag = pag;
-	spin_unlock(&pag->pag_buf_lock);
+	spin_unlock(&bch->bc_lock);
 	*bpp = new_bp;
 	return 0;
 
 out_free_buf:
 	xfs_buf_free(new_bp);
 out_drop_pag:
-	xfs_perag_put(pag);
+	if (pag)
+		xfs_perag_put(pag);
 	return error;
+}
+
+static inline struct xfs_buf_cache *
+xfs_buftarg_buf_cache(
+	struct xfs_buftarg		*btp,
+	struct xfs_perag		*pag)
+{
+	if (pag)
+		return &pag->pag_bcache;
+	return btp->bt_cache;
+}
+
+static inline struct xfs_perag *
+xfs_buftarg_get_pag(
+	struct xfs_buftarg		*btp,
+	const struct xfs_buf_map	*map)
+{
+	struct xfs_mount		*mp = btp->bt_mount;
+
+	return xfs_perag_get(mp, xfs_daddr_to_agno(mp, map->bm_bn));
 }
 
 /*
@@ -686,6 +708,7 @@ xfs_buf_get_map(
 	xfs_buf_flags_t		flags,
 	struct xfs_buf		**bpp)
 {
+	struct xfs_buf_cache	*bch;
 	struct xfs_perag	*pag;
 	struct xfs_buf		*bp = NULL;
 	struct xfs_buf_map	cmap = { .bm_bn = map[0].bm_bn };
@@ -701,10 +724,10 @@ xfs_buf_get_map(
 	if (error)
 		return error;
 
-	pag = xfs_perag_get(btp->bt_mount,
-			    xfs_daddr_to_agno(btp->bt_mount, cmap.bm_bn));
+	pag = xfs_buftarg_get_pag(btp, &cmap);
+	bch = xfs_buftarg_buf_cache(btp, pag);
 
-	error = xfs_buf_lookup(pag, &cmap, flags, &bp);
+	error = xfs_buf_lookup(bch, &cmap, flags, &bp);
 	if (error && error != -ENOENT)
 		goto out_put_perag;
 
@@ -716,13 +739,14 @@ xfs_buf_get_map(
 			goto out_put_perag;
 
 		/* xfs_buf_find_insert() consumes the perag reference. */
-		error = xfs_buf_find_insert(btp, pag, &cmap, map, nmaps,
+		error = xfs_buf_find_insert(btp, bch, pag, &cmap, map, nmaps,
 				flags, &bp);
 		if (error)
 			return error;
 	} else {
 		XFS_STATS_INC(btp->bt_mount, xb_get_locked);
-		xfs_perag_put(pag);
+		if (pag)
+			xfs_perag_put(pag);
 	}
 
 	/* We do not hold a perag reference anymore. */
@@ -750,7 +774,8 @@ xfs_buf_get_map(
 	return 0;
 
 out_put_perag:
-	xfs_perag_put(pag);
+	if (pag)
+		xfs_perag_put(pag);
 	return error;
 }
 
@@ -1010,7 +1035,9 @@ static void
 xfs_buf_rele_cached(
 	struct xfs_buf		*bp)
 {
+	struct xfs_buftarg	*btp = bp->b_target;
 	struct xfs_perag	*pag = bp->b_pag;
+	struct xfs_buf_cache	*bch = xfs_buftarg_buf_cache(btp, pag);
 	bool			release;
 	bool			freebuf = false;
 
@@ -1029,7 +1056,7 @@ xfs_buf_rele_cached(
 	 * leading to a use-after-free scenario.
 	 */
 	spin_lock(&bp->b_lock);
-	release = atomic_dec_and_lock(&bp->b_hold, &pag->pag_buf_lock);
+	release = atomic_dec_and_lock(&bp->b_hold, &bch->bc_lock);
 	if (!release) {
 		/*
 		 * Drop the in-flight state if the buffer is already on the LRU
@@ -1050,11 +1077,11 @@ xfs_buf_rele_cached(
 		 * buffer for the LRU and clear the (now stale) dispose list
 		 * state flag
 		 */
-		if (list_lru_add_obj(&bp->b_target->bt_lru, &bp->b_lru)) {
+		if (list_lru_add_obj(&btp->bt_lru, &bp->b_lru)) {
 			bp->b_state &= ~XFS_BSTATE_DISPOSE;
 			atomic_inc(&bp->b_hold);
 		}
-		spin_unlock(&pag->pag_buf_lock);
+		spin_unlock(&bch->bc_lock);
 	} else {
 		/*
 		 * most of the time buffers will already be removed from the
@@ -1063,16 +1090,17 @@ xfs_buf_rele_cached(
 		 * was on was the disposal list
 		 */
 		if (!(bp->b_state & XFS_BSTATE_DISPOSE)) {
-			list_lru_del_obj(&bp->b_target->bt_lru, &bp->b_lru);
+			list_lru_del_obj(&btp->bt_lru, &bp->b_lru);
 		} else {
 			ASSERT(list_empty(&bp->b_lru));
 		}
 
 		ASSERT(!(bp->b_flags & _XBF_DELWRI_Q));
-		rhashtable_remove_fast(&pag->pag_buf_hash, &bp->b_rhash_head,
-				       xfs_buf_hash_params);
-		spin_unlock(&pag->pag_buf_lock);
-		xfs_perag_put(pag);
+		rhashtable_remove_fast(&bch->bc_hash, &bp->b_rhash_head,
+				xfs_buf_hash_params);
+		spin_unlock(&bch->bc_lock);
+		if (pag)
+			xfs_perag_put(pag);
 		freebuf = true;
 	}
 
