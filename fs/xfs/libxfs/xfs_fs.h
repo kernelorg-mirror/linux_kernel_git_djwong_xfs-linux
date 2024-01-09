@@ -853,6 +853,7 @@ struct xfs_scrub_metadata {
 #define XFS_IOC_UNRESVSP64	_IOW ('X', 43, struct xfs_flock64)
 #define XFS_IOC_GETBMAPA	_IOWR('X', 44, struct getbmap)
 #define XFS_IOC_FSGETXATTRA	_IOR ('X', 45, struct fsxattr)
+/*	XFS_IOC_ADDFEATURE ------- staging 46	   */
 /*	XFS_IOC_SETBIOSIZE ---- deprecated 46	   */
 /*	XFS_IOC_GETBIOSIZE ---- deprecated 47	   */
 #define XFS_IOC_GETBMAPX	_IOWR('X', 56, struct getbmap)
