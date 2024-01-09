@@ -839,9 +839,10 @@ static inline size_t sizeof_xfs_scrub_vec(unsigned int nr)
 #define XFS_SCRUB_METAPATH_GRPQUOTA	3
 #define XFS_SCRUB_METAPATH_PRJQUOTA	4
 #define XFS_SCRUB_METAPATH_RTRMAPBT	5
+#define XFS_SCRUB_METAPATH_RTREFCBT	6
 
 /* Number of metapath sm_ino values */
-#define XFS_SCRUB_METAPATH_NR		6
+#define XFS_SCRUB_METAPATH_NR		7
 
 /*
  * ioctl limits
