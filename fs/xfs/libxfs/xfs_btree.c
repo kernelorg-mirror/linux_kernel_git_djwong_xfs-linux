@@ -28,6 +28,8 @@
 #include "xfs_rmap_btree.h"
 #include "xfs_refcount_btree.h"
 #include "xfs_health.h"
+#include "xfs_buf_mem.h"
+#include "xfs_btree_mem.h"
 
 /*
  * Btree magic numbers.
@@ -75,6 +77,9 @@ xfs_btree_check_lblock_siblings(
 	if (level >= 0) {
 		if (!xfs_btree_check_lptr(cur, sibling, level + 1))
 			return __this_address;
+	} else if (cur && cur->bc_ops->type == XFS_BTREE_TYPE_MEM) {
+		if (!xfbtree_verify_bno(cur->bc_mem.xfbtree, sibling))
+			return __this_address;
 	} else {
 		if (!xfs_verify_fsbno(mp, sibling))
 			return __this_address;
@@ -95,6 +100,8 @@ xfs_btree_check_sblock_siblings(
 
 	if (dsibling == cpu_to_be32(NULLAGBLOCK))
 		return NULL;
+
+	ASSERT(cur == NULL || cur->bc_ops->type != XFS_BTREE_TYPE_MEM);
 
 	sibling = be32_to_cpu(dsibling);
 	if (sibling == agbno)
@@ -143,7 +150,9 @@ __xfs_btree_check_lblock(
 	    cur->bc_ops->get_maxrecs(cur, level))
 		return __this_address;
 
-	if (bp)
+	if (cur->bc_ops->type == XFS_BTREE_TYPE_MEM && bp)
+		fsb = xfs_daddr_to_xfbno(xfs_buf_daddr(bp));
+	else if (bp)
 		fsb = XFS_DADDR_TO_FSB(mp, xfs_buf_daddr(bp));
 
 	fa = xfs_btree_check_lblock_siblings(mp, cur, level, fsb,
@@ -209,6 +218,8 @@ __xfs_btree_check_sblock(
 	    cur->bc_ops->get_maxrecs(cur, level))
 		return __this_address;
 
+	ASSERT(cur->bc_ops->type != XFS_BTREE_TYPE_MEM);
+
 	if (bp)
 		agbno = xfs_daddr_to_agbno(mp, xfs_buf_daddr(bp));
 
@@ -267,6 +278,8 @@ xfs_btree_check_lptr(
 {
 	if (level <= 0)
 		return false;
+	if (cur->bc_ops->type == XFS_BTREE_TYPE_MEM)
+		return xfbtree_verify_bno(cur->bc_mem.xfbtree, fsbno);
 	return xfs_verify_fsbno(cur->bc_mp, fsbno);
 }
 
@@ -279,6 +292,9 @@ xfs_btree_check_sptr(
 {
 	if (level <= 0)
 		return false;
+
+	ASSERT(cur->bc_ops->type != XFS_BTREE_TYPE_MEM);
+
 	return xfs_verify_agbno(cur->bc_ag.pag, agbno);
 }
 
@@ -293,7 +309,20 @@ xfs_btree_check_ptr(
 	int				index,
 	int				level)
 {
-	if (cur->bc_ops->ptr_len == XFS_BTREE_LONG_PTR_LEN) {
+	if (cur->bc_ops->type == XFS_BTREE_TYPE_MEM) {
+		xfbno_t bno		= be64_to_cpu((&ptr->l)[index]);
+
+		ASSERT(cur->bc_ops->ptr_len == XFS_BTREE_LONG_PTR_LEN);
+
+		if (xfbtree_verify_bno(cur->bc_mem.xfbtree, bno))
+			return 0;
+
+		xfs_err(cur->bc_mp,
+"In-memory: Corrupt btree %d flags 0x%x pointer at level %d index %d fa %pS.",
+				cur->bc_btnum, cur->bc_flags, level, index,
+				__this_address);
+		return -EFSCORRUPTED;
+	} else if (cur->bc_ops->ptr_len == XFS_BTREE_LONG_PTR_LEN) {
 		if (xfs_btree_check_lptr(cur, be64_to_cpu((&ptr->l)[index]),
 				level))
 			return 0;
@@ -451,6 +480,10 @@ xfs_btree_del_cursor(
 		kmem_free(cur->bc_ops);
 
 	switch (cur->bc_ops->type) {
+	case XFS_BTREE_TYPE_MEM:
+		if (cur->bc_mem.pag)
+			xfs_perag_put(cur->bc_mem.pag);
+		break;
 	case XFS_BTREE_TYPE_AG:
 		if (cur->bc_ag.pag)
 			xfs_perag_put(cur->bc_ag.pag);
@@ -461,6 +494,26 @@ xfs_btree_del_cursor(
 	}
 
 	kmem_cache_free(cur->bc_cache, cur);
+}
+
+/* Return the buffer target for this btree's buffer. */
+static inline struct xfs_buftarg *
+xfs_btree_buftarg(
+	struct xfs_btree_cur	*cur)
+{
+	if (cur->bc_ops->type == XFS_BTREE_TYPE_MEM)
+		return cur->bc_mem.xfbtree->target;
+	return cur->bc_mp->m_ddev_targp;
+}
+
+/* Return the block size (in units of 512b sectors) for this btree. */
+static inline unsigned int
+xfs_btree_bbsize(
+	struct xfs_btree_cur	*cur)
+{
+	if (cur->bc_ops->type == XFS_BTREE_TYPE_MEM)
+		return XFBNO_BBSIZE;
+	return cur->bc_mp->m_bsize;
 }
 
 /*
@@ -500,10 +553,11 @@ xfs_btree_dup_cursor(
 		new->bc_levels[i].ra = cur->bc_levels[i].ra;
 		bp = cur->bc_levels[i].bp;
 		if (bp) {
-			error = xfs_trans_read_buf(mp, tp, mp->m_ddev_targp,
-						   xfs_buf_daddr(bp), mp->m_bsize,
-						   0, &bp,
-						   cur->bc_ops->buf_ops);
+			error = xfs_trans_read_buf(mp, tp,
+					xfs_btree_buftarg(cur),
+					xfs_buf_daddr(bp),
+					xfs_btree_bbsize(cur), 0, &bp,
+					cur->bc_ops->buf_ops);
 			if (xfs_metadata_is_sick(error))
 				xfs_btree_mark_sick(new);
 			if (error) {
@@ -944,6 +998,9 @@ xfs_btree_readahead_lblock(
 	xfs_fsblock_t		left = be64_to_cpu(block->bb_u.l.bb_leftsib);
 	xfs_fsblock_t		right = be64_to_cpu(block->bb_u.l.bb_rightsib);
 
+	if (cur->bc_ops->type == XFS_BTREE_TYPE_MEM)
+		return 0;
+
 	if ((lr & XFS_BTCUR_LEFTRA) && left != NULLFSBLOCK) {
 		xfs_btree_reada_bufl(cur->bc_mp, left, 1,
 				     cur->bc_ops->buf_ops);
@@ -969,6 +1026,7 @@ xfs_btree_readahead_sblock(
 	xfs_agblock_t		left = be32_to_cpu(block->bb_u.s.bb_leftsib);
 	xfs_agblock_t		right = be32_to_cpu(block->bb_u.s.bb_rightsib);
 
+	ASSERT(cur->bc_ops->type != XFS_BTREE_TYPE_MEM);
 
 	if ((lr & XFS_BTCUR_LEFTRA) && left != NULLAGBLOCK) {
 		xfs_btree_reada_bufs(cur->bc_mp, cur->bc_ag.pag->pag_agno,
@@ -1030,7 +1088,9 @@ xfs_btree_ptr_to_daddr(
 	if (error)
 		return error;
 
-	if (cur->bc_ops->ptr_len == XFS_BTREE_LONG_PTR_LEN) {
+	if (cur->bc_ops->type == XFS_BTREE_TYPE_MEM) {
+		*daddr = xfbno_to_daddr(be64_to_cpu(ptr->l));
+	} else if (cur->bc_ops->ptr_len == XFS_BTREE_LONG_PTR_LEN) {
 		fsbno = be64_to_cpu(ptr->l);
 		*daddr = XFS_FSB_TO_DADDR(cur->bc_mp, fsbno);
 	} else {
@@ -1058,8 +1118,9 @@ xfs_btree_readahead_ptr(
 
 	if (xfs_btree_ptr_to_daddr(cur, ptr, &daddr))
 		return;
-	xfs_buf_readahead(cur->bc_mp->m_ddev_targp, daddr,
-			  cur->bc_mp->m_bsize * count, cur->bc_ops->buf_ops);
+	xfs_buf_readahead(xfs_btree_buftarg(cur), daddr,
+			xfs_btree_bbsize(cur) * count,
+			cur->bc_ops->buf_ops);
 }
 
 /*
@@ -1239,6 +1300,8 @@ xfs_btree_owner(
 	 * change in future, but is safe for current users of the generic btree
 	 * code.
 	 */
+	if (cur->bc_ops->type == XFS_BTREE_TYPE_MEM)
+		return cur->bc_mem.xfbtree->owner;
 	if (cur->bc_ops->ptr_len == XFS_BTREE_LONG_PTR_LEN)
 		return cur->bc_ino.ip->i_ino;
 	return cur->bc_ag.pag->pag_agno;
@@ -1285,10 +1348,12 @@ xfs_btree_buf_to_ptr(
 	struct xfs_buf		*bp,
 	union xfs_btree_ptr	*ptr)
 {
-	if (cur->bc_ops->ptr_len == XFS_BTREE_LONG_PTR_LEN)
+	if (cur->bc_ops->type == XFS_BTREE_TYPE_MEM) {
+		ptr->l = cpu_to_be64(xfs_daddr_to_xfbno(xfs_buf_daddr(bp)));
+	} else if (cur->bc_ops->ptr_len == XFS_BTREE_LONG_PTR_LEN) {
 		ptr->l = cpu_to_be64(XFS_DADDR_TO_FSB(cur->bc_mp,
 					xfs_buf_daddr(bp)));
-	else {
+	} else {
 		ptr->s = cpu_to_be32(xfs_daddr_to_agbno(cur->bc_mp,
 					xfs_buf_daddr(bp)));
 	}
@@ -1309,15 +1374,14 @@ xfs_btree_get_buf_block(
 	struct xfs_btree_block		**block,
 	struct xfs_buf			**bpp)
 {
-	struct xfs_mount	*mp = cur->bc_mp;
-	xfs_daddr_t		d;
-	int			error;
+	xfs_daddr_t			d;
+	int				error;
 
 	error = xfs_btree_ptr_to_daddr(cur, ptr, &d);
 	if (error)
 		return error;
-	error = xfs_trans_get_buf(cur->bc_tp, mp->m_ddev_targp, d, mp->m_bsize,
-			0, bpp);
+	error = xfs_trans_get_buf(cur->bc_tp, xfs_btree_buftarg(cur), d,
+			xfs_btree_bbsize(cur), 0, bpp);
 	if (error)
 		return error;
 
@@ -1348,9 +1412,9 @@ xfs_btree_read_buf_block(
 	error = xfs_btree_ptr_to_daddr(cur, ptr, &d);
 	if (error)
 		return error;
-	error = xfs_trans_read_buf(mp, cur->bc_tp, mp->m_ddev_targp, d,
-				   mp->m_bsize, flags, bpp,
-				   cur->bc_ops->buf_ops);
+	error = xfs_trans_read_buf(mp, cur->bc_tp, xfs_btree_buftarg(cur), d,
+			xfs_btree_bbsize(cur), flags, bpp,
+			cur->bc_ops->buf_ops);
 	if (xfs_metadata_is_sick(error))
 		xfs_btree_mark_sick(cur);
 	if (error)
@@ -4423,7 +4487,11 @@ xfs_btree_visit_block(
 	 * return the same block without checking if the right sibling points
 	 * back to us and creates a cyclic reference in the btree.
 	 */
-	if (cur->bc_ops->ptr_len == XFS_BTREE_LONG_PTR_LEN) {
+	if (cur->bc_ops->type == XFS_BTREE_TYPE_MEM) {
+		if (be64_to_cpu(rptr.l) == xfs_daddr_to_xfbno(
+							xfs_buf_daddr(bp)))
+			return -EFSCORRUPTED;
+	} else if (cur->bc_ops->ptr_len == XFS_BTREE_LONG_PTR_LEN) {
 		if (be64_to_cpu(rptr.l) == XFS_DADDR_TO_FSB(cur->bc_mp,
 							xfs_buf_daddr(bp))) {
 			xfs_btree_mark_sick(cur);
@@ -4613,6 +4681,8 @@ xfs_btree_lblock_verify(
 	xfs_fsblock_t		fsb;
 	xfs_failaddr_t		fa;
 
+	ASSERT(!(bp->b_target->bt_flags & XFS_BUFTARG_MEM));
+
 	/* numrecs verification */
 	if (be16_to_cpu(block->bb_numrecs) > max_recs)
 		return __this_address;
@@ -4667,6 +4737,8 @@ xfs_btree_sblock_verify(
 	struct xfs_btree_block	*block = XFS_BUF_TO_BLOCK(bp);
 	xfs_agblock_t		agbno;
 	xfs_failaddr_t		fa;
+
+	ASSERT(!(bp->b_target->bt_flags & XFS_BUFTARG_MEM));
 
 	/* numrecs verification */
 	if (be16_to_cpu(block->bb_numrecs) > max_recs)
