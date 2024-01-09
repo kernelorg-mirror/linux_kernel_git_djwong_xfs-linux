@@ -295,6 +295,7 @@ typedef struct xfs_mount {
 #define XFS_FEAT_BIGTIME	(1ULL << 24)	/* large timestamps */
 #define XFS_FEAT_NEEDSREPAIR	(1ULL << 25)	/* needs xfs_repair */
 #define XFS_FEAT_NREXT64	(1ULL << 26)	/* large extent counters */
+#define XFS_FEAT_METADIR	(1ULL << 27)	/* metadata directory tree */
 
 /* Mount features */
 #define XFS_FEAT_ADD_LOG_FEAT	(1ULL << 47)	/* can add log incompat features */
@@ -359,6 +360,7 @@ __XFS_HAS_FEAT(inobtcounts, INOBTCNT)
 __XFS_HAS_FEAT(bigtime, BIGTIME)
 __XFS_HAS_FEAT(needsrepair, NEEDSREPAIR)
 __XFS_HAS_FEAT(large_extent_counts, NREXT64)
+__XFS_HAS_FEAT(metadir, METADIR)
 
 bool xfs_can_add_incompat_log_features(struct xfs_mount *mp, bool want_audit);
 
