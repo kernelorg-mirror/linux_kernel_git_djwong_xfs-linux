@@ -24,6 +24,7 @@
 #include "xfs_trans_space.h"
 #include "xfs_health.h"
 #include "xfs_swapext.h"
+#include "xfs_parent.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
@@ -63,8 +64,12 @@ struct xrep_parent {
 	/* Orphanage reparenting request. */
 	struct xrep_adoption	adoption;
 
-	/* Directory entry name, plus the trailing null. */
-	unsigned char		namebuf[MAXNAMELEN];
+	/*
+	 * Scratch buffer for scanning dirents to create pptr xattrs.  At the
+	 * very end of the repair, it can also be used to compute the
+	 * lost+found filename if we need to reparent the file.
+	 */
+	struct xfs_parent_name_irec pptr;
 };
 
 /* Tear down all the incore stuff we created. */
@@ -236,7 +241,7 @@ xrep_parent_move_to_orphanage(
 	if (error)
 		return error;
 
-	error = xrep_adoption_compute_name(&rp->adoption, rp->namebuf);
+	error = xrep_adoption_compute_name(&rp->adoption, rp->pptr.p_name);
 	if (error)
 		return error;
 
