@@ -2024,7 +2024,10 @@ xfs_bmap_rtalloc(
 	};
 	int			error;
 
-	align = xfs_get_extsz_hint(ap->ip);
+	if (ap->flags & XFS_BMAPI_COWFORK)
+		align = xfs_get_cowextsz_hint(ap->ip);
+	else
+		align = xfs_get_extsz_hint(ap->ip);
 retry:
 	error = xfs_bmap_extsize_align(mp, &ap->got, &ap->prev,
 					align, 1, ap->eof, 0,
