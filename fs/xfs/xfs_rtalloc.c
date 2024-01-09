@@ -1137,6 +1137,7 @@ xfs_growfs_check_rtgeom(
 		fake_mp->m_features |= XFS_FEAT_REALTIME;
 
 	xfs_rtrmapbt_compute_maxlevels(fake_mp);
+	xfs_rtrefcountbt_compute_maxlevels(fake_mp);
 
 	xfs_trans_resv_calc(fake_mp, M_RES(fake_mp));
 	min_logfsbs = xfs_log_calc_minimum_size(fake_mp);
@@ -1446,6 +1447,7 @@ error_cancel:
 		 */
 		mp->m_features |= XFS_FEAT_REALTIME;
 		xfs_rtrmapbt_compute_maxlevels(mp);
+		xfs_rtrefcountbt_compute_maxlevels(mp);
 	}
 	if (error) {
 		if (xfs_has_rtgroups(mp))
