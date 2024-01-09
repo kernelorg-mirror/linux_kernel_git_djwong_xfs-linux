@@ -238,9 +238,10 @@ xrep_findparent_live_update(
  * will be called when there is a dotdot update for the inode being repaired.
  */
 int
-xrep_findparent_scan_start(
+__xrep_findparent_scan_start(
 	struct xfs_scrub		*sc,
-	struct xrep_parent_scan_info	*pscan)
+	struct xrep_parent_scan_info	*pscan,
+	notifier_fn_t			custom_fn)
 {
 	int				error;
 
@@ -262,7 +263,8 @@ xrep_findparent_scan_start(
 	 * ILOCK, which means that any in-progress inode updates will finish
 	 * before we can scan the inode.
 	 */
-	xfs_hook_setup(&pscan->hooks.dirent_hook, xrep_findparent_live_update);
+	xfs_hook_setup(&pscan->hooks.dirent_hook,
+			custom_fn ? custom_fn : xrep_findparent_live_update);
 	error = xfs_dir_hook_add(sc->mp, &pscan->hooks);
 	if (error)
 		goto out_iscan;
