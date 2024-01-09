@@ -447,7 +447,7 @@ xchk_dirpath_step_up(
 	/* Parent must be in the same directory tree. */
 	if (is_metadir != xfs_is_metadir_inode(dp)) {
 		trace_xchk_dirpath_crosses_tree(dl->sc, dp, path->path_nr,
-				path->nr_steps, &dl->pptr);
+				path->nr_steps, &dl->name, &dl->pptr);
 		error = -EFSCORRUPTED;
 		goto out_scanlock;
 	}
