@@ -1035,7 +1035,7 @@ xrep_xattr_reset_fork(
  * fork.  The caller must ILOCK the tempfile and join it to the transaction.
  * This function returns with the inode joined to a clean scrub transaction.
  */
-STATIC int
+int
 xrep_xattr_reset_tempfile_fork(
 	struct xfs_scrub	*sc)
 {
@@ -1355,7 +1355,7 @@ xrep_xattr_swap_prep(
 }
 
 /* Swap the temporary file's attribute fork with the one being repaired. */
-STATIC int
+int
 xrep_xattr_swap(
 	struct xfs_scrub	*sc,
 	struct xrep_tempswap	*tx)
