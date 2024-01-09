@@ -156,6 +156,8 @@ xchk_dirtree_parentless(const struct xchk_dirtree *dl)
 
 	if (sc->ip == sc->mp->m_rootip)
 		return true;
+	if (sc->ip == sc->mp->m_metadirip)
+		return true;
 	if (VFS_I(sc->ip)->i_nlink == 0)
 		return true;
 	return false;
