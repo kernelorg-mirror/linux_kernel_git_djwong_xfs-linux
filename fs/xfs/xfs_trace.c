@@ -39,6 +39,15 @@
 #include "xfs_buf_mem.h"
 #include "xfs_btree_mem.h"
 
+#ifdef CONFIG_XFS_BTREE_IN_MEM
+static inline unsigned long
+xfbtree_ino(
+	struct xfbtree		*xfbt)
+{
+	return file_inode(xfbt->target->bt_file)->i_ino;
+}
+#endif /* CONFIG_XFS_BTREE_IN_MEM */
+
 /*
  * We include this last to have the helpers above available for the trace
  * event implementations.
