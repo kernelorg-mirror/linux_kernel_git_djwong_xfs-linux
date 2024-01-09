@@ -16,6 +16,37 @@
 #include <linux/fsnotify.h>
 
 /*
+ * If the filesystem has relatively new features enabled, we're willing to
+ * upgrade the filesystem to have the EXCHMAPS log incompat feature.
+ * Technically we could do this with any V5 filesystem, but let's not deal
+ * with really old kernels.
+ */
+static inline bool
+xfs_exchrange_upgradeable(
+	struct xfs_mount	*mp)
+{
+	return xfs_has_bigtime(mp) || xfs_has_large_extent_counts(mp);
+}
+
+/*
+ * Decide if we should advertise to userspace the potential for using file
+ * range exchanges on this filesystem.  This does not say anything about the
+ * actual readiness to start such an operation.
+ */
+bool
+xfs_exchrange_possible(
+	struct xfs_mount	*mp)
+{
+	/* Always possible when mapping exchange log intent items are enabled */
+	if (xfs_sb_version_haslogexchmaps(&mp->m_sb))
+		return true;
+
+	/* Can we upgrade the fs to have the log intent item? */
+	return xfs_exchrange_upgradeable(mp) &&
+	       xfs_can_add_incompat_log_features(mp, false);
+}
+
+/*
  * Generic code for exchanging ranges of two files via XFS_IOC_EXCHANGE_RANGE.
  * This part deals with struct file objects and byte ranges and does not deal
  * with XFS-specific data structures such as xfs_inodes and block ranges.  This
