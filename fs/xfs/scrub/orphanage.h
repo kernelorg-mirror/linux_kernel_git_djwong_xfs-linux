@@ -54,6 +54,9 @@ struct xrep_adoption {
 
 	struct xfs_scrub	*sc;
 
+	/* Parent pointer context tracking */
+	struct xfs_parent_args	ppargs;
+
 	/* Block reservations for orphanage and child (if directory). */
 	unsigned int		orphanage_blkres;
 	unsigned int		child_blkres;
