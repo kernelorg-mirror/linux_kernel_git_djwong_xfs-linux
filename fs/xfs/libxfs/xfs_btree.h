@@ -12,6 +12,7 @@ struct xfs_mount;
 struct xfs_trans;
 struct xfs_ifork;
 struct xfs_perag;
+struct xfbtree;
 
 /*
  * Generic key, ptr and record wrapper structures.
@@ -112,6 +113,7 @@ static inline enum xbtree_key_contig xbtree_key_contig(uint64_t x, uint64_t y)
 enum xfs_btree_type {
 	XFS_BTREE_TYPE_AG,
 	XFS_BTREE_TYPE_INODE,
+	XFS_BTREE_TYPE_MEM,
 };
 
 struct xfs_btree_ops {
@@ -281,6 +283,10 @@ struct xfs_btree_cur
 			struct xfs_buf		*agbp;
 			struct xbtree_afakeroot	*afake;	/* for staging cursor */
 		} bc_ag;
+		struct {
+			struct xfbtree		*xfbtree;
+			struct xfs_perag	*pag;
+		} bc_mem;
 	};
 
 	/* per-format private data */
@@ -490,6 +496,8 @@ xfs_failaddr_t xfs_btree_agblock_verify(struct xfs_buf *bp,
 xfs_failaddr_t xfs_btree_fsblock_v5hdr_verify(struct xfs_buf *bp,
 		uint64_t owner);
 xfs_failaddr_t xfs_btree_fsblock_verify(struct xfs_buf *bp,
+		unsigned int max_recs);
+xfs_failaddr_t xfs_btree_memblock_verify(struct xfs_buf *bp,
 		unsigned int max_recs);
 
 unsigned int xfs_btree_compute_maxlevels(const unsigned int *limits,
