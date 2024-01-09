@@ -554,10 +554,8 @@ int		xfs_iflush_cluster(struct xfs_buf *);
 void		xfs_lock_two_inodes(struct xfs_inode *ip0, uint ip0_mode,
 				struct xfs_inode *ip1, uint ip1_mode);
 
-int xfs_init_new_inode(struct mnt_idmap *idmap, struct xfs_trans *tp,
-		struct xfs_inode *pip, xfs_ino_t ino, umode_t mode,
-		xfs_nlink_t nlink, dev_t rdev, prid_t prid, bool init_xattrs,
-		struct xfs_inode **ipp);
+int xfs_icreate(struct xfs_trans *tp, xfs_ino_t ino,
+		const struct xfs_icreate_args *args, struct xfs_inode **ipp);
 
 static inline int
 xfs_itruncate_extents(
@@ -664,5 +662,11 @@ void xfs_dir_hook_setup(struct xfs_dir_hook *hook, notifier_fn_t mod_fn);
 #else
 # define xfs_dir_update_hook(dp, ip, delta, name)	((void)0)
 #endif /* CONFIG_XFS_LIVE_HOOKS */
+
+void xfs_icreate_args_inherit(struct xfs_icreate_args *args,
+		struct xfs_inode *dp, struct mnt_idmap *idmap, umode_t mode,
+		bool init_xattrs);
+void xfs_icreate_args_rootfile(struct xfs_icreate_args *args,
+		struct xfs_mount *mp, umode_t mode, bool init_xattrs);
 
 #endif	/* __XFS_INODE_H__ */
