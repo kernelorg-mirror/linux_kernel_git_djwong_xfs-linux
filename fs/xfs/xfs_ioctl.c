@@ -40,6 +40,7 @@
 #include "xfs_xattr.h"
 #include "xfs_rtbitmap.h"
 #include "xfs_file.h"
+#include "xfs_exchrange.h"
 
 #include <linux/mount.h>
 #include <linux/namei.h>
@@ -1930,6 +1931,40 @@ xfs_ioctl_fs_counts(
 	return 0;
 }
 
+static long
+xfs_ioc_exchange_range(
+	struct file			*file,
+	struct xfs_exchange_range __user *argp)
+{
+	struct xfs_exchrange		fxr = {
+		.file2			= file,
+	};
+	struct xfs_exchange_range	args;
+	struct fd			file1;
+	int				error;
+
+	if (copy_from_user(&args, argp, sizeof(args)))
+		return -EFAULT;
+	if (memchr_inv(&args.pad, 0, sizeof(args.pad)))
+		return -EINVAL;
+	if (args.flags & ~XFS_EXCHANGE_RANGE_ALL_FLAGS)
+		return -EINVAL;
+
+	fxr.file1_offset	= args.file1_offset;
+	fxr.file2_offset	= args.file2_offset;
+	fxr.length		= args.length;
+	fxr.flags		= args.flags;
+
+	file1 = fdget(args.file1_fd);
+	if (!file1.file)
+		return -EBADF;
+	fxr.file1 = file1.file;
+
+	error = xfs_exchange_range(&fxr);
+	fdput(file1);
+	return error;
+}
+
 /*
  * These long-unused ioctls were removed from the official ioctl API in 5.17,
  * but retain these definitions so that we can log warnings about them.
@@ -2169,6 +2204,9 @@ xfs_file_ioctl(
 		sb_end_write(mp->m_super);
 		return error;
 	}
+
+	case XFS_IOC_EXCHANGE_RANGE:
+		return xfs_ioc_exchange_range(filp, arg);
 
 	default:
 		return -ENOTTY;
