@@ -45,6 +45,8 @@
 
 #include <linux/mount.h>
 #include <linux/fileattr.h>
+#include <linux/security.h>
+#include <linux/fsnotify.h>
 
 /* Return 0 on success or positive error */
 int
@@ -1568,6 +1570,9 @@ xfs_file_ioctl(
 		return xfs_ioc_start_commit(filp, arg);
 	case XFS_IOC_COMMIT_RANGE:
 		return xfs_ioc_commit_range(filp, arg);
+
+	case XFS_IOC_MAP_FREESP:
+		return xfs_ioc_map_freesp(filp, arg);
 
 	default:
 		return -ENOTTY;
