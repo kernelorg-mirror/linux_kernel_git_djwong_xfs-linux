@@ -1953,7 +1953,7 @@ xfs_free_buftarg(
 	if (btp->bt_bdev != btp->bt_mount->m_super->s_bdev)
 		bdev_release(btp->bt_bdev_handle);
 
-	kmem_free(btp);
+	kfree(btp);
 }
 
 int
@@ -2002,7 +2002,7 @@ xfs_alloc_buftarg(
 #if defined(CONFIG_FS_DAX) && defined(CONFIG_MEMORY_FAILURE)
 	ops = &xfs_dax_holder_operations;
 #endif
-	btp = kmem_zalloc(sizeof(*btp), KM_NOFS);
+	btp = kzalloc(sizeof(*btp), GFP_NOFS);
 
 	btp->bt_mount = mp;
 	btp->bt_bdev_handle = bdev_handle;
@@ -2045,7 +2045,7 @@ error_pcpu:
 error_lru:
 	list_lru_destroy(&btp->bt_lru);
 error_free:
-	kmem_free(btp);
+	kfree(btp);
 	return NULL;
 }
 
