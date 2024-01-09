@@ -34,6 +34,13 @@ xfs_attr_grab_log_assist(
 	int			error = 0;
 
 	/*
+	 * As a performance optimization, skip the log force and super write
+	 * if the filesystem featureset already protects the attri log items.
+	 */
+	if (xfs_attri_can_use_without_log_assistance(mp))
+		return 0;
+
+	/*
 	 * Protect ourselves from an idle log clearing the logged xattrs log
 	 * incompat feature bit.
 	 */
@@ -76,7 +83,8 @@ static inline void
 xfs_attr_rele_log_assist(
 	struct xfs_mount	*mp)
 {
-	xlog_drop_incompat_feat(mp->m_log, XLOG_INCOMPAT_FEAT_XATTRS);
+	if (!xfs_attri_can_use_without_log_assistance(mp))
+		xlog_drop_incompat_feat(mp->m_log, XLOG_INCOMPAT_FEAT_XATTRS);
 }
 
 static inline bool
