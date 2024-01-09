@@ -211,6 +211,7 @@ xfs_inode_item_data_fork_size(
 		break;
 	case XFS_DINODE_FMT_BTREE:
 	case XFS_DINODE_FMT_RMAP:
+	case XFS_DINODE_FMT_REFCOUNT:
 		if ((iip->ili_fields & XFS_ILOG_DBROOT) &&
 		    ip->i_df.if_broot_bytes > 0) {
 			*nbytes += ip->i_df.if_broot_bytes;
@@ -332,6 +333,7 @@ xfs_inode_item_format_data_fork(
 		break;
 	case XFS_DINODE_FMT_BTREE:
 	case XFS_DINODE_FMT_RMAP:
+	case XFS_DINODE_FMT_REFCOUNT:
 		iip->ili_fields &=
 			~(XFS_ILOG_DDATA | XFS_ILOG_DEXT | XFS_ILOG_DEV);
 
