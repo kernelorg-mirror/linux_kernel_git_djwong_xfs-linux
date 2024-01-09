@@ -227,6 +227,8 @@ struct xfs_btree_ops {
 # define XFS_BTGEO_IN_MEM		(0)
 #endif
 
+#define XFS_BTGEO_IROOT_RECORDS		(1U << 6) /* iroot can store records */
+
 /*
  * Reasons for the update_lastrec method to be called.
  */
