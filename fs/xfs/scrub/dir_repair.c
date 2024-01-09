@@ -1324,7 +1324,7 @@ xrep_dir_scan_dirtree(
 	int			error;
 
 	/* Roots of directory trees are their own parents. */
-	if (sc->ip == sc->mp->m_rootip)
+	if (sc->ip == sc->mp->m_rootip || sc->ip == sc->mp->m_metadirip)
 		xrep_findparent_scan_found(&rd->pscan, sc->ip->i_ino);
 
 	/*
