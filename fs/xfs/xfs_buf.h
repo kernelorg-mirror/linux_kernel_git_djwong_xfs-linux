@@ -21,6 +21,7 @@ extern struct kmem_cache *xfs_buf_cache;
  *	Base types
  */
 struct xfs_buf;
+struct xfile;
 
 #define XFS_BUF_DADDR_NULL	((xfs_daddr_t) (-1LL))
 
@@ -109,9 +110,11 @@ typedef struct xfs_buftarg {
 	struct bdev_handle	*bt_bdev_handle;
 	struct block_device	*bt_bdev;
 	struct dax_device	*bt_daxdev;
+	struct file		*bt_file;
 	u64			bt_dax_part_off;
 	struct xfs_mount	*bt_mount;
 	struct xfs_buf_cache	*bt_cache;
+	unsigned int		bt_flags;
 	unsigned int		bt_meta_sectorsize;
 	size_t			bt_meta_sectormask;
 	size_t			bt_logical_sectorsize;
@@ -124,6 +127,13 @@ typedef struct xfs_buftarg {
 	struct percpu_counter	bt_io_count;
 	struct ratelimit_state	bt_ioerror_rl;
 } xfs_buftarg_t;
+
+#ifdef CONFIG_XFS_MEMORY_BUFS
+/* in-memory buftarg via bt_file */
+# define XFS_BUFTARG_MEM	(1U << 0)
+#else
+# define XFS_BUFTARG_MEM	(0)
+#endif
 
 #define XB_PAGES	2
 
@@ -375,6 +385,8 @@ xfs_buf_update_cksum(struct xfs_buf *bp, unsigned long cksum_offset)
 /*
  *	Handling of buftargs.
  */
+struct xfs_buftarg *xfs_alloc_buftarg_common(struct xfs_mount *mp,
+		const char *descr);
 struct xfs_buftarg *xfs_alloc_buftarg(struct xfs_mount *mp,
 		struct bdev_handle *bdev_handle);
 extern void xfs_free_buftarg(struct xfs_buftarg *);
