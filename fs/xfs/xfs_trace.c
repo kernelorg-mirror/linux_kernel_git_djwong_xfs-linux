@@ -42,6 +42,7 @@
 #include "xfs_swapext.h"
 #include "xfs_xchgrange.h"
 #include "xfs_parent.h"
+#include "xfs_imeta.h"
 
 #ifdef CONFIG_XFS_BTREE_IN_MEM
 static inline unsigned long
