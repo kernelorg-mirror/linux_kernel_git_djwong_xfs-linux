@@ -6,6 +6,10 @@
 #ifndef __XFS_SCRUB_ATTR_REPAIR_H__
 #define __XFS_SCRUB_ATTR_REPAIR_H__
 
+struct xrep_tempswap;
+
+int xrep_xattr_swap(struct xfs_scrub *sc, struct xrep_tempswap *tx);
 int xrep_xattr_reset_fork(struct xfs_scrub *sc);
+int xrep_xattr_reset_tempfile_fork(struct xfs_scrub *sc);
 
 #endif /* __XFS_SCRUB_ATTR_REPAIR_H__ */
