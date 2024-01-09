@@ -38,6 +38,7 @@
 #include "xfs_iomap.h"
 #include "xfs_buf_mem.h"
 #include "xfs_btree_mem.h"
+#include "xfs_bmap.h"
 
 #ifdef CONFIG_XFS_BTREE_IN_MEM
 static inline unsigned long
