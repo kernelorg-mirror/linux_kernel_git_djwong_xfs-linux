@@ -831,11 +831,6 @@ DEFINE_INODE_EVENT(xfs_getattr);
 DEFINE_INODE_EVENT(xfs_setattr);
 DEFINE_INODE_EVENT(xfs_readlink);
 DEFINE_INODE_EVENT(xfs_inactive_symlink);
-DEFINE_INODE_EVENT(xfs_alloc_file_space);
-DEFINE_INODE_EVENT(xfs_free_file_space);
-DEFINE_INODE_EVENT(xfs_zero_file_space);
-DEFINE_INODE_EVENT(xfs_collapse_file_space);
-DEFINE_INODE_EVENT(xfs_insert_file_space);
 DEFINE_INODE_EVENT(xfs_readdir);
 #ifdef CONFIG_XFS_POSIX_ACL
 DEFINE_INODE_EVENT(xfs_get_acl);
@@ -1629,6 +1624,11 @@ DEFINE_SIMPLE_IO_EVENT(xfs_end_io_direct_write);
 DEFINE_SIMPLE_IO_EVENT(xfs_end_io_direct_write_unwritten);
 DEFINE_SIMPLE_IO_EVENT(xfs_end_io_direct_write_append);
 DEFINE_SIMPLE_IO_EVENT(xfs_file_splice_read);
+DEFINE_SIMPLE_IO_EVENT(xfs_alloc_file_space);
+DEFINE_SIMPLE_IO_EVENT(xfs_free_file_space);
+DEFINE_SIMPLE_IO_EVENT(xfs_zero_file_space);
+DEFINE_SIMPLE_IO_EVENT(xfs_collapse_file_space);
+DEFINE_SIMPLE_IO_EVENT(xfs_insert_file_space);
 
 DECLARE_EVENT_CLASS(xfs_itrunc_class,
 	TP_PROTO(struct xfs_inode *ip, xfs_fsize_t new_size),
