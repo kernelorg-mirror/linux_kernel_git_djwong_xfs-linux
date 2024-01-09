@@ -620,4 +620,24 @@ void xfs_attr_intent_destroy_cache(void);
 
 int xfs_attr_sf_totsize(struct xfs_inode *dp);
 
+/*
+ * Decide if this filesystem has a new enough permanent feature set to protect
+ * attri log items from being replayed on a kernel that does not have
+ * XFS_SB_FEAT_INCOMPAT_LOG_XATTRS set.
+ */
+static inline bool
+xfs_attri_can_use_without_log_assistance(
+	struct xfs_mount	*mp)
+{
+	if (!xfs_sb_is_v5(&mp->m_sb))
+		return false;
+
+	/*
+	 * No incompat features have been defined since the addition of xattr
+	 * log items.
+	 */
+
+	return false;
+}
+
 #endif	/* __XFS_ATTR_H__ */
