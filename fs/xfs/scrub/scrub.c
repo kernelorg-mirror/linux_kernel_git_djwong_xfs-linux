@@ -792,6 +792,31 @@ xfs_scrubv_check_barrier(
 	return 0;
 }
 
+/*
+ * If the caller provided us with a nonzero inode number that isn't the ioctl
+ * file, try to grab a reference to it to eliminate all further untrusted inode
+ * lookups.  If we can't get the inode, let each scrub function try again.
+ */
+STATIC struct xfs_inode *
+xchk_scrubv_open_by_handle(
+	struct xfs_mount		*mp,
+	const struct xfs_scrub_vec_head	*head)
+{
+	struct xfs_inode		*ip;
+	int				error;
+
+	error = xfs_iget(mp, NULL, head->svh_ino, XFS_IGET_UNTRUSTED, 0, &ip);
+	if (error)
+		return NULL;
+
+	if (VFS_I(ip)->i_generation != head->svh_gen) {
+		xfs_irele(ip);
+		return NULL;
+	}
+
+	return ip;
+}
+
 /* Vectored scrub implementation to reduce ioctl calls. */
 int
 xfs_ioc_scrubv_metadata(
@@ -804,6 +829,7 @@ xfs_ioc_scrubv_metadata(
 	struct xfs_scrub_vec		__user *uvectors;
 	struct xfs_inode		*ip_in = XFS_I(file_inode(file));
 	struct xfs_mount		*mp = ip_in->i_mount;
+	struct xfs_inode		*handle_ip = NULL;
 	struct xfs_scrub_vec		*v;
 	size_t				vec_bytes;
 	unsigned int			i;
@@ -847,6 +873,17 @@ xfs_ioc_scrubv_metadata(
 
 		trace_xchk_scrubv_item(mp, &head, i, v);
 	}
+
+	/*
+	 * If the caller wants us to do a scrub-by-handle and the file used to
+	 * call the ioctl is not the same file, load the incore inode and pin
+	 * it across all the scrubv actions to avoid repeated UNTRUSTED
+	 * lookups.  The reference is not passed to deeper layers of scrub
+	 * because each scrubber gets to decide its own strategy for getting an
+	 * inode.
+	 */
+	if (head.svh_ino && head.svh_ino != ip_in->i_ino)
+		handle_ip = xchk_scrubv_open_by_handle(mp, &head);
 
 	/* Run all the scrubbers. */
 	for (i = 0, v = vectors; i < head.svh_nr; i++, v++) {
@@ -895,6 +932,15 @@ xfs_ioc_scrubv_metadata(
 	}
 
 out_free:
+	/*
+	 * If we're holding the only reference to an inode opened via handle,
+	 * mark it dontcache so that we don't pollute the cache.
+	 */
+	if (handle_ip) {
+		if (atomic_read(&VFS_I(handle_ip)->i_count) == 1)
+			d_mark_dontcache(VFS_I(handle_ip));
+		xfs_irele(handle_ip);
+	}
 	kfree(vectors);
 	return error;
 }
