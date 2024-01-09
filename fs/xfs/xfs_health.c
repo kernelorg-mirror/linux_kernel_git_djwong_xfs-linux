@@ -18,6 +18,7 @@
 #include "xfs_da_format.h"
 #include "xfs_da_btree.h"
 #include "xfs_quota_defs.h"
+#include "xfs_rtgroup.h"
 
 /*
  * Warn about metadata corruption that we detected but haven't fixed, and
@@ -29,7 +30,9 @@ xfs_health_unmount(
 	struct xfs_mount	*mp)
 {
 	struct xfs_perag	*pag;
+	struct xfs_rtgroup	*rtg;
 	xfs_agnumber_t		agno;
+	xfs_rgnumber_t		rgno;
 	unsigned int		sick = 0;
 	unsigned int		checked = 0;
 	bool			warn = false;
@@ -42,6 +45,15 @@ xfs_health_unmount(
 		xfs_ag_measure_sickness(pag, &sick, &checked);
 		if (sick) {
 			trace_xfs_ag_unfixed_corruption(mp, agno, sick);
+			warn = true;
+		}
+	}
+
+	/* Measure realtime group corruption levels. */
+	for_each_rtgroup(mp, rgno, rtg) {
+		xfs_rtgroup_measure_sickness(rtg, &sick, &checked);
+		if (sick) {
+			trace_xfs_rtgroup_unfixed_corruption(rtg, sick);
 			warn = true;
 		}
 	}
@@ -278,6 +290,80 @@ xfs_ag_measure_sickness(
 	*sick = pag->pag_sick;
 	*checked = pag->pag_checked;
 	spin_unlock(&pag->pag_state_lock);
+}
+
+/* Mark unhealthy per-rtgroup metadata given a raw rt group number. */
+void
+xfs_rgno_mark_sick(
+	struct xfs_mount	*mp,
+	xfs_rgnumber_t		rgno,
+	unsigned int		mask)
+{
+	struct xfs_rtgroup	*rtg = xfs_rtgroup_get(mp, rgno);
+
+	/* per-rtgroup structure not set up yet? */
+	if (!rtg)
+		return;
+
+	xfs_rtgroup_mark_sick(rtg, mask);
+	xfs_rtgroup_put(rtg);
+}
+
+/* Mark unhealthy per-rtgroup metadata. */
+void
+xfs_rtgroup_mark_sick(
+	struct xfs_rtgroup	*rtg,
+	unsigned int		mask)
+{
+	ASSERT(!(mask & ~XFS_SICK_RT_ALL));
+	trace_xfs_rtgroup_mark_sick(rtg, mask);
+
+	spin_lock(&rtg->rtg_state_lock);
+	rtg->rtg_sick |= mask;
+	spin_unlock(&rtg->rtg_state_lock);
+}
+
+/* Mark per-rtgroup metadata as having been checked. */
+void
+xfs_rtgroup_mark_checked(
+	struct xfs_rtgroup	*rtg,
+	unsigned int		mask)
+{
+	ASSERT(!(mask & ~XFS_SICK_RT_PRIMARY));
+
+	spin_lock(&rtg->rtg_state_lock);
+	rtg->rtg_checked |= mask;
+	spin_unlock(&rtg->rtg_state_lock);
+}
+
+/* Mark per-rtgroup metadata ok. */
+void
+xfs_rtgroup_mark_healthy(
+	struct xfs_rtgroup	*rtg,
+	unsigned int		mask)
+{
+	ASSERT(!(mask & ~XFS_SICK_RT_ALL));
+	trace_xfs_rtgroup_mark_healthy(rtg, mask);
+
+	spin_lock(&rtg->rtg_state_lock);
+	rtg->rtg_sick &= ~mask;
+	if (!(rtg->rtg_sick & XFS_SICK_RT_PRIMARY))
+		rtg->rtg_sick &= ~XFS_SICK_RT_SECONDARY;
+	rtg->rtg_checked |= mask;
+	spin_unlock(&rtg->rtg_state_lock);
+}
+
+/* Sample which per-rtgroup metadata are unhealthy. */
+void
+xfs_rtgroup_measure_sickness(
+	struct xfs_rtgroup	*rtg,
+	unsigned int		*sick,
+	unsigned int		*checked)
+{
+	spin_lock(&rtg->rtg_state_lock);
+	*sick = rtg->rtg_sick;
+	*checked = rtg->rtg_checked;
+	spin_unlock(&rtg->rtg_state_lock);
 }
 
 /* Mark the unhealthy parts of an inode. */
