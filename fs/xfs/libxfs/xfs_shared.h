@@ -51,6 +51,7 @@ extern const struct xfs_btree_ops xfs_finobt_ops;
 extern const struct xfs_btree_ops xfs_bmbt_ops;
 extern const struct xfs_btree_ops xfs_refcountbt_ops;
 extern const struct xfs_btree_ops xfs_rmapbt_ops;
+extern const struct xfs_btree_ops xfs_rmapbt_mem_ops;
 
 static inline bool xfs_btree_is_bno(const struct xfs_btree_ops *ops)
 {
@@ -85,6 +86,11 @@ static inline bool xfs_btree_is_refcount(const struct xfs_btree_ops *ops)
 static inline bool xfs_btree_is_rmap(const struct xfs_btree_ops *ops)
 {
 	return ops == &xfs_rmapbt_ops;
+}
+
+static inline bool xfs_btree_is_mem_rmap(const struct xfs_btree_ops *ops)
+{
+	return ops == &xfs_rmapbt_mem_ops;
 }
 
 /* log size calculation functions */
