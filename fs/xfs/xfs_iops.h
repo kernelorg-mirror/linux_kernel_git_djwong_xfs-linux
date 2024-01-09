@@ -20,4 +20,6 @@ extern void xfs_setup_inode(struct xfs_inode *ip);
 extern void xfs_setup_iops(struct xfs_inode *ip);
 extern void xfs_diflags_to_iflags(struct xfs_inode *ip, bool init);
 
+void xfs_setup_metadata_inode_lock_class(struct xfs_inode *ip);
+
 #endif /* __XFS_IOPS_H__ */
