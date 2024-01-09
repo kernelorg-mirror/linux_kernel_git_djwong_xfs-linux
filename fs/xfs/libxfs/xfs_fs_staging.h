@@ -318,4 +318,7 @@ struct xfs_map_freesp {
  */
 #define XFS_IOC_MAP_FREESP	_IOWR('X', 64, struct xfs_map_freesp)
 
+/* Add features to mounted filesystems. */
+#define XFS_IOC_ADDFEATURE		_IOR ('X', 46, __u64)
+
 #endif /* __XFS_FS_STAGING_H__ */
