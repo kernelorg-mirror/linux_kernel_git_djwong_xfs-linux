@@ -22,6 +22,8 @@ void xmbuf_free(struct xmbuf *xmb);
 int xmbuf_map_page(struct xfs_buf *bp);
 void xmbuf_unmap_page(struct xfs_buf *bp);
 bool xmbuf_verify_daddr(struct xfs_buftarg *btp, xfs_daddr_t daddr);
+void xmbuf_trans_bdetach(struct xfs_trans *tp, struct xfs_buf *bp);
+int xmbuf_finalize(struct xfs_buf *bp);
 #else
 # define xmbuf_map_page(...)		(-ENOMEM)
 # define xmbuf_unmap_page(...)		((void)0)
