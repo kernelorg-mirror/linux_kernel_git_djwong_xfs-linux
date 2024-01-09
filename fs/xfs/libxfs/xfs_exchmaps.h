@@ -101,6 +101,7 @@ unsigned int xfs_exchmaps_reflink_prep(const struct xfs_exchmaps_req *req);
 void xfs_exchmaps_reflink_finish(struct xfs_trans *tp,
 		const struct xfs_exchmaps_req *req, unsigned int reflink_state);
 
+int xfs_exchmaps_estimate_overhead(struct xfs_exchmaps_req *req);
 int xfs_exchmaps_estimate(struct xfs_exchmaps_req *req);
 
 extern struct kmem_cache	*xfs_exchmaps_intent_cache;
