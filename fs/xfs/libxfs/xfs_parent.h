@@ -86,4 +86,11 @@ int xfs_parent_from_xattr(struct xfs_mount *mp, unsigned int attr_flags,
 		const void *value, unsigned int valuelen,
 		struct xfs_parent_irec *irec);
 
+/* Repair functions */
+void xfs_parent_irec_init(struct xfs_parent_irec *pptr,
+		const struct xfs_inode *dp);
+int xfs_parent_lookup(struct xfs_trans *tp, struct xfs_inode *ip,
+		const struct xfs_name *name, const struct xfs_parent_irec *pptr,
+		struct xfs_parent_args *scratch);
+
 #endif /* __XFS_PARENT_H__ */
