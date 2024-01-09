@@ -297,6 +297,8 @@ xrep_orphanage_can_adopt(
 		return false;
 	if (xfs_internal_inum(sc->mp, sc->ip->i_ino))
 		return false;
+	if (xfs_is_metadata_inode(sc->ip))
+		return false;
 	return true;
 }
 
