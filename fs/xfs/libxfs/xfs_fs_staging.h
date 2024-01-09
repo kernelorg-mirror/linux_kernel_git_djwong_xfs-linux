@@ -126,6 +126,7 @@ struct xfs_rtgroup_geometry {
 	__u64 rg_reserved[13];	/* o: zero */
 };
 #define XFS_RTGROUP_GEOM_SICK_SUPER	(1 << 0)  /* superblock */
+#define XFS_RTGROUP_GEOM_SICK_BITMAP	(1 << 1)  /* rtbitmap for this group */
 
 #define XFS_IOC_RTGROUP_GEOMETRY _IOWR('X', 63, struct xfs_rtgroup_geometry)
 
