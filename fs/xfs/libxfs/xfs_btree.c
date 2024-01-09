@@ -30,6 +30,7 @@
 #include "xfs_health.h"
 #include "xfs_buf_mem.h"
 #include "xfs_btree_mem.h"
+#include "xfs_rtgroup.h"
 
 /*
  * Btree magic numbers.
@@ -529,7 +530,8 @@ xfs_btree_del_cursor(
 			xfs_perag_put(cur->bc_ag.pag);
 		break;
 	case XFS_BTREE_TYPE_INODE:
-		/* nothing to do */
+		if (cur->bc_ino.rtg)
+			xfs_rtgroup_put(cur->bc_ino.rtg);
 		break;
 	case XFS_BTREE_TYPE_MEM:
 		if (cur->bc_mem.pag)
