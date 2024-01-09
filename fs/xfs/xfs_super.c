@@ -2357,6 +2357,9 @@ init_xfs_fs(void)
 	printk(KERN_INFO XFS_VERSION_STRING " with "
 			 XFS_BUILD_OPTIONS " enabled\n");
 
+#ifdef CONFIG_XFS_EXPERIMENTAL_IOCTLS
+	xfs_info(NULL, "EXPERIMENTAL ioctls in use.  Use at your own risk!");
+#endif
 	xfs_dir_startup();
 
 	error = xfs_init_caches();
