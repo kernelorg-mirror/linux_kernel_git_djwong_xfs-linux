@@ -529,6 +529,7 @@ const struct xfs_btree_ops xfs_bmbt_ops = {
 	.key_len		= sizeof(xfs_bmbt_key_t),
 	.geom_flags		= XFS_BTGEO_LONG_PTRS | XFS_BTGEO_ROOT_IN_INODE,
 	.lru_refs		= XFS_BMAP_BTREE_REF,
+	.statoff		= XFS_STATS_CALC_INDEX(xs_bmbt_2),
 
 	.dup_cursor		= xfs_bmbt_dup_cursor,
 	.update_cursor		= xfs_bmbt_update_cursor,
@@ -562,7 +563,6 @@ xfs_bmbt_init_common(
 
 	cur = xfs_btree_alloc_cursor(mp, tp, XFS_BTNUM_BMAP, &xfs_bmbt_ops,
 			mp->m_bm_maxlevels[whichfork], xfs_bmbt_cur_cache);
-	cur->bc_statoff = XFS_STATS_CALC_INDEX(xs_bmbt_2);
 
 	cur->bc_ino.ip = ip;
 	cur->bc_ino.allocated = 0;
