@@ -3280,9 +3280,8 @@ TRACE_EVENT(xfs_refcount_lookup,
 
 /* single-rcext tracepoint class */
 DECLARE_EVENT_CLASS(xfs_refcount_extent_class,
-	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno,
-		 struct xfs_refcount_irec *irec),
-	TP_ARGS(mp, agno, irec),
+	TP_PROTO(struct xfs_btree_cur *cur, struct xfs_refcount_irec *irec),
+	TP_ARGS(cur, irec),
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_agnumber_t, agno)
@@ -3292,8 +3291,8 @@ DECLARE_EVENT_CLASS(xfs_refcount_extent_class,
 		__field(xfs_nlink_t, refcount)
 	),
 	TP_fast_assign(
-		__entry->dev = mp->m_super->s_dev;
-		__entry->agno = agno;
+		__entry->dev = cur->bc_mp->m_super->s_dev;
+		__entry->agno = cur->bc_ag.pag->pag_agno;
 		__entry->domain = irec->rc_domain;
 		__entry->startblock = irec->rc_startblock;
 		__entry->blockcount = irec->rc_blockcount;
@@ -3310,15 +3309,14 @@ DECLARE_EVENT_CLASS(xfs_refcount_extent_class,
 
 #define DEFINE_REFCOUNT_EXTENT_EVENT(name) \
 DEFINE_EVENT(xfs_refcount_extent_class, name, \
-	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno, \
-		 struct xfs_refcount_irec *irec), \
-	TP_ARGS(mp, agno, irec))
+	TP_PROTO(struct xfs_btree_cur *cur, struct xfs_refcount_irec *irec), \
+	TP_ARGS(cur, irec))
 
 /* single-rcext and an agbno tracepoint class */
 DECLARE_EVENT_CLASS(xfs_refcount_extent_at_class,
-	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno,
-		 struct xfs_refcount_irec *irec, xfs_agblock_t agbno),
-	TP_ARGS(mp, agno, irec, agbno),
+	TP_PROTO(struct xfs_btree_cur *cur, struct xfs_refcount_irec *irec,
+		 xfs_agblock_t agbno),
+	TP_ARGS(cur, irec, agbno),
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_agnumber_t, agno)
@@ -3329,8 +3327,8 @@ DECLARE_EVENT_CLASS(xfs_refcount_extent_at_class,
 		__field(xfs_agblock_t, agbno)
 	),
 	TP_fast_assign(
-		__entry->dev = mp->m_super->s_dev;
-		__entry->agno = agno;
+		__entry->dev = cur->bc_mp->m_super->s_dev;
+		__entry->agno = cur->bc_ag.pag->pag_agno;
 		__entry->domain = irec->rc_domain;
 		__entry->startblock = irec->rc_startblock;
 		__entry->blockcount = irec->rc_blockcount;
@@ -3349,15 +3347,15 @@ DECLARE_EVENT_CLASS(xfs_refcount_extent_at_class,
 
 #define DEFINE_REFCOUNT_EXTENT_AT_EVENT(name) \
 DEFINE_EVENT(xfs_refcount_extent_at_class, name, \
-	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno, \
-		 struct xfs_refcount_irec *irec, xfs_agblock_t agbno), \
-	TP_ARGS(mp, agno, irec, agbno))
+	TP_PROTO(struct xfs_btree_cur *cur, struct xfs_refcount_irec *irec, \
+		 xfs_agblock_t agbno), \
+	TP_ARGS(cur, irec, agbno))
 
 /* double-rcext tracepoint class */
 DECLARE_EVENT_CLASS(xfs_refcount_double_extent_class,
-	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno,
-		 struct xfs_refcount_irec *i1, struct xfs_refcount_irec *i2),
-	TP_ARGS(mp, agno, i1, i2),
+	TP_PROTO(struct xfs_btree_cur *cur, struct xfs_refcount_irec *i1,
+		struct xfs_refcount_irec *i2),
+	TP_ARGS(cur, i1, i2),
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_agnumber_t, agno)
@@ -3371,8 +3369,8 @@ DECLARE_EVENT_CLASS(xfs_refcount_double_extent_class,
 		__field(xfs_nlink_t, i2_refcount)
 	),
 	TP_fast_assign(
-		__entry->dev = mp->m_super->s_dev;
-		__entry->agno = agno;
+		__entry->dev = cur->bc_mp->m_super->s_dev;
+		__entry->agno = cur->bc_ag.pag->pag_agno;
 		__entry->i1_domain = i1->rc_domain;
 		__entry->i1_startblock = i1->rc_startblock;
 		__entry->i1_blockcount = i1->rc_blockcount;
@@ -3398,16 +3396,15 @@ DECLARE_EVENT_CLASS(xfs_refcount_double_extent_class,
 
 #define DEFINE_REFCOUNT_DOUBLE_EXTENT_EVENT(name) \
 DEFINE_EVENT(xfs_refcount_double_extent_class, name, \
-	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno, \
-		 struct xfs_refcount_irec *i1, struct xfs_refcount_irec *i2), \
-	TP_ARGS(mp, agno, i1, i2))
+	TP_PROTO(struct xfs_btree_cur *cur, struct xfs_refcount_irec *i1, \
+		 struct xfs_refcount_irec *i2), \
+	TP_ARGS(cur, i1, i2))
 
 /* double-rcext and an agbno tracepoint class */
 DECLARE_EVENT_CLASS(xfs_refcount_double_extent_at_class,
-	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno,
-		 struct xfs_refcount_irec *i1, struct xfs_refcount_irec *i2,
-		 xfs_agblock_t agbno),
-	TP_ARGS(mp, agno, i1, i2, agbno),
+	TP_PROTO(struct xfs_btree_cur *cur, struct xfs_refcount_irec *i1,
+		 struct xfs_refcount_irec *i2, xfs_agblock_t agbno),
+	TP_ARGS(cur, i1, i2, agbno),
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_agnumber_t, agno)
@@ -3422,8 +3419,8 @@ DECLARE_EVENT_CLASS(xfs_refcount_double_extent_at_class,
 		__field(xfs_agblock_t, agbno)
 	),
 	TP_fast_assign(
-		__entry->dev = mp->m_super->s_dev;
-		__entry->agno = agno;
+		__entry->dev = cur->bc_mp->m_super->s_dev;
+		__entry->agno = cur->bc_ag.pag->pag_agno;
 		__entry->i1_domain = i1->rc_domain;
 		__entry->i1_startblock = i1->rc_startblock;
 		__entry->i1_blockcount = i1->rc_blockcount;
@@ -3451,17 +3448,15 @@ DECLARE_EVENT_CLASS(xfs_refcount_double_extent_at_class,
 
 #define DEFINE_REFCOUNT_DOUBLE_EXTENT_AT_EVENT(name) \
 DEFINE_EVENT(xfs_refcount_double_extent_at_class, name, \
-	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno, \
-		 struct xfs_refcount_irec *i1, struct xfs_refcount_irec *i2, \
-		 xfs_agblock_t agbno), \
-	TP_ARGS(mp, agno, i1, i2, agbno))
+	TP_PROTO(struct xfs_btree_cur *cur, struct xfs_refcount_irec *i1, \
+		struct xfs_refcount_irec *i2, xfs_agblock_t agbno), \
+	TP_ARGS(cur, i1, i2, agbno))
 
 /* triple-rcext tracepoint class */
 DECLARE_EVENT_CLASS(xfs_refcount_triple_extent_class,
-	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno,
-		 struct xfs_refcount_irec *i1, struct xfs_refcount_irec *i2,
-		 struct xfs_refcount_irec *i3),
-	TP_ARGS(mp, agno, i1, i2, i3),
+	TP_PROTO(struct xfs_btree_cur *cur, struct xfs_refcount_irec *i1,
+		struct xfs_refcount_irec *i2, struct xfs_refcount_irec *i3),
+	TP_ARGS(cur, i1, i2, i3),
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_agnumber_t, agno)
@@ -3479,8 +3474,8 @@ DECLARE_EVENT_CLASS(xfs_refcount_triple_extent_class,
 		__field(xfs_nlink_t, i3_refcount)
 	),
 	TP_fast_assign(
-		__entry->dev = mp->m_super->s_dev;
-		__entry->agno = agno;
+		__entry->dev = cur->bc_mp->m_super->s_dev;
+		__entry->agno = cur->bc_ag.pag->pag_agno;
 		__entry->i1_domain = i1->rc_domain;
 		__entry->i1_startblock = i1->rc_startblock;
 		__entry->i1_blockcount = i1->rc_blockcount;
@@ -3515,10 +3510,9 @@ DECLARE_EVENT_CLASS(xfs_refcount_triple_extent_class,
 
 #define DEFINE_REFCOUNT_TRIPLE_EXTENT_EVENT(name) \
 DEFINE_EVENT(xfs_refcount_triple_extent_class, name, \
-	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno, \
-		 struct xfs_refcount_irec *i1, struct xfs_refcount_irec *i2, \
-		 struct xfs_refcount_irec *i3), \
-	TP_ARGS(mp, agno, i1, i2, i3))
+	TP_PROTO(struct xfs_btree_cur *cur, struct xfs_refcount_irec *i1, \
+		struct xfs_refcount_irec *i2, struct xfs_refcount_irec *i3), \
+	TP_ARGS(cur, i1, i2, i3))
 
 /* refcount btree tracepoints */
 DEFINE_REFCOUNT_EXTENT_EVENT(xfs_refcount_get);
@@ -3536,7 +3530,6 @@ DEFINE_REFCOUNT_EVENT(xfs_refcount_cow_increase);
 DEFINE_REFCOUNT_EVENT(xfs_refcount_cow_decrease);
 DEFINE_REFCOUNT_TRIPLE_EXTENT_EVENT(xfs_refcount_merge_center_extents);
 DEFINE_REFCOUNT_EXTENT_EVENT(xfs_refcount_modify_extent);
-DEFINE_REFCOUNT_EXTENT_EVENT(xfs_refcount_recover_extent);
 DEFINE_REFCOUNT_EXTENT_AT_EVENT(xfs_refcount_split_extent);
 DEFINE_REFCOUNT_DOUBLE_EXTENT_EVENT(xfs_refcount_merge_left_extent);
 DEFINE_REFCOUNT_DOUBLE_EXTENT_EVENT(xfs_refcount_merge_right_extent);
