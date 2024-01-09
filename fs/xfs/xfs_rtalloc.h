@@ -50,6 +50,8 @@ int xfs_growfs_check_rtgeom(const struct xfs_mount *mp, xfs_rfsblock_t dblocks,
 		xfs_rfsblock_t rblocks, xfs_agblock_t rextsize,
 		xfs_rtblock_t rextents, xfs_extlen_t rbmblocks,
 		uint8_t rextslog);
+int xfs_rtallocate_extent(struct xfs_trans *tp, xfs_rtxnum_t start,
+		xfs_rtxlen_t maxlen, xfs_rtxlen_t *len, xfs_rtxnum_t *rtx);
 #else
 # define xfs_growfs_rt(mp,in)				(-ENOSYS)
 # define xfs_rtalloc_reinit_frextents(m)		(0)
@@ -70,6 +72,7 @@ xfs_rtmount_init(
 # define xfs_rt_resv_free(mp)				((void)0)
 # define xfs_rt_resv_init(mp)				(0)
 # define xfs_growfs_check_rtgeom(mp, d, r, rs, rx, rb, rl)	(0)
+# define xfs_rtallocate_extent(...)			(-ENOSYS)
 #endif	/* CONFIG_XFS_RT */
 
 #endif	/* __XFS_RTALLOC_H__ */
