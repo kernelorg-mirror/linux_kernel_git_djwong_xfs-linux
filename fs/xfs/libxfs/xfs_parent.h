@@ -71,4 +71,19 @@ int xfs_parent_replacename(struct xfs_trans *tp,
 		struct xfs_inode *new_dp, const struct xfs_name *new_name,
 		struct xfs_inode *child);
 
+/*
+ * Incore version of a parent pointer.  The parent pointer name itself is
+ * handled separately.
+ */
+struct xfs_parent_irec {
+	/* Parent pointer attribute value fields */
+	xfs_ino_t		p_ino;
+	uint32_t		p_gen;
+};
+
+int xfs_parent_from_xattr(struct xfs_mount *mp, unsigned int attr_flags,
+		const unsigned char *name, unsigned int namelen,
+		const void *value, unsigned int valuelen,
+		struct xfs_parent_irec *irec);
+
 #endif /* __XFS_PARENT_H__ */

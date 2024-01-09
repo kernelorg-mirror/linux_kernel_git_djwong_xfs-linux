@@ -280,3 +280,43 @@ xfs_parent_replacename(
 	xfs_attr_defer_parent(args, XFS_ATTR_DEFER_REPLACE);
 	return 0;
 }
+
+/* Convert an ondisk parent pointer to the incore format. */
+static void
+xfs_parent_irec_from_disk(
+	struct xfs_parent_irec		*irec,
+	const void			*value,
+	unsigned int			valuelen)
+{
+	const struct xfs_parent_rec	*rec = value;
+
+	irec->p_ino = be64_to_cpu(rec->p_ino);
+	irec->p_gen = be32_to_cpu(rec->p_gen);
+}
+
+/*
+ * Extract parent pointer information from any xattr into @irec.  Returns 0 if
+ * this is not a parent pointer xattr at all; 1 if this is a valid parent
+ * pointer and @irec has been filled out; or -EFSCORRUPTED for garbage.
+ */
+int
+xfs_parent_from_xattr(
+	struct xfs_mount	*mp,
+	unsigned int		attr_flags,
+	const unsigned char	*name,
+	unsigned int		namelen,
+	const void		*value,
+	unsigned int		valuelen,
+	struct xfs_parent_irec	*irec)
+{
+	if (!(attr_flags & XFS_ATTR_PARENT))
+		return 0;
+
+	if (!xfs_parent_namecheck(attr_flags, name, namelen))
+		return -EFSCORRUPTED;
+	if (!xfs_parent_valuecheck(mp, value, valuelen))
+		return -EFSCORRUPTED;
+
+	xfs_parent_irec_from_disk(irec, value, valuelen);
+	return 1;
+}
