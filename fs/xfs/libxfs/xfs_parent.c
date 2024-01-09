@@ -28,6 +28,7 @@
 #include "xfs_parent.h"
 #include "xfs_trans_space.h"
 #include "xfs_attr_item.h"
+#include "xfs_health.h"
 
 struct kmem_cache		*xfs_parent_args_cache;
 
@@ -240,4 +241,28 @@ xfs_parent_addname(
 {
 	xfs_parent_setname(ppargs, tp, dp, parent_name, child);
 	xfs_attr_defer_parent(&ppargs->args, XFS_ATTR_DEFER_SET);
+}
+
+/* Remove a parent pointer to reflect a dirent removal. */
+int
+xfs_parent_removename(
+	struct xfs_trans	*tp,
+	struct xfs_parent_args	*ppargs,
+	struct xfs_inode	*dp,
+	const struct xfs_name	*parent_name,
+	struct xfs_inode	*child)
+{
+	/*
+	 * For regular attrs, removing an attr from a !hasattr inode is a nop.
+	 * For parent pointers, we require that the pointer must exist if the
+	 * caller wants us to remove the pointer.
+	 */
+	if (XFS_IS_CORRUPT(child->i_mount, !xfs_inode_hasattr(child))) {
+		xfs_inode_mark_sick(child, XFS_SICK_INO_PARENT);
+		return -EFSCORRUPTED;
+	}
+
+	xfs_parent_setname(ppargs, tp, dp, parent_name, child);
+	xfs_attr_defer_parent(&ppargs->args, XFS_ATTR_DEFER_REMOVE);
+	return 0;
 }
