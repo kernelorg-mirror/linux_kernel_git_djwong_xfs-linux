@@ -147,7 +147,7 @@ xfs_parent_hashattr(
 	return xfs_parent_hashval(mp, name, namelen, be64_to_cpu(rec->p_ino));
 }
 
-/* Initializes a xfs_parent_name_rec to be stored as an attribute name. */
+/* Initializes a xfs_parent_rec to be stored as an attribute name. */
 static inline void
 xfs_parent_rec_init(
 	struct xfs_parent_rec		*rec,
@@ -311,4 +311,41 @@ xfs_parent_replacename(
 	xfs_parent_setnewname(ppargs, tp, new_dp, new_name, child);
 	xfs_attr_defer_parent(args, XFS_ATTR_DEFER_REPLACE);
 	return 0;
+}
+
+/* Convert an ondisk parent pointer to the incore format. */
+void
+xfs_parent_irec_from_disk(
+	struct xfs_parent_irec		*irec,
+	const uint8_t			*name,
+	unsigned int			namelen,
+	const struct xfs_parent_rec	*rec)
+{
+	irec->p_ino = be64_to_cpu(rec->p_ino);
+	irec->p_gen = be32_to_cpu(rec->p_gen);
+	irec->p_namelen = namelen;
+	memcpy(irec->p_name, name, namelen);
+}
+
+/* Convert an incore parent pointer to the ondisk attr value format. */
+void
+xfs_parent_irec_to_disk(
+	struct xfs_parent_rec		*rec,
+	const struct xfs_parent_irec	*irec)
+{
+	rec->p_ino = cpu_to_be64(irec->p_ino);
+	rec->p_gen = cpu_to_be32(irec->p_gen);
+}
+
+/* Is this a valid incore parent pointer? */
+bool
+xfs_parent_verify_irec(
+	struct xfs_mount		*mp,
+	const struct xfs_parent_irec	*irec)
+{
+	if (!xfs_verify_dir_ino(mp, irec->p_ino))
+		return false;
+	if (!xfs_dir2_namecheck(irec->p_name, irec->p_namelen))
+		return false;
+	return true;
 }

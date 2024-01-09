@@ -109,4 +109,26 @@ xfs_parent_finish(
 		xfs_parent_args_free(mp, ppargs);
 }
 
+/*
+ * Incore version of a parent pointer, also contains dirent name so callers
+ * can pass/obtain all the parent pointer information in a single structure
+ */
+struct xfs_parent_irec {
+	/* Parent pointer attribute value fields */
+	xfs_ino_t		p_ino;
+	uint32_t		p_gen;
+
+	/* Parent pointer attribute name fields */
+	uint8_t			p_namelen;
+	unsigned char		p_name[MAXNAMELEN];
+};
+
+void xfs_parent_irec_from_disk(struct xfs_parent_irec *irec,
+		const uint8_t *name, unsigned int namelen,
+		const struct xfs_parent_rec *rec);
+void xfs_parent_irec_to_disk(struct xfs_parent_rec *rec,
+		const struct xfs_parent_irec *irec);
+bool xfs_parent_verify_irec(struct xfs_mount *mp,
+		const struct xfs_parent_irec *irec);
+
 #endif /* __XFS_PARENT_H__ */
