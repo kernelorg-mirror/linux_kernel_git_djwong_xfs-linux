@@ -250,4 +250,7 @@ struct xfs_health_monitor {
 /* Monitor for health events. */
 #define XFS_IOC_HEALTH_MONITOR		_IOR ('X', 48, struct xfs_health_monitor)
 
+/* Add features to mounted filesystems. */
+#define XFS_IOC_ADDFEATURE		_IOR ('X', 46, __u64)
+
 #endif /* __XFS_FS_STAGING_H__ */
