@@ -14,4 +14,13 @@ typedef int (*xchk_xattr_fn)(struct xfs_scrub *sc, struct xfs_inode *ip,
 int xchk_xattr_walk(struct xfs_scrub *sc, struct xfs_inode *ip,
 		xchk_xattr_fn attr_fn, void *priv);
 
+struct xfs_parent_name_irec;
+
+typedef int (*xchk_pptr_fn)(struct xfs_scrub *sc, struct xfs_inode *ip,
+		const struct xfs_parent_name_irec *pptr, void *priv);
+
+int xchk_pptr_walk(struct xfs_scrub *sc, struct xfs_inode *ip,
+		xchk_pptr_fn pptr_fn, struct xfs_parent_name_irec *pptr_buf,
+		void *priv);
+
 #endif /* __XFS_SCRUB_LISTXATTR_H__ */
