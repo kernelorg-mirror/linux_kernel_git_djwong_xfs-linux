@@ -40,6 +40,7 @@
 #include "xfs_btree_mem.h"
 #include "xfs_bmap.h"
 #include "xfs_swapext.h"
+#include "xfs_xchgrange.h"
 
 #ifdef CONFIG_XFS_BTREE_IN_MEM
 static inline unsigned long
