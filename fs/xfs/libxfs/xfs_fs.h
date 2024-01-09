@@ -1004,6 +1004,7 @@ xfs_getparents_rec(
 #define XFS_IOC_SCRUBV_METADATA	_IOWR('X', 60, struct xfs_scrub_vec_head)
 #define XFS_IOC_AG_GEOMETRY	_IOWR('X', 61, struct xfs_ag_geometry)
 #define XFS_IOC_GETPARENTS	_IOWR('X', 62, struct xfs_getparents)
+/*	XFS_IOC_RTGROUP_GEOMETRY - staging 63	   */
 
 
 /*
