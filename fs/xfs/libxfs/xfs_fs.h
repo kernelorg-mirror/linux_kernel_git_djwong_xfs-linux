@@ -1141,6 +1141,7 @@ struct xfs_health_monitor {
 #define XFS_IOC_UNRESVSP64	_IOW ('X', 43, struct xfs_flock64)
 #define XFS_IOC_GETBMAPA	_IOWR('X', 44, struct getbmap)
 #define XFS_IOC_FSGETXATTRA	_IOR ('X', 45, struct fsxattr)
+/*	XFS_IOC_ADDFEATURE ------- staging 46	   */
 /*	XFS_IOC_SETBIOSIZE ---- deprecated 46	   */
 /*	XFS_IOC_GETBIOSIZE ---- deprecated 47	   */
 #define XFS_IOC_GETBMAPX	_IOWR('X', 56, struct getbmap)
@@ -1156,6 +1157,7 @@ struct xfs_health_monitor {
 #define XFS_IOC_GETFSREFCOUNTS	_IOWR('X', 65, struct xfs_getfsrefs_head)
 #define XFS_IOC_MAP_FREESP	_IOWR('X', 66, struct xfs_map_freesp)
 #define XFS_IOC_HEALTH_MONITOR	_IOR ('X', 67, struct xfs_health_monitor)
+#define XFS_IOC_ADDFEATURE	_IOR ('X', 68, __u64)
 
 /*
  * ioctl commands that replace IRIX syssgi()'s
