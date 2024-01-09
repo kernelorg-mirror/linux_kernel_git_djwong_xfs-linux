@@ -21,6 +21,7 @@
 #include "xfs_errortag.h"
 #include "xfs_error.h"
 #include "xfs_ag.h"
+#include "xfs_buf_mem.h"
 
 struct kmem_cache *xfs_buf_cache;
 
@@ -312,7 +313,9 @@ xfs_buf_free(
 
 	ASSERT(list_empty(&bp->b_lru));
 
-	if (bp->b_flags & _XBF_PAGES)
+	if (bp->b_target->bt_flags & XFS_BUFTARG_MEM)
+		xmbuf_unmap_page(bp);
+	else if (bp->b_flags & _XBF_PAGES)
 		xfs_buf_free_pages(bp);
 	else if (bp->b_flags & _XBF_KMEM)
 		kmem_free(bp->b_addr);
@@ -623,18 +626,20 @@ xfs_buf_find_insert(
 	if (error)
 		goto out_drop_pag;
 
-	/*
-	 * For buffers that fit entirely within a single page, first attempt to
-	 * allocate the memory from the heap to minimise memory usage. If we
-	 * can't get heap memory for these small buffers, we fall back to using
-	 * the page allocator.
-	 */
-	if (BBTOB(new_bp->b_length) >= PAGE_SIZE ||
-	    xfs_buf_alloc_kmem(new_bp, flags) < 0) {
+	if (new_bp->b_target->bt_flags & XFS_BUFTARG_MEM) {
+		error = xmbuf_map_page(new_bp);
+	} else if (BBTOB(new_bp->b_length) >= PAGE_SIZE ||
+		   xfs_buf_alloc_kmem(new_bp, flags) < 0) {
+		/*
+		 * For buffers that fit entirely within a single page, first
+		 * attempt to allocate the memory from the heap to minimise
+		 * memory usage. If we can't get heap memory for these small
+		 * buffers, we fall back to using the page allocator.
+		 */
 		error = xfs_buf_alloc_pages(new_bp, flags);
-		if (error)
-			goto out_free_buf;
 	}
+	if (error)
+		goto out_free_buf;
 
 	spin_lock(&bch->bc_lock);
 	bp = rhashtable_lookup_get_insert_fast(&bch->bc_hash,
@@ -981,7 +986,10 @@ xfs_buf_get_uncached(
 	if (error)
 		return error;
 
-	error = xfs_buf_alloc_pages(bp, flags);
+	if (bp->b_target->bt_flags & XFS_BUFTARG_MEM)
+		error = xmbuf_map_page(bp);
+	else
+		error = xfs_buf_alloc_pages(bp, flags);
 	if (error)
 		goto fail_free_buf;
 
@@ -1612,6 +1620,12 @@ _xfs_buf_ioapply(
 
 	/* we only use the buffer cache for meta-data */
 	op |= REQ_META;
+
+	/* in-memory targets are directly mapped, no IO required. */
+	if (bp->b_target->bt_flags & XFS_BUFTARG_MEM) {
+		xfs_buf_ioend(bp);
+		return;
+	}
 
 	/*
 	 * Walk all the vectors issuing IO on them. Set up the initial offset
