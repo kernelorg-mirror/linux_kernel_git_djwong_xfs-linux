@@ -172,6 +172,19 @@ config XFS_ONLINE_SCRUB_STATS
 
 	  If unsure, say N.
 
+config XFS_ONLINE_SCRUB_WHINE
+	bool "XFS online metadata verbose logging by default"
+	default n
+	depends on XFS_ONLINE_SCRUB
+	help
+	  If you say Y here, the kernel will by default log the outcomes of all
+	  scrub and repair operations, as well as any corruptions found.  This
+	  may slow down scrub due to printk logging overhead timers.
+
+	  This value can be changed by editing /sys/fs/xfs/debug/scrub_whine
+
+	  If unsure, say N.
+
 config XFS_ONLINE_REPAIR
 	bool "XFS online metadata repair support"
 	default n
