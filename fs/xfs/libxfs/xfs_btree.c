@@ -1222,15 +1222,10 @@ xfs_btree_init_buf(
 	bp->b_ops = ops->buf_ops;
 }
 
-void
-xfs_btree_init_block_cur(
-	struct xfs_btree_cur	*cur,
-	struct xfs_buf		*bp,
-	int			level,
-	int			numrecs)
+static inline __u64
+xfs_btree_owner(
+	struct xfs_btree_cur    *cur)
 {
-	__u64			owner;
-
 	/*
 	 * we can pull the owner from the cursor right now as the different
 	 * owners align directly with the pointer size of the btree. This may
@@ -1238,11 +1233,19 @@ xfs_btree_init_block_cur(
 	 * code.
 	 */
 	if (cur->bc_ops->geom_flags & XFS_BTGEO_LONG_PTRS)
-		owner = cur->bc_ino.ip->i_ino;
-	else
-		owner = cur->bc_ag.pag->pag_agno;
+		return cur->bc_ino.ip->i_ino;
+	return cur->bc_ag.pag->pag_agno;
+}
 
-	xfs_btree_init_buf(cur->bc_mp, bp, cur->bc_ops, level, numrecs, owner);
+void
+xfs_btree_init_block_cur(
+	struct xfs_btree_cur	*cur,
+	struct xfs_buf		*bp,
+	int			level,
+	int			numrecs)
+{
+	xfs_btree_init_buf(cur->bc_mp, bp, cur->bc_ops, level, numrecs,
+			xfs_btree_owner(cur));
 }
 
 /*
