@@ -21,6 +21,7 @@
 #include "xfs_errortag.h"
 #include "xfs_error.h"
 #include "xfs_ag.h"
+#include "xfs_buf_mem.h"
 
 struct kmem_cache *xfs_buf_cache;
 
@@ -317,7 +318,9 @@ xfs_buf_free(
 
 	ASSERT(list_empty(&bp->b_lru));
 
-	if (bp->b_flags & _XBF_PAGES)
+	if (xfs_buftarg_is_mem(bp->b_target))
+		xmbuf_unmap_page(bp);
+	else if (bp->b_flags & _XBF_PAGES)
 		xfs_buf_free_pages(bp);
 	else if (bp->b_flags & _XBF_KMEM)
 		kmem_free(bp->b_addr);
@@ -628,18 +631,20 @@ xfs_buf_find_insert(
 	if (error)
 		goto out_drop_pag;
 
-	/*
-	 * For buffers that fit entirely within a single page, first attempt to
-	 * allocate the memory from the heap to minimise memory usage. If we
-	 * can't get heap memory for these small buffers, we fall back to using
-	 * the page allocator.
-	 */
-	if (BBTOB(new_bp->b_length) >= PAGE_SIZE ||
-	    xfs_buf_alloc_kmem(new_bp, flags) < 0) {
+	if (xfs_buftarg_is_mem(new_bp->b_target)) {
+		error = xmbuf_map_page(new_bp);
+	} else if (BBTOB(new_bp->b_length) >= PAGE_SIZE ||
+		   xfs_buf_alloc_kmem(new_bp, flags) < 0) {
+		/*
+		 * For buffers that fit entirely within a single page, first
+		 * attempt to allocate the memory from the heap to minimise
+		 * memory usage. If we can't get heap memory for these small
+		 * buffers, we fall back to using the page allocator.
+		 */
 		error = xfs_buf_alloc_pages(new_bp, flags);
-		if (error)
-			goto out_free_buf;
 	}
+	if (error)
+		goto out_free_buf;
 
 	spin_lock(&bch->bc_lock);
 	bp = rhashtable_lookup_get_insert_fast(&bch->bc_hash,
@@ -691,6 +696,9 @@ xfs_buftarg_get_pag(
 	const struct xfs_buf_map	*map)
 {
 	struct xfs_mount		*mp = btp->bt_mount;
+
+	if (xfs_buftarg_is_mem(btp))
+		return NULL;
 
 	return xfs_perag_get(mp, xfs_daddr_to_agno(mp, map->bm_bn));
 }
@@ -987,7 +995,10 @@ xfs_buf_get_uncached(
 	if (error)
 		return error;
 
-	error = xfs_buf_alloc_pages(bp, flags);
+	if (xfs_buftarg_is_mem(bp->b_target))
+		error = xmbuf_map_page(bp);
+	else
+		error = xfs_buf_alloc_pages(bp, flags);
 	if (error)
 		goto fail_free_buf;
 
@@ -1629,6 +1640,12 @@ _xfs_buf_ioapply(
 	/* we only use the buffer cache for meta-data */
 	op |= REQ_META;
 
+	/* in-memory targets are directly mapped, no IO required. */
+	if (xfs_buftarg_is_mem(bp->b_target)) {
+		xfs_buf_ioend(bp);
+		return;
+	}
+
 	/*
 	 * Walk all the vectors issuing IO on them. Set up the initial offset
 	 * into the buffer and the desired IO size before we start -
@@ -1984,19 +2001,24 @@ xfs_buftarg_shrink_count(
 }
 
 void
-xfs_free_buftarg(
+xfs_destroy_buftarg(
 	struct xfs_buftarg	*btp)
 {
 	shrinker_free(btp->bt_shrinker);
 	ASSERT(percpu_counter_sum(&btp->bt_io_count) == 0);
 	percpu_counter_destroy(&btp->bt_io_count);
 	list_lru_destroy(&btp->bt_lru);
+}
 
+void
+xfs_free_buftarg(
+	struct xfs_buftarg	*btp)
+{
+	xfs_destroy_buftarg(btp);
 	fs_put_dax(btp->bt_daxdev, btp->bt_mount);
 	/* the main block device is closed by kill_block_super */
 	if (btp->bt_bdev != btp->bt_mount->m_super->s_bdev)
 		bdev_release(btp->bt_bdev_handle);
-
 	kfree(btp);
 }
 
@@ -2017,6 +2039,45 @@ xfs_setsize_buftarg(
 	}
 
 	return 0;
+}
+
+int
+xfs_init_buftarg(
+	struct xfs_buftarg		*btp,
+	size_t				logical_sectorsize,
+	const char			*descr)
+{
+	/* Set up device logical sector size mask */
+	btp->bt_logical_sectorsize = logical_sectorsize;
+	btp->bt_logical_sectormask = logical_sectorsize - 1;
+
+	/*
+	 * Buffer IO error rate limiting. Limit it to no more than 10 messages
+	 * per 30 seconds so as to not spam logs too much on repeated errors.
+	 */
+	ratelimit_state_init(&btp->bt_ioerror_rl, 30 * HZ,
+			     DEFAULT_RATELIMIT_BURST);
+
+	if (list_lru_init(&btp->bt_lru))
+		return -ENOMEM;
+	if (percpu_counter_init(&btp->bt_io_count, 0, GFP_KERNEL))
+		goto out_destroy_lru;
+
+	btp->bt_shrinker =
+		shrinker_alloc(SHRINKER_NUMA_AWARE, "xfs-buf:%s", descr);
+	if (!btp->bt_shrinker)
+		goto out_destroy_io_count;
+	btp->bt_shrinker->count_objects = xfs_buftarg_shrink_count;
+	btp->bt_shrinker->scan_objects = xfs_buftarg_shrink_scan;
+	btp->bt_shrinker->private_data = btp;
+	shrinker_register(btp->bt_shrinker);
+	return 0;
+
+out_destroy_io_count:
+	percpu_counter_destroy(&btp->bt_io_count);
+out_destroy_lru:
+	list_lru_destroy(&btp->bt_lru);
+	return -ENOMEM;
 }
 
 struct xfs_buftarg *
@@ -2046,41 +2107,12 @@ xfs_alloc_buftarg(
 	 */
 	if (xfs_setsize_buftarg(btp, bdev_logical_block_size(btp->bt_bdev)))
 		goto error_free;
-
-	/* Set up device logical sector size mask */
-	btp->bt_logical_sectorsize = bdev_logical_block_size(btp->bt_bdev);
-	btp->bt_logical_sectormask = bdev_logical_block_size(btp->bt_bdev) - 1;
-
-	/*
-	 * Buffer IO error rate limiting. Limit it to no more than 10 messages
-	 * per 30 seconds so as to not spam logs too much on repeated errors.
-	 */
-	ratelimit_state_init(&btp->bt_ioerror_rl, 30 * HZ,
-			     DEFAULT_RATELIMIT_BURST);
-
-	if (list_lru_init(&btp->bt_lru))
+	if (xfs_init_buftarg(btp, bdev_logical_block_size(btp->bt_bdev),
+			mp->m_super->s_id))
 		goto error_free;
-
-	if (percpu_counter_init(&btp->bt_io_count, 0, GFP_KERNEL))
-		goto error_lru;
-
-	btp->bt_shrinker = shrinker_alloc(SHRINKER_NUMA_AWARE, "xfs-buf:%s",
-					  mp->m_super->s_id);
-	if (!btp->bt_shrinker)
-		goto error_pcpu;
-
-	btp->bt_shrinker->count_objects = xfs_buftarg_shrink_count;
-	btp->bt_shrinker->scan_objects = xfs_buftarg_shrink_scan;
-	btp->bt_shrinker->private_data = btp;
-
-	shrinker_register(btp->bt_shrinker);
 
 	return btp;
 
-error_pcpu:
-	percpu_counter_destroy(&btp->bt_io_count);
-error_lru:
-	list_lru_destroy(&btp->bt_lru);
 error_free:
 	kfree(btp);
 	return NULL;
