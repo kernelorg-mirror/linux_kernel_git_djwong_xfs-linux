@@ -521,8 +521,15 @@ xfs_attr_parent_match(
 {
 	ASSERT(args->value != NULL);
 
-	/* XXX: we haven't defined the parent ptr ondisk format yet */
-	return false;
+	/* Parent pointers do not use remote values */
+	if (!value)
+		return false;
+
+	/* The only value we support is a parent rec. */
+	if (valuelen != sizeof(struct xfs_parent_rec))
+		return false;
+
+	return memcmp(args->value, value, valuelen) == 0;
 }
 
 static bool
