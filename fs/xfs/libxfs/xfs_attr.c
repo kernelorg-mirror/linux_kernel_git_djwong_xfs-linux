@@ -426,6 +426,20 @@ xfs_attr_complete_op(
 	args->attr_filter &= ~XFS_ATTR_INCOMPLETE;
 	if (!do_replace)
 		return XFS_DAS_DONE;
+	if (xfs_attr_intent_op(attr) != XFS_ATTRI_OP_FLAGS_PPTR_REPLACE)
+		return replace_state;
+
+	/*
+	 * Parent pointer replacement operations require the caller to set the
+	 * old and new names and values explicitly.
+	 */
+	ASSERT(args->new_namelen > 0);
+
+	args->name = args->new_name;
+	args->namelen = args->new_namelen;
+	args->hashval = xfs_da_hashname(args->name, args->namelen);
+	args->value = args->new_value;
+	args->valuelen = args->new_valuelen;
 
 	return replace_state;
 }
