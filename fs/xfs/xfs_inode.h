@@ -331,6 +331,12 @@ static inline bool xfs_inode_has_bigallocunit(struct xfs_inode *ip)
 	return XFS_IS_REALTIME_INODE(ip) && ip->i_mount->m_sb.sb_rextsize > 1;
 }
 
+/* Decide if we need to unshare the blocks around a range that we're writing. */
+static inline bool xfs_inode_needs_cow_around(struct xfs_inode *ip)
+{
+	return xfs_is_cow_inode(ip) && xfs_inode_has_bigallocunit(ip);
+}
+
 /*
  * Return the buftarg used for data allocations on a given inode.
  */
