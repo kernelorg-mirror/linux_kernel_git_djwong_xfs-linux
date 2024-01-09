@@ -2061,7 +2061,10 @@ int dax_remap_file_range_prep(struct file *file_in, loff_t pos_in,
 			      loff_t *len, unsigned int remap_flags,
 			      const struct iomap_ops *ops)
 {
+	unsigned int blocksize = file_inode(file_out)->i_sb->s_blocksize;
+
 	return __generic_remap_file_range_prep(file_in, pos_in, file_out,
-					       pos_out, len, remap_flags, ops);
+					       pos_out, len, remap_flags, ops,
+					       blocksize);
 }
 EXPORT_SYMBOL_GPL(dax_remap_file_range_prep);
