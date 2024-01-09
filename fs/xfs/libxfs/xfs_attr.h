@@ -646,6 +646,10 @@ xfs_attri_can_use_without_log_assistance(
 	if (xfs_has_parent(mp))
 		return true;
 
+	/* Metadata directories were added after parent pointers. */
+	if (xfs_has_metadir(mp))
+		return true;
+
 	return false;
 }
 
