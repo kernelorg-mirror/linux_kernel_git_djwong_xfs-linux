@@ -248,3 +248,17 @@ xmbuf_unmap_page(
 	bp->b_pages = NULL;
 	bp->b_page_count = 0;
 }
+
+/* Is this a valid daddr within the buftarg? */
+bool
+xmbuf_verify_daddr(
+	struct xfs_buftarg	*btp,
+	xfs_daddr_t		daddr)
+{
+	struct xmbuf		*xmb = to_xmbuf(btp);
+	struct inode		*inode = file_inode(xmb->file);
+
+	ASSERT(btp->bt_flags & XFS_BUFTARG_MEM);
+
+	return daddr < (inode->i_sb->s_maxbytes >> BBSHIFT);
+}
