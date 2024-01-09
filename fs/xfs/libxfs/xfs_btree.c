@@ -541,6 +541,8 @@ xfs_btree_del_cursor(
 	case XFS_BTREE_TYPE_MEM:
 		if (cur->bc_mem.pag)
 			xfs_perag_put(cur->bc_mem.pag);
+		if (cur->bc_mem.rtg)
+			xfs_rtgroup_put(cur->bc_mem.rtg);
 		break;
 	}
 
