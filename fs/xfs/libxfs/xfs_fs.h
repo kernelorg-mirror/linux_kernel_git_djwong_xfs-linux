@@ -1029,6 +1029,7 @@ struct xfs_getparents_by_handle {
 #define XFS_IOC_GETPARENTS	_IOWR('X', 62, struct xfs_getparents)
 #define XFS_IOC_GETPARENTS_BY_HANDLE _IOWR('X', 62, struct xfs_getparents_by_handle)
 /*	XFS_IOC_RTGROUP_GEOMETRY - staging 63	   */
+/*	XFS_IOC_MAP_FREESP ---- staging 64	   */
 
 /*
  * ioctl commands that replace IRIX syssgi()'s
