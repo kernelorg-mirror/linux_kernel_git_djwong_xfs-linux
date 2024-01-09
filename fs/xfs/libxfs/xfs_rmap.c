@@ -329,6 +329,8 @@ xfs_rmap_check_btrec(
 	struct xfs_btree_cur		*cur,
 	const struct xfs_rmap_irec	*irec)
 {
+	if (xfs_btree_is_mem_rtrmap(cur->bc_ops))
+		return xfs_rtrmap_check_irec(cur->bc_mem.rtg, irec);
 	if (xfs_btree_is_rtrmap(cur->bc_ops))
 		return xfs_rtrmap_check_irec(cur->bc_ino.rtg, irec);
 	if (xfs_btree_is_mem_rmap(cur->bc_ops))
