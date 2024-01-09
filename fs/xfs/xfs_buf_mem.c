@@ -9,6 +9,9 @@
 #include "xfs_buf_mem.h"
 #include "xfs_trace.h"
 #include <linux/shmem_fs.h>
+#include "xfs_log_format.h"
+#include "xfs_trans.h"
+#include "xfs_buf_item.h"
 
 /*
  * Buffer Cache for In-Memory Files
@@ -215,4 +218,47 @@ xfbuf_verify_daddr(
 	ASSERT(btp->bt_flags & XFS_BUFTARG_MEM);
 
 	return daddr < (inode->i_sb->s_maxbytes >> BBSHIFT);
+}
+
+/* Discard the page backing this buffer. */
+static void
+xfbuf_stale(
+	struct xfs_buf		*bp)
+{
+	struct xfbuf		*xfb = to_xfbuf(bp->b_target);
+	struct inode		*inode = file_inode(xfb->file);
+	loff_t			pos;
+
+	ASSERT(bp->b_target->bt_flags & XFS_BUFTARG_MEM);
+
+	pos = BBTOB(xfs_buf_daddr(bp));
+	shmem_truncate_range(inode, pos, pos + BBTOB(bp->b_length) - 1);
+}
+
+/*
+ * Detach this (probably dirty) xfbuf buffer from the transaction by any means
+ * necessary.  Attach the buffer to the delwri list if it needs to be
+ * written.
+ */
+void
+xfbuf_trans_bdetach(
+	struct xfs_trans	*tp,
+	struct xfs_buf		*bp,
+	struct list_head	*buf_list)
+{
+	struct xfs_buf_log_item	*bli = bp->b_log_item;
+
+	ASSERT(bli != NULL);
+
+	if (bli->bli_flags & XFS_BLI_STALE)
+		xfbuf_stale(bp);
+
+	bli->bli_flags &= ~(XFS_BLI_DIRTY | XFS_BLI_ORDERED |
+			    XFS_BLI_LOGGED | XFS_BLI_STALE);
+	clear_bit(XFS_LI_DIRTY, &bli->bli_item.li_flags);
+
+	while (bp->b_log_item != NULL)
+		xfs_trans_bdetach(tp, bp);
+
+	/* direct mapped buffers do not need writing */
 }
