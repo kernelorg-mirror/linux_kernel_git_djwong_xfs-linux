@@ -12,6 +12,7 @@
 #include "xfs_btree.h"
 #include "xfs_ag.h"
 #include "xfs_health.h"
+#include "xfs_rtgroup.h"
 #include "scrub/scrub.h"
 #include "scrub/health.h"
 #include "scrub/common.h"
@@ -74,6 +75,7 @@ enum xchk_health_group {
 	XHG_RT,
 	XHG_AG,
 	XHG_INO,
+	XHG_RTGROUP,
 };
 
 struct xchk_health_map {
@@ -162,12 +164,16 @@ xchk_mark_all_healthy(
 	struct xfs_mount	*mp)
 {
 	struct xfs_perag	*pag;
+	struct xfs_rtgroup	*rtg;
 	xfs_agnumber_t		agno;
+	xfs_rgnumber_t		rgno;
 
 	xfs_fs_mark_healthy(mp, XFS_SICK_FS_INDIRECT);
 	xfs_rt_mark_healthy(mp, XFS_SICK_RT_INDIRECT);
 	for_each_perag(mp, agno, pag)
 		xfs_ag_mark_healthy(pag, XFS_SICK_AG_INDIRECT);
+	for_each_rtgroup(mp, rgno, rtg)
+		xfs_rtgroup_mark_healthy(rtg, XFS_SICK_RT_INDIRECT);
 }
 
 /*
@@ -185,6 +191,7 @@ xchk_update_health(
 	struct xfs_scrub	*sc)
 {
 	struct xfs_perag	*pag;
+	struct xfs_rtgroup	*rtg;
 	bool			bad;
 
 	/*
@@ -243,6 +250,14 @@ xchk_update_health(
 		else
 			xfs_rt_mark_healthy(sc->mp, sc->sick_mask);
 		break;
+	case XHG_RTGROUP:
+		rtg = xfs_rtgroup_get(sc->mp, sc->sm->sm_agno);
+		if (bad)
+			xfs_rtgroup_mark_corrupt(rtg, sc->sick_mask);
+		else
+			xfs_rtgroup_mark_healthy(rtg, sc->sick_mask);
+		xfs_rtgroup_put(rtg);
+		break;
 	default:
 		ASSERT(0);
 		break;
@@ -296,7 +311,9 @@ xchk_health_record(
 {
 	struct xfs_mount	*mp = sc->mp;
 	struct xfs_perag	*pag;
+	struct xfs_rtgroup	*rtg;
 	xfs_agnumber_t		agno;
+	xfs_rgnumber_t		rgno;
 
 	unsigned int		sick;
 	unsigned int		checked;
@@ -312,6 +329,12 @@ xchk_health_record(
 	for_each_perag(mp, agno, pag) {
 		xfs_ag_measure_sickness(pag, &sick, &checked);
 		if (sick & XFS_SICK_AG_PRIMARY)
+			xchk_set_corrupt(sc);
+	}
+
+	for_each_rtgroup(mp, rgno, rtg) {
+		xfs_rtgroup_measure_sickness(rtg, &sick, &checked);
+		if (sick & XFS_SICK_RT_PRIMARY)
 			xchk_set_corrupt(sc);
 	}
 
