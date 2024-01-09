@@ -191,6 +191,17 @@ config XFS_ONLINE_REPAIR
 
 	  If unsure, say N.
 
+config XFS_EXPERIMENTAL_IOCTLS
+	bool "XFS experimental system calls"
+	default y if XFS_DEBUG
+	depends on XFS_FS
+	help
+	  If you say Y here, the kernel will be built with support for new
+	  system calls that are not yet ready to become part of the stable
+	  kernel ABI.  This enables testing for early adopters.
+
+	  If unsure, say N.
+
 config XFS_WARN
 	bool "XFS Verbose Warnings"
 	depends on XFS_FS && !XFS_DEBUG
