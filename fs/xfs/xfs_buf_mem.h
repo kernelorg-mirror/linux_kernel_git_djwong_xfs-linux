@@ -22,6 +22,9 @@ void xfbuf_free(struct xfbuf *xfb);
 int xfbuf_map_pages(struct xfs_buf *bp, xfs_buf_flags_t flags);
 void xfbuf_unmap_pages(struct xfs_buf *bp);
 bool xfbuf_verify_daddr(struct xfs_buftarg *btp, xfs_daddr_t daddr);
+void xfbuf_trans_bdetach(struct xfs_trans *tp, struct xfs_buf *bp,
+		struct list_head *buf_list);
+#define xfbuf_bwrite(...)		(0)
 #else
 # define xfbuf_map_pages(...)		(-ENOMEM)
 # define xfbuf_unmap_pages(...)		((void)0)
