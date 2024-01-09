@@ -349,3 +349,59 @@ xfs_parent_verify_irec(
 		return false;
 	return true;
 }
+
+/* Initialize an incore parent pointer. */
+void
+xfs_parent_irec_init(
+	struct xfs_parent_irec	*pptr,
+	struct xfs_inode	*dp,
+	const struct xfs_name	*name)
+{
+	pptr->p_ino = dp->i_ino;
+	pptr->p_gen = VFS_I(dp)->i_generation;
+	pptr->p_namelen = name->len;
+	memcpy(pptr->p_name, name->name, name->len);
+}
+
+static inline void
+xfs_parent_scratch_init(
+	struct xfs_trans		*tp,
+	struct xfs_inode		*child,
+	xfs_ino_t			owner,
+	const struct xfs_parent_irec	*pptr,
+	struct xfs_parent_scratch	*scr)
+{
+	xfs_parent_irec_to_disk(&scr->rec, pptr);
+	memset(&scr->args, 0, sizeof(struct xfs_da_args));
+	xfs_parent_args_init(&scr->args, tp, &scr->rec, child, owner,
+			pptr->p_name, pptr->p_namelen);
+}
+
+/*
+ * Look up the @name associated with the parent pointer (@pptr) of @ip.
+ * Caller must hold at least ILOCK_SHARED.  Returns 0 if the pointer is found,
+ * -ENOATTR if there is no match, or a negative errno.  The scratchpad need not
+ * be initialized.
+ */
+int
+xfs_parent_lookup(
+	struct xfs_trans		*tp,
+	struct xfs_inode		*ip,
+	const struct xfs_parent_irec	*pptr,
+	struct xfs_parent_scratch	*scr)
+{
+	int				error;
+
+	/*
+	 * Make sure the attr fork iext tree is loaded in transaction context
+	 * before we start down the rest of the call path.
+	 */
+	if (xfs_inode_hasattr(ip)) {
+		error = xfs_iread_extents(tp, ip, XFS_ATTR_FORK);
+		if (error)
+			return error;
+	}
+
+	xfs_parent_scratch_init(tp, ip, ip->i_ino, pptr, scr);
+	return xfs_attr_get_ilocked(&scr->args);
+}
