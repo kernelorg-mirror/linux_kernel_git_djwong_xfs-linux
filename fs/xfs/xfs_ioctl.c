@@ -976,10 +976,12 @@ xfs_ioc_ag_geometry(
 
 	if (copy_from_user(&ageo, arg, sizeof(ageo)))
 		return -EFAULT;
-	if (ageo.ag_flags)
+	if (ageo.ag_flags & ~XFS_AG_FLAG_ALL)
 		return -EINVAL;
 	if (memchr_inv(&ageo.ag_reserved, 0, sizeof(ageo.ag_reserved)))
 		return -EINVAL;
+	if ((ageo.ag_flags & XFS_AG_FLAG_UPDATE) && !capable(CAP_SYS_ADMIN))
+		return -EPERM;
 
 	pag = xfs_perag_get(mp, ageo.ag_number);
 	if (!pag)
