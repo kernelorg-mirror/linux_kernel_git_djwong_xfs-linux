@@ -260,6 +260,37 @@ larp_show(
 }
 XFS_SYSFS_ATTR_RW(larp);
 
+/* Logging of the outcomes of everything that scrub does */
+STATIC ssize_t
+scrub_whine_store(
+	struct kobject	*kobject,
+	const char	*buf,
+	size_t		count)
+{
+	int		ret;
+	int		val;
+
+	ret = kstrtoint(buf, 0, &val);
+	if (ret)
+		return ret;
+
+	if (val < -1 || val > num_possible_cpus())
+		return -EINVAL;
+
+	xfs_globals.scrub_whine = val;
+
+	return count;
+}
+
+STATIC ssize_t
+scrub_whine_show(
+	struct kobject	*kobject,
+	char		*buf)
+{
+	return sysfs_emit(buf, "%d\n", xfs_globals.scrub_whine);
+}
+XFS_SYSFS_ATTR_RW(scrub_whine);
+
 STATIC ssize_t
 bload_leaf_slack_store(
 	struct kobject	*kobject,
@@ -319,6 +350,7 @@ static struct attribute *xfs_dbg_attrs[] = {
 	ATTR_LIST(always_cow),
 	ATTR_LIST(pwork_threads),
 	ATTR_LIST(larp),
+	ATTR_LIST(scrub_whine),
 	ATTR_LIST(bload_leaf_slack),
 	ATTR_LIST(bload_node_slack),
 	NULL,
