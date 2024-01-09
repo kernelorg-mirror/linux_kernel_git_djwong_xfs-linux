@@ -29,6 +29,7 @@
 #include "xfs_iomap.h"
 #include "xfs_reflink.h"
 #include "xfs_rtbitmap.h"
+#include "xfs_exchmaps.h"
 
 /* Kernel only BMAP related definitions and functions */
 
