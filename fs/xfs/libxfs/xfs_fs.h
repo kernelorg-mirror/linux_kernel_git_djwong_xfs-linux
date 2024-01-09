@@ -243,6 +243,8 @@ typedef struct xfs_fsop_resblks {
 /* file range exchange available to userspace */
 #define XFS_FSOP_GEOM_FLAGS_EXCHANGE_RANGE	(1 << 24)
 
+#define XFS_FSOP_GEOM_FLAGS_PARENT	(1U << 30) /* parent pointers */
+
 /*
  * Minimum and maximum sizes need for growth checks.
  *
