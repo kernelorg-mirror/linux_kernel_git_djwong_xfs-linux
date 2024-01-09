@@ -491,6 +491,7 @@ xfs_attri_validate(
 		return false;
 
 	switch (op) {
+	case XFS_ATTRI_OP_FLAGS_PPTR_SET:
 	case XFS_ATTRI_OP_FLAGS_PPTR_REMOVE:
 		if (!xfs_has_parent(mp))
 			return false;
@@ -595,6 +596,7 @@ xfs_attri_recover_work(
 	xfs_attr_sethash(args);
 
 	switch (xfs_attr_intent_op(attr)) {
+	case XFS_ATTRI_OP_FLAGS_PPTR_SET:
 	case XFS_ATTRI_OP_FLAGS_SET:
 	case XFS_ATTRI_OP_FLAGS_REPLACE:
 		args->total = xfs_attr_calc_size(args, &local);
@@ -778,6 +780,9 @@ xfs_attr_defer_parent(
 
 	switch (op) {
 	case XFS_ATTR_DEFER_SET:
+		new->xattri_op_flags = XFS_ATTRI_OP_FLAGS_PPTR_SET;
+		new->xattri_dela_state = xfs_attr_init_add_state(args);
+		break;
 	case XFS_ATTR_DEFER_REPLACE:
 		/* will be added in subsequent patches */
 		ASSERT(0);
@@ -841,6 +846,7 @@ xlog_recover_attri_commit_pass2(
 	op = xfs_attr_log_item_op(attri_formatp);
 	switch (op) {
 	case XFS_ATTRI_OP_FLAGS_PPTR_REMOVE:
+	case XFS_ATTRI_OP_FLAGS_PPTR_SET:
 		/* Log item, attr name, attr value */
 		if (item->ri_total != 3) {
 			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
@@ -926,6 +932,7 @@ xlog_recover_attri_commit_pass2(
 		}
 		fallthrough;
 	case XFS_ATTRI_OP_FLAGS_PPTR_REMOVE:
+	case XFS_ATTRI_OP_FLAGS_PPTR_SET:
 	case XFS_ATTRI_OP_FLAGS_SET:
 	case XFS_ATTRI_OP_FLAGS_REPLACE:
 		/*
@@ -933,7 +940,7 @@ xlog_recover_attri_commit_pass2(
 		 * and do not take a newname.  Values are optional for set and
 		 * replace.
 		 *
-		 * Name-value remove operations must have a name, do not
+		 * Name-value set/remove operations must have a name, do not
 		 * take a newname, and can take a value.
 		 */
 		if (attr_name == NULL || name_len == 0) {
