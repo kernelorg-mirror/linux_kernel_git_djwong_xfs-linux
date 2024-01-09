@@ -1278,6 +1278,35 @@ xfs_diflags_to_iflags(
 	inode->i_flags |= flags;
 }
 
+static void
+xfs_setup_metadata_inode_lock_class(
+	struct xfs_inode	*ip)
+{
+	struct inode		*inode = &ip->i_vnode;
+	/*
+	 * Metadata directories and files are not exposed to userspace, which
+	 * means that they never access any of the VFS IO locks and never
+	 * experience page faults.  Give them separate locking classes so that
+	 * lockdep will not complain about conflicts that cannot happen.
+	 */
+	static struct lock_class_key xfs_metadata_file_ilock_class;
+	static struct lock_class_key xfs_metadata_dir_ilock_class;
+
+	if (S_ISDIR(inode->i_mode)) {
+		/*
+		 * We set the i_rwsem class here to avoid potential races with
+		 * lockdep_annotate_inode_mutex_key() reinitialising the lock
+		 * after a filehandle lookup has already found the inode in
+		 * cache before it has been unlocked via unlock_new_inode().
+		 */
+		lockdep_set_class(&inode->i_rwsem,
+				  &inode->i_sb->s_type->i_mutex_dir_key);
+		lockdep_set_class(&ip->i_lock, &xfs_metadata_dir_ilock_class);
+	} else {
+		lockdep_set_class(&ip->i_lock, &xfs_metadata_file_ilock_class);
+	}
+}
+
 /*
  * Initialize the Linux inode.
  *
@@ -1292,6 +1321,7 @@ xfs_setup_inode(
 {
 	struct inode		*inode = &ip->i_vnode;
 	gfp_t			gfp_mask;
+	bool			is_meta = xfs_is_metadata_inode(ip);
 
 	inode->i_ino = ip->i_ino;
 	inode->i_state |= I_NEW;
@@ -1303,7 +1333,19 @@ xfs_setup_inode(
 	i_size_write(inode, ip->i_disk_size);
 	xfs_diflags_to_iflags(ip, true);
 
-	if (S_ISDIR(inode->i_mode)) {
+	/*
+	 * Mark our metadata files as private so that LSMs and the ACL code
+	 * don't try to add their own metadata or reason about these files,
+	 * and users cannot ever obtain file handles to them.
+	 */
+	if (is_meta) {
+		inode->i_flags |= S_PRIVATE;
+		inode->i_opflags &= ~IOP_XATTR;
+	}
+
+	if (is_meta) {
+		xfs_setup_metadata_inode_lock_class(ip);
+	} else if (S_ISDIR(inode->i_mode)) {
 		/*
 		 * We set the i_rwsem class here to avoid potential races with
 		 * lockdep_annotate_inode_mutex_key() reinitialising the lock
