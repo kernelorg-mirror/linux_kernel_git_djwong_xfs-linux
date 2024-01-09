@@ -26,7 +26,7 @@
  * Callers must not be running any transactions or hold any inode locks.
  * Permission to use the log items remains until clean unmount time.
  */
-static inline int
+int
 xfs_attr_grab_log_assist(
 	struct xfs_mount	*mp)
 {
