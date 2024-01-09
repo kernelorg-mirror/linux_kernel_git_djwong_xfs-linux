@@ -25,4 +25,9 @@ struct page *xfile_get_page(struct xfile *xf, loff_t offset, unsigned int len,
 		unsigned int flags);
 void xfile_put_page(struct xfile *xf, struct page *page);
 
+static inline unsigned long long xfile_bytes(struct xfile *xf)
+{
+	return file_inode(xf->file)->i_blocks << SECTOR_SHIFT;
+}
+
 #endif /* __XFS_SCRUB_XFILE_H__ */
