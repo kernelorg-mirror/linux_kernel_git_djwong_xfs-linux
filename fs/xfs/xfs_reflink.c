@@ -1614,7 +1614,6 @@ xfs_reflink_zero_posteof(
 	return xfs_zero_range(ip, isize, pos - isize, NULL);
 }
 
-#ifdef CONFIG_XFS_RT
 /*
  * Adjust the length of the remap operation to end on an allocation unit (AU)
  * boundary.
@@ -1661,9 +1660,6 @@ xfs_reflink_adjust_rtbigalloc_len(
 	trace_xfs_reflink_adjust_rtbigalloc_len(src, pos_in, *len, dest, pos_out);
 	return 0;
 }
-#else
-# define xfs_reflink_adjust_rtbigalloc_len(...)		(0)
-#endif /* CONFIG_XFS_RT */
 
 /*
  * Check the alignment of a remap request when the allocation unit size isn't a
@@ -1803,9 +1799,17 @@ xfs_reflink_remap_prep(
 	if (IS_DAX(inode_in) != IS_DAX(inode_out))
 		goto out_unlock;
 
-	/* XXX Can't reflink forcealign files for now */
-	if (xfs_inode_force_align(src) || xfs_inode_force_align(dest))
-		goto out_unlock;
+	/* Check non-power of two alignment issues, if necessary. */
+	if ((xfs_inode_force_align(src) || xfs_inode_force_align(dest)) &&
+	    !is_power_of_2(alloc_unit)) {
+		ret = xfs_reflink_remap_check_rtalign(src, pos_in, dest,
+				pos_out, len, remap_flags);
+		if (ret)
+			goto out_unlock;
+
+		/* Do the VFS checks with the regular block alignment. */
+		alloc_unit = src->i_mount->m_sb.sb_blocksize;
+	}
 
 	/* Check non-power of two alignment issues, if necessary. */
 	if (XFS_IS_REALTIME_INODE(dest) && !is_power_of_2(alloc_unit)) {
