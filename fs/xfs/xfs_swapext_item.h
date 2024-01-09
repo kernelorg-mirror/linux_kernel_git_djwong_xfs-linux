@@ -53,4 +53,8 @@ struct xfs_sxd_log_item {
 extern struct kmem_cache	*xfs_sxi_cache;
 extern struct kmem_cache	*xfs_sxd_cache;
 
+struct xfs_swapext_intent;
+
+void xfs_swapext_defer_add(struct xfs_trans *tp, struct xfs_swapext_intent *sxi);
+
 #endif	/* __XFS_SWAPEXT_ITEM_H__ */
