@@ -323,6 +323,7 @@ const struct xfs_btree_ops xfs_refcountbt_ops = {
 	.ptr_len		= XFS_BTREE_SHORT_PTR_LEN,
 	.lru_refs		= XFS_REFC_BTREE_REF,
 	.statoff		= XFS_STATS_CALC_INDEX(xs_refcbt_2),
+	.type			= XFS_BTREE_TYPE_AG,
 
 	.dup_cursor		= xfs_refcountbt_dup_cursor,
 	.set_root		= xfs_refcountbt_set_root,

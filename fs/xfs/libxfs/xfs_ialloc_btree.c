@@ -404,6 +404,7 @@ const struct xfs_btree_ops xfs_inobt_ops = {
 	.ptr_len		= XFS_BTREE_SHORT_PTR_LEN,
 	.lru_refs		= XFS_INO_BTREE_REF,
 	.statoff		= XFS_STATS_CALC_INDEX(xs_ibt_2),
+	.type			= XFS_BTREE_TYPE_AG,
 
 	.dup_cursor		= xfs_inobt_dup_cursor,
 	.set_root		= xfs_inobt_set_root,
@@ -429,6 +430,7 @@ const struct xfs_btree_ops xfs_finobt_ops = {
 	.ptr_len		= XFS_BTREE_SHORT_PTR_LEN,
 	.lru_refs		= XFS_INO_BTREE_REF,
 	.statoff		= XFS_STATS_CALC_INDEX(xs_fibt_2),
+	.type			= XFS_BTREE_TYPE_AG,
 
 	.dup_cursor		= xfs_inobt_dup_cursor,
 	.set_root		= xfs_finobt_set_root,

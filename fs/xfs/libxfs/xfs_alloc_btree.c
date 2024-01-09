@@ -460,6 +460,7 @@ const struct xfs_btree_ops xfs_bnobt_ops = {
 	.ptr_len		= XFS_BTREE_SHORT_PTR_LEN,
 	.lru_refs		= XFS_ALLOC_BTREE_REF,
 	.statoff		= XFS_STATS_CALC_INDEX(xs_abtb_2),
+	.type			= XFS_BTREE_TYPE_AG,
 
 	.dup_cursor		= xfs_allocbt_dup_cursor,
 	.set_root		= xfs_allocbt_set_root,
@@ -487,6 +488,7 @@ const struct xfs_btree_ops xfs_cntbt_ops = {
 	.geom_flags		= XFS_BTGEO_LASTREC_UPDATE,
 	.lru_refs		= XFS_ALLOC_BTREE_REF,
 	.statoff		= XFS_STATS_CALC_INDEX(xs_abtc_2),
+	.type			= XFS_BTREE_TYPE_AG,
 
 	.dup_cursor		= xfs_allocbt_dup_cursor,
 	.set_root		= xfs_allocbt_set_root,

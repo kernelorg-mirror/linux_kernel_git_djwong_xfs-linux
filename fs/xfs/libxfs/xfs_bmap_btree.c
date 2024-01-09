@@ -528,9 +528,9 @@ const struct xfs_btree_ops xfs_bmbt_ops = {
 	.rec_len		= sizeof(xfs_bmbt_rec_t),
 	.key_len		= sizeof(xfs_bmbt_key_t),
 	.ptr_len		= XFS_BTREE_LONG_PTR_LEN,
-	.geom_flags		= XFS_BTGEO_ROOT_IN_INODE,
 	.lru_refs		= XFS_BMAP_BTREE_REF,
 	.statoff		= XFS_STATS_CALC_INDEX(xs_bmbt_2),
+	.type			= XFS_BTREE_TYPE_INODE,
 
 	.dup_cursor		= xfs_bmbt_dup_cursor,
 	.update_cursor		= xfs_bmbt_update_cursor,
