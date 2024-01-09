@@ -27,6 +27,9 @@
 #include "xfs_xattr.h"
 #include "xfs_parent.h"
 #include "xfs_trans_space.h"
+#include "xfs_attr_item.h"
+
+struct kmem_cache		*xfs_parent_args_cache;
 
 /*
  * Parent pointer attribute handling.
@@ -138,4 +141,72 @@ xfs_parent_hashattr(
 	}
 
 	return xfs_parent_hashval(mp, name, namelen, be64_to_cpu(rec->p_ino));
+}
+
+/* Initializes a xfs_parent_rec to be stored as an attribute name. */
+static inline void
+xfs_parent_rec_init(
+	struct xfs_parent_rec		*rec,
+	const struct xfs_inode		*dp)
+{
+	rec->p_ino = cpu_to_be64(dp->i_ino);
+	rec->p_gen = cpu_to_be32(VFS_IC(dp)->i_generation);
+}
+
+/*
+ * Initialize the parent pointer arguments structure.  Caller must have zeroed
+ * the contents of @args.  @tp is only required for updates.
+ */
+static void
+xfs_parent_da_args_init(
+	struct xfs_da_args	*args,
+	struct xfs_trans	*tp,
+	struct xfs_parent_rec	*rec,
+	struct xfs_inode	*child,
+	xfs_ino_t		owner,
+	const unsigned char	*parent_name,
+	unsigned int		parent_namelen)
+{
+	args->geo = child->i_mount->m_attr_geo;
+	args->whichfork = XFS_ATTR_FORK;
+	args->attr_filter = XFS_ATTR_PARENT;
+	args->op_flags = XFS_DA_OP_LOGGED | XFS_DA_OP_OKNOENT;
+	args->trans = tp;
+	args->dp = child;
+	args->owner = owner;
+	args->name = parent_name;
+	args->namelen = parent_namelen;
+	args->value = rec;
+	args->valuelen = sizeof(struct xfs_parent_rec);
+	xfs_attr_sethash(args);
+}
+
+/*
+ * Set up a parent pointer add, lookup, or remove operation; or the first
+ * step of a replace operation.
+ */
+static void
+xfs_parent_args_setname(
+	struct xfs_parent_args	*ppargs,
+	struct xfs_trans	*tp,
+	struct xfs_inode	*dp,
+	const struct xfs_name	*parent_name,
+	struct xfs_inode	*child)
+{
+	xfs_parent_rec_init(&ppargs->rec, dp);
+	xfs_parent_da_args_init(&ppargs->args, tp, &ppargs->rec, child,
+			child->i_ino, parent_name->name, parent_name->len);
+}
+
+/* Add a parent pointer to reflect a dirent addition. */
+void
+xfs_parent_addname(
+	struct xfs_trans	*tp,
+	struct xfs_parent_args	*ppargs,
+	struct xfs_inode	*dp,
+	const struct xfs_name	*parent_name,
+	struct xfs_inode	*child)
+{
+	xfs_parent_args_setname(ppargs, tp, dp, parent_name, child);
+	xfs_attr_defer_parent(&ppargs->args, XFS_ATTR_DEFER_SET);
 }
