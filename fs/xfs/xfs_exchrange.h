@@ -37,4 +37,14 @@ struct xfs_exchrange {
 
 int xfs_exchange_range(struct xfs_exchrange *fxr);
 
+/* XFS-specific parts of file exchanges */
+
+struct xfs_exchmaps_req;
+
+void xfs_exchrange_ilock(struct xfs_trans *tp, struct xfs_inode *ip1,
+		struct xfs_inode *ip2);
+void xfs_exchrange_iunlock(struct xfs_inode *ip1, struct xfs_inode *ip2);
+
+int xfs_exchrange_estimate(struct xfs_exchmaps_req *req);
+
 #endif /* __XFS_EXCHRANGE_H__ */
