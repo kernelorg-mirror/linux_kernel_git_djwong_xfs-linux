@@ -103,7 +103,12 @@ typedef struct xfs_sb {
 	xfs_ino_t	sb_rootino;	/* root inode number */
 	xfs_ino_t	sb_rbmino;	/* bitmap inode for realtime extents */
 	xfs_ino_t	sb_rsumino;	/* summary inode for rt bitmap */
-	xfs_agblock_t	sb_rextsize;	/* realtime extent size, blocks */
+	/*
+	 * Realtime extent size, blocks.  If the FORCEALIGN feature is set,
+	 * the allocation group size must be a multiple of this value, and
+	 * file data allocations will be aligned to this value.
+	 */
+	xfs_agblock_t	sb_rextsize;
 	xfs_agblock_t	sb_agblocks;	/* size of an allocation group */
 	xfs_agnumber_t	sb_agcount;	/* number of allocation groups */
 	xfs_extlen_t	sb_rbmblocks;	/* number of rt bitmap blocks */
@@ -388,6 +393,8 @@ xfs_sb_has_compat_feature(
 #define XFS_SB_FEAT_RO_COMPAT_REFLINK  (1 << 2)		/* reflinked files */
 #define XFS_SB_FEAT_RO_COMPAT_INOBTCNT (1 << 3)		/* inobt block counts */
 #define XFS_SB_FEAT_RO_COMPAT_VERITY   (1 << 4)		/* fs-verity */
+/* all AGs and data allocations must be aligned to rextsize, even for !rt files */
+#define XFS_SB_FEAT_RO_COMPAT_FORCEALIGN (1 << 30)
 #define XFS_SB_FEAT_RO_COMPAT_ALL \
 		(XFS_SB_FEAT_RO_COMPAT_FINOBT   | \
 		 XFS_SB_FEAT_RO_COMPAT_RMAPBT   | \
@@ -1192,6 +1199,8 @@ static inline void xfs_dinode_put_rdev(struct xfs_dinode *dip, xfs_dev_t rdev)
 #define XFS_DIFLAG2_BIGTIME_BIT	3	/* big timestamps */
 #define XFS_DIFLAG2_NREXT64_BIT	4	/* large extent counters */
 #define XFS_DIFLAG2_VERITY_BIT	5	/* inode sealed by fsverity */
+/* data extent mappings for regular files must be aligned to extent size hint */
+#define XFS_DIFLAG2_FORCEALIGN_BIT 6
 #define XFS_DIFLAG2_METADIR_BIT	63	/* filesystem metadata */
 
 #define XFS_DIFLAG2_DAX		(1ULL << XFS_DIFLAG2_DAX_BIT)
@@ -1226,10 +1235,12 @@ static inline void xfs_dinode_put_rdev(struct xfs_dinode *dip, xfs_dev_t rdev)
  */
 #define XFS_DIFLAG2_METADIR	(1ULL << XFS_DIFLAG2_METADIR_BIT)
 
+#define XFS_DIFLAG2_FORCEALIGN	(1ULL << XFS_DIFLAG2_FORCEALIGN_BIT)
+
 #define XFS_DIFLAG2_ANY \
 	(XFS_DIFLAG2_DAX | XFS_DIFLAG2_REFLINK | XFS_DIFLAG2_COWEXTSIZE | \
 	 XFS_DIFLAG2_BIGTIME | XFS_DIFLAG2_NREXT64 | XFS_DIFLAG2_METADIR | \
-	 XFS_DIFLAG2_VERITY)
+	 XFS_DIFLAG2_VERITY | XFS_DIFLAG2_FORCEALIGN)
 
 static inline bool xfs_dinode_has_bigtime(const struct xfs_dinode *dip)
 {
