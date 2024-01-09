@@ -92,5 +92,13 @@ void xfs_parent_irec_init(struct xfs_parent_irec *pptr,
 int xfs_parent_lookup(struct xfs_trans *tp, struct xfs_inode *ip,
 		const struct xfs_name *name, const struct xfs_parent_irec *pptr,
 		struct xfs_parent_args *scratch);
+int xfs_parent_set(struct xfs_inode *ip, xfs_ino_t owner,
+		const struct xfs_name *name,
+		const struct xfs_parent_irec *pptr,
+		struct xfs_parent_args *scratch);
+int xfs_parent_unset(struct xfs_inode *ip, xfs_ino_t owner,
+		const struct xfs_name *name,
+		const struct xfs_parent_irec *pptr,
+		struct xfs_parent_args *scratch);
 
 #endif /* __XFS_PARENT_H__ */
