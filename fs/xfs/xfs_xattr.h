@@ -8,6 +8,8 @@
 
 enum xfs_attr_update;
 int xfs_attr_change(struct xfs_da_args *args, enum xfs_attr_update op);
+int xfs_attr_grab_log_assist(struct xfs_mount *mp);
+void xfs_attr_rele_log_assist(struct xfs_mount *mp);
 
 extern const struct xattr_handler * const xfs_xattr_handlers[];
 
