@@ -50,6 +50,6 @@ int xfs_xchg_range_grab_log_assist(struct xfs_mount *mp, bool force,
 int xfs_xchg_range(struct xfs_inode *ip1, struct xfs_inode *ip2,
 		const struct xfs_exch_range *fxr, unsigned int xchg_flags);
 int xfs_xchg_range_prep(struct file *file1, struct file *file2,
-		struct xfs_exch_range *fxr);
+		struct xfs_exch_range *fxr, unsigned int xchg_flags);
 
 #endif /* __XFS_XCHGRANGE_H__ */
