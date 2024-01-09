@@ -405,3 +405,45 @@ xfs_parent_lookup(
 	xfs_parent_scratch_init(tp, ip, ip->i_ino, pptr, scr);
 	return xfs_attr_get_ilocked(&scr->args);
 }
+
+/*
+ * Attach the parent pointer (@pptr -> @name) to @ip immediately.  Caller must
+ * not have a transaction or hold the ILOCK.  This is for specialized repair
+ * functions only.  The scratchpad need not be initialized.
+ */
+int
+xfs_parent_set(
+	struct xfs_inode		*ip,
+	xfs_ino_t			owner,
+	const struct xfs_parent_irec	*pptr,
+	struct xfs_parent_scratch	*scr)
+{
+	if (XFS_IS_CORRUPT(ip->i_mount,
+			!xfs_parent_verify_irec(ip->i_mount, pptr))) {
+		return -EFSCORRUPTED;
+	}
+
+	xfs_parent_scratch_init(NULL, ip, owner, pptr, scr);
+	return xfs_attr_setname(&scr->args, true);
+}
+
+/*
+ * Remove the parent pointer (@rec -> @name) from @ip immediately.  Caller must
+ * not have a transaction or hold the ILOCK.  This is for specialized repair
+ * functions only.  The scratchpad need not be initialized.
+ */
+int
+xfs_parent_unset(
+	struct xfs_inode		*ip,
+	xfs_ino_t			owner,
+	const struct xfs_parent_irec	*pptr,
+	struct xfs_parent_scratch	*scr)
+{
+	if (XFS_IS_CORRUPT(ip->i_mount,
+			!xfs_parent_verify_irec(ip->i_mount, pptr))) {
+		return -EFSCORRUPTED;
+	}
+
+	xfs_parent_scratch_init(NULL, ip, owner, pptr, scr);
+	return xfs_attr_removename(&scr->args, true);
+}
