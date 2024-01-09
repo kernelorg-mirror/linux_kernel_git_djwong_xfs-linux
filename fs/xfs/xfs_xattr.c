@@ -21,6 +21,12 @@
 #include <linux/posix_acl_xattr.h>
 
 /*
+ * This file defines functions to work with externally visible extended
+ * attributes, such as those in user, system, or security namespaces.  They
+ * should not be used for internally used attributes.  Consider xfs_attr.c.
+ */
+
+/*
  * Get permission to use log-assisted atomic exchange of file extents.
  * Callers must not be running any transactions or hold any ILOCKs.
  */
@@ -213,6 +219,10 @@ xfs_xattr_put_listent(
 	int prefix_len;
 
 	ASSERT(context->count >= 0);
+
+	/* Don't expose private xattr namespaces. */
+	if (flags & XFS_ATTR_PRIVATE_NSP_MASK)
+		return;
 
 	if (flags & XFS_ATTR_ROOT) {
 #ifdef CONFIG_XFS_POSIX_ACL
