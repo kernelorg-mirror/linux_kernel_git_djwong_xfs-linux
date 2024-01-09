@@ -1367,12 +1367,22 @@ xfs_dir_open(
 	return error;
 }
 
+/*
+ * When we release the file, we don't want it to trim EOF blocks if it is a
+ * readonly context.  This avoids open/read/close workloads from removing
+ * EOF blocks that other writers depend upon to reduce fragmentation.
+ */
 STATIC int
 xfs_file_release(
 	struct inode	*inode,
-	struct file	*filp)
+	struct file	*file)
 {
-	return xfs_release(XFS_I(inode));
+	bool		free_eof_blocks = true;
+
+	if ((file->f_mode & (FMODE_WRITE | FMODE_READ)) == FMODE_READ)
+		free_eof_blocks = false;
+
+	return xfs_release(XFS_I(inode), free_eof_blocks);
 }
 
 STATIC int
