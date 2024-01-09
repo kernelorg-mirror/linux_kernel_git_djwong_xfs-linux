@@ -166,6 +166,7 @@ xfs_initialize_rtgroups(
 		memset(&rtg->lock_class, 0, sizeof(rtg->lock_class));
 		lockdep_register_key(&rtg->lock_class);
 		xfs_defer_drain_init(&rtg->rtg_intents_drain);
+		xfs_hooks_init(&rtg->rtg_rmap_update_hooks);
 #endif /* __KERNEL__ */
 
 		/* Active ref owned by mount indicates rtgroup is online. */
