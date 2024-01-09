@@ -45,6 +45,7 @@
 #include "xfs_imeta.h"
 #include "xfs_rtgroup.h"
 #include "xfs_rmap.h"
+#include "xfs_refcount.h"
 
 #ifdef CONFIG_XFS_BTREE_IN_MEM
 static inline unsigned long
