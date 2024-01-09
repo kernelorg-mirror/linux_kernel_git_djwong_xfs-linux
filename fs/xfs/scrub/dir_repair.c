@@ -38,8 +38,10 @@
 #include "scrub/xfile.h"
 #include "scrub/xfarray.h"
 #include "scrub/xfblob.h"
+#include "scrub/iscan.h"
 #include "scrub/readdir.h"
 #include "scrub/reap.h"
+#include "scrub/findparent.h"
 
 /*
  * Directory Repair
@@ -108,10 +110,10 @@ struct xrep_dir {
 	struct xfs_da_args	args;
 
 	/*
-	 * This is the parent that we're going to set on the reconstructed
-	 * directory.
+	 * Information used to scan the filesystem to find the inumber of the
+	 * dotdot entry for this directory.
 	 */
-	xfs_ino_t		parent_ino;
+	struct xrep_parent_scan_info pscan;
 
 	/* How many subdirectories did we find? */
 	uint64_t		subdirs;
@@ -130,6 +132,7 @@ xrep_dir_teardown(
 {
 	struct xrep_dir		*rd = sc->buf;
 
+	xrep_findparent_scan_teardown(&rd->pscan);
 	xfblob_destroy(rd->dir_names);
 	xfarray_destroy(rd->dir_entries);
 }
@@ -141,6 +144,8 @@ xrep_setup_directory(
 {
 	struct xrep_dir		*rd;
 	int			error;
+
+	xchk_fsgates_enable(sc, XCHK_FSGATES_DIRENTS);
 
 	error = xrep_tempfile_create(sc, S_IFDIR);
 	if (error)
@@ -177,8 +182,8 @@ xrep_dir_self_parent(
 }
 
 /*
- * Look up the dotdot entry.  Returns NULLFSINO if we don't know what to do.
- * The next patch will check this more carefully.
+ * Look up the dotdot entry and confirm that it's really the parent.
+ * Returns NULLFSINO if we don't know what to do.
  */
 static inline xfs_ino_t
 xrep_dir_lookup_parent(
@@ -194,37 +199,39 @@ xrep_dir_lookup_parent(
 	if (!xfs_verify_dir_ino(sc->mp, ino))
 		return NULLFSINO;
 
+	error = xrep_findparent_confirm(sc, &ino);
+	if (error)
+		return NULLFSINO;
+
 	return ino;
 }
 
-/*
- * Try to find the parent of the directory being repaired.
- *
- * NOTE: This function will someday be augmented by the directory parent repair
- * code, which will know how to check the parent and scan the filesystem if
- * we cannot find anything.  Inode scans will have to be done before we start
- * salvaging directory entries, so we do this now.
- */
+/* Try to find the parent of the directory being repaired. */
 STATIC int
 xrep_dir_find_parent(
 	struct xrep_dir		*rd)
 {
 	xfs_ino_t		ino;
 
-	ino = xrep_dir_self_parent(rd);
+	ino = xrep_findparent_self_reference(rd->sc);
 	if (ino != NULLFSINO) {
-		rd->parent_ino = ino;
+		xrep_findparent_scan_finish_early(&rd->pscan, ino);
 		return 0;
 	}
 
 	ino = xrep_dir_lookup_parent(rd);
 	if (ino != NULLFSINO) {
-		rd->parent_ino = ino;
+		xrep_findparent_scan_finish_early(&rd->pscan, ino);
 		return 0;
 	}
 
-	/* NOTE: A future patch will deal with moving orphans. */
-	return -EFSCORRUPTED;
+	/*
+	 * A full filesystem scan is the last resort.  On a busy filesystem,
+	 * the scan can fail with -EBUSY if we cannot grab IOLOCKs.  That means
+	 * that we don't know what who the parent is, so we should return to
+	 * userspace.
+	 */
+	return xrep_findparent_scan(&rd->pscan);
 }
 
 /*
@@ -932,6 +939,10 @@ xrep_dir_salvage_entries(
 	 * modifications, but there's nothing to prevent userspace from reading
 	 * the directory until we're ready for the swap operation.  Reads will
 	 * return -EIO without shutting down the fs, so we're ok with that.
+	 *
+	 * The VFS can change dotdot on us, but the findparent scan will keep
+	 * our incore parent inode up to date.  See the note on locking issues
+	 * for more details.
 	 */
 	error = xrep_trans_commit(sc);
 	if (error)
@@ -1155,6 +1166,14 @@ xrep_dir_swap(
 		return -EFSCORRUPTED;
 
 	/*
+	 * If we never found the parent for this directory, we can't fix this
+	 * directory.
+	 */
+	ASSERT(sc->ilock_flags & XFS_ILOCK_EXCL);
+	if (rd->pscan.parent_ino == NULLFSINO)
+		return -EFSCORRUPTED;
+
+	/*
 	 * Reset the temporary directory's '..' entry to point to the parent
 	 * that we found.  The temporary directory was created with the root
 	 * directory as the parent, so we can skip this if repairing a
@@ -1163,9 +1182,9 @@ xrep_dir_swap(
 	 * It's also possible that this replacement could also expand a sf
 	 * tempdir into block format.
 	 */
-	if (rd->parent_ino != sc->mp->m_rootip->i_ino) {
+	if (rd->pscan.parent_ino != sc->mp->m_rootip->i_ino) {
 		error = xrep_dir_replace(rd, rd->sc->tempip, &xfs_name_dotdot,
-				rd->parent_ino, rd->tx.req.resblks);
+				rd->pscan.parent_ino, rd->tx.req.resblks);
 		if (error)
 			return error;
 	}
@@ -1221,7 +1240,7 @@ xrep_dir_rebuild_tree(
 	struct xfs_scrub	*sc = rd->sc;
 	int			error;
 
-	trace_xrep_dir_rebuild_tree(sc->ip, rd->parent_ino);
+	trace_xrep_dir_rebuild_tree(sc->ip, rd->pscan.parent_ino);
 
 	/*
 	 * Take the IOLOCK on the temporary file so that we can run dir
@@ -1278,8 +1297,6 @@ xrep_dir_setup_scan(
 	char			*descr;
 	int			error;
 
-	rd->parent_ino = NULLFSINO;
-
 	/* Set up some staging memory for salvaging dirents. */
 	descr = xchk_xfile_ino_descr(sc, "directory entries");
 	error = xfarray_create(descr, 0, sizeof(struct xrep_dirent),
@@ -1294,8 +1311,15 @@ xrep_dir_setup_scan(
 	if (error)
 		goto out_xfarray;
 
+	error = xrep_findparent_scan_start(sc, &rd->pscan);
+	if (error)
+		goto out_xfblob;
+
 	return 0;
 
+out_xfblob:
+	xfblob_destroy(rd->dir_names);
+	rd->dir_names = NULL;
 out_xfarray:
 	xfarray_destroy(rd->dir_entries);
 	rd->dir_entries = NULL;
