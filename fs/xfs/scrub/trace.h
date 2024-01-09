@@ -3871,6 +3871,37 @@ TRACE_EVENT(xrep_rtrmap_live_update,
 		  __entry->offset,
 		  __entry->flags)
 );
+
+TRACE_EVENT(xrep_rtrefc_found,
+	TP_PROTO(struct xfs_rtgroup *rtg, const struct xfs_refcount_irec *rec),
+	TP_ARGS(rtg, rec),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(dev_t, rtdev)
+		__field(xfs_rgnumber_t, rgno)
+		__field(enum xfs_refc_domain, domain)
+		__field(xfs_rgblock_t, startblock)
+		__field(xfs_extlen_t, blockcount)
+		__field(xfs_nlink_t, refcount)
+	),
+	TP_fast_assign(
+		__entry->dev = rtg->rtg_mount->m_super->s_dev;
+		__entry->rtdev = rtg->rtg_mount->m_rtdev_targp->bt_dev;
+		__entry->rgno = rtg->rtg_rgno;
+		__entry->domain = rec->rc_domain;
+		__entry->startblock = rec->rc_startblock;
+		__entry->blockcount = rec->rc_blockcount;
+		__entry->refcount = rec->rc_refcount;
+	),
+	TP_printk("dev %d:%d rtdev %d:%d rgno 0x%x dom %s rgbno 0x%x fsbcount 0x%x refcount %u",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  MAJOR(__entry->rtdev), MINOR(__entry->rtdev),
+		  __entry->rgno,
+		  __print_symbolic(__entry->domain, XFS_REFC_DOMAIN_STRINGS),
+		  __entry->startblock,
+		  __entry->blockcount,
+		  __entry->refcount)
+);
 #endif /* CONFIG_XFS_RT */
 
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
