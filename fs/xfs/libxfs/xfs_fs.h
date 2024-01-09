@@ -1016,6 +1016,7 @@ xfs_getparents_rec(
 #define XFS_IOC_AG_GEOMETRY	_IOWR('X', 61, struct xfs_ag_geometry)
 #define XFS_IOC_GETPARENTS	_IOWR('X', 62, struct xfs_getparents)
 /*	XFS_IOC_RTGROUP_GEOMETRY - staging 63	   */
+/*	XFS_IOC_MAP_FREESP ---- staging 64	   */
 
 
 /*
