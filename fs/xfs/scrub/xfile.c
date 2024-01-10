@@ -267,15 +267,14 @@ xfile_seek_data(
 
 /*
  * Grab the (locked) page for a memory object.  The object cannot span a page
- * boundary.  Returns 0 (and a locked page) if successful, -ENOTBLK if we
- * cannot grab the page, or the usual negative errno.
+ * boundary.  Returns 0 the locked page if successful, or an ERR_PTR on
+ * failure.
  */
-int
+struct page *
 xfile_get_page(
 	struct xfile		*xf,
 	loff_t			pos,
-	unsigned int		len,
-	struct xfile_page	*xfpage)
+	unsigned int		len)
 {
 	struct inode		*inode = file_inode(xf->file);
 	struct folio		*folio = NULL;
@@ -284,9 +283,9 @@ xfile_get_page(
 	int			error;
 
 	if (inode->i_sb->s_maxbytes - pos < len)
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
 	if (len > PAGE_SIZE - offset_in_page(pos))
-		return -ENOTBLK;
+		return ERR_PTR(-ENOTBLK);
 
 	trace_xfile_get_page(xf, pos, len);
 
@@ -301,13 +300,13 @@ xfile_get_page(
 	error = shmem_get_folio(inode, pos >> PAGE_SHIFT, &folio, SGP_CACHE);
 	memalloc_nofs_restore(pflags);
 	if (error)
-		return error;
+		return ERR_PTR(error);
 
 	page = folio_file_page(folio, pos >> PAGE_SHIFT);
 	if (PageHWPoison(page)) {
 		folio_unlock(folio);
 		folio_put(folio);
-		return -EIO;
+		return ERR_PTR(-EIO);
 	}
 
 	/*
@@ -315,11 +314,7 @@ xfile_get_page(
 	 * (potentially last) reference in xfile_put_page.
 	 */
 	set_page_dirty(page);
-
-	xfpage->page = page;
-	xfpage->fsdata = NULL;
-	xfpage->pos = round_down(pos, PAGE_SIZE);
-	return 0;
+	return page;
 }
 
 /*
@@ -328,11 +323,9 @@ xfile_get_page(
 void
 xfile_put_page(
 	struct xfile		*xf,
-	struct xfile_page	*xfpage)
+	struct page		*page)
 {
-	struct page		*page = xfpage->page;
-
-	trace_xfile_put_page(xf, page->index << PAGE_SHIFT, PAGE_SIZE);
+	trace_xfile_put_page(xf, folio_pos(page_folio(page)), PAGE_SIZE);
 
 	unlock_page(page);
 	put_page(page);

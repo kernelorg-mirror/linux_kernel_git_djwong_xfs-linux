@@ -570,7 +570,15 @@ xfarray_sort_get_page(
 	loff_t			pos,
 	uint64_t		len)
 {
-	return xfile_get_page(si->array->xfile, pos, len, &si->xfpage);
+	struct page		*page;
+
+	page = xfile_get_page(si->array->xfile, pos, len);
+	if (IS_ERR(page))
+		return PTR_ERR(page);
+
+	si->page = page;
+	si->page_index = pos >> PAGE_SHIFT;
+	return 0;
 }
 
 /* Release a page we grabbed for sorting records. */
@@ -578,8 +586,11 @@ static inline void
 xfarray_sort_put_page(
 	struct xfarray_sortinfo	*si)
 {
-	if (xfile_page_cached(&si->xfpage))
-		xfile_put_page(si->array->xfile, &si->xfpage);
+	if (si->page) {
+		xfile_put_page(si->array->xfile, si->page);
+		si->page = NULL;
+		si->page_index = 0;
+	}
 }
 
 /* Decide if these records are eligible for in-page sorting. */
@@ -621,7 +632,7 @@ xfarray_pagesort(
 		return error;
 
 	xfarray_sort_bump_heapsorts(si);
-	startp = page_address(si->xfpage.page) + offset_in_page(lo_pos);
+	startp = page_address(si->page) + offset_in_page(lo_pos);
 	sort(startp, hi - lo + 1, si->array->obj_size, si->cmp_fn, NULL);
 
 	xfarray_sort_bump_stores(si);
@@ -845,15 +856,14 @@ xfarray_sort_load_cached(
 	}
 
 	/* If the cached page is not the one we want, release it. */
-	if (xfile_page_cached(&si->xfpage) &&
-	    xfile_page_index(&si->xfpage) != startpage)
+	if (si->page && si->page_index != startpage)
 		xfarray_sort_put_page(si);
 
 	/*
 	 * If we don't have a cached page (and we know the load is contained
 	 * in a single page) then grab it.
 	 */
-	if (!xfile_page_cached(&si->xfpage)) {
+	if (!si->page) {
 		if (xfarray_sort_terminated(si, &error))
 			return error;
 
@@ -863,7 +873,7 @@ xfarray_sort_load_cached(
 			return error;
 	}
 
-	memcpy(ptr, page_address(si->xfpage.page) + offset_in_page(idx_pos),
+	memcpy(ptr, page_address(si->page) + offset_in_page(idx_pos),
 			si->array->obj_size);
 	return 0;
 }

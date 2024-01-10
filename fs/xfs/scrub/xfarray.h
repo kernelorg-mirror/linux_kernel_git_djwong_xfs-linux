@@ -106,7 +106,14 @@ struct xfarray_sortinfo {
 	unsigned int		flags;
 
 	/* Cache a page here for faster access. */
-	struct xfile_page	xfpage;
+	struct page		*page;
+
+	/*
+	 * xfile page index that we used to get the page cached above.  Track
+	 * this separately because page could be a non-head page, and those do
+	 * not have page->index set.
+	 */
+	pgoff_t			page_index;
 
 #ifdef DEBUG
 	/* Performance statistics. */
