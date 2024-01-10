@@ -1915,19 +1915,13 @@ four of those five higher level data structures.
 The fifth use case is discussed in the :ref:`realtime summary <rtsummary>` case
 study.
 
-The most general storage interface supported by the xfile enables the reading
-and writing of arbitrary quantities of data at arbitrary offsets in the xfile.
-This capability is provided by ``xfile_pread`` and ``xfile_pwrite`` functions,
-which behave similarly to their userspace counterparts.
 XFS is very record-based, which suggests that the ability to load and store
 complete records is important.
 To support these cases, a pair of ``xfile_obj_load`` and ``xfile_obj_store``
-functions are provided to read and persist objects into an xfile.
-They are internally the same as pread and pwrite, except that they treat any
-error as an out of memory error.
+functions are provided to read and persist objects into an xfile that unlike
+the pread and pwrite system calls treat any error as an out of memory error.
 For online repair, squashing error conditions in this manner is an acceptable
 behavior because the only reaction is to abort the operation back to userspace.
-All five xfile usecases can be serviced by these four functions.
 
 However, no discussion of file access idioms is complete without answering the
 question, "But what about mmap?"
