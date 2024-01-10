@@ -34,13 +34,6 @@
  * xfiles assume that the caller will handle all required concurrency
  * management; standard vfs locks (freezer and inode) are not taken.  Reads
  * and writes are satisfied directly from the page cache.
- *
- * NOTE: The current shmemfs implementation has a quirk that in-kernel reads
- * of a hole cause a page to be mapped into the file.  If you are going to
- * create a sparse xfile, please be careful about reading from uninitialized
- * parts of the file.  These pages are !Uptodate and will eventually be
- * reclaimed if not written, but in the short term this boosts memory
- * consumption.
  */
 
 /*
@@ -117,58 +110,38 @@ xfile_load(
 	size_t			count,
 	loff_t			pos)
 {
-	struct inode		*inode = file_inode(xf->file);
-	struct address_space	*mapping = inode->i_mapping;
-	struct page		*page = NULL;
-	unsigned int		pflags;
-	int			error = 0;
-
 	if (count > MAX_RW_COUNT)
 		return -ENOMEM;
-	if (inode->i_sb->s_maxbytes - pos < count)
+	if (file_inode(xf->file)->i_sb->s_maxbytes - pos < count)
 		return -ENOMEM;
 
 	trace_xfile_load(xf, pos, count);
 
-	pflags = memalloc_nofs_save();
 	while (count > 0) {
+		struct page	*page;
 		unsigned int	len;
 
 		len = min_t(ssize_t, count, PAGE_SIZE - offset_in_page(pos));
-
-		/*
-		 * In-kernel reads of a shmem file cause it to allocate a page
-		 * if the mapping shows a hole.  Therefore, if we hit ENOMEM
-		 * we can continue by zeroing the caller's buffer.
-		 */
-		page = shmem_read_mapping_page_gfp(mapping, pos >> PAGE_SHIFT,
-				__GFP_NOWARN);
-		if (IS_ERR(page)) {
-			error = PTR_ERR(page);
-			if (error != -ENOMEM) {
-				error = -ENOMEM;
-				break;
-			}
-
+		page = xfile_get_page(xf, pos, len, 0);
+		if (IS_ERR(page))
+			return -ENOMEM;
+		if (!page) {
+			/*
+			 * No data stored at this offset, just zero the output
+			 * buffer.
+			 */
 			memset(buf, 0, len);
 			goto advance;
 		}
-
-		/*
-		 * xfile pages must never be mapped into userspace, so
-		 * we skip the dcache flush.
-		 */
 		memcpy(buf, page_address(page) + offset_in_page(pos), len);
-		put_page(page);
-
+		xfile_put_page(xf, page);
 advance:
 		count -= len;
 		pos += len;
 		buf += len;
 	}
-	memalloc_nofs_restore(pflags);
 
-	return error;
+	return 0;
 }
 
 /*
