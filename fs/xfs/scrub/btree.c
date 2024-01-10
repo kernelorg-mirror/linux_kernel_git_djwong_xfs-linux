@@ -244,7 +244,7 @@ xchk_btree_ptr_ok(
 		return true;
 
 	/* Otherwise, check the pointers. */
-	if (bs->cur->bc_ops->geom_flags & XFS_BTGEO_LONG_PTRS)
+	if (bs->cur->bc_ops->ptr_len == XFS_BTREE_LONG_PTR_LEN)
 		res = xfs_btree_check_lptr(bs->cur, be64_to_cpu(ptr->l), level);
 	else
 		res = xfs_btree_check_sptr(bs->cur, be32_to_cpu(ptr->s), level);
@@ -385,7 +385,7 @@ xchk_btree_check_block_owner(
 	agno = xfs_daddr_to_agno(bs->cur->bc_mp, daddr);
 	agbno = xfs_daddr_to_agbno(bs->cur->bc_mp, daddr);
 
-	init_sa = bs->cur->bc_ops->geom_flags & XFS_BTGEO_LONG_PTRS;
+	init_sa = bs->cur->bc_ops->ptr_len == XFS_BTREE_LONG_PTR_LEN;
 	if (init_sa) {
 		error = xchk_ag_init_existing(bs->sc, agno, &bs->sc->sa);
 		if (!xchk_btree_xref_process_error(bs->sc, bs->cur,
@@ -597,7 +597,7 @@ xchk_btree_get_block(
 		return error;
 
 	xfs_btree_get_block(bs->cur, level, pbp);
-	if (bs->cur->bc_ops->geom_flags & XFS_BTGEO_LONG_PTRS)
+	if (bs->cur->bc_ops->ptr_len == XFS_BTREE_LONG_PTR_LEN)
 		failed_at = __xfs_btree_check_lblock(bs->cur, *pblock,
 				level, *pbp);
 	else
