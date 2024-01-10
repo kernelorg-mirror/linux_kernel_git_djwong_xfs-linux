@@ -572,7 +572,7 @@ xfarray_sort_get_page(
 {
 	struct page		*page;
 
-	page = xfile_get_page(si->array->xfile, pos, len);
+	page = xfile_get_page(si->array->xfile, pos, len, XFILE_ALLOC);
 	if (IS_ERR(page))
 		return PTR_ERR(page);
 
