@@ -76,6 +76,11 @@ xfile_create(
 	 */
 	mapping_set_gfp_mask(inode->i_mapping, GFP_HIGHUSER);
 
+	/*
+	 * We're not quite ready for large folios yet.
+	 */
+	mapping_clear_large_folios(inode->i_mapping);
+
 	trace_xfile_create(xf);
 
 	*xfilep = xf;
