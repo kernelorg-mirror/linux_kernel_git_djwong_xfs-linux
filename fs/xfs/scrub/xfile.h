@@ -19,7 +19,9 @@ int xfile_store(struct xfile *xf, const void *buf, size_t count,
 
 loff_t xfile_seek_data(struct xfile *xf, loff_t pos);
 
-struct page *xfile_get_page(struct xfile *xf, loff_t offset, unsigned int len);
+#define XFILE_ALLOC		(1 << 0) /* allocate page if not present */
+struct page *xfile_get_page(struct xfile *xf, loff_t offset, unsigned int len,
+		unsigned int flags);
 void xfile_put_page(struct xfile *xf, struct page *page);
 
 #endif /* __XFS_SCRUB_XFILE_H__ */
