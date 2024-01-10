@@ -2144,6 +2144,11 @@ unlock:
  *
  * Return: The found folio, %NULL if SGP_READ or SGP_NOALLOC was passed in @sgp
  * and no folio was found at @index, or an ERR_PTR() otherwise.
+ *
+ * If the caller modifies data in the returned folio, it must call
+ * folio_mark_dirty() on the locked folio before dropping the reference to
+ * ensure the folio is not reclaimed.  Unlike for normal file systems there is
+ * no need to reserve space for users of shmem_*file_setup().
  */
 int shmem_get_folio(struct inode *inode, pgoff_t index, struct folio **foliop,
 		enum sgp_type sgp)
