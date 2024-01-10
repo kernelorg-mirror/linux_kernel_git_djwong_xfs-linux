@@ -274,7 +274,8 @@ struct page *
 xfile_get_page(
 	struct xfile		*xf,
 	loff_t			pos,
-	unsigned int		len)
+	unsigned int		len,
+	unsigned int		flags)
 {
 	struct inode		*inode = file_inode(xf->file);
 	struct folio		*folio = NULL;
@@ -293,14 +294,18 @@ xfile_get_page(
 	 * Increase the file size first so that shmem_get_folio(..., SGP_CACHE),
 	 * actually allocates a folio instead of erroring out.
 	 */
-	if (pos + len > i_size_read(inode))
+	if ((flags & XFILE_ALLOC) && pos + len > i_size_read(inode))
 		i_size_write(inode, pos + len);
 
 	pflags = memalloc_nofs_save();
-	error = shmem_get_folio(inode, pos >> PAGE_SHIFT, &folio, SGP_CACHE);
+	error = shmem_get_folio(inode, pos >> PAGE_SHIFT, &folio,
+			(flags & XFILE_ALLOC) ? SGP_CACHE : SGP_READ);
 	memalloc_nofs_restore(pflags);
 	if (error)
 		return ERR_PTR(error);
+
+	if (!folio)
+		return NULL;
 
 	page = folio_file_page(folio, pos >> PAGE_SHIFT);
 	if (PageHWPoison(page)) {
@@ -313,7 +318,8 @@ xfile_get_page(
 	 * Mark the page dirty so that it won't be reclaimed once we drop the
 	 * (potentially last) reference in xfile_put_page.
 	 */
-	set_page_dirty(page);
+	if (flags & XFILE_ALLOC)
+		set_page_dirty(page);
 	return page;
 }
 
