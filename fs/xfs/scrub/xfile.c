@@ -278,11 +278,8 @@ xfile_get_page(
 	struct xfile_page	*xfpage)
 {
 	struct inode		*inode = file_inode(xf->file);
-	struct address_space	*mapping = inode->i_mapping;
-	const struct address_space_operations *aops = mapping->a_ops;
-	struct page		*page = NULL;
-	void			*fsdata = NULL;
-	loff_t			key = round_down(pos, PAGE_SIZE);
+	struct folio		*folio = NULL;
+	struct page		*page;
 	unsigned int		pflags;
 	int			error;
 
@@ -293,78 +290,50 @@ xfile_get_page(
 
 	trace_xfile_get_page(xf, pos, len);
 
-	pflags = memalloc_nofs_save();
-
 	/*
-	 * We call write_begin directly here to avoid all the freezer
-	 * protection lock-taking that happens in the normal path.  shmem
-	 * doesn't support fs freeze, but lockdep doesn't know that and will
-	 * trip over that.
+	 * Increase the file size first so that shmem_get_folio(..., SGP_CACHE),
+	 * actually allocates a folio instead of erroring out.
 	 */
-	error = aops->write_begin(NULL, mapping, key, PAGE_SIZE, &page,
-			&fsdata);
-	if (error)
-		goto out_pflags;
-
-	/* We got the page, so make sure we push out EOF. */
-	if (i_size_read(inode) < pos + len)
+	if (pos + len > i_size_read(inode))
 		i_size_write(inode, pos + len);
 
-	/*
-	 * If the page isn't up to date, fill it with zeroes before we hand it
-	 * to the caller and make sure the backing store will hold on to them.
-	 */
-	if (!PageUptodate(page)) {
-		memset(page_address(page), 0, PAGE_SIZE);
-		SetPageUptodate(page);
+	pflags = memalloc_nofs_save();
+	error = shmem_get_folio(inode, pos >> PAGE_SHIFT, &folio, SGP_CACHE);
+	memalloc_nofs_restore(pflags);
+	if (error)
+		return error;
+
+	page = folio_file_page(folio, pos >> PAGE_SHIFT);
+	if (PageHWPoison(page)) {
+		folio_unlock(folio);
+		folio_put(folio);
+		return -EIO;
 	}
 
 	/*
-	 * Mark each page dirty so that the contents are written to some
-	 * backing store when we drop this buffer, and take an extra reference
-	 * to prevent the xfile page from being swapped or removed from the
-	 * page cache by reclaim if the caller unlocks the page.
+	 * Mark the page dirty so that it won't be reclaimed once we drop the
+	 * (potentially last) reference in xfile_put_page.
 	 */
 	set_page_dirty(page);
-	get_page(page);
 
 	xfpage->page = page;
-	xfpage->fsdata = fsdata;
-	xfpage->pos = key;
-out_pflags:
-	memalloc_nofs_restore(pflags);
-	return error;
+	xfpage->fsdata = NULL;
+	xfpage->pos = round_down(pos, PAGE_SIZE);
+	return 0;
 }
 
 /*
- * Release the (locked) page for a memory object.  Returns 0 or a negative
- * errno.
+ * Release the (locked) page for a memory object.
  */
-int
+void
 xfile_put_page(
 	struct xfile		*xf,
 	struct xfile_page	*xfpage)
 {
-	struct inode		*inode = file_inode(xf->file);
-	struct address_space	*mapping = inode->i_mapping;
-	const struct address_space_operations *aops = mapping->a_ops;
-	unsigned int		pflags;
-	int			ret;
+	struct page		*page = xfpage->page;
 
-	trace_xfile_put_page(xf, xfpage->pos, PAGE_SIZE);
+	trace_xfile_put_page(xf, page->index << PAGE_SHIFT, PAGE_SIZE);
 
-	/* Give back the reference that we took in xfile_get_page. */
-	put_page(xfpage->page);
-
-	pflags = memalloc_nofs_save();
-	ret = aops->write_end(NULL, mapping, xfpage->pos, PAGE_SIZE, PAGE_SIZE,
-			xfpage->page, xfpage->fsdata);
-	memalloc_nofs_restore(pflags);
-	memset(xfpage, 0, sizeof(struct xfile_page));
-
-	if (ret < 0)
-		return ret;
-	if (ret != PAGE_SIZE)
-		return -EIO;
-	return 0;
+	unlock_page(page);
+	put_page(page);
 }

@@ -37,6 +37,6 @@ loff_t xfile_seek_data(struct xfile *xf, loff_t pos);
 
 int xfile_get_page(struct xfile *xf, loff_t offset, unsigned int len,
 		struct xfile_page *xbuf);
-int xfile_put_page(struct xfile *xf, struct xfile_page *xbuf);
+void xfile_put_page(struct xfile *xf, struct xfile_page *xbuf);
 
 #endif /* __XFS_SCRUB_XFILE_H__ */

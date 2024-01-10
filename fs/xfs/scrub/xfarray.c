@@ -574,13 +574,12 @@ xfarray_sort_get_page(
 }
 
 /* Release a page we grabbed for sorting records. */
-static inline int
+static inline void
 xfarray_sort_put_page(
 	struct xfarray_sortinfo	*si)
 {
-	if (!xfile_page_cached(&si->xfpage))
-		return 0;
-	return xfile_put_page(si->array->xfile, &si->xfpage);
+	if (xfile_page_cached(&si->xfpage))
+		xfile_put_page(si->array->xfile, &si->xfpage);
 }
 
 /* Decide if these records are eligible for in-page sorting. */
@@ -626,7 +625,8 @@ xfarray_pagesort(
 	sort(startp, hi - lo + 1, si->array->obj_size, si->cmp_fn, NULL);
 
 	xfarray_sort_bump_stores(si);
-	return xfarray_sort_put_page(si);
+	xfarray_sort_put_page(si);
+	return 0;
 }
 
 /* Return a pointer to the xfarray pivot record within the sortinfo struct. */
@@ -836,10 +836,7 @@ xfarray_sort_load_cached(
 	startpage = idx_pos >> PAGE_SHIFT;
 	endpage = (idx_pos + si->array->obj_size - 1) >> PAGE_SHIFT;
 	if (startpage != endpage) {
-		error = xfarray_sort_put_page(si);
-		if (error)
-			return error;
-
+		xfarray_sort_put_page(si);
 		if (xfarray_sort_terminated(si, &error))
 			return error;
 
@@ -849,11 +846,8 @@ xfarray_sort_load_cached(
 
 	/* If the cached page is not the one we want, release it. */
 	if (xfile_page_cached(&si->xfpage) &&
-	    xfile_page_index(&si->xfpage) != startpage) {
-		error = xfarray_sort_put_page(si);
-		if (error)
-			return error;
-	}
+	    xfile_page_index(&si->xfpage) != startpage)
+		xfarray_sort_put_page(si);
 
 	/*
 	 * If we don't have a cached page (and we know the load is contained
@@ -995,10 +989,7 @@ xfarray_sort(
 				if (error)
 					goto out_free;
 			}
-			error = xfarray_sort_put_page(si);
-			if (error)
-				goto out_free;
-
+			xfarray_sort_put_page(si);
 			if (xfarray_sort_terminated(si, &error))
 				goto out_free;
 
@@ -1024,10 +1015,7 @@ xfarray_sort(
 				if (error)
 					goto out_free;
 			}
-			error = xfarray_sort_put_page(si);
-			if (error)
-				goto out_free;
-
+			xfarray_sort_put_page(si);
 			if (xfarray_sort_terminated(si, &error))
 				goto out_free;
 
