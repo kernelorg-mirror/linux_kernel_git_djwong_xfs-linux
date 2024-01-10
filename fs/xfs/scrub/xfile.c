@@ -182,74 +182,30 @@ xfile_store(
 	size_t			count,
 	loff_t			pos)
 {
-	struct inode		*inode = file_inode(xf->file);
-	struct address_space	*mapping = inode->i_mapping;
-	const struct address_space_operations *aops = mapping->a_ops;
-	struct page		*page = NULL;
-	unsigned int		pflags;
-	int			error = 0;
-
 	if (count > MAX_RW_COUNT)
 		return -ENOMEM;
-	if (inode->i_sb->s_maxbytes - pos < count)
+	if (file_inode(xf->file)->i_sb->s_maxbytes - pos < count)
 		return -ENOMEM;
 
 	trace_xfile_store(xf, pos, count);
 
-	pflags = memalloc_nofs_save();
 	while (count > 0) {
-		void		*fsdata = NULL;
-		void		*p, *kaddr;
+		struct page	*page;
 		unsigned int	len;
-		int		ret;
 
 		len = min_t(ssize_t, count, PAGE_SIZE - offset_in_page(pos));
+		page = xfile_get_page(xf, pos, len, XFILE_ALLOC);
+		if (IS_ERR(page))
+			return -ENOMEM;
+		memcpy(page_address(page) + offset_in_page(pos), buf, len);
+		xfile_put_page(xf, page);
 
-		/*
-		 * We call write_begin directly here to avoid all the freezer
-		 * protection lock-taking that happens in the normal path.
-		 * shmem doesn't support fs freeze, but lockdep doesn't know
-		 * that and will trip over that.
-		 */
-		error = aops->write_begin(NULL, mapping, pos, len, &page,
-				&fsdata);
-		if (error) {
-			error = -ENOMEM;
-			break;
-		}
-
-		/*
-		 * xfile pages must never be mapped into userspace, so we skip
-		 * the dcache flush.  If the page is not uptodate, zero it
-		 * before writing data.
-		 */
-		kaddr = page_address(page);
-		if (!PageUptodate(page)) {
-			memset(kaddr, 0, PAGE_SIZE);
-			SetPageUptodate(page);
-		}
-		p = kaddr + offset_in_page(pos);
-		memcpy(p, buf, len);
-
-		ret = aops->write_end(NULL, mapping, pos, len, len, page,
-				fsdata);
-		if (ret < 0) {
-			error = -ENOMEM;
-			break;
-		}
-
-		if (ret != len) {
-			error = -ENOMEM;
-			break;
-		}
-
-		count -= ret;
-		pos += ret;
-		buf += ret;
+		count -= len;
+		pos += len;
+		buf += len;
 	}
-	memalloc_nofs_restore(pflags);
 
-	return error;
+	return 0;
 }
 
 /* Find the next written area in the xfile data for a given offset. */
