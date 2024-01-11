@@ -99,6 +99,31 @@ xfile_destroy(
 	kfree(xf);
 }
 
+/* Has this file lost any of the data stored in it? */
+static inline bool
+xfile_has_lost_data(
+	struct inode		*inode,
+	struct folio		*folio)
+{
+	struct address_space	*mapping = inode->i_mapping;
+
+	/* This folio itself has been poisoned. */
+	if (folio_test_hwpoison(folio))
+		return true;
+
+	/* A base page under this large folio has been poisoned. */
+	if (folio_test_large(folio) && folio_test_has_hwpoisoned(folio))
+		return true;
+
+	/* Data loss has occurred anywhere in this shmem file. */
+	if (test_bit(AS_EIO, &mapping->flags))
+		return true;
+	if (filemap_check_wb_err(mapping, 0))
+		return true;
+
+	return false;
+}
+
 /*
  * Load an object.  Since we're treating this file as "memory", any error or
  * short IO is treated as a failure to allocate memory.
@@ -138,9 +163,7 @@ xfile_load(
 				PAGE_SIZE - offset_in_page(pos));
 			memset(buf, 0, len);
 		} else {
-			if (folio_test_hwpoison(folio) ||
-			    (folio_test_large(folio) &&
-			     folio_test_has_hwpoisoned(folio))) {
+			if (xfile_has_lost_data(inode, folio)) {
 				folio_unlock(folio);
 				folio_put(folio);
 				break;
@@ -201,9 +224,7 @@ xfile_store(
 		if (shmem_get_folio(inode, pos >> PAGE_SHIFT, &folio,
 				SGP_CACHE) < 0)
 			break;
-		if (folio_test_hwpoison(folio) ||
-		    (folio_test_large(folio) &&
-		     folio_test_has_hwpoisoned(folio))) {
+		if (xfile_has_lost_data(inode, folio)) {
 			folio_unlock(folio);
 			folio_put(folio);
 			break;
@@ -283,12 +304,13 @@ xfile_get_page(
 	if (!folio)
 		return NULL;
 
-	page = folio_file_page(folio, pos >> PAGE_SHIFT);
-	if (PageHWPoison(page)) {
+	if (xfile_has_lost_data(inode, folio)) {
 		folio_unlock(folio);
 		folio_put(folio);
 		return ERR_PTR(-EIO);
 	}
+
+	page = folio_file_page(folio, pos >> PAGE_SHIFT);
 
 	/*
 	 * Mark the page dirty so that it won't be reclaimed once we drop the
