@@ -147,6 +147,31 @@ xfbuf_free(
 	kfree(xfb);
 }
 
+/* Has this file lost any of the data stored in it? */
+static inline bool
+xfbuf_has_lost_data(
+	struct inode		*inode,
+	struct folio		*folio)
+{
+	struct address_space	*mapping = inode->i_mapping;
+
+	/* This folio itself has been poisoned. */
+	if (folio_test_hwpoison(folio))
+		return true;
+
+	/* A base page under this large folio has been poisoned. */
+	if (folio_test_large(folio) && folio_test_has_hwpoisoned(folio))
+		return true;
+
+	/* Data loss has occurred anywhere in this shmem file. */
+	if (test_bit(AS_EIO, &mapping->flags))
+		return true;
+	if (filemap_check_wb_err(mapping, 0))
+		return true;
+
+	return false;
+}
+
 /* Directly map a shmem page into the buffer cache. */
 int
 xfbuf_map_pages(
@@ -180,12 +205,13 @@ xfbuf_map_pages(
 	if (!folio)
 		return -ENOMEM;
 
-	page = folio_file_page(folio, pos >> PAGE_SHIFT);
-	if (PageHWPoison(page)) {
+	if (xfbuf_has_lost_data(inode, folio)) {
 		folio_unlock(folio);
 		folio_put(folio);
 		return -EIO;
 	}
+
+	page = folio_file_page(folio, pos >> PAGE_SHIFT);
 
 	/*
 	 * Mark the page dirty so that it won't be reclaimed once we drop the
