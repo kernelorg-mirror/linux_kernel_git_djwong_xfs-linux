@@ -175,29 +175,56 @@ xfile_store(
 	size_t			count,
 	loff_t			pos)
 {
+	struct inode		*inode = file_inode(xf->file);
+	unsigned int		pflags;
+
 	if (count > MAX_RW_COUNT)
 		return -ENOMEM;
-	if (file_inode(xf->file)->i_sb->s_maxbytes - pos < count)
+	if (inode->i_sb->s_maxbytes - pos < count)
 		return -ENOMEM;
 
 	trace_xfile_store(xf, pos, count);
 
-	while (count > 0) {
-		struct page	*page;
-		unsigned int	len;
+	/*
+	 * Increase the file size first so that shmem_get_folio(..., SGP_CACHE),
+	 * actually allocates a folio instead of erroring out.
+	 */
+	if (pos + count > i_size_read(inode))
+		i_size_write(inode, pos + count);
 
-		len = min_t(ssize_t, count, PAGE_SIZE - offset_in_page(pos));
-		page = xfile_get_page(xf, pos, len, XFILE_ALLOC);
-		if (IS_ERR(page))
-			return -ENOMEM;
-		memcpy(page_address(page) + offset_in_page(pos), buf, len);
-		xfile_put_page(xf, page);
+	pflags = memalloc_nofs_save();
+	while (count > 0) {
+		struct folio	*folio;
+		unsigned int	len;
+		unsigned int	offset;
+
+		if (shmem_get_folio(inode, pos >> PAGE_SHIFT, &folio,
+				SGP_CACHE) < 0)
+			break;
+		if (folio_test_hwpoison(folio) ||
+		    (folio_test_large(folio) &&
+		     folio_test_has_hwpoisoned(folio))) {
+			folio_unlock(folio);
+			folio_put(folio);
+			break;
+		}
+
+		offset = offset_in_folio(folio, pos);
+		len = min_t(ssize_t, count, folio_size(folio) - offset);
+		memcpy(folio_address(folio) + offset, buf, len);
+
+		folio_mark_dirty(folio);
+		folio_unlock(folio);
+		folio_put(folio);
 
 		count -= len;
 		pos += len;
 		buf += len;
 	}
+	memalloc_nofs_restore(pflags);
 
+	if (count)
+		return -ENOMEM;
 	return 0;
 }
 
