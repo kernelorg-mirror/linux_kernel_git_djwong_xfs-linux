@@ -593,51 +593,42 @@ xfarray_sort_put_page(
 	}
 }
 
-/* Decide if these records are eligible for in-page sorting. */
-static inline bool
-xfarray_want_pagesort(
-	struct xfarray_sortinfo	*si,
-	xfarray_idx_t		lo,
-	xfarray_idx_t		hi)
-{
-	pgoff_t			lo_page;
-	pgoff_t			hi_page;
-	loff_t			end_pos;
-
-	/* We can only map one page at a time. */
-	lo_page = xfarray_pos(si->array, lo) >> PAGE_SHIFT;
-	end_pos = xfarray_pos(si->array, hi) + si->array->obj_size - 1;
-	hi_page = end_pos >> PAGE_SHIFT;
-
-	return lo_page == hi_page;
-}
-
-/* Sort a bunch of records that all live in the same memory page. */
+/*
+ * Sort the records from lo to hi (inclusive) if they are all backed by the
+ * same memory folio.  Returns 1 if it sorted, 0 if it did not, or a negative
+ * errno.
+ */
 STATIC int
-xfarray_pagesort(
+xfarray_foliosort(
 	struct xfarray_sortinfo	*si,
 	xfarray_idx_t		lo,
 	xfarray_idx_t		hi)
 {
+	struct folio		*folio;
 	void			*startp;
 	loff_t			lo_pos = xfarray_pos(si->array, lo);
-	uint64_t		len = xfarray_pos(si->array, hi - lo);
-	int			error = 0;
+	uint64_t		len = xfarray_pos(si->array, hi - lo + 1);
 
-	trace_xfarray_pagesort(si, lo, hi);
+	/* No single folio could back this many records. */
+	if (len > XFILE_MAX_FOLIO_SIZE)
+		return 0;
 
 	xfarray_sort_bump_loads(si);
-	error = xfarray_sort_get_page(si, lo_pos, len);
-	if (error)
-		return error;
+	folio = xfile_get_folio(si->array->xfile, lo_pos, len, XFILE_ALLOC);
+	if (IS_ERR(folio))
+		return PTR_ERR(folio);
+	if (!folio)
+		return 0;
+
+	trace_xfarray_foliosort(si, lo, hi);
 
 	xfarray_sort_bump_heapsorts(si);
-	startp = page_address(si->page) + offset_in_page(lo_pos);
+	startp = folio_address(folio) + offset_in_folio(folio, lo_pos);
 	sort(startp, hi - lo + 1, si->array->obj_size, si->cmp_fn, NULL);
 
 	xfarray_sort_bump_stores(si);
-	xfarray_sort_put_page(si);
-	return 0;
+	xfile_put_folio(si->array->xfile, folio);
+	return 1;
 }
 
 /* Return a pointer to the xfarray pivot record within the sortinfo struct. */
@@ -941,6 +932,8 @@ xfarray_sort(
 	pivot = xfarray_sortinfo_pivot(si);
 
 	while (si->stack_depth >= 0) {
+		int		ret;
+
 		lo = si_lo[si->stack_depth];
 		hi = si_hi[si->stack_depth];
 
@@ -953,13 +946,13 @@ xfarray_sort(
 		}
 
 		/*
-		 * If directly mapping the page and sorting can solve our
+		 * If directly mapping the folio and sorting can solve our
 		 * problems, we're done.
 		 */
-		if (xfarray_want_pagesort(si, lo, hi)) {
-			error = xfarray_pagesort(si, lo, hi);
-			if (error)
-				goto out_free;
+		ret = xfarray_foliosort(si, lo, hi);
+		if (ret < 0)
+			goto out_free;
+		if (ret == 1) {
 			si->stack_depth--;
 			continue;
 		}

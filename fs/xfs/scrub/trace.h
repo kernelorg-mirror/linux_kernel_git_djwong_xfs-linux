@@ -908,6 +908,8 @@ DEFINE_XFILE_EVENT(xfile_store);
 DEFINE_XFILE_EVENT(xfile_seek_data);
 DEFINE_XFILE_EVENT(xfile_get_page);
 DEFINE_XFILE_EVENT(xfile_put_page);
+DEFINE_XFILE_EVENT(xfile_get_folio);
+DEFINE_XFILE_EVENT(xfile_put_folio);
 
 TRACE_EVENT(xfarray_create,
 	TP_PROTO(struct xfarray *xfa, unsigned long long required_capacity),
@@ -954,7 +956,7 @@ TRACE_EVENT(xfarray_isort,
 		  __entry->hi - __entry->lo)
 );
 
-TRACE_EVENT(xfarray_pagesort,
+TRACE_EVENT(xfarray_foliosort,
 	TP_PROTO(struct xfarray_sortinfo *si, uint64_t lo, uint64_t hi),
 	TP_ARGS(si, lo, hi),
 	TP_STRUCT__entry(

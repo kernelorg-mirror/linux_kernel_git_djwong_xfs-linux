@@ -24,4 +24,10 @@ struct page *xfile_get_page(struct xfile *xf, loff_t offset, unsigned int len,
 		unsigned int flags);
 void xfile_put_page(struct xfile *xf, struct page *page);
 
+#define XFILE_MAX_FOLIO_SIZE	(PAGE_SIZE << MAX_PAGECACHE_ORDER)
+
+struct folio *xfile_get_folio(struct xfile *xf, loff_t offset, size_t len,
+		unsigned int flags);
+void xfile_put_folio(struct xfile *xf, struct folio *folio);
+
 #endif /* __XFS_SCRUB_XFILE_H__ */
