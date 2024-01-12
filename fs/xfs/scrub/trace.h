@@ -1027,6 +1027,47 @@ TRACE_EVENT(xfarray_sort,
 		  __entry->bytes)
 );
 
+TRACE_EVENT(xfarray_sort_scan,
+	TP_PROTO(struct xfarray_sortinfo *si, unsigned long long idx),
+	TP_ARGS(si, idx),
+	TP_STRUCT__entry(
+		__field(unsigned long, ino)
+		__field(unsigned long long, nr)
+		__field(size_t, obj_size)
+		__field(unsigned long long, idx)
+		__field(unsigned long long, folio_pos)
+		__field(unsigned long, folio_bytes)
+		__field(unsigned long long, first_idx)
+		__field(unsigned long long, last_idx)
+	),
+	TP_fast_assign(
+		__entry->nr = si->array->nr;
+		__entry->obj_size = si->array->obj_size;
+		__entry->ino = file_inode(si->array->xfile->file)->i_ino;
+		__entry->idx = idx;
+		if (si->folio) {
+			__entry->folio_pos = folio_pos(si->folio);
+			__entry->folio_bytes = folio_size(si->folio);
+			__entry->first_idx = si->first_folio_idx;
+			__entry->last_idx = si->last_folio_idx;
+		} else {
+			__entry->folio_pos = 0;
+			__entry->folio_bytes = 0;
+			__entry->first_idx = 0;
+			__entry->last_idx = 0;
+		}
+	),
+	TP_printk("xfino 0x%lx nr %llu objsz %zu idx %llu folio_pos 0x%llx folio_bytes 0x%lx first_idx %llu last_idx %llu",
+		  __entry->ino,
+		  __entry->nr,
+		  __entry->obj_size,
+		  __entry->idx,
+		  __entry->folio_pos,
+		  __entry->folio_bytes,
+		  __entry->first_idx,
+		  __entry->last_idx)
+);
+
 TRACE_EVENT(xfarray_sort_stats,
 	TP_PROTO(struct xfarray_sortinfo *si, int error),
 	TP_ARGS(si, error),
