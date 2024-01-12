@@ -25,6 +25,12 @@ struct page *xfile_get_page(struct xfile *xf, loff_t offset, unsigned int len,
 		unsigned int flags);
 void xfile_put_page(struct xfile *xf, struct page *page);
 
+#define XFILE_MAX_FOLIO_SIZE	(PAGE_SIZE << MAX_PAGECACHE_ORDER)
+
+struct folio *xfile_get_folio(struct xfile *xf, loff_t offset, size_t len,
+		unsigned int flags);
+void xfile_put_folio(struct xfile *xf, struct folio *folio);
+
 static inline unsigned long long xfile_bytes(struct xfile *xf)
 {
 	return file_inode(xf->file)->i_blocks << SECTOR_SHIFT;
