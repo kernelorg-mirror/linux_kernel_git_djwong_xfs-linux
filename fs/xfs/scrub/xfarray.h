@@ -130,15 +130,14 @@ struct xfarray_sortinfo {
 	/* next time we want to cond_resched() */
 	struct xchk_relax	relax;
 
-	/* Cache a page here for faster access. */
-	struct page		*page;
+	/* Cache a folio here for faster scanning for pivots */
+	struct folio		*folio;
 
-	/*
-	 * xfile page index that we used to get the page cached above.  Track
-	 * this separately because page could be a non-head page, and those do
-	 * not have page->index set.
-	 */
-	pgoff_t			page_index;
+	/* First array index in folio that is completely readable */
+	xfarray_idx_t		first_folio_idx;
+
+	/* Last array index in folio that is completely readable */
+	xfarray_idx_t		last_folio_idx;
 
 #ifdef DEBUG
 	/* Performance statistics. */
