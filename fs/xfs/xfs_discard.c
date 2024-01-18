@@ -8,6 +8,7 @@
 #include "xfs_format.h"
 #include "xfs_log_format.h"
 #include "xfs_trans_resv.h"
+#include "xfs_trans.h"
 #include "xfs_mount.h"
 #include "xfs_btree.h"
 #include "xfs_alloc_btree.h"
@@ -121,7 +122,7 @@ xfs_discard_extents(
 		error = __blkdev_issue_discard(mp->m_ddev_targp->bt_bdev,
 				XFS_AGB_TO_DADDR(mp, busyp->agno, busyp->bno),
 				XFS_FSB_TO_BB(mp, busyp->length),
-				GFP_NOFS, &bio);
+				GFP_KERNEL, &bio);
 		if (error && error != -EOPNOTSUPP) {
 			xfs_info(mp,
 	 "discard failed for extent [0x%llx,%u], error %d",
@@ -156,6 +157,7 @@ xfs_trim_gather_extents(
 	uint64_t		*blocks_trimmed)
 {
 	struct xfs_mount	*mp = pag->pag_mount;
+	struct xfs_trans	*tp;
 	struct xfs_btree_cur	*cur;
 	struct xfs_buf		*agbp;
 	int			error;
@@ -169,11 +171,15 @@ xfs_trim_gather_extents(
 	 */
 	xfs_log_force(mp, XFS_LOG_SYNC);
 
-	error = xfs_alloc_read_agf(pag, NULL, 0, &agbp);
+	error = xfs_trans_alloc_empty(mp, &tp);
 	if (error)
 		return error;
 
-	cur = xfs_cntbt_init_cursor(mp, NULL, agbp, pag);
+	error = xfs_alloc_read_agf(pag, tp, 0, &agbp);
+	if (error)
+		goto out_trans_cancel;
+
+	cur = xfs_cntbt_init_cursor(mp, tp, agbp, pag);
 
 	/*
 	 * Look up the extent length requested in the AGF and start with it.
@@ -281,7 +287,8 @@ next_extent:
 		xfs_extent_busy_clear(mp, &extents->extent_list, false);
 out_del_cursor:
 	xfs_btree_del_cursor(cur, error);
-	xfs_buf_relse(agbp);
+out_trans_cancel:
+	xfs_trans_cancel(tp);
 	return error;
 }
 
