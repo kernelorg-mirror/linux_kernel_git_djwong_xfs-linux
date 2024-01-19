@@ -36,6 +36,8 @@ struct xfs_rtgroup {
 #ifdef __KERNEL__
 	/* -- kernel only structures below this line -- */
 	spinlock_t		rtg_state_lock;
+
+	struct lock_class_key	lock_class;
 #endif /* __KERNEL__ */
 };
 
