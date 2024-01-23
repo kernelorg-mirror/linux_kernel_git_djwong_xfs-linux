@@ -173,7 +173,7 @@ xfs_trim_gather_extents(
 	if (error)
 		return error;
 
-	cur = xfs_allocbt_init_cursor(mp, NULL, agbp, pag, XFS_BTNUM_CNT);
+	cur = xfs_cntbt_init_cursor(mp, NULL, agbp, pag);
 
 	/*
 	 * Look up the extent length requested in the AGF and start with it.
