@@ -2003,7 +2003,8 @@ xfs_alloc_buftarg(
 	ops = &xfs_dax_holder_operations;
 #endif
 	btp = kzalloc(sizeof(*btp), GFP_NOFS);
-
+	if (!btp)
+		return NULL;
 	btp->bt_mount = mp;
 	btp->bt_bdev_handle = bdev_handle;
 	btp->bt_dev = bdev_handle->bdev->bd_dev;
