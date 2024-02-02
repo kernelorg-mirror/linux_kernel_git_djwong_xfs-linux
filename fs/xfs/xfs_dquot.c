@@ -25,6 +25,7 @@
 #include "xfs_bmap_btree.h"
 #include "xfs_error.h"
 #include "xfs_health.h"
+#include "xfs_timestats.h"
 
 /*
  * Lock order:
@@ -44,6 +45,16 @@ static struct kmem_cache	*xfs_dquot_cache;
 
 static struct lock_class_key xfs_dquot_group_class;
 static struct lock_class_key xfs_dquot_project_class;
+
+#ifdef CONFIG_XFS_TIME_STATS
+void xfs_dqlock(struct xfs_dquot *dqp)
+{
+	DEFINE_XFS_TIMESTAT(start_time);
+
+	mutex_lock(&dqp->q_qlock);
+	xfs_timestats_end(&dqp->q_mount->m_timestats.ts_dqlock, start_time);
+}
+#endif
 
 /* Record observations of quota corruption with the health tracking system. */
 static void
