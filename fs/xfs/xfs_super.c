@@ -46,6 +46,7 @@
 #include "xfs_exchmaps_item.h"
 #include "xfs_parent.h"
 #include "xfs_rtalloc.h"
+#include "xfs_timestats.h"
 #include "scrub/stats.h"
 #include "scrub/rcbag_btree.h"
 
@@ -767,6 +768,7 @@ xfs_mount_free(
 		xfs_free_buftarg(mp->m_ddev_targp);
 
 	debugfs_remove(mp->m_debugfs);
+	xfs_timestats_destroy(mp);
 	kfree(mp->m_rtname);
 	kfree(mp->m_logname);
 	kmem_free(mp);
@@ -1145,6 +1147,7 @@ xfs_fs_put_super(
 	xfs_rtmount_freesb(mp);
 	xfs_freesb(mp);
 	xchk_mount_stats_free(mp);
+	xfs_timestats_unexport(mp);
 	free_percpu(mp->m_stats.xs_stats);
 	xfs_inodegc_free_percpu(mp);
 	xfs_destroy_percpu_counters(mp);
@@ -1579,6 +1582,7 @@ xfs_fs_fill_super(
 		goto out_destroy_inodegc;
 	}
 
+	xfs_timestats_export(mp);
 	error = xchk_mount_stats_alloc(mp);
 	if (error)
 		goto out_free_stats;
@@ -1804,6 +1808,7 @@ xfs_fs_fill_super(
 	xfs_freesb(mp);
  out_free_scrub_stats:
 	xchk_mount_stats_free(mp);
+	xfs_timestats_unexport(mp);
  out_free_stats:
 	free_percpu(mp->m_stats.xs_stats);
  out_destroy_inodegc:
@@ -2064,6 +2069,7 @@ static int xfs_init_fs_context(
 	mp->m_allocsize_log = 16; /* 64k */
 
 	xfs_hooks_init(&mp->m_dir_update_hooks);
+	xfs_timestats_init(mp);
 
 	fc->s_fs_info = mp;
 	fc->ops = &xfs_context_ops;
