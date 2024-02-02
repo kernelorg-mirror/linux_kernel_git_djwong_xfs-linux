@@ -12,6 +12,7 @@
 #include "xfs_sysfs.h"
 #include "xfs_btree.h"
 #include "xfs_super.h"
+#include "xfs_timestats.h"
 #include "scrub/scrub.h"
 #include "scrub/stats.h"
 #include "scrub/trace.h"
@@ -44,11 +45,23 @@ struct xchk_scrub_stats {
 	spinlock_t		css_lock;
 };
 
-struct xchk_stats {
-	struct dentry		*cs_debugfs;
-	struct xchk_scrub_stats	cs_stats[XFS_SCRUB_TYPE_NR];
+struct xchk_timestats {
+#ifdef CONFIG_XFS_TIME_STATS
+	struct dentry		*parent;
+	struct {
+		struct time_stats	scrub;
+		struct time_stats	repair;
+	} scrub[XFS_SCRUB_TYPE_NR];
+#endif
 };
 
+struct xchk_stats {
+	struct dentry		*cs_debugfs;
+#ifdef CONFIG_XFS_TIME_STATS
+	struct xchk_timestats	*cs_timestats;
+#endif
+	struct xchk_scrub_stats	cs_stats[XFS_SCRUB_TYPE_NR];
+};
 
 static struct xchk_stats	global_stats;
 
@@ -86,6 +99,107 @@ static const char *name_map[XFS_SCRUB_TYPE_NR] = {
 	[XFS_SCRUB_TYPE_RTRMAPBT]	= "rtrmapbt",
 	[XFS_SCRUB_TYPE_RTREFCBT]	= "rtrefcountbt",
 };
+#ifdef CONFIG_XFS_TIME_STATS
+static inline void
+xchk_timestats_init(
+	struct xchk_stats	*cs,
+	struct xfs_mount	*mp)
+{
+	struct xchk_timestats	*ts;
+	unsigned int		i;
+
+	/* Only individual mounts have timestats so far */
+	if (!mp) {
+		cs->cs_timestats = NULL;
+		return;
+	}
+
+	/* timestats are optional */
+	ts = kmalloc(sizeof(struct xchk_timestats), GFP_KERNEL);
+	if (!ts) {
+		cs->cs_timestats = NULL;
+		return;
+	}
+
+	for (i = 0; i < XFS_SCRUB_TYPE_NR; i++) {
+		time_stats_init(&ts->scrub[i].scrub);
+		time_stats_init(&ts->scrub[i].repair);
+	}
+
+	ts->parent = mp->m_timestats.ts_debugfs;
+	cs->cs_timestats = ts;
+}
+
+static inline void
+xchk_timestats_teardown(
+	struct xchk_stats	*cs)
+{
+	struct xchk_timestats	*ts = cs->cs_timestats;
+	unsigned int		i;
+
+	if (!ts)
+		return;
+
+	for (i = 0; i < XFS_SCRUB_TYPE_NR; i++) {
+		time_stats_exit(&ts->scrub[i].scrub);
+		time_stats_exit(&ts->scrub[i].repair);
+	}
+	kfree(ts);
+	cs->cs_timestats = NULL;
+}
+
+static inline void
+xchk_timestats_register(
+	struct xchk_stats	*cs)
+{
+	char			name[32];
+	struct xchk_timestats	*ts = cs->cs_timestats;
+	unsigned int		i;
+
+	if (!ts)
+		return;
+
+	for (i = 0; i < XFS_SCRUB_TYPE_NR; i++) {
+		if (!name_map[i])
+			continue;
+
+		snprintf(name, 32, "scrub::%s", name_map[i]);
+		debugfs_create_file(name, 0444, ts->parent,
+				&ts->scrub[i].scrub, &xfs_timestats_fops);
+
+		snprintf(name, 32, "repair::%s", name_map[i]);
+		debugfs_create_file(name, 0444, ts->parent,
+				&ts->scrub[i].repair, &xfs_timestats_fops);
+	}
+}
+
+STATIC void
+xchk_timestats_merge_one(
+	struct xchk_stats		*cs,
+	const struct xfs_scrub_metadata	*sm,
+	const struct xchk_stats_run	*run)
+{
+	struct xchk_timestats		*ts = cs->cs_timestats;
+
+	if (sm->sm_type >= XFS_SCRUB_TYPE_NR) {
+		ASSERT(sm->sm_type < XFS_SCRUB_TYPE_NR);
+		return;
+	}
+	if (!ts)
+		return;
+
+	xfs_timestats_interval(&ts->scrub[sm->sm_type].scrub,
+			run->scrub_start, run->scrub_stop);
+	xfs_timestats_interval(&ts->scrub[sm->sm_type].repair,
+			run->repair_start, run->repair_stop);
+}
+
+#else
+# define xchk_timestats_init(cs, mp)	((void)0)
+# define xchk_timestats_teardown(cs)	((void)0)
+# define xchk_timestats_register(cs)	((void)0)
+# define xchk_timestats_merge_one(...)	((void)0)
+#endif
 
 /* Format the scrub stats into a text buffer, similar to pcp style. */
 STATIC ssize_t
@@ -192,6 +306,7 @@ xchk_stats_merge_one(
 	const struct xchk_stats_run	*run)
 {
 	struct xchk_scrub_stats		*css;
+	u64				delta;
 
 	if (sm->sm_type >= XFS_SCRUB_TYPE_NR) {
 		ASSERT(sm->sm_type < XFS_SCRUB_TYPE_NR);
@@ -216,13 +331,15 @@ xchk_stats_merge_one(
 	if (sm->sm_flags & XFS_SCRUB_OFLAG_WARNING)
 		css->warning++;
 	css->retries += run->retries;
-	css->checktime_us += howmany_64(run->scrub_ns, NSEC_PER_USEC);
+	delta = max(1, run->scrub_stop - run->scrub_start);
+	css->checktime_us += howmany_64(delta, NSEC_PER_USEC);
 
 	if (run->repair_attempted)
 		css->repair_invocations++;
 	if (run->repair_succeeded)
 		css->repair_success++;
-	css->repairtime_us += howmany_64(run->repair_ns, NSEC_PER_USEC);
+	delta = max(1, run->repair_stop - run->repair_start);
+	css->repairtime_us += howmany_64(delta, NSEC_PER_USEC);
 	spin_unlock(&css->css_lock);
 }
 
@@ -235,6 +352,7 @@ xchk_stats_merge(
 {
 	xchk_stats_merge_one(&global_stats, sm, run);
 	xchk_stats_merge_one(mp->m_scrub_stats, sm, run);
+	xchk_timestats_merge_one(mp->m_scrub_stats, sm, run);
 }
 
 /* debugfs boilerplate */
@@ -321,6 +439,7 @@ xchk_stats_init(
 	for (i = 0; i < XFS_SCRUB_TYPE_NR; i++, css++)
 		spin_lock_init(&css->css_lock);
 
+	xchk_timestats_init(cs, mp);
 	return 0;
 }
 
@@ -341,6 +460,8 @@ xchk_stats_register(
 			&scrub_stats_fops);
 	debugfs_create_file("clear_stats", 0200, cs->cs_debugfs, cs,
 			&clear_scrub_stats_fops);
+
+	xchk_timestats_register(cs);
 }
 
 /* Free all resources related to the stats object. */
@@ -348,6 +469,7 @@ STATIC int
 xchk_stats_teardown(
 	struct xchk_stats	*cs)
 {
+	xchk_timestats_teardown(cs);
 	return 0;
 }
 
