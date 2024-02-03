@@ -106,10 +106,11 @@ EXPORT_SYMBOL_GPL(mean_and_variance_get_stddev);
  * see linked pdf: function derived from equations 140-143 where alpha = 2^w.
  * values are stored bitshifted for performance and added precision.
  */
-void mean_and_variance_weighted_update(struct mean_and_variance_weighted *s, s64 x)
+void mean_and_variance_weighted_update(struct mean_and_variance_weighted *s,
+		s64 x, bool initted, u8 weight)
 {
 	// previous weighted variance.
-	u8 w		= s->weight;
+	u8 w		= weight;
 	u64 var_w0	= s->variance;
 	// new value weighted.
 	s64 x_w		= x << w;
@@ -118,14 +119,13 @@ void mean_and_variance_weighted_update(struct mean_and_variance_weighted *s, s64
 	// new mean weighted.
 	s64 u_w1	= s->mean + diff;
 
-	if (!s->init) {
+	if (!initted) {
 		s->mean = x_w;
 		s->variance = 0;
 	} else {
 		s->mean = u_w1;
 		s->variance = ((var_w0 << w) - var_w0 + ((diff_w * (x_w - u_w1)) >> w)) >> w;
 	}
-	s->init = true;
 }
 EXPORT_SYMBOL_GPL(mean_and_variance_weighted_update);
 
@@ -133,9 +133,10 @@ EXPORT_SYMBOL_GPL(mean_and_variance_weighted_update);
  * mean_and_variance_weighted_get_mean() - get mean from @s
  * @s: mean and variance number of samples and their sums
  */
-s64 mean_and_variance_weighted_get_mean(struct mean_and_variance_weighted s)
+s64 mean_and_variance_weighted_get_mean(struct mean_and_variance_weighted s,
+		u8 weight)
 {
-	return fast_divpow2(s.mean, s.weight);
+	return fast_divpow2(s.mean, weight);
 }
 EXPORT_SYMBOL_GPL(mean_and_variance_weighted_get_mean);
 
@@ -143,10 +144,11 @@ EXPORT_SYMBOL_GPL(mean_and_variance_weighted_get_mean);
  * mean_and_variance_weighted_get_variance() -- get variance from @s
  * @s: mean and variance number of samples and their sums
  */
-u64 mean_and_variance_weighted_get_variance(struct mean_and_variance_weighted s)
+u64 mean_and_variance_weighted_get_variance(struct mean_and_variance_weighted s,
+		u8 weight)
 {
 	// always positive don't need fast divpow2
-	return s.variance >> s.weight;
+	return s.variance >> weight;
 }
 EXPORT_SYMBOL_GPL(mean_and_variance_weighted_get_variance);
 
@@ -154,9 +156,10 @@ EXPORT_SYMBOL_GPL(mean_and_variance_weighted_get_variance);
  * mean_and_variance_weighted_get_stddev() - get standard deviation from @s
  * @s: mean and variance number of samples and their sums
  */
-u32 mean_and_variance_weighted_get_stddev(struct mean_and_variance_weighted s)
+u32 mean_and_variance_weighted_get_stddev(struct mean_and_variance_weighted s,
+		u8 weight)
 {
-	return int_sqrt64(mean_and_variance_weighted_get_variance(s));
+	return int_sqrt64(mean_and_variance_weighted_get_variance(s, weight));
 }
 EXPORT_SYMBOL_GPL(mean_and_variance_weighted_get_stddev);
 
