@@ -49,6 +49,43 @@ const struct file_operations xfs_timestats_fops = {
 	.read			= xfs_timestats_read,
 };
 
+/* Format a timestats report into a buffer as json. */
+static ssize_t
+xfs_timestats_read_json(
+	struct file		*file,
+	char __user		*ubuf,
+	size_t			count,
+	loff_t			*ppos)
+{
+	struct seq_buf		s;
+	struct time_stats	*ts = file->private_data;
+	char			*buf;
+	ssize_t			ret;
+
+	/*
+	 * This generates a stringly snapshot of a timestats report, so we
+	 * do not want userspace to receive garbled text from multiple calls.
+	 * If the file position is greater than 0, return a short read.
+	 */
+	if (*ppos > 0)
+		return 0;
+
+	buf = kzalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	seq_buf_init(&s, buf, PAGE_SIZE);
+	time_stats_to_json(&s, ts, "mount", TIME_STATS_PRINT_NO_ZEROES);
+	ret = simple_read_from_buffer(ubuf, count, ppos, buf, seq_buf_used(&s));
+	kfree(buf);
+	return ret;
+}
+
+const struct file_operations xfs_timestats_json_fops = {
+	.open			= simple_open,
+	.read			= xfs_timestats_read_json,
+};
+
 /* Set up timestats collection. */
 void
 xfs_timestats_init(
@@ -79,8 +116,12 @@ xfs_timestats_destroy(
 
 /* Export timestats via debugfs */
 #define X(p, ts, name) \
-	debugfs_create_file("blocked::" #name, 0444, (p), &(ts)->ts_##name, \
-			&xfs_timestats_fops)
+	do { \
+		debugfs_create_file("blocked::" #name ".txt", 0444, (p), \
+				&(ts)->ts_##name, &xfs_timestats_fops); \
+		debugfs_create_file("blocked::" #name ".json", 0444, (p), \
+				&(ts)->ts_##name, &xfs_timestats_json_fops); \
+	} while (0)
 void
 xfs_timestats_export(
 	struct xfs_mount	*mp)

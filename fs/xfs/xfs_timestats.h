@@ -8,6 +8,7 @@
 
 #ifdef CONFIG_XFS_TIME_STATS
 extern const struct file_operations xfs_timestats_fops;
+extern const struct file_operations xfs_timestats_json_fops;
 
 void xfs_timestats_init(struct xfs_mount *mp);
 void xfs_timestats_export(struct xfs_mount *mp);
