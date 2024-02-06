@@ -103,6 +103,8 @@ struct xfs_rmap_intent;
 struct xfs_refcount_intent;
 struct xfs_fsrefs;
 struct xfs_merkle_bkey;
+struct xfs_healthmon_event;
+struct xfs_health_update_params;
 
 #define XFS_ATTR_FILTER_FLAGS \
 	{ XFS_ATTR_ROOT,	"ROOT" }, \
@@ -5999,6 +6001,111 @@ TRACE_EVENT(xfs_fsverity_shrinker_scan,
 		  __entry->caller_ip)
 )
 #endif /* CONFIG_XFS_VERITY */
+
+#ifdef CONFIG_XFS_HEALTH_MONITOR
+TRACE_EVENT(xfs_healthmon_shutdown_hook,
+	TP_PROTO(const struct xfs_mount *mp, uint32_t shutdown_flags,
+		 unsigned int events, bool lost_prev),
+	TP_ARGS(mp, shutdown_flags, events, lost_prev),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(uint32_t, shutdown_flags)
+		__field(unsigned int, events)
+		__field(bool, lost_prev)
+	),
+	TP_fast_assign(
+		__entry->dev = mp ? mp->m_super->s_dev : 0;
+		__entry->shutdown_flags = shutdown_flags;
+		__entry->events = events;
+		__entry->lost_prev = lost_prev;
+	),
+	TP_printk("dev %d:%d shutdown_flags %s events %u lost_prev? %d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __print_flags(__entry->shutdown_flags, "|", XFS_SHUTDOWN_STRINGS),
+		  __entry->events,
+		  __entry->lost_prev)
+);
+
+DECLARE_EVENT_CLASS(xfs_healthmon_class,
+	TP_PROTO(const struct xfs_mount *mp, unsigned int events, bool lost_prev),
+	TP_ARGS(mp, events, lost_prev),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned int, events)
+		__field(bool, lost_prev)
+	),
+	TP_fast_assign(
+		__entry->dev = mp ? mp->m_super->s_dev : 0;
+		__entry->events = events;
+		__entry->lost_prev = lost_prev;
+	),
+	TP_printk("dev %d:%d events %u lost_prev? %d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->events,
+		  __entry->lost_prev)
+);
+#define DEFINE_HEALTHMON_EVENT(name) \
+DEFINE_EVENT(xfs_healthmon_class, name, \
+	TP_PROTO(const struct xfs_mount *mp, unsigned int events, bool lost_prev), \
+	TP_ARGS(mp, events, lost_prev))
+DEFINE_HEALTHMON_EVENT(xfs_healthmon_create);
+DEFINE_HEALTHMON_EVENT(xfs_healthmon_run);
+DEFINE_HEALTHMON_EVENT(xfs_healthmon_stop);
+DEFINE_HEALTHMON_EVENT(xfs_healthmon_exit);
+DEFINE_HEALTHMON_EVENT(xfs_healthmon_unmount);
+
+#define XFS_HEALTHMON_TYPE_STRINGS \
+	{ XFS_HEALTHMON_LOST,		"lost" }, \
+	{ XFS_HEALTHMON_SHUTDOWN,	"shutdown" }
+
+#define XFS_HEALTHMON_DOMAIN_STRINGS \
+	{ XFS_HEALTHMON_MOUNT,		"mount" }
+
+TRACE_DEFINE_ENUM(XFS_HEALTHMON_LOST);
+TRACE_DEFINE_ENUM(XFS_HEALTHMON_SHUTDOWN);
+
+TRACE_DEFINE_ENUM(XFS_HEALTHMON_MOUNT);
+
+DECLARE_EVENT_CLASS(xfs_healthmon_event_class,
+	TP_PROTO(const struct xfs_mount *mp, const struct xfs_healthmon_event *event),
+	TP_ARGS(mp, event),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned int, type)
+		__field(unsigned int, domain)
+		__field(unsigned int, mask)
+		__field(unsigned long long, ino)
+		__field(unsigned int, gen)
+		__field(unsigned int, group)
+	),
+	TP_fast_assign(
+		__entry->dev = mp ? mp->m_super->s_dev : 0;
+		__entry->type = event->type;
+		__entry->domain = event->domain;
+		switch (__entry->domain) {
+		case XFS_HEALTHMON_MOUNT:
+			__entry->mask = event->flags;
+			break;
+		}
+	),
+	TP_printk("dev %d:%d type %s domain %s mask 0x%x ino 0x%llx gen 0x%x group 0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __print_symbolic(__entry->type, XFS_HEALTHMON_TYPE_STRINGS),
+		  __print_symbolic(__entry->domain, XFS_HEALTHMON_DOMAIN_STRINGS),
+		  __entry->mask,
+		  __entry->ino,
+		  __entry->gen,
+		  __entry->group)
+);
+#define DEFINE_HEALTHMONEVENT_EVENT(name) \
+DEFINE_EVENT(xfs_healthmon_event_class, name, \
+	TP_PROTO(const struct xfs_mount *mp, const struct xfs_healthmon_event *event), \
+	TP_ARGS(mp, event))
+DEFINE_HEALTHMONEVENT_EVENT(xfs_healthmon_push);
+DEFINE_HEALTHMONEVENT_EVENT(xfs_healthmon_pop);
+DEFINE_HEALTHMONEVENT_EVENT(xfs_healthmon_format);
+DEFINE_HEALTHMONEVENT_EVENT(xfs_healthmon_drop);
+#endif /* CONFIG_XFS_HEALTH_MONITOR */
 
 #endif /* _TRACE_XFS_H */
 
