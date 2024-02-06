@@ -232,4 +232,14 @@ struct xfs_map_freesp {
 /* Turn off fs-verity */
 #define FS_IOC_DISABLE_VERITY	_IO('f', 133)
 
+struct xfs_health_monitor {
+	__u64	flags;		/* flags */
+	__u8	format;		/* output format */
+	__u8	pad1[7];	/* zeroes */
+	__u64	pad2[2];	/* zeroes */
+};
+
+/* Monitor for health events. */
+#define XFS_IOC_HEALTH_MONITOR		_IOR ('X', 48, struct xfs_health_monitor)
+
 #endif /* __XFS_FS_STAGING_H__ */
