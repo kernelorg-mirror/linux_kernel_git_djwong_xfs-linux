@@ -287,6 +287,9 @@ typedef struct xfs_mount {
 	/* Hook to feed dirent updates to an active online repair. */
 	struct xfs_hooks	m_dir_update_hooks;
 
+	/* Hook to feed health events to a daemon. */
+	struct xfs_hooks	m_health_update_hooks;
+
 	struct xfs_timestats	m_timestats;
 } xfs_mount_t;
 
