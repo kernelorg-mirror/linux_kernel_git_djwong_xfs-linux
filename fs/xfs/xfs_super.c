@@ -2081,6 +2081,7 @@ static int xfs_init_fs_context(
 	mp->m_allocsize_log = 16; /* 64k */
 
 	xfs_hooks_init(&mp->m_dir_update_hooks);
+	xfs_hooks_init(&mp->m_health_update_hooks);
 	xfs_timestats_init(mp);
 
 	fc->s_fs_info = mp;
