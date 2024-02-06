@@ -1096,6 +1096,13 @@ struct xfs_map_freesp {
 	__u64	pad;		/* must be zero */
 };
 
+struct xfs_health_monitor {
+	__u64	flags;		/* flags */
+	__u8	format;		/* output format */
+	__u8	pad1[7];	/* zeroes */
+	__u64	pad2[2];	/* zeroes */
+};
+
 /*
  * ioctl commands that are used by Linux filesystems
  */
@@ -1137,6 +1144,7 @@ struct xfs_map_freesp {
 #define XFS_IOC_RTGROUP_GEOMETRY _IOWR('X', 65, struct xfs_rtgroup_geometry)
 #define XFS_IOC_GETFSREFCOUNTS	_IOWR('X', 66, struct xfs_getfsrefs_head)
 #define XFS_IOC_MAP_FREESP	_IOWR('X', 67, struct xfs_map_freesp)
+#define XFS_IOC_HEALTH_MONITOR	_IOR ('X', 68, struct xfs_health_monitor)
 
 /*
  * ioctl commands that replace IRIX syssgi()'s
