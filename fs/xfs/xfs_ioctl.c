@@ -45,6 +45,7 @@
 #include "xfs_exchrange.h"
 #include "xfs_rtgroup.h"
 #include "xfs_verity.h"
+#include "xfs_healthmon.h"
 
 #include <linux/mount.h>
 #include <linux/namei.h>
@@ -2469,6 +2470,23 @@ xfs_ioc_map_freesp(
 # define xfs_ioc_map_freesp(...)		(-ENOTTY)
 #endif
 
+#ifdef CONFIG_XFS_EXPERIMENTAL_IOCTLS
+STATIC int
+xfs_ioc_health_monitor(
+	struct xfs_mount		*mp,
+	struct xfs_health_monitor __user *arg)
+{
+	struct xfs_health_monitor	hmo;
+
+	if (copy_from_user(&hmo, arg, sizeof(hmo)))
+		return -EFAULT;
+
+	return xfs_healthmon_create(mp, &hmo);
+}
+#else
+# define xfs_ioc_health_monitor(...)		(-ENOTTY)
+#endif
+
 /*
  * These long-unused ioctls were removed from the official ioctl API in 5.17,
  * but retain these definitions so that we can log warnings about them.
@@ -2746,6 +2764,9 @@ xfs_file_ioctl(
 		if (!xfs_has_verity(mp))
 			return -EOPNOTSUPP;
 		return fsverity_ioctl_read_metadata(filp, arg);
+
+	case XFS_IOC_HEALTH_MONITOR:
+		return xfs_ioc_health_monitor(mp, arg);
 
 	default:
 		return -ENOTTY;
