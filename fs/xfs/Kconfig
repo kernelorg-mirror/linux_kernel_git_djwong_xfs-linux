@@ -6,6 +6,7 @@ config XFS_FS
 	select LIBCRC32C
 	select FS_IOMAP
 	select TIME_STATS if XFS_TIME_STATS
+	select THREAD_WITH_FILE if XFS_HEALTH_MONITOR
 	help
 	  XFS is a high performance journaling filesystem which originated
 	  on the SGI IRIX platform.  It is completely multi-threaded, can
@@ -127,6 +128,14 @@ config XFS_TIME_STATS
 	default y
 	help
 	  Collects time statistics on various operations in the filesystem.
+
+config XFS_HEALTH_MONITOR
+	bool "Report filesystem health events to userspace"
+	depends on XFS_FS
+	select XFS_LIVE_HOOKS
+	default y
+	help
+	  Report health events to userspace programs.
 
 config XFS_DRAIN_INTENTS
 	bool
