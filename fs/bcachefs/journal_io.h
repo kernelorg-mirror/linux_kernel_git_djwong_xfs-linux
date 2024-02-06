@@ -2,6 +2,8 @@
 #ifndef _BCACHEFS_JOURNAL_IO_H
 #define _BCACHEFS_JOURNAL_IO_H
 
+#include <linux/darray_types.h>
+
 /*
  * Only used for holding the journal entries we read in btree_journal_read()
  * during cache_registration
