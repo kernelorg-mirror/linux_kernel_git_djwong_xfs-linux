@@ -47,6 +47,8 @@
 #include "xfs_rmap.h"
 #include "xfs_refcount.h"
 #include "xfs_fsrefs.h"
+#include "xfs_health.h"
+#include "xfs_healthmon.h"
 
 static inline void
 xfs_rmapbt_crack_agno_opdev(
