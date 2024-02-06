@@ -44,6 +44,7 @@
 #include "xfs_xchgrange.h"
 #include "xfs_file.h"
 #include "xfs_rtgroup.h"
+#include "xfs_healthmon.h"
 
 #include <linux/mount.h>
 #include <linux/namei.h>
@@ -2563,6 +2564,15 @@ xfs_file_ioctl(
 
 	case XFS_IOC_MAP_FREESP:
 		return xfs_ioc_map_freesp(filp, arg);
+
+	case XFS_IOC_HEALTH_MONITOR: {
+		struct xfs_health_monitor	hmo;
+
+		if (copy_from_user(&hmo, arg, sizeof(hmo)))
+			return -EFAULT;
+
+		return xfs_healthmon_create(mp, &hmo);
+	}
 
 	default:
 		return -ENOTTY;
