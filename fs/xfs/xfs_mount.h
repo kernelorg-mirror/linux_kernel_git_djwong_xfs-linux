@@ -290,6 +290,9 @@ typedef struct xfs_mount {
 	/* Hook to feed health events to a daemon. */
 	struct xfs_hooks	m_health_update_hooks;
 
+	/* Hook to feed shutdown events to a daemon. */
+	struct xfs_hooks	m_shutdown_hooks;
+
 	struct xfs_timestats	m_timestats;
 } xfs_mount_t;
 
