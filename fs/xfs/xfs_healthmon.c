@@ -24,6 +24,7 @@
 #include "xfs_notify_failure.h"
 #include "xfs_fs.h"
 #include "xfs_ioctl.h"
+#include "xfs_file.h"
 
 /*
  * Live Health Monitoring
@@ -171,6 +172,26 @@
  * The domain element tells us which device reported a media failure.  The
  * daddr and bbcount elements tell us where inside that device the failure was
  * observed.
+ *
+ * File IO Errors
+ * --------------
+ *
+ * {
+ *	"type": "readahead" | "writeback" | "dioread" | "diowrite",
+ *	"domain": "filerange",
+ *	"inode": integer,
+ *	"generation": integer,
+ *	"pos": integer,
+ *	"len": integer,
+ *	"time_ns": integer
+ * }
+ *
+ * Type "type" field tells us where the IO occurred -- "readhead" for reads
+ * to the page cache; "writeback" for dirty cache writeback; "dioread" for
+ * O_DIRECT reads; and "diowrite" for O_DIRECT writes.
+ *
+ * The "inode" and "generation" elements report which file was affected.
+ * The "pos" and "len" elements report what part of the file was affected.
  */
 
 #define XFS_HEALTHMON_MAX_EVENTS \
@@ -199,6 +220,7 @@ struct xfs_healthmon {
 	struct xfs_shutdown_hook	shook;
 	struct xfs_health_hook		hhook;
 	struct xfs_media_error_hook	mhook;
+	struct xfs_file_ioerror_hook	fhook;
 
 	/* filesystem mount, or NULL if we've unmounted */
 	struct xfs_mount		*mp;
@@ -246,10 +268,12 @@ xfs_healthmon_exit(
 	trace_xfs_healthmon_exit(hm->mp, hm->events, hm->lost_prev_event);
 
 	if (hm->mp) {
+		xfs_file_ioerror_hook_del(hm->mp, &hm->fhook);
 		xfs_media_error_hook_del(hm->mp, &hm->mhook);
 		xfs_health_hook_del(hm->mp, &hm->hhook);
 		xfs_shutdown_hook_del(hm->mp, &hm->shook);
 	}
+	xfs_file_ioerror_hook_disable();
 	xfs_media_error_hook_disable();
 	xfs_health_hook_disable();
 	xfs_shutdown_hook_disable();
@@ -596,6 +620,71 @@ out_unlock:
 }
 #endif
 
+/* Add a file io error event to the reporting queue. */
+STATIC int
+xfs_healthmon_file_ioerror_hook(
+	struct notifier_block		*nb,
+	unsigned long			action,
+	void				*data)
+{
+	struct xfs_healthmon		*hm;
+	struct xfs_healthmon_event	*event;
+	struct xfs_file_ioerror_params	*p = data;
+	enum xfs_healthmon_type		type = 0;
+	int				error;
+
+	hm = container_of(nb, struct xfs_healthmon, fhook.ioerror_hook.nb);
+
+	switch (action) {
+	case XFS_FILE_IOERROR_BUFFERED_READ:
+	case XFS_FILE_IOERROR_BUFFERED_WRITE:
+	case XFS_FILE_IOERROR_DIRECT_READ:
+	case XFS_FILE_IOERROR_DIRECT_WRITE:
+		break;
+	default:
+		ASSERT(0);
+		return NOTIFY_DONE;
+	}
+
+	mutex_lock(&hm->lock);
+
+	trace_xfs_healthmon_file_ioerror_hook(hm->mp, action, p, hm->events,
+			hm->lost_prev_event);
+
+	error = xfs_healthmon_start_live_update(hm);
+	if (error)
+		goto out_unlock;
+
+	switch (action) {
+	case XFS_FILE_IOERROR_BUFFERED_READ:
+		type = XFS_HEALTHMON_BUFREAD;
+		break;
+	case XFS_FILE_IOERROR_BUFFERED_WRITE:
+		type = XFS_HEALTHMON_BUFWRITE;
+		break;
+	case XFS_FILE_IOERROR_DIRECT_READ:
+		type = XFS_HEALTHMON_DIOREAD;
+		break;
+	case XFS_FILE_IOERROR_DIRECT_WRITE:
+		type = XFS_HEALTHMON_DIOWRITE;
+		break;
+	}
+
+	event = new_event(hm, type, XFS_HEALTHMON_FILERANGE);
+	if (!event)
+		goto out_unlock;
+
+	event->fino = p->ino;
+	event->fgen = p->gen;
+	event->fpos = p->pos;
+	event->flen = p->len;
+	xfs_healthmon_push(hm, event);
+
+out_unlock:
+	mutex_unlock(&hm->lock);
+	return NOTIFY_DONE;
+}
+
 /* Render the health update type as a string. */
 STATIC const char *
 xfs_healthmon_typestring(
@@ -609,6 +698,10 @@ xfs_healthmon_typestring(
 		[XFS_HEALTHMON_CORRUPT]		= "corrupt",
 		[XFS_HEALTHMON_HEALTHY]		= "healthy",
 		[XFS_HEALTHMON_MEDIA_ERROR]	= "media",
+		[XFS_HEALTHMON_BUFREAD]	 	= "readahead",
+		[XFS_HEALTHMON_BUFWRITE] 	= "writeback",
+		[XFS_HEALTHMON_DIOREAD]	 	= "dioread",
+		[XFS_HEALTHMON_DIOWRITE]	= "diowrite",
 	};
 
 	if (event->type >= ARRAY_SIZE(type_strings))
@@ -632,6 +725,7 @@ xfs_healthmon_domstring(
 		[XFS_HEALTHMON_DATADEV]		= "datadev",
 		[XFS_HEALTHMON_LOGDEV]		= "logdev",
 		[XFS_HEALTHMON_RTDEV]		= "rtdev",
+		[XFS_HEALTHMON_FILERANGE]	= "filerange",
 	};
 
 	if (event->domain >= ARRAY_SIZE(dom_strings))
@@ -874,6 +968,33 @@ xfs_healthmon_format_media_error(
 			event->bbcount);
 }
 
+/* Render file range events as a string set */
+static ssize_t
+xfs_healthmon_format_filerange(
+	struct stdio_redirect		*out,
+	const struct xfs_healthmon_event *event)
+{
+	ssize_t				ret;
+
+	ret = stdio_redirect_printf(out, false, "  \"inode\":      %llu,\n",
+			event->fino);
+	if (ret < 0)
+		return ret;
+
+	ret = stdio_redirect_printf(out, false, "  \"generation\": %u,\n",
+			event->fgen);
+	if (ret < 0)
+		return ret;
+
+	ret = stdio_redirect_printf(out, false, "  \"pos\":        %llu,\n",
+			event->fpos);
+	if (ret < 0)
+		return ret;
+
+	return stdio_redirect_printf(out, false, "  \"length\":     %llu,\n",
+			event->flen);
+}
+
 /* Format an event into json. */
 STATIC int
 xfs_healthmon_format(
@@ -931,6 +1052,9 @@ xfs_healthmon_format(
 	case XFS_HEALTHMON_LOGDEV:
 	case XFS_HEALTHMON_RTDEV:
 		ret = xfs_healthmon_format_media_error(out, event);
+		break;
+	case XFS_HEALTHMON_FILERANGE:
+		ret = xfs_healthmon_format_filerange(out, event);
 		break;
 	}
 	if (ret < 0)
@@ -1066,6 +1190,7 @@ xfs_healthmon_create(
 	xfs_shutdown_hook_enable();
 	xfs_health_hook_enable();
 	xfs_media_error_hook_enable();
+	xfs_file_ioerror_hook_enable();
 
 	xfs_shutdown_hook_setup(&hm->shook, xfs_healthmon_shutdown_hook);
 	ret = xfs_shutdown_hook_add(mp, &hm->shook);
@@ -1082,13 +1207,21 @@ xfs_healthmon_create(
 	if (ret)
 		goto out_health;
 
+	xfs_file_ioerror_hook_setup(&hm->fhook,
+			xfs_healthmon_file_ioerror_hook);
+	ret = xfs_file_ioerror_hook_add(mp, &hm->fhook);
+	if (ret)
+		goto out_media;
+
 	ret = run_thread_with_stdout(&hm->thread, &xfs_healthmon_ops);
 	if (ret < 0)
-		goto out_media;
+		goto out_fileio;
 
 	trace_xfs_healthmon_create(mp, hmo->flags, hmo->format);
 
 	return ret;
+out_fileio:
+	xfs_file_ioerror_hook_del(mp, &hm->fhook);
 out_media:
 	xfs_media_error_hook_del(mp, &hm->mhook);
 out_health:
@@ -1096,6 +1229,7 @@ out_health:
 out_shutdown:
 	xfs_shutdown_hook_del(mp, &hm->shook);
 out_hooks:
+	xfs_file_ioerror_hook_disable();
 	xfs_media_error_hook_disable();
 	xfs_health_hook_disable();
 	xfs_shutdown_hook_disable();
