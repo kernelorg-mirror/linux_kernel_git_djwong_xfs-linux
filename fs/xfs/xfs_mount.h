@@ -293,6 +293,9 @@ typedef struct xfs_mount {
 	/* Hook to feed shutdown events to a daemon. */
 	struct xfs_hooks	m_shutdown_hooks;
 
+	/* Hook to feed media error events to a daemon. */
+	struct xfs_hooks	m_media_error_hooks;
+
 	struct xfs_timestats	m_timestats;
 } xfs_mount_t;
 
