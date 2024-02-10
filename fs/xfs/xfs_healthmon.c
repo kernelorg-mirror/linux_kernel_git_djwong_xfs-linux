@@ -22,6 +22,8 @@
 #include "xfs_health.h"
 #include "xfs_healthmon.h"
 #include "xfs_notify_failure.h"
+#include "xfs_fs.h"
+#include "xfs_ioctl.h"
 
 #define XFS_HEALTHMON_MAX_EVENTS \
 		(32768 / sizeof(struct xfs_healthmon_event))
@@ -823,9 +825,29 @@ xfs_healthmon_run(
 	trace_xfs_healthmon_stop(hm->mp, hm->events, hm->lost_prev_event);
 }
 
+/* Handle ioctls for the health monitoring thread. */
+static long
+xfs_healthmon_ioctl(
+	struct thread_with_stdio	*thr,
+	unsigned int			cmd,
+	unsigned long			p)
+{
+#if 0
+	/* XXX how do we open the root dir? */
+	switch (cmd) {
+	case XFS_IOC_SCRUB_METADATA:
+	case XFS_IOC_SCRUBV_METADATA:
+		return xfs_file_ioctl(NULL, cmd, p);
+	}
+#endif
+
+	return -ENOTTY;
+}
+
 static const struct thread_with_stdio_ops xfs_healthmon_ops = {
 	.exit		= xfs_healthmon_exit,
 	.fn		= xfs_healthmon_run,
+	.unlocked_ioctl	= xfs_healthmon_ioctl,
 };
 
 /*
