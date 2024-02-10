@@ -22,6 +22,8 @@
 #include "xfs_health.h"
 #include "xfs_healthmon.h"
 #include "xfs_notify_failure.h"
+#include "xfs_fs.h"
+#include "xfs_ioctl.h"
 
 /*
  * Live Health Monitoring
@@ -995,9 +997,36 @@ xfs_healthmon_validate(
 	return true;
 }
 
+/* Handle ioctls for the health monitoring thread. */
+STATIC long
+xfs_healthmon_ioctl(
+	struct thread_with_stdio	*thr,
+	unsigned int			cmd,
+	unsigned long			p)
+{
+	struct xfs_health_monitor	hmo;
+	struct xfs_healthmon		*hm = to_healthmon(thr);
+	void			__user *arg = (void __user *)p;
+
+	if (cmd != XFS_IOC_HEALTH_MONITOR)
+		return -ENOTTY;
+
+	if (copy_from_user(&hmo, arg, sizeof(hmo)))
+		return -EFAULT;
+
+	if (!xfs_healthmon_validate(&hmo))
+		return -EINVAL;
+
+	mutex_lock(&hm->lock);
+	hm->verbose = !!(hmo.flags & XFS_HEALTH_MONITOR_VERBOSE);
+	mutex_unlock(&hm->lock);
+	return 0;
+}
+
 static const struct thread_with_stdio_ops xfs_healthmon_ops = {
 	.exit		= xfs_healthmon_exit,
 	.fn		= xfs_healthmon_run,
+	.unlocked_ioctl	= xfs_healthmon_ioctl,
 };
 
 /*
