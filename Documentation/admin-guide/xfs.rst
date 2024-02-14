@@ -21,6 +21,13 @@ Mount Options
 
 When mounting an XFS filesystem, the following options are accepted.
 
+  add_log_feat/noadd_log_feat
+        Permit unprivileged userspace to use functionality that requires
+        the addition of log incompat feature bits to the superblock.
+        The feature bits will be cleared during a clean unmount.
+        Old kernels cannot recover dirty logs if they do not recognize
+        all log incompat feature bits.
+
   allocsize=size
 	Sets the buffered I/O end-of-file preallocation size when
 	doing delayed allocation writeout (default size is 64KiB).
