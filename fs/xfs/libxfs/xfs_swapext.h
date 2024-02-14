@@ -32,9 +32,11 @@ xfs_swapext_can_use_without_log_assistance(
 		return false;
 
 	/*
-	 * No incompat features have been defined since the addition of swapext
-	 * log items.
+	 * Parent pointers were the next incompat feature added after the
+	 * addition of extent swap log items.
 	 */
+	if (xfs_has_parent(mp))
+		return true;
 
 	return false;
 }
