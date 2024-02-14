@@ -1321,6 +1321,15 @@ xfs_add_incompat_log_feature(
 		goto rele;
 
 	/*
+	 * Allow the log feature upgrade only if the sysadmin permits it via
+	 * mount option; or the caller is the administrator.
+	 */
+	if (!xfs_can_add_log_features(mp) && !capable(CAP_SYS_ADMIN)) {
+		error = -EOPNOTSUPP;
+		goto rele;
+	}
+
+	/*
 	 * Write the primary superblock to disk immediately, because we need
 	 * the log_incompat bit to be set in the primary super now to protect
 	 * the log items that we're going to commit later.
