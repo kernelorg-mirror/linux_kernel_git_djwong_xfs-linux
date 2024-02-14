@@ -1322,6 +1322,11 @@ xfs_add_incompat_log_feature(
 	if (xfs_sb_has_incompat_log_feature(&mp->m_sb, feature))
 		goto rele;
 
+	if (!xfs_may_add_log_features(mp)) {
+		error = -EOPNOTSUPP;
+		goto rele;
+	}
+
 	/*
 	 * Write the primary superblock to disk immediately, because we need
 	 * the log_incompat bit to be set in the primary super now to protect
