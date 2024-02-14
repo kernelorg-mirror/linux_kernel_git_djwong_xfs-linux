@@ -1280,6 +1280,27 @@ xfs_force_summary_recalc(
 }
 
 /*
+ * Allow the log feature upgrade only if the sysadmin permits it via mount
+ * option; or the caller is the administrator.  If the @want_audit parameter
+ * is true, then a denial due to insufficient privileges will be logged.
+ */
+bool
+xfs_can_add_incompat_log_features(
+	struct xfs_mount	*mp,
+	bool			want_audit)
+{
+	/* Always allowed if the mount option is set */
+	if (mp->m_features & XFS_FEAT_ADD_LOG_FEAT)
+		return true;
+
+	/* Allowed for administrators */
+	if (want_audit)
+		return capable(CAP_SYS_ADMIN);
+
+	return has_capability_noaudit(current, CAP_SYS_ADMIN);
+}
+
+/*
  * Enable a log incompat feature flag in the primary superblock.  The caller
  * cannot have any other transactions in progress.
  */
@@ -1319,6 +1340,11 @@ xfs_add_incompat_log_feature(
 
 	if (xfs_sb_has_incompat_log_feature(&mp->m_sb, feature))
 		goto rele;
+
+	if (!xfs_can_add_incompat_log_features(mp, true)) {
+		error = -EOPNOTSUPP;
+		goto rele;
+	}
 
 	/*
 	 * Write the primary superblock to disk immediately, because we need
