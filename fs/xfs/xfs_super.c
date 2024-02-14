@@ -103,7 +103,8 @@ enum {
 	Opt_filestreams, Opt_quota, Opt_noquota, Opt_usrquota, Opt_grpquota,
 	Opt_prjquota, Opt_uquota, Opt_gquota, Opt_pquota,
 	Opt_uqnoenforce, Opt_gqnoenforce, Opt_pqnoenforce, Opt_qnoenforce,
-	Opt_discard, Opt_nodiscard, Opt_dax, Opt_dax_enum,
+	Opt_discard, Opt_nodiscard, Opt_dax, Opt_dax_enum, Opt_add_log_feat,
+	Opt_noadd_log_feat,
 };
 
 static const struct fs_parameter_spec xfs_fs_parameters[] = {
@@ -148,6 +149,8 @@ static const struct fs_parameter_spec xfs_fs_parameters[] = {
 	fsparam_flag("nodiscard",	Opt_nodiscard),
 	fsparam_flag("dax",		Opt_dax),
 	fsparam_enum("dax",		Opt_dax_enum, dax_param_enums),
+	fsparam_flag("add_log_feat",	Opt_add_log_feat),
+	fsparam_flag("noadd_log_feat",	Opt_noadd_log_feat),
 	{}
 };
 
@@ -176,6 +179,7 @@ xfs_fs_show_options(
 		{ XFS_FEAT_LARGE_IOSIZE,	",largeio" },
 		{ XFS_FEAT_DAX_ALWAYS,		",dax=always" },
 		{ XFS_FEAT_DAX_NEVER,		",dax=never" },
+		{ XFS_FEAT_ADD_LOG_FEAT,	",add_log_feat" },
 		{ 0, NULL }
 	};
 	struct xfs_mount	*mp = XFS_M(root->d_sb);
@@ -1370,6 +1374,12 @@ xfs_fs_parse_param(
 		xfs_mount_set_dax_mode(parsing_mp, result.uint_32);
 		return 0;
 #endif
+	case Opt_add_log_feat:
+		parsing_mp->m_features |= XFS_FEAT_ADD_LOG_FEAT;
+		return 0;
+	case Opt_noadd_log_feat:
+		parsing_mp->m_features &= ~XFS_FEAT_ADD_LOG_FEAT;
+		return 0;
 	/* Following mount options will be removed in September 2025 */
 	case Opt_ikeep:
 		xfs_fs_warn_deprecated(fc, param, XFS_FEAT_IKEEP, true);
