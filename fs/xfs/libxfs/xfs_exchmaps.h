@@ -19,9 +19,11 @@ xfs_exchmaps_can_use_without_log_assistance(
 		return false;
 
 	/*
-	 * No incompat features have been defined since the addition of file
-	 * mapping exchange log items.
+	 * Parent pointers were the next incompat feature added after the
+	 * addition of file mapping exchange log items.
 	 */
+	if (xfs_has_parent(mp))
+		return true;
 
 	return false;
 }

@@ -640,9 +640,11 @@ xfs_attri_can_use_without_log_assistance(
 		return false;
 
 	/*
-	 * No incompat features have been defined since the addition of xattr
-	 * log items.
+	 * Parent pointers require logged extended attribute updates to
+	 * maintain referential integrity with dirent updates.
 	 */
+	if (xfs_has_parent(mp))
+		return true;
 
 	return false;
 }
