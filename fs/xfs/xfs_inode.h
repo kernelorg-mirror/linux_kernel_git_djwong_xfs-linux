@@ -312,6 +312,15 @@ static inline bool xfs_inode_has_large_extent_counts(struct xfs_inode *ip)
 }
 
 /*
+ * Decide if the file data allocation unit for this file is larger than
+ * a single filesystem block.
+ */
+static inline bool xfs_inode_has_bigallocunit(struct xfs_inode *ip)
+{
+	return XFS_IS_REALTIME_INODE(ip) && ip->i_mount->m_sb.sb_rextsize > 1;
+}
+
+/*
  * Return the buftarg used for data allocations on a given inode.
  */
 #define xfs_inode_buftarg(ip) \
