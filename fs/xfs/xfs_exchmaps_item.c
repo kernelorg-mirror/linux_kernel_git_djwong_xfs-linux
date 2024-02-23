@@ -329,7 +329,7 @@ xfs_xmi_validate(
 {
 	struct xfs_xmi_log_format	*xlf = &xmi_lip->xmi_format;
 
-	if (!xfs_sb_version_haslogexchmaps(&mp->m_sb))
+	if (!xfs_exchmaps_enabled(mp))
 		return false;
 
 	if (xmi_lip->xmi_format.__pad != 0)

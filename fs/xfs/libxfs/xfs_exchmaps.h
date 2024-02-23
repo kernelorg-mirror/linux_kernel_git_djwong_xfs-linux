@@ -122,6 +122,7 @@ int xfs_exchmaps_finish_one(struct xfs_trans *tp,
 int xfs_exchmaps_check_forks(struct xfs_mount *mp,
 		const struct xfs_exchmaps_req *req);
 
+bool xfs_exchmaps_enabled(struct xfs_mount *mp);
 void xfs_exchange_mappings(struct xfs_trans *tp,
 		const struct xfs_exchmaps_req *req);
 

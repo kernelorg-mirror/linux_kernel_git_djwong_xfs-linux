@@ -1189,6 +1189,30 @@ xfs_exchmaps_upgrade_extent_counts(
 	xfs_exchmaps_ensure_large_extent_counts(tp, xmi->xmi_ip2);
 }
 
+/* Are logged file mapping exchanges enabled on this filesystem? */
+bool
+xfs_exchmaps_enabled(
+	struct xfs_mount	*mp)
+{
+	/*
+	 * Directory parent pointers make directory repairs practical.
+	 * However, online repairs of directories (and parent pointers which
+	 * are embedded in extended attributes) must commit the repairs
+	 * atomically by building a replacement structure in a temporary file
+	 * and then exchanging the contents.
+	 *
+	 * Although there's no hard dependency between parent pointers and file
+	 * mapping exchanges like there is with logged xattr updates, these
+	 * two features will likely go hand in hand.  Since parent pointers
+	 * itself uses an incompat bit, we don't need the log incompat bit for
+	 * exchmaps.
+	 */
+	if (xfs_has_parent(mp))
+		return true;
+
+	return xfs_sb_version_haslogexchmaps(&mp->m_sb);
+}
+
 /*
  * Schedule an exchange a range of mappings from one inode to another.
  *
@@ -1213,7 +1237,7 @@ xfs_exchange_mappings(
 	ASSERT(!(req->flags & ~XFS_EXCHMAPS_LOGGED_FLAGS));
 	if (req->flags & XFS_EXCHMAPS_SET_SIZES)
 		ASSERT(!(req->flags & XFS_EXCHMAPS_ATTR_FORK));
-	ASSERT(xfs_sb_version_haslogexchmaps(&tp->t_mountp->m_sb));
+	ASSERT(xfs_exchmaps_enabled(tp->t_mountp));
 
 	if (req->blockcount == 0)
 		return;

@@ -47,7 +47,7 @@ xfs_exchrange_possible(
 	struct xfs_mount	*mp)
 {
 	/* Always possible when mapping exchange log intent items are enabled */
-	if (xfs_sb_version_haslogexchmaps(&mp->m_sb))
+	if (xfs_exchmaps_enabled(mp))
 		return true;
 
 	/* Can we upgrade the fs to have the log intent item? */
@@ -359,7 +359,7 @@ xfs_exchrange_enable(
 	int			error = 0;
 
 	/* Mapping exchange log intent items are already enabled */
-	if (xfs_sb_version_haslogexchmaps(&mp->m_sb))
+	if (xfs_exchmaps_enabled(mp))
 		return 0;
 
 	if (!xfs_exchrange_upgradeable(mp))
