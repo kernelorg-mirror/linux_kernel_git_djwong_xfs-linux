@@ -31,7 +31,7 @@ xfs_attr_grab_log_assist(
 	int			error = 0;
 
 	/* xattr update log intent items are already enabled */
-	if (xfs_sb_version_haslogxattrs(&mp->m_sb))
+	if (xfs_has_logxattrs(mp))
 		return 0;
 
 	/*

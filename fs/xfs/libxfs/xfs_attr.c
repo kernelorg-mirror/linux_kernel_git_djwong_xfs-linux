@@ -898,6 +898,23 @@ xfs_attr_lookup(
 	return error;
 }
 
+/* Are logged xattr updates enabled on this filesystem? */
+bool
+xfs_has_logxattrs(
+	struct xfs_mount	*mp)
+{
+	/*
+	 * Directory parent pointers require logged extended attribute updates
+	 * to maintain referential integrity with dirent updates.  Since parent
+	 * pointers itself uses an incompat bit, we don't need the log incompat
+	 * bit for larp.
+	 */
+	if (xfs_has_parent(mp))
+		return true;
+
+	return xfs_sb_version_haslogxattrs(&mp->m_sb);
+}
+
 void
 xfs_attr_defer_add(
 	struct xfs_da_args	*args,
@@ -911,7 +928,7 @@ xfs_attr_defer_add(
 	 * has to have protected those items with a feature bit.
 	 */
 	ASSERT(!(args->op_flags & XFS_DA_OP_LOGGED) ||
-	       xfs_sb_version_haslogxattrs(&args->dp->i_mount->m_sb));
+	       xfs_has_logxattrs(args->dp->i_mount));
 
 	new = kmem_cache_zalloc(xfs_attr_intent_cache, GFP_NOFS | __GFP_NOFAIL);
 	new->xattri_op_flags = op_flags;
