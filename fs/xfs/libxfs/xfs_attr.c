@@ -893,6 +893,13 @@ xfs_attr_defer_add(
 
 	struct xfs_attr_intent	*new;
 
+	/*
+	 * Either we're not using logged xattr update intent items or the log
+	 * has to have protected those items with a feature bit.
+	 */
+	ASSERT(!(args->op_flags & XFS_DA_OP_LOGGED) ||
+	       xfs_sb_version_haslogxattrs(&args->dp->i_mount->m_sb));
+
 	new = kmem_cache_zalloc(xfs_attr_intent_cache, GFP_NOFS | __GFP_NOFAIL);
 	new->xattri_op_flags = op_flags;
 	new->xattri_da_args = args;
