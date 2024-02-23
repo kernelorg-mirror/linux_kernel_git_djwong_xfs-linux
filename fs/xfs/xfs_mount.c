@@ -621,6 +621,31 @@ xfs_agbtree_compute_maxlevels(
 }
 
 /*
+ * Mark certain log incompat feature bits as sticky, and make sure they're
+ * enabled.
+ */
+STATIC int
+xfs_mountfs_set_perm_log_features(
+	struct xfs_mount	*mp)
+{
+	if (xfs_has_parent(mp)) {
+		/*
+		 * Directory parent pointers require logged extended attribute
+		 * updates to maintain referential integrity with dirent
+		 * updates.  Set the LARP bit.
+		 */
+		mp->m_perm_log_incompat |= XFS_SB_FEAT_INCOMPAT_LOG_XATTRS;
+	}
+
+	/* Make sure the permanent bits are set in the ondisk primary super. */
+	if ((mp->m_sb.sb_features_log_incompat & mp->m_perm_log_incompat) ==
+						 mp->m_perm_log_incompat)
+		return 0;
+
+	return xfs_add_incompat_log_features(mp, mp->m_perm_log_incompat);
+}
+
+/*
  * This function does the following on an initial mount of a file system:
  *	- reads the superblock from disk and init the mount struct
  *	- if we're a 32-bit kernel, do a size check on the superblock
@@ -823,6 +848,12 @@ xfs_mountfs(
 			      XFS_FSB_TO_BB(mp, sbp->sb_logblocks));
 	if (error) {
 		xfs_warn(mp, "log mount failed");
+		goto out_inodegc_shrinker;
+	}
+
+	error = xfs_mountfs_set_perm_log_features(mp);
+	if (error) {
+		xfs_warn(mp, "setting permanent log incompat features failed");
 		goto out_inodegc_shrinker;
 	}
 
