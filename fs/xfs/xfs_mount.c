@@ -635,6 +635,20 @@ xfs_mountfs_set_perm_log_features(
 		 * updates.  Set the LARP bit.
 		 */
 		mp->m_perm_log_incompat |= XFS_SB_FEAT_INCOMPAT_LOG_XATTRS;
+
+		/*
+		 * Directory parent pointers make directory repairs practical.
+		 * However, online repairs of directories (and parent pointers
+		 * which are embedded in extended attributes) must commit the
+		 * repairs atomically by building a replacement structure in a
+		 * temporary file and then exchanging the contents.
+		 *
+		 * Although there's no hard dependency between parent pointers
+		 * and file mapping exchanges like there is with logged xattr
+		 * updates, these two features will likely go hand in hand.
+		 * Set the exchmaps bit.
+		 */
+		mp->m_perm_log_incompat |= XFS_SB_FEAT_INCOMPAT_LOG_EXCHMAPS;
 	}
 
 	/* Make sure the permanent bits are set in the ondisk primary super. */
