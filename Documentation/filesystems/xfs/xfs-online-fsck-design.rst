@@ -4055,7 +4055,7 @@ series.
 | clear the bit; if the lock attempt fails, the feature bit remains set.   |
 | The code supporting a log incompat feature should create wrapper         |
 | functions to obtain the log feature and call                             |
-| ``xfs_add_incompat_log_feature`` to set the feature bits in the primary  |
+| ``xfs_add_incompat_log_features`` to set the feature bits in the primary |
 | superblock.                                                              |
 | The superblock update is performed transactionally, so the wrapper to    |
 | obtain log assistance must be called just prior to the creation of the   |
