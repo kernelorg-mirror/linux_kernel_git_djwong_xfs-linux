@@ -1305,15 +1305,14 @@ xfs_can_add_incompat_log_features(
  * cannot have any other transactions in progress.
  */
 int
-xfs_add_incompat_log_feature(
+xfs_add_incompat_log_features(
 	struct xfs_mount	*mp,
-	uint32_t		feature)
+	uint32_t		features)
 {
 	struct xfs_dsb		*dsb;
 	int			error;
 
-	ASSERT(hweight32(feature) == 1);
-	ASSERT(!(feature & XFS_SB_FEAT_INCOMPAT_LOG_UNKNOWN));
+	ASSERT(!(features & XFS_SB_FEAT_INCOMPAT_LOG_UNKNOWN));
 
 	/*
 	 * Force the log to disk and kick the background AIL thread to reduce
@@ -1338,7 +1337,7 @@ xfs_add_incompat_log_feature(
 		goto rele;
 	}
 
-	if (xfs_sb_has_incompat_log_feature(&mp->m_sb, feature))
+	if ((mp->m_sb.sb_features_log_incompat & features) == features)
 		goto rele;
 
 	if (!xfs_can_add_incompat_log_features(mp, true)) {
@@ -1353,7 +1352,7 @@ xfs_add_incompat_log_feature(
 	 */
 	dsb = mp->m_sb_bp->b_addr;
 	xfs_sb_to_disk(dsb, &mp->m_sb);
-	dsb->sb_features_log_incompat |= cpu_to_be32(feature);
+	dsb->sb_features_log_incompat |= cpu_to_be32(features);
 	error = xfs_bwrite(mp->m_sb_bp);
 	if (error)
 		goto shutdown;
@@ -1362,7 +1361,7 @@ xfs_add_incompat_log_feature(
 	 * Add the feature bits to the incore superblock before we unlock the
 	 * buffer.
 	 */
-	xfs_sb_add_incompat_log_features(&mp->m_sb, feature);
+	xfs_sb_add_incompat_log_features(&mp->m_sb, features);
 	xfs_buf_relse(mp->m_sb_bp);
 
 	/* Log the superblock to disk. */
