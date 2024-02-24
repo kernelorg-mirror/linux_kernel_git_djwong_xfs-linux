@@ -72,7 +72,7 @@ xfs_exchrange_enable(
 	if (!xfs_exchrange_upgradeable(mp))
 		return -EOPNOTSUPP;
 
-	error = xfs_add_incompat_log_feature(mp,
+	error = xfs_add_incompat_log_features(mp,
 			XFS_SB_FEAT_INCOMPAT_LOG_EXCHMAPS);
 	if (error)
 		return error;
