@@ -66,13 +66,15 @@ xrep_superblock(
 	/*
 	 * Don't write out a secondary super with NEEDSREPAIR or log incompat
 	 * features set, since both are ignored when set on a secondary.
+	 * Always set the permanent log incompat features, just like mkfs.
 	 */
 	if (xfs_has_crc(mp)) {
 		struct xfs_dsb		*sb = bp->b_addr;
 
 		sb->sb_features_incompat &=
 				~cpu_to_be32(XFS_SB_FEAT_INCOMPAT_NEEDSREPAIR);
-		sb->sb_features_log_incompat = 0;
+		sb->sb_features_log_incompat =
+				cpu_to_be32(mp->m_perm_log_incompat);
 	}
 
 	/* Write this to disk. */
