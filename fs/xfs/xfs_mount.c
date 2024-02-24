@@ -664,7 +664,7 @@ STATIC int
 xfs_mountfs_set_perm_log_features(
 	struct xfs_mount	*mp)
 {
-	if (xfs_has_parent(mp)) {
+	if (xfs_has_parent(mp) || xfs_has_metadir(mp)) {
 		/*
 		 * Directory parent pointers require logged extended attribute
 		 * updates to maintain referential integrity with dirent
@@ -685,6 +685,11 @@ xfs_mountfs_set_perm_log_features(
 		 * Set the exchmaps bit.
 		 */
 		mp->m_perm_log_incompat |= XFS_SB_FEAT_INCOMPAT_LOG_EXCHMAPS;
+
+		/*
+		 * Metadata directories are a modern feature, so the same
+		 * permanent log incompat rules apply.
+		 */
 	}
 
 	/* Make sure the permanent bits are set in the ondisk primary super. */
