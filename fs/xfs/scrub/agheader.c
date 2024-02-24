@@ -329,8 +329,13 @@ xchk_superblock(
 		 * log incompat features protect newer log record types from
 		 * older log recovery code.  Log recovery doesn't check the
 		 * secondary supers, so we can clear these if needed.
+		 *
+		 * Note that mkfs sets the "permanent" bits in the secondary
+		 * supers, so we don't flag the field if those are the only
+		 * bits set.
 		 */
-		if (sb->sb_features_log_incompat)
+		if (sb->sb_features_log_incompat !=
+				cpu_to_be32(mp->m_perm_log_incompat))
 			xchk_block_set_preen(sc, bp);
 
 		/* Don't care about sb_crc */
