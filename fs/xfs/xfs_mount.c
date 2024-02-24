@@ -1388,11 +1388,12 @@ bool
 xfs_clear_incompat_log_features(
 	struct xfs_mount	*mp)
 {
+	unsigned int		to_clear = XFS_SB_FEAT_INCOMPAT_LOG_ALL &
+						~mp->m_perm_log_incompat;
 	bool			ret = false;
 
 	if (!xfs_has_crc(mp) ||
-	    !xfs_sb_has_incompat_log_feature(&mp->m_sb,
-				XFS_SB_FEAT_INCOMPAT_LOG_ALL) ||
+	    !xfs_sb_has_incompat_log_feature(&mp->m_sb, to_clear) ||
 	    xfs_is_shutdown(mp) ||
 	    !xfs_is_done_with_log_incompat(mp))
 		return false;
@@ -1405,9 +1406,8 @@ xfs_clear_incompat_log_features(
 	xfs_buf_lock(mp->m_sb_bp);
 	xfs_buf_hold(mp->m_sb_bp);
 
-	if (xfs_sb_has_incompat_log_feature(&mp->m_sb,
-				XFS_SB_FEAT_INCOMPAT_LOG_ALL)) {
-		xfs_sb_remove_incompat_log_features(&mp->m_sb);
+	if (xfs_sb_has_incompat_log_feature(&mp->m_sb, to_clear)) {
+		xfs_sb_remove_incompat_log_features(&mp->m_sb, to_clear);
 		ret = true;
 	}
 
