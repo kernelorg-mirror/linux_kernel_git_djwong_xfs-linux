@@ -44,7 +44,7 @@ xfs_attr_grab_log_assist(
 		return -EOPNOTSUPP;
 
 	/* Enable log-assisted xattrs. */
-	error = xfs_add_incompat_log_feature(mp,
+	error = xfs_add_incompat_log_features(mp,
 			XFS_SB_FEAT_INCOMPAT_LOG_XATTRS);
 	if (error)
 		return error;
