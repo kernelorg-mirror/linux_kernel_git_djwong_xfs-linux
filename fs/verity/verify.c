@@ -13,14 +13,17 @@
 static struct workqueue_struct *fsverity_read_workqueue;
 
 /*
- * Returns true if the hash block with index @hblock_idx in the tree, located in
- * @hpage, has already been verified.
+ * Returns true if the hash block with index @hblock_idx in the tree has
+ * already been verified.
  */
-static bool is_hash_block_verified(struct fsverity_info *vi, struct page *hpage,
+static bool is_hash_block_verified(struct inode *inode,
+				   struct fsverity_blockbuf *block,
 				   unsigned long hblock_idx)
 {
 	unsigned int blocks_per_page;
 	unsigned int i;
+	struct fsverity_info *vi = inode->i_verity_info;
+	struct page *hpage = (struct page *)block->context;
 
 	/*
 	 * When the Merkle tree block size and page size are the same, then the
@@ -34,6 +37,12 @@ static bool is_hash_block_verified(struct fsverity_info *vi, struct page *hpage,
 	if (!vi->hash_block_verified)
 		return PageChecked(hpage);
 
+	/*
+	 * Filesystems which use block based caching (e.g. XFS) always use
+	 * bitmap.
+	 */
+	if (inode->i_sb->s_vop->read_merkle_tree_block)
+		return test_bit(hblock_idx, vi->hash_block_verified);
 	/*
 	 * When the Merkle tree block size and page size differ, we use a bitmap
 	 * to indicate whether each hash block has been verified.
@@ -95,15 +104,15 @@ verify_data_block(struct inode *inode, struct fsverity_info *vi,
 	const struct merkle_tree_params *params = &vi->tree_params;
 	const unsigned int hsize = params->digest_size;
 	int level;
+	int err;
+	int num_ra_pages;
 	u8 _want_hash[FS_VERITY_MAX_DIGEST_SIZE];
 	const u8 *want_hash;
 	u8 real_hash[FS_VERITY_MAX_DIGEST_SIZE];
 	/* The hash blocks that are traversed, indexed by level */
 	struct {
-		/* Page containing the hash block */
-		struct page *page;
-		/* Mapped address of the hash block (will be within @page) */
-		const void *addr;
+		/* Buffer containing the hash block */
+		struct fsverity_blockbuf block;
 		/* Index of the hash block in the tree overall */
 		unsigned long index;
 		/* Byte offset of the wanted hash relative to @addr */
@@ -144,10 +153,11 @@ verify_data_block(struct inode *inode, struct fsverity_info *vi,
 		unsigned long next_hidx;
 		unsigned long hblock_idx;
 		pgoff_t hpage_idx;
+		u64 hblock_pos;
 		unsigned int hblock_offset_in_page;
 		unsigned int hoffset;
 		struct page *hpage;
-		const void *haddr;
+		struct fsverity_blockbuf *block = &hblocks[level].block;
 
 		/*
 		 * The index of the block in the current level; also the index
@@ -165,29 +175,49 @@ verify_data_block(struct inode *inode, struct fsverity_info *vi,
 		hblock_offset_in_page =
 			(hblock_idx << params->log_blocksize) & ~PAGE_MASK;
 
+		/* Offset of the Merkle tree block into the tree */
+		hblock_pos = hblock_idx << params->log_blocksize;
+
 		/* Byte offset of the hash within the block */
 		hoffset = (hidx << params->log_digestsize) &
 			  (params->block_size - 1);
 
-		hpage = inode->i_sb->s_vop->read_merkle_tree_page(inode,
-				hpage_idx, level == 0 ? min(max_ra_pages,
-					params->tree_pages - hpage_idx) : 0);
-		if (IS_ERR(hpage)) {
+		num_ra_pages = level == 0 ?
+			min(max_ra_pages, params->tree_pages - hpage_idx) : 0;
+
+		if (inode->i_sb->s_vop->read_merkle_tree_block) {
+			err = inode->i_sb->s_vop->read_merkle_tree_block(
+				inode, hblock_pos, block, params->log_blocksize,
+				num_ra_pages);
+		} else {
+			unsigned int blocks_per_page =
+				vi->tree_params.blocks_per_page;
+			hblock_idx = round_down(hblock_idx, blocks_per_page);
+			hpage = inode->i_sb->s_vop->read_merkle_tree_page(
+				inode, hpage_idx, (num_ra_pages << PAGE_SHIFT));
+
+			if (IS_ERR(hpage)) {
+				err = PTR_ERR(hpage);
+			} else {
+				block->kaddr = kmap_local_page(hpage) +
+					hblock_offset_in_page;
+				block->context = hpage;
+			}
+		}
+
+		if (err) {
 			fsverity_err(inode,
-				     "Error %ld reading Merkle tree page %lu",
-				     PTR_ERR(hpage), hpage_idx);
+				     "Error %d reading Merkle tree block %lu",
+				     err, hblock_idx);
 			goto error;
 		}
-		haddr = kmap_local_page(hpage) + hblock_offset_in_page;
-		if (is_hash_block_verified(vi, hpage, hblock_idx)) {
-			memcpy(_want_hash, haddr + hoffset, hsize);
+
+		if (is_hash_block_verified(inode, block, hblock_idx)) {
+			memcpy(_want_hash, block->kaddr + hoffset, hsize);
 			want_hash = _want_hash;
-			kunmap_local(haddr);
-			put_page(hpage);
+			fsverity_drop_block(inode, block);
 			goto descend;
 		}
-		hblocks[level].page = hpage;
-		hblocks[level].addr = haddr;
 		hblocks[level].index = hblock_idx;
 		hblocks[level].hoffset = hoffset;
 		hidx = next_hidx;
@@ -197,10 +227,11 @@ verify_data_block(struct inode *inode, struct fsverity_info *vi,
 descend:
 	/* Descend the tree verifying hash blocks. */
 	for (; level > 0; level--) {
-		struct page *hpage = hblocks[level - 1].page;
-		const void *haddr = hblocks[level - 1].addr;
+		struct fsverity_blockbuf *block = &hblocks[level - 1].block;
+		const void *haddr = block->kaddr;
 		unsigned long hblock_idx = hblocks[level - 1].index;
 		unsigned int hoffset = hblocks[level - 1].hoffset;
+		struct page *hpage = (struct page *)block->context;
 
 		if (fsverity_hash_block(params, inode, haddr, real_hash) != 0)
 			goto error;
@@ -217,8 +248,7 @@ descend:
 			SetPageChecked(hpage);
 		memcpy(_want_hash, haddr + hoffset, hsize);
 		want_hash = _want_hash;
-		kunmap_local(haddr);
-		put_page(hpage);
+		fsverity_drop_block(inode, block);
 	}
 
 	/* Finally, verify the data block. */
@@ -235,10 +265,8 @@ corrupted:
 		     params->hash_alg->name, hsize, want_hash,
 		     params->hash_alg->name, hsize, real_hash);
 error:
-	for (; level > 0; level--) {
-		kunmap_local(hblocks[level - 1].addr);
-		put_page(hblocks[level - 1].page);
-	}
+	for (; level > 0; level--)
+		fsverity_drop_block(inode, &hblocks[level - 1].block);
 	return false;
 }
 
@@ -361,4 +389,43 @@ void __init fsverity_init_workqueue(void)
 						  num_online_cpus());
 	if (!fsverity_read_workqueue)
 		panic("failed to allocate fsverity_read_queue");
+}
+
+/**
+ * fsverity_invalidate_block() - invalidate Merkle tree block
+ * @inode: inode to which this Merkle tree blocks belong
+ * @block: block to be invalidated
+ *
+ * This function invalidates/clears "verified" state of Merkle tree block
+ * in the fs-verity bitmap. The block needs to have ->offset set.
+ */
+void fsverity_invalidate_block(struct inode *inode,
+		struct fsverity_blockbuf *block)
+{
+	struct fsverity_info *vi = inode->i_verity_info;
+	const unsigned int log_blocksize = vi->tree_params.log_blocksize;
+
+	if (block->offset > vi->tree_params.tree_size) {
+		fsverity_err(inode,
+"Trying to invalidate beyond Merkle tree (tree %lld, offset %lld)",
+			     vi->tree_params.tree_size, block->offset);
+		return;
+	}
+
+	clear_bit(block->offset >> log_blocksize, vi->hash_block_verified);
+}
+EXPORT_SYMBOL_GPL(fsverity_invalidate_block);
+
+void fsverity_drop_block(struct inode *inode,
+		struct fsverity_blockbuf *block)
+{
+	if (inode->i_sb->s_vop->drop_block)
+		inode->i_sb->s_vop->drop_block(block);
+	else {
+		struct page *page = (struct page *)block->context;
+
+		kunmap_local(block->kaddr);
+		put_page(page);
+	}
+	block->kaddr = NULL;
 }
