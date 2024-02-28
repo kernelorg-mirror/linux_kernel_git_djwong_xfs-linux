@@ -13,8 +13,12 @@ int xfs_exchrange_enable(struct xfs_mount *mp);
 #define __XFS_EXCHANGE_RANGE_UPD_CMTIME1	(1ULL << 63)
 #define __XFS_EXCHANGE_RANGE_UPD_CMTIME2	(1ULL << 62)
 
+/* Freshness check required */
+#define __XFS_EXCHANGE_RANGE_CHECK_FRESH2	(1ULL << 61)
+
 #define XFS_EXCHANGE_RANGE_PRIV_FLAGS	(__XFS_EXCHANGE_RANGE_UPD_CMTIME1 | \
-					 __XFS_EXCHANGE_RANGE_UPD_CMTIME2)
+					 __XFS_EXCHANGE_RANGE_UPD_CMTIME2 | \
+					 __XFS_EXCHANGE_RANGE_CHECK_FRESH2)
 
 struct xfs_exchrange {
 	struct file		*file1;
@@ -32,6 +36,7 @@ struct xfs_exchrange {
 	struct timespec64	file2_ctime;
 };
 
+void xfs_exchrange_freshness(struct xfs_exchrange *fxr);
 int xfs_exchange_range(struct xfs_exchrange *fxr);
 
 struct xfs_exchmaps_req;
