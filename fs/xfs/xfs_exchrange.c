@@ -131,6 +131,33 @@ xfs_exchrange_estimate(
 	return error;
 }
 
+/*
+ * Check that file2's metadata agree with the snapshot that we took for the
+ * range commit request.
+ *
+ * This should be called after the filesystem has locked /all/ inode metadata
+ * against modification.
+ */
+STATIC int
+xfs_exchrange_check_freshness(
+	const struct xfs_exchrange	*fxr,
+	struct xfs_inode		*ip2)
+{
+	struct inode			*inode2 = VFS_I(ip2);
+	struct timespec64		ctime = inode_get_ctime(inode2);
+	struct timespec64		mtime = inode_get_mtime(inode2);
+
+	trace_xfs_exchrange_freshness(fxr, ip2);
+
+	/* Check that file2 hasn't otherwise been modified. */
+	if (fxr->file2_ino != ip2->i_ino ||
+	    !timespec64_equal(&fxr->file2_ctime, &ctime) ||
+	    !timespec64_equal(&fxr->file2_mtime, &mtime))
+		return -EBUSY;
+
+	return 0;
+}
+
 #define QRETRY_IP1	(0x1)
 #define QRETRY_IP2	(0x2)
 
@@ -666,6 +693,12 @@ xfs_exchrange_prep(
 	if (error || fxr->length == 0)
 		return error;
 
+	if (fxr->flags & __XFS_EXCHANGE_RANGE_CHECK_FRESH2) {
+		error = xfs_exchrange_check_freshness(fxr, ip2);
+		if (error)
+			return error;
+	}
+
 	/* Attach dquots to both inodes before changing block maps. */
 	error = xfs_qm_dqattach(ip2);
 	if (error)
@@ -780,7 +813,8 @@ xfs_exchange_range(
 	if (fxr->file1->f_path.mnt != fxr->file2->f_path.mnt)
 		return -EXDEV;
 
-	if (fxr->flags & ~XFS_EXCHANGE_RANGE_ALL_FLAGS)
+	if (fxr->flags & ~(XFS_EXCHANGE_RANGE_ALL_FLAGS |
+			 __XFS_EXCHANGE_RANGE_CHECK_FRESH2))
 		return -EINVAL;
 
 	/* Userspace requests only honored for regular files. */
@@ -827,4 +861,22 @@ xfs_exchange_range(
 	if (fxr->file2 != fxr->file1)
 		fsnotify_modify(fxr->file2);
 	return 0;
+}
+
+/* Sample freshness data from fxr->file2 for a commit range operation. */
+void
+xfs_exchrange_freshness(
+	struct xfs_exchrange	*fxr)
+{
+	struct inode		*inode2 = file_inode(fxr->file2);
+	struct xfs_inode	*ip2 = XFS_I(inode2);
+	unsigned int		lockflags = XFS_IOLOCK_SHARED |
+					    XFS_MMAPLOCK_SHARED |
+					    XFS_ILOCK_SHARED;
+
+	xfs_ilock(ip2, lockflags);
+	fxr->file2_ino = ip2->i_ino;
+	fxr->file2_ctime = inode_get_ctime(inode2);
+	fxr->file2_mtime = inode_get_mtime(inode2);
+	xfs_iunlock(ip2, lockflags);
 }
