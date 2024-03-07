@@ -23,7 +23,6 @@
 #include "xfs_trace.h"
 #include "xfs_error.h"
 #include "xfs_health.h"
-#include "xfs_verity.h"
 
 #define ATTR_RMTVALUE_MAPSIZE	1	/* # of map entries at once */
 
