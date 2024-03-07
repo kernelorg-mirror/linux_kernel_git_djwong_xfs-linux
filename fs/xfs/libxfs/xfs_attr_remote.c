@@ -396,20 +396,11 @@ xfs_attr_rmtval_get(
 	int			blkcnt = args->rmtblkcnt;
 	int			i;
 	int			offset = 0;
-	int			flags = 0;
-	void			*addr;
 
 	trace_xfs_attr_rmtval_get(args);
 
 	ASSERT(args->valuelen != 0);
 	ASSERT(args->rmtvaluelen == args->valuelen);
-
-	/*
-	 * For fs-verity we want additional space in the xfs_buf. This space is
-	 * used to copy xattr value without leaf headers (crc header).
-	 */
-	if (xfs_verity_merkle_block(args))
-		flags = XBF_DOUBLE_ALLOC;
 
 	valuelen = args->rmtvaluelen;
 	while (valuelen > 0) {
@@ -430,22 +421,11 @@ xfs_attr_rmtval_get(
 			dblkno = XFS_FSB_TO_DADDR(mp, map[i].br_startblock);
 			dblkcnt = XFS_FSB_TO_BB(mp, map[i].br_blockcount);
 			error = xfs_buf_read(mp->m_ddev_targp, dblkno, dblkcnt,
-					flags, &bp, &xfs_attr3_rmt_buf_ops);
+					0, &bp, &xfs_attr3_rmt_buf_ops);
 			if (xfs_metadata_is_sick(error))
 				xfs_dirattr_mark_sick(args->dp, XFS_ATTR_FORK);
 			if (error)
 				return error;
-
-			/*
-			 * For fs-verity we allocated more space. That space is
-			 * filled with the same xattr data but without leaf
-			 * headers. Point args->value to that data
-			 */
-			if (flags & XBF_DOUBLE_ALLOC) {
-				addr = xfs_buf_offset(bp, BBTOB(bp->b_length));
-				args->value = addr;
-				dst = addr;
-			}
 
 			error = xfs_attr_rmtval_copyout(mp, bp, args->dp,
 							&offset, &valuelen,
@@ -547,8 +527,7 @@ xfs_attr_rmtval_set_value(
 		dblkno = XFS_FSB_TO_DADDR(mp, map.br_startblock),
 		dblkcnt = XFS_FSB_TO_BB(mp, map.br_blockcount);
 
-		error = xfs_buf_get(mp->m_ddev_targp, dblkno, dblkcnt,
-				XBF_DOUBLE_ALLOC, &bp);
+		error = xfs_buf_get(mp->m_ddev_targp, dblkno, dblkcnt, 0, &bp);
 		if (error)
 			return error;
 		bp->b_ops = &xfs_attr3_rmt_buf_ops;
