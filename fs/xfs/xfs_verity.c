@@ -394,7 +394,7 @@ xfs_fsverity_merkle_key_from_disk(
 }
 
 static int
-xfs_get_verity_descriptor(
+xfs_verity_get_descriptor(
 	struct inode		*inode,
 	void			*buf,
 	size_t			buf_size)
@@ -422,7 +422,7 @@ xfs_get_verity_descriptor(
 }
 
 static int
-xfs_begin_enable_verity(
+xfs_verity_begin_enable(
 	struct file		*filp,
 	u64			merkle_tree_size,
 	unsigned int		tree_blocksize)
@@ -480,7 +480,7 @@ xfs_drop_merkle_tree(
 }
 
 static int
-xfs_end_enable_verity(
+xfs_verity_end_enable(
 	struct file		*filp,
 	const void		*desc,
 	size_t			desc_size,
@@ -544,7 +544,7 @@ out:
 }
 
 static int
-xfs_read_merkle_tree_block(
+xfs_verity_read_merkle(
 	const struct fsverity_readmerkle *req,
 	struct fsverity_blockbuf	*block)
 {
@@ -624,7 +624,7 @@ out_new_mk:
 }
 
 static int
-xfs_write_merkle_tree_block(
+xfs_verity_write_merkle(
 	struct inode		*inode,
 	const void		*buf,
 	u64			pos,
@@ -649,7 +649,7 @@ xfs_write_merkle_tree_block(
 }
 
 static void
-xfs_drop_merkle_tree_block(
+xfs_verity_drop_merkle(
 	struct fsverity_blockbuf	*block)
 {
 	struct xfs_merkle_blob		*mk = block->context;
@@ -660,10 +660,10 @@ xfs_drop_merkle_tree_block(
 }
 
 const struct fsverity_operations xfs_verity_ops = {
-	.begin_enable_verity		= &xfs_begin_enable_verity,
-	.end_enable_verity		= &xfs_end_enable_verity,
-	.get_verity_descriptor		= &xfs_get_verity_descriptor,
-	.read_merkle_tree_block		= &xfs_read_merkle_tree_block,
-	.write_merkle_tree_block	= &xfs_write_merkle_tree_block,
-	.drop_merkle_tree_block		= &xfs_drop_merkle_tree_block,
+	.begin_enable_verity		= xfs_verity_begin_enable,
+	.end_enable_verity		= xfs_verity_end_enable,
+	.get_verity_descriptor		= xfs_verity_get_descriptor,
+	.read_merkle_tree_block		= xfs_verity_read_merkle,
+	.write_merkle_tree_block	= xfs_verity_write_merkle,
+	.drop_merkle_tree_block		= xfs_verity_drop_merkle,
 };
