@@ -384,7 +384,7 @@ xblobc_get(
 
 	ASSERT(xfs_buftarg_is_blobcache(target));
 
-	error = xfs_buf_get(target, key, BTOBB(bytecount), 0, bpp);
+	error = xfs_buf_get(target, key, BTOBB(bytecount), bpp);
 	if (error)
 		return error;
 
