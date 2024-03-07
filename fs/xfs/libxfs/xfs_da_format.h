@@ -924,21 +924,8 @@ struct xfs_fsverity_merkle_key {
 	__be64 merkleoff;
 };
 
-static inline void
-xfs_fsverity_merkle_key_to_disk(struct xfs_fsverity_merkle_key *key, loff_t pos)
-{
-	key->merkleoff = cpu_to_be64(pos);
-}
-
-static inline loff_t
-xfs_fsverity_name_to_block_offset(unsigned char *name)
-{
-	struct xfs_fsverity_merkle_key key = {
-		.merkleoff = *(__be64 *)name
-	};
-	loff_t offset = be64_to_cpu(key.merkleoff);
-
-	return offset;
-}
+/* ondisk xattr name used for the fsverity descriptor */
+#define XFS_VERITY_DESCRIPTOR_NAME	"vdesc"
+#define XFS_VERITY_DESCRIPTOR_NAME_LEN	(sizeof(XFS_VERITY_DESCRIPTOR_NAME) - 1)
 
 #endif /* __XFS_DA_FORMAT_H__ */

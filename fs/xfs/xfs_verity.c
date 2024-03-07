@@ -107,6 +107,23 @@ xfs_begin_enable_verity(
 	return error;
 }
 
+static inline void
+xfs_fsverity_merkle_key_to_disk(
+	struct xfs_fsverity_merkle_key	*key,
+	u64				offset)
+{
+	key->merkleoff = cpu_to_be64(offset);
+}
+
+static inline u64
+xfs_fsverity_merkle_key_from_disk(
+	void				*attr_name)
+{
+	struct xfs_fsverity_merkle_key	*key = attr_name;
+
+	return be64_to_cpu(key->merkleoff);
+}
+
 static int
 xfs_drop_merkle_tree(
 	struct xfs_inode		*ip,
@@ -121,6 +138,7 @@ xfs_drop_merkle_tree(
 		.whichfork		= XFS_ATTR_FORK,
 		.attr_filter		= XFS_ATTR_VERITY,
 		.op_flags		= XFS_DA_OP_REMOVE,
+		.name			= (const uint8_t *)&name,
 		.namelen		= sizeof(struct xfs_fsverity_merkle_key),
 		/* NULL value make xfs_attr_set remove the attr */
 		.value			= NULL,
@@ -129,7 +147,6 @@ xfs_drop_merkle_tree(
 	if (!merkle_tree_size)
 		return 0;
 
-	args.name = (const uint8_t *)&name.merkleoff;
 	for (offset = 0; offset < merkle_tree_size; offset += tree_blocksize) {
 		xfs_fsverity_merkle_key_to_disk(&name, offset);
 		error = xfs_attr_set(&args);
@@ -221,6 +238,7 @@ xfs_read_merkle_tree_block(
 	struct xfs_da_args		args = {
 		.dp			= ip,
 		.attr_filter		= XFS_ATTR_VERITY,
+		.name			= (const uint8_t *)&name,
 		.namelen		= sizeof(struct xfs_fsverity_merkle_key),
 		.valuelen		= (1 << log_blocksize),
 	};
@@ -246,7 +264,6 @@ xfs_read_merkle_tree_block(
 	}
 
 	xfs_fsverity_merkle_key_to_disk(&name, pos);
-	args.name = (const uint8_t *)&name.merkleoff;
 
 	error = xfs_attr_get(&args);
 	if (error)
