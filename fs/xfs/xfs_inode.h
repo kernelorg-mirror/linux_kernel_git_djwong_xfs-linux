@@ -352,7 +352,6 @@ static inline bool xfs_inode_has_large_extent_counts(struct xfs_inode *ip)
  * plain old IRECLAIMABLE inode.
  */
 #define XFS_INACTIVATING		(1 << 13)
-#define XFS_IVERITY_CONSTRUCTION	(1 << 14) /* merkle tree construction */
 
 /* Quotacheck is running but inode has not been added to quota counts. */
 #define XFS_IQUOTAUNCHECKED	(1 << 14)
@@ -364,6 +363,8 @@ static inline bool xfs_inode_has_large_extent_counts(struct xfs_inode *ip)
  * IREMAPPING is cleared.
  */
 #define XFS_IREMAPPING		(1U << 15)
+
+#define XFS_VERITY_CONSTRUCTION	(1U << 16) /* merkle tree construction */
 
 /* All inode state flags related to inode reclaim. */
 #define XFS_ALL_IRECLAIM_FLAGS	(XFS_IRECLAIMABLE | \
