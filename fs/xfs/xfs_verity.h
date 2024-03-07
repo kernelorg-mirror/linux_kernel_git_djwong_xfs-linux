@@ -20,9 +20,6 @@ xfs_verity_merkle_block(
 	if (!(args->attr_filter & XFS_ATTR_VERITY))
 		return false;
 
-	if (!(args->op_flags & XFS_DA_OP_BUFFER))
-		return false;
-
 	return true;
 }
 
