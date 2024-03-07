@@ -10,9 +10,6 @@
 #include "xfs_da_btree.h"
 #include <linux/fsverity.h>
 
-#define XFS_VERITY_DESCRIPTOR_NAME "vdesc"
-#define XFS_VERITY_DESCRIPTOR_NAME_LEN 5
-
 static inline bool
 xfs_verity_merkle_block(
 		struct xfs_da_args *args)
