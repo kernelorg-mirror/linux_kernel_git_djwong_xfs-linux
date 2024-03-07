@@ -27,7 +27,24 @@ xfs_verity_merkle_block(
 }
 
 #ifdef CONFIG_FS_VERITY
+void __xfs_verity_destroy_cache(struct xfs_inode *ip);
+
+static inline bool xfs_verity_has_cache(struct xfs_inode *ip)
+{
+	return ip->i_merkle_blocks != NULL;
+}
+
+static inline void
+xfs_verity_destroy_cache(
+	struct xfs_inode	*ip)
+{
+	if (xfs_verity_has_cache(ip))
+		__xfs_verity_destroy_cache(ip);
+}
+
 extern const struct fsverity_operations xfs_verity_ops;
+#else
+# define xfs_verity_destroy_inode(ip)	((void)0)
 #endif	/* CONFIG_FS_VERITY */
 
 #endif	/* __XFS_VERITY_H__ */
