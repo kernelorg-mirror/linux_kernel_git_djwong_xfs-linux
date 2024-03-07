@@ -14,6 +14,8 @@
 #include "xfs_buf_item.h"
 #include "xfs_error.h"
 
+struct kmem_cache	*xfs_self_buftarg_cache;
+
 /*
  * Buffer Cache for In-Memory Files
  * ================================
@@ -58,7 +60,7 @@ xmbuf_alloc(
 	struct xfs_buftarg	*btp;
 	int			error;
 
-	btp = kzalloc(struct_size(btp, bt_cache, 1), GFP_KERNEL);
+	btp = kmem_cache_zalloc(xfs_self_buftarg_cache, GFP_KERNEL);
 	if (!btp)
 		return -ENOMEM;
 
@@ -107,7 +109,7 @@ out_bcache:
 out_file:
 	fput(file);
 out_free_btp:
-	kfree(btp);
+	kmem_cache_free(xfs_self_buftarg_cache, btp);
 	return error;
 }
 
@@ -124,7 +126,7 @@ xmbuf_free(
 	xfs_destroy_buftarg(btp);
 	xfs_buf_cache_destroy(btp->bt_cache);
 	fput(btp->bt_file);
-	kfree(btp);
+	kmem_cache_free(xfs_self_buftarg_cache, btp);
 }
 
 /* Directly map a shmem page into the buffer cache. */

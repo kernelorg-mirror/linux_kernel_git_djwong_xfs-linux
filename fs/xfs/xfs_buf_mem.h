@@ -6,6 +6,8 @@
 #ifndef __XFS_BUF_MEM_H__
 #define __XFS_BUF_MEM_H__
 
+extern struct kmem_cache		*xfs_self_buftarg_cache;
+
 #define XMBUF_BLOCKSIZE			(PAGE_SIZE)
 #define XMBUF_BLOCKSHIFT		(PAGE_SHIFT)
 
