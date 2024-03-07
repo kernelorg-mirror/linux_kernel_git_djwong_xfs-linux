@@ -17,51 +17,168 @@
 #include "xfs_log_format.h"
 #include "xfs_trans.h"
 #include "xfs_attr_leaf.h"
+#include "xfs_trace.h"
 
 /*
- * Make fs-verity invalidate verified status of Merkle tree block
+ * Merkle Tree Block Cache
+ * =======================
+ *
  */
-static void
-xfs_verity_put_listent(
-	struct xfs_attr_list_context	*context,
-	int				flags,
-	unsigned char			*name,
-	int				namelen,
-	int				valuelen)
-{
-	struct fsverity_blockbuf	block = {
-		.offset = xfs_fsverity_name_to_block_offset(name),
-		.size = valuelen,
-	};
-	/*
-	 * Verity descriptor is smaller than 1024; verity block min size is
-	 * 1024. Exclude verity descriptor
-	 */
-	if (valuelen < 1024)
-		return;
+struct xfs_merkle_blob {
+	/* refcount of this item; the cache holds its own ref */
+	refcount_t		mk_refcount;
 
-	fsverity_invalidate_block(VFS_I(context->dp), &block);
+	/* blob data, must be last! */
+	unsigned char		mk_data[];
+};
+
+/* Size of a merkle tree cache block */
+static inline size_t sizeof_merkle_blob(unsigned int blocksize)
+{
+	return struct_size_t(struct xfs_merkle_blob, mk_data, blocksize);
 }
 
 /*
- * Iterate over extended attributes in the bp to invalidate Merkle tree blocks
+ * Allocate a merkle tree blob object to prepare for reading a merkle tree
+ * object from disk.
  */
-static int
-xfs_invalidate_blocks(
-	struct xfs_inode	*ip,
-	struct xfs_buf		*bp)
+static inline struct xfs_merkle_blob *
+xfs_merkle_blob_alloc(
+	unsigned int		blocksize)
 {
-	struct xfs_attr_list_context context;
+	struct xfs_merkle_blob	*mk;
 
-	context.dp = ip;
-	context.resynch = 0;
-	context.buffer = NULL;
-	context.bufsize = 0;
-	context.firstu = 0;
-	context.attr_filter = XFS_ATTR_VERITY;
-	context.put_listent = xfs_verity_put_listent;
+	mk = kvzalloc(sizeof_merkle_blob(blocksize), GFP_KERNEL);
+	if (!mk)
+		return NULL;
 
-	return xfs_attr3_leaf_list_int(bp, &context);
+	/* Caller owns this refcount. */
+	refcount_set(&mk->mk_refcount, 1);
+	return mk;
+}
+
+/* Free a merkle tree blob. */
+static inline void
+xfs_merkle_blob_rele(
+	struct xfs_merkle_blob	*mk)
+{
+	if (refcount_dec_and_test(&mk->mk_refcount))
+		kvfree(mk);
+}
+
+/* Initialize the merkle tree block cache */
+void
+xfs_verity_cache_init(
+	struct xfs_inode	*ip)
+{
+	xa_init(&ip->i_merkle_blocks);
+}
+
+/*
+ * Drop all the merkle tree blocks out of the cache.  Caller must ensure that
+ * there are no active references to cache items.
+ */
+void
+xfs_verity_cache_drop(
+	struct xfs_inode	*ip)
+{
+	XA_STATE(xas, &ip->i_merkle_blocks, 0);
+	struct xfs_merkle_blob	*mk;
+
+	xas_lock(&xas);
+	xas_for_each(&xas, mk, ULONG_MAX) {
+		ASSERT(refcount_read(&mk->mk_refcount) == 1);
+
+		trace_xfs_verity_cache_drop(ip, xas.xa_index, _RET_IP_);
+
+		xas_store(&xas, NULL);
+		xfs_merkle_blob_rele(mk);
+	}
+	xas_unlock(&xas);
+}
+
+/* Destroy the merkle tree block cache */
+void
+xfs_verity_cache_destroy(
+	struct xfs_inode	*ip)
+{
+	ASSERT(xa_empty(&ip->i_merkle_blocks));
+
+	xa_destroy(&ip->i_merkle_blocks);
+}
+
+/* Return a cached merkle tree block, or NULL. */
+static struct xfs_merkle_blob *
+xfs_verity_cache_load(
+	struct xfs_inode	*ip,
+	unsigned long		key)
+{
+	XA_STATE(xas, &ip->i_merkle_blocks, key);
+	struct xfs_merkle_blob	*mk;
+
+	/* Look up the cached item and try to get an active ref. */
+	rcu_read_lock();
+	do {
+		mk = xas_load(&xas);
+		if (xa_is_zero(mk))
+			mk = NULL;
+	} while (xas_retry(&xas, mk) ||
+		 (mk && !refcount_inc_not_zero(&mk->mk_refcount)));
+	rcu_read_unlock();
+
+	if (!mk)
+		return NULL;
+
+	trace_xfs_verity_cache_load(ip, key, _RET_IP_);
+	return mk;
+}
+
+/*
+ * Try to store a merkle tree block in the cache with the given key.
+ *
+ * If the merkle tree block is not already in the cache, the given block @mk
+ * will be added to the cache and returned.  The caller retains its active
+ * reference to @mk.
+ *
+ * If there was already a merkle block in the cache, it will be returned to
+ * the caller with an active reference.  @mk will be untouched.
+ */
+static struct xfs_merkle_blob *
+xfs_verity_cache_store(
+	struct xfs_inode	*ip,
+	unsigned long		key,
+	struct xfs_merkle_blob	*mk)
+{
+	struct xfs_merkle_blob	*old;
+
+	trace_xfs_verity_cache_store(ip, key, _RET_IP_);
+
+	/*
+	 * Either replace a NULL entry with mk, or take an active ref to
+	 * whatever's currently there.
+	 */
+	xa_lock(&ip->i_merkle_blocks);
+	do {
+		old = __xa_cmpxchg(&ip->i_merkle_blocks, key, NULL, mk,
+				GFP_KERNEL);
+	} while (old && !refcount_inc_not_zero(&old->mk_refcount));
+	xa_unlock(&ip->i_merkle_blocks);
+
+	if (old == NULL) {
+		/*
+		 * There was no previous value.  @mk is now live in the cache.
+		 * Bump the active refcount to transfer ownership to the cache
+		 * and return @mk to the caller.
+		 */
+		refcount_inc(&mk->mk_refcount);
+		return mk;
+	}
+
+	/*
+	 * We obtained an active reference to a previous value in the cache.
+	 * Return it to the caller.
+	 */
+	return old;
 }
 
 static int
@@ -224,82 +341,59 @@ xfs_read_merkle_tree_block(
 	struct xfs_da_args		args = {
 		.dp			= ip,
 		.attr_filter		= XFS_ATTR_VERITY,
-		.op_flags		= XFS_DA_OP_BUFFER,
 		.namelen		= sizeof(struct xfs_fsverity_merkle_key),
 		.valuelen		= block->size,
 	};
-	int				error = 0;
+	struct xfs_merkle_blob		*mk, *new_mk;
+	unsigned long			key = block->offset >> req->log_blocksize;
+	int				error;
 
+	ASSERT(block->offset >> req->log_blocksize <= ULONG_MAX);
+
+	xfs_fsverity_merkle_key_to_disk(&name, block->offset);
+
+	/* Is the block already cached? */
+	mk = xfs_verity_cache_load(ip, key);
+	if (mk)
+		goto out_hit;
+
+	new_mk = xfs_merkle_blob_alloc(block->size);
+	if (!new_mk)
+		return -ENOMEM;
+	args.value = new_mk->mk_data;
+
+	/* Read the block in from disk and try to store it in the cache. */
 	xfs_fsverity_merkle_key_to_disk(&name, block->offset);
 	args.name = (const uint8_t *)&name.merkleoff;
 
 	error = xfs_attr_get(&args);
 	if (error)
-		goto out;
+		goto out_new_mk;
 
-	if (!args.valuelen)
-		return -ENODATA;
-
-	block->kaddr = args.value;
-	block->context = args.bp;
-
-	/*
-	 * Memory barriers are used to force operation ordering of clearing
-	 * bitmap in fsverity_invalidate_block() and setting XBF_VERITY_SEEN
-	 * flag.
-	 *
-	 * Multiple threads may execute this code concurrently on the same block.
-	 * This is safe because we use memory barriers to ensure that if a
-	 * thread sees XBF_VERITY_SEEN, then fsverity bitmap is already up to
-	 * date.
-	 *
-	 * Invalidating block in a bitmap again at worst causes a hash block to
-	 * be verified redundantly. That event should be very rare, so it's not
-	 * worth using a lock to avoid.
-	 */
-	if (!(args.bp->b_flags & XBF_VERITY_SEEN)) {
-		/*
-		 * A read memory barrier is needed here to give ACQUIRE
-		 * semantics to the above check.
-		 */
-		smp_rmb();
-		/*
-		 * fs-verity is not aware if buffer was evicted from the memory.
-		 * Make fs-verity invalidate verfied status of all blocks in the
-		 * buffer.
-		 *
-		 * Single extended attribute can contain multiple Merkle tree
-		 * blocks:
-		 * - leaf with inline data -> invalidate all blocks in the leaf
-		 * - remote value -> invalidate single block
-		 *
-		 * For example, leaf on 64k system with 4k/1k filesystem will
-		 * contain multiple Merkle tree blocks.
-		 *
-		 * Only remote value buffers would have XBF_DOUBLE_ALLOC flag
-		 */
-		if (args.bp->b_flags & XBF_DOUBLE_ALLOC)
-			fsverity_invalidate_block(req->inode, block);
-		else {
-			error = xfs_invalidate_blocks(ip, args.bp);
-			if (error)
-				goto out;
-		}
+	if (!args.valuelen) {
+		error = -ENODATA;
+		goto out_new_mk;
 	}
 
-	/*
-	 * A write memory barrier is needed here to give RELEASE
-	 * semantics to the below flag.
-	 */
-	smp_wmb();
-	args.bp->b_flags |= XBF_VERITY_SEEN;
+	mk = xfs_verity_cache_store(ip, key, new_mk);
+	if (mk != new_mk) {
+		/*
+		 * We raced with another thread to populate the cache and lost.
+		 * Free the new cache blob and continue with the existing one.
+		 */
+		xfs_merkle_blob_rele(new_mk);
+	}
 
-	return error;
+	/* We might have loaded this in from disk, fsverity must recheck */
+	fsverity_invalidate_block(req->inode, block);
 
-out:
-	kvfree(args.value);
-	if (args.bp)
-		xfs_buf_rele(args.bp);
+out_hit:
+	block->kaddr   = (void *)mk->mk_data;
+	block->context = mk;
+	return 0;
+
+out_new_mk:
+	xfs_merkle_blob_rele(new_mk);
 	return error;
 }
 
@@ -332,15 +426,11 @@ static void
 xfs_drop_block(
 	struct fsverity_blockbuf	*block)
 {
-	struct xfs_buf			*bp;
+	struct xfs_merkle_blob		*mk = block->context;
 
-	ASSERT(block != NULL);
-	bp = (struct xfs_buf *)block->context;
-	ASSERT(bp->b_flags & XBF_VERITY_SEEN);
-
-	xfs_buf_rele(bp);
-
-	kunmap_local(block->kaddr);
+	xfs_merkle_blob_rele(mk);
+	block->kaddr = NULL;
+	block->context = NULL;
 }
 
 const struct fsverity_operations xfs_verity_ops = {
