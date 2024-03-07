@@ -5,6 +5,7 @@ config XFS_FS
 	select EXPORTFS
 	select LIBCRC32C
 	select FS_IOMAP
+	select XFS_BLOBCACHE if FS_VERITY
 	help
 	  XFS is a high performance journaling filesystem which originated
 	  on the SGI IRIX platform.  It is completely multi-threaded, can

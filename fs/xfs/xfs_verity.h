@@ -27,7 +27,23 @@ xfs_verity_merkle_block(
 }
 
 #ifdef CONFIG_FS_VERITY
+void __xfs_verity_destroy_cache(struct xfs_inode *ip);
+
+/*
+ * Clean up the merkle tree cache while destroying an inode.  Caller must
+ * ensure that there are no other threads accessing i_merkle_blocks.
+ */
+static inline void
+xfs_verity_destroy_cache(
+	struct xfs_inode	*ip)
+{
+	if (ip->i_merkle_blocks)
+		__xfs_verity_destroy_cache(ip);
+}
+
 extern const struct fsverity_operations xfs_verity_ops;
+#else
+# define xfs_verity_destroy_cache(ip)	((void)0)
 #endif	/* CONFIG_FS_VERITY */
 
 #endif	/* __XFS_VERITY_H__ */

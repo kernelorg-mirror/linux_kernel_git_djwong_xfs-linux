@@ -667,6 +667,7 @@ xfs_fs_destroy_inode(
 	XFS_STATS_INC(ip->i_mount, vn_rele);
 	XFS_STATS_INC(ip->i_mount, vn_remove);
 	fsverity_cleanup_inode(inode);
+	xfs_verity_destroy_cache(ip);
 	xfs_inode_mark_reclaimable(ip);
 }
 

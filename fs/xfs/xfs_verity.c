@@ -17,51 +17,61 @@
 #include "xfs_log_format.h"
 #include "xfs_trans.h"
 #include "xfs_attr_leaf.h"
+#include "xfs_blobcache.h"
+
+static inline struct xfs_blobcache *xfs_verity_get_cache(struct xfs_inode *ip)
+{
+	/*
+	 * The acquire here pairs with the cmpxchg_release in the cache setup
+	 * function below.
+	 */
+	return smp_load_acquire(&ip->i_merkle_blocks);
+}
+
 
 /*
- * Make fs-verity invalidate verified status of Merkle tree block
+ * Construct the incore buffer cache that we use to cache merkle tree blocks.
+ * The caller might have IOLOCK_SHARED, so we must be careful with the i_verity
+ * pointer store.
  */
-static void
-xfs_verity_put_listent(
-	struct xfs_attr_list_context	*context,
-	int				flags,
-	unsigned char			*name,
-	int				namelen,
-	int				valuelen)
+static int
+xfs_verity_setup_cache(
+	struct xfs_inode	*ip)
 {
-	struct fsverity_blockbuf	block = {
-		.offset = xfs_fsverity_name_to_block_offset(name),
-		.size = valuelen,
-	};
-	/*
-	 * Verity descriptor is smaller than 1024; verity block min size is
-	 * 1024. Exclude verity descriptor
-	 */
-	if (valuelen < 1024)
-		return;
+	struct xfs_blobcache	*bc, *old;
 
-	fsverity_invalidate_block(VFS_I(context->dp), &block);
+	bc = xfs_blobcache_alloc(ip->i_mount, "merkle", ip->i_ino);
+	if (IS_ERR(bc))
+		return PTR_ERR(bc);
+
+	/*
+	 * We might be called upon to set up the merkle tree block cache while
+	 * only holding IOLOCK_SHARED.  Hence we must use cmpxchg to set the
+	 * pointer or back off if we lost the race to do so.  The cache only
+	 * gets destroyed after the inode has been isolated, so the only race
+	 * here is to set the value, not to clear it.
+	 *
+	 * The cmpxchg_release pairs with the smp_load_acquire above.
+	 */
+	old = cmpxchg_release(&ip->i_merkle_blocks, NULL, bc);
+	if (old)
+		xfs_blobcache_free(bc);
+
+	return 0;
 }
 
 /*
- * Iterate over extended attributes in the bp to invalidate Merkle tree blocks
+ * Dump all the cached merkle tree blocks and the cache itself.  Caller must
+ * ensure that there are no other threads accessing i_merkle_blocks.
  */
-static int
-xfs_invalidate_blocks(
-	struct xfs_inode	*ip,
-	struct xfs_buf		*bp)
+void
+__xfs_verity_destroy_cache(
+	struct xfs_inode	*ip)
 {
-	struct xfs_attr_list_context context;
+	struct xfs_blobcache	*bc = ip->i_merkle_blocks;
 
-	context.dp = ip;
-	context.resynch = 0;
-	context.buffer = NULL;
-	context.bufsize = 0;
-	context.firstu = 0;
-	context.attr_filter = XFS_ATTR_VERITY;
-	context.put_listent = xfs_verity_put_listent;
-
-	return xfs_attr3_leaf_list_int(bp, &context);
+	ip->i_merkle_blocks = NULL;
+	xfs_blobcache_free(bc);
 }
 
 static int
@@ -222,83 +232,79 @@ xfs_read_merkle_tree_block(
 	struct xfs_da_args		args = {
 		.dp			= ip,
 		.attr_filter		= XFS_ATTR_VERITY,
-		.op_flags		= XFS_DA_OP_BUFFER,
 		.namelen		= sizeof(struct xfs_fsverity_merkle_key),
 		.valuelen		= block->size,
 	};
-	int				error = 0;
+	struct xfs_blobcache		*bc;
+	struct xfs_blobitem		*bi;
+	xfs_blobitem_key_t		key = block->offset >> req->log_blocksize;
+	int				error;
 
+	ASSERT(xfs_blobitem_key_check(block->offset >> req->log_blocksize));
+
+	xfs_fsverity_merkle_key_to_disk(&name, block->offset);
+
+	bc = xfs_verity_get_cache(ip);
+	if (!bc) {
+		error = xfs_verity_setup_cache(ip);
+		if (error)
+			return error;
+
+		bc = xfs_verity_get_cache(ip);
+	}
+
+	/* Is the block already cached? */
+	bi = xfs_blobcache_load(bc, key, block->size);
+	if (!IS_ERR_OR_NULL(bi))
+		goto out_hit;
+
+	/* Read the block in from disk and try to store it in the cache. */
 	xfs_fsverity_merkle_key_to_disk(&name, block->offset);
 	args.name = (const uint8_t *)&name.merkleoff;
 
 	error = xfs_attr_get(&args);
 	if (error)
-		goto out;
+		return error;
 
 	if (!args.valuelen)
 		return -ENODATA;
 
-	block->kaddr = args.value;
-	block->context = args.bp;
-
-	/*
-	 * Memory barriers are used to force operation ordering of clearing
-	 * bitmap in fsverity_invalidate_block() and setting XBF_VERITY_SEEN
-	 * flag.
-	 *
-	 * Multiple threads may execute this code concurrently on the same block.
-	 * This is safe because we use memory barriers to ensure that if a
-	 * thread sees XBF_VERITY_SEEN, then fsverity bitmap is already up to
-	 * date.
-	 *
-	 * Invalidating block in a bitmap again at worst causes a hash block to
-	 * be verified redundantly. That event should be very rare, so it's not
-	 * worth using a lock to avoid.
-	 */
-	if (!(args.bp->b_flags & XBF_VERITY_SEEN)) {
+	error = xfs_blobcache_store(bc, key, args.value, block->size, &bi);
+	switch (error) {
+	case -EEXIST:
 		/*
-		 * A read memory barrier is needed here to give ACQUIRE
-		 * semantics to the above check.
+		 * We raced with another thread to populate the cache and lost.
+		 * Free the attr value buffer but keep going.
 		 */
-		smp_rmb();
+		kvfree(args.value);
+		break;
+	case 0:
 		/*
-		 * fs-verity is not aware if buffer was evicted from the memory.
-		 * Make fs-verity invalidate verfied status of all blocks in the
-		 * buffer.
-		 *
-		 * Single extended attribute can contain multiple Merkle tree
-		 * blocks:
-		 * - leaf with inline data -> invalidate all blocks in the leaf
-		 * - remote value -> invalidate single block
-		 *
-		 * For example, leaf on 64k system with 4k/1k filesystem will
-		 * contain multiple Merkle tree blocks.
-		 *
-		 * Only remote value buffers would have XBF_DOUBLE_ALLOC flag
+		 * The merkle tree block is now cached and owns the attr value
+		 * buffer.  Keep going.
 		 */
-		if (args.bp->b_flags & XBF_DOUBLE_ALLOC)
-			fsverity_invalidate_block(req->inode, block);
-		else {
-			error = xfs_invalidate_blocks(ip, args.bp);
-			if (error)
-				goto out;
-		}
+		break;
+	default:
+		/* An error occurred, free the attr value buffer and bail. */
+		kvfree(args.value);
+		return error;
 	}
 
+	/* We might have loaded this in from disk, fsverity must recheck */
+	fsverity_invalidate_block(req->inode, block);
+
+out_hit:
+	block->kaddr   = (void *)bi->bi_data;
+	block->context = bi;
+
 	/*
-	 * A write memory barrier is needed here to give RELEASE
-	 * semantics to the below flag.
+	 * Prioritize keeping the root-adjacent levels cached if this isn't a
+	 * streaming read.
 	 */
-	smp_wmb();
-	args.bp->b_flags |= XBF_VERITY_SEEN;
+	if (req->level >= 0)
+		xfs_blobitem_set_shrinkref(bi, req->level + 1);
 
-	return error;
-
-out:
-	kvfree(args.value);
-	if (args.bp)
-		xfs_buf_rele(args.bp);
-	return error;
+	return 0;
 }
 
 static int
@@ -330,15 +336,11 @@ static void
 xfs_drop_block(
 	struct fsverity_blockbuf	*block)
 {
-	struct xfs_buf			*bp;
+	struct xfs_blobitem		*bi = block->context;
 
-	ASSERT(block != NULL);
-	bp = (struct xfs_buf *)block->context;
-	ASSERT(bp->b_flags & XBF_VERITY_SEEN);
-
-	xfs_buf_rele(bp);
-
-	kunmap_local(block->kaddr);
+	xfs_blobitem_rele(bi);
+	block->kaddr = NULL;
+	block->context = NULL;
 }
 
 const struct fsverity_operations xfs_verity_ops = {
