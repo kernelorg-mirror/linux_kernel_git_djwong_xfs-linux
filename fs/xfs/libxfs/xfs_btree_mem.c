@@ -92,7 +92,7 @@ xfbtree_init_leaf_block(
 	xfbno_t				bno = xfbt->highest_bno++;
 	int				error;
 
-	error = xfs_buf_get(xfbt->target, xfbno_to_daddr(bno), XFBNO_BBSIZE, 0,
+	error = xfs_buf_get(xfbt->target, xfbno_to_daddr(bno), XFBNO_BBSIZE,
 			&bp);
 	if (error)
 		return error;
