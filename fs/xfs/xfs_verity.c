@@ -312,7 +312,7 @@ xfs_verity_begin_enable(
 	if (IS_DAX(inode))
 		return -EINVAL;
 
-	if (xfs_iflags_test_and_set(ip, XFS_IVERITY_CONSTRUCTION))
+	if (xfs_iflags_test_and_set(ip, XFS_VERITY_CONSTRUCTION))
 		return -EBUSY;
 
 	return error;
@@ -415,7 +415,7 @@ out:
 		WARN_ON_ONCE(xfs_drop_merkle_tree(ip, merkle_tree_size,
 						  tree_blocksize));
 
-	xfs_iflags_clear(ip, XFS_IVERITY_CONSTRUCTION);
+	xfs_iflags_clear(ip, XFS_VERITY_CONSTRUCTION);
 	return error;
 }
 
