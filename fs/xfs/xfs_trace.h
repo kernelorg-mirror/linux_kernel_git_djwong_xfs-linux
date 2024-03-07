@@ -4666,6 +4666,32 @@ TRACE_EVENT(xmbuf_free,
 		  __entry->bytes,
 		  __entry->size)
 );
+
+DECLARE_EVENT_CLASS(xblobc_class,
+	TP_PROTO(struct xfs_buftarg *btp),
+	TP_ARGS(btp),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(dev_t, cookie)
+	),
+	TP_fast_assign(
+		__entry->dev = btp->bt_mount->m_super->s_dev;
+		__entry->cookie = btp->bt_dev;
+	),
+	TP_printk("dev %d:%d xblobc_cookie %d:%d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  MAJOR(__entry->cookie), MINOR(__entry->cookie))
+);
+#define DEFINE_XBLOBC_EVENT(name)	\
+DEFINE_EVENT(xblobc_class, name,	\
+	TP_PROTO(struct xfs_buftarg *btp), \
+	TP_ARGS(btp))
+DEFINE_XBLOBC_EVENT(xblobc_alloc);
+DEFINE_XBLOBC_EVENT(xblobc_free);
+
+DEFINE_BUF_EVENT(xblobc_peek);
+DEFINE_BUF_EVENT(xblobc_get);
+DEFINE_BUF_EVENT(xblobc_store);
 #endif /* CONFIG_XFS_MEMORY_BUFS */
 
 #ifdef CONFIG_XFS_BTREE_IN_MEM

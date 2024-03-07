@@ -324,7 +324,7 @@ xfs_buf_free(
 	else if (bp->b_flags & _XBF_PAGES)
 		xfs_buf_free_pages(bp);
 	else if (bp->b_flags & _XBF_KMEM)
-		kfree(bp->b_addr);
+		kvfree(bp->b_addr);
 
 	call_rcu(&bp->b_rcu, xfs_buf_free_callback);
 }
@@ -428,6 +428,9 @@ _xfs_buf_map_pages(
 	struct xfs_buf		*bp,
 	xfs_buf_flags_t		flags)
 {
+	if (xfs_buftarg_is_blobcache(bp->b_target))
+		return 0;
+
 	ASSERT(bp->b_flags & _XBF_PAGES);
 	if (bp->b_page_count == 1) {
 		/* A single page buffer is always mappable */
@@ -643,6 +646,8 @@ xfs_buf_find_insert(
 
 	if (xfs_buftarg_is_mem(new_bp->b_target)) {
 		error = xmbuf_map_page(new_bp);
+	} else if (xfs_buftarg_is_blobcache(new_bp->b_target)) {
+		error = 0; /* cache will install memory later */
 	} else if (BBTOB(new_bp->b_length) >= PAGE_SIZE ||
 		   xfs_buf_alloc_kmem(new_bp, flags) < 0) {
 		/*
@@ -697,7 +702,7 @@ xfs_buftarg_get_pag(
 {
 	struct xfs_mount		*mp = btp->bt_mount;
 
-	if (xfs_buftarg_is_mem(btp))
+	if (xfs_buftarg_is_mem(btp) || xfs_buftarg_is_blobcache(btp))
 		return NULL;
 	return xfs_perag_get(mp, xfs_daddr_to_agno(mp, map->bm_bn));
 }
@@ -943,7 +948,7 @@ xfs_buf_readahead_map(
 	 * Currently we don't have a good means or justification for performing
 	 * xmbuf_map_page asynchronously, so we don't do readahead.
 	 */
-	if (xfs_buftarg_is_mem(target))
+	if (xfs_buftarg_is_mem(target) || xfs_buftarg_is_blobcache(target))
 		return;
 
 	xfs_buf_read_map(target, map, nmaps,
@@ -1005,6 +1010,11 @@ xfs_buf_get_uncached(
 	DEFINE_SINGLE_BUF_MAP(map, XFS_BUF_DADDR_NULL, numblks);
 
 	*bpp = NULL;
+
+	if (xfs_buftarg_is_blobcache(target)) {
+		ASSERT(0);
+		return -EINVAL;
+	}
 
 	/* flags might contain irrelevant bits, pass only what we care about */
 	error = _xfs_buf_alloc(target, &map, 1, flags & XBF_NO_IOACCT, &bp);
@@ -1657,7 +1667,8 @@ _xfs_buf_ioapply(
 	op |= REQ_META;
 
 	/* in-memory targets are directly mapped, no IO required. */
-	if (xfs_buftarg_is_mem(bp->b_target)) {
+	if (xfs_buftarg_is_mem(bp->b_target) ||
+	    xfs_buftarg_is_blobcache(bp->b_target)) {
 		xfs_buf_ioend(bp);
 		return;
 	}

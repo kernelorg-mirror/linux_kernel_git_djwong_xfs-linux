@@ -270,3 +270,155 @@ xmbuf_trans_bdetach(
 	while (bp->b_log_item != NULL)
 		xfs_trans_bdetach(tp, bp);
 }
+
+/*
+ * Blob Cache
+ * ==========
+ *
+ * Some callers would like to be able to cache arbitrary blobs and be able to
+ * look them up via a numeric key.  Create self-caching buftargs and add some
+ * bespoke functions to peek, get, and store blobs.
+ */
+
+/* Allocate a buffer cache target to index blobs. */
+int
+xblobc_alloc(
+	struct xfs_mount	*mp,
+	dev_t			cookie,
+	const char		*descr,
+	struct xfs_buftarg	**btpp)
+{
+	struct xfs_buftarg	*btp;
+	int			error;
+
+	btp = kmem_cache_zalloc(xfs_self_buftarg_cache, GFP_KERNEL);
+	if (!btp)
+		return -ENOMEM;
+
+	error = xfs_buf_cache_init(btp->bt_cache);
+	if (error)
+		goto out_free_btp;
+
+	/* Initialize buffer target */
+	btp->bt_mount = mp;
+	btp->bt_dev = cookie;
+	btp->bt_bdev = NULL; /* blob caches have no bdev or file */
+	btp->bt_file = NULL;
+	btp->bt_meta_sectorsize = XBC_BLOCKSIZE;
+	btp->bt_meta_sectormask = XBC_BLOCKSIZE - 1;
+
+	error = xfs_init_buftarg(btp, XBC_BLOCKSIZE, descr);
+	if (error)
+		goto out_bcache;
+
+	trace_xblobc_alloc(btp);
+
+	*btpp = btp;
+	return 0;
+
+out_bcache:
+	xfs_buf_cache_destroy(btp->bt_cache);
+out_free_btp:
+	kmem_cache_free(xfs_self_buftarg_cache, btp);
+	return error;
+}
+
+/* Free a blob cache target for a memory-backed buffer cache. */
+void
+xblobc_free(
+	struct xfs_buftarg	*btp)
+{
+	ASSERT(xfs_buftarg_is_blobcache(btp));
+	ASSERT(percpu_counter_sum(&btp->bt_io_count) == 0);
+
+	trace_xblobc_free(btp);
+
+	xfs_buftarg_drain(btp);
+	xfs_destroy_buftarg(btp);
+	xfs_buf_cache_destroy(btp->bt_cache);
+	kmem_cache_free(xfs_self_buftarg_cache, btp);
+}
+
+/*
+ * Retrieve cached data from the blob cache.  Returns -ENODATA if nothing
+ * was cached.  @bytecount must be a multiple of XBC_BLOCKSIZE.
+ */
+int
+xblobc_peek(
+	struct xfs_buftarg	*target,
+	xblobc_key_t		key,
+	size_t			bytecount,
+	struct xfs_buf		**bpp)
+{
+	struct xfs_buf		*bp;
+	int			error;
+
+	ASSERT(xfs_buftarg_is_blobcache(target));
+
+	error = xfs_buf_incore(target, key, BTOBB(bytecount), 0, &bp);
+	if (error == -ENOENT)
+		return -ENODATA;
+	if (error)
+		return error;
+
+	trace_xblobc_peek(bp, _RET_IP_);
+
+	if (!bp->b_addr) {
+		xfs_buf_relse(bp);
+		return -ENODATA;
+	}
+
+	*bpp = bp;
+	return 0;
+}
+
+/* Retrieve the handle in preparation for storing a blob. */
+int
+xblobc_get(
+	struct xfs_buftarg	*target,
+	xblobc_key_t		key,
+	size_t			bytecount,
+	struct xfs_buf		**bpp)
+{
+	int			error;
+
+	ASSERT(xfs_buftarg_is_blobcache(target));
+
+	error = xfs_buf_get(target, key, BTOBB(bytecount), 0, bpp);
+	if (error)
+		return error;
+
+	trace_xblobc_get(*bpp, _RET_IP_);
+
+	return 0;
+}
+
+/* Store data into the cache.  The xfs_buf takes ownership of the data. */
+void
+xblobc_store(
+	struct xfs_buf		*bp,
+	void			*data,
+	size_t			datalen)
+{
+	ASSERT(xfs_buftarg_is_blobcache(bp->b_target));
+	ASSERT(BTOBB(datalen) == bp->b_length);
+	ASSERT(!(bp->b_flags & _XBF_PAGES));
+
+	trace_xblobc_store(bp, _RET_IP_);
+
+	if (bp->b_addr) {
+		ASSERT(bp->b_flags & _XBF_KMEM);
+		ASSERT(bp->b_pages == bp->b_page_array);
+		ASSERT(bp->b_pages[0] == NULL);
+		ASSERT(bp->b_page_count == 0);
+
+		kvfree(bp->b_addr);
+	}
+
+	bp->b_addr = data;
+	bp->b_offset = 0;
+	bp->b_pages = bp->b_page_array;
+	bp->b_pages[0] = NULL;
+	bp->b_page_count = 0;
+	bp->b_flags |= (_XBF_KMEM | XBF_DONE);
+}
