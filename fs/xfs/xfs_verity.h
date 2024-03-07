@@ -27,7 +27,15 @@ xfs_verity_merkle_block(
 }
 
 #ifdef CONFIG_FS_VERITY
+void xfs_verity_cache_init(struct xfs_inode *ip);
+void xfs_verity_cache_drop(struct xfs_inode *ip);
+void xfs_verity_cache_destroy(struct xfs_inode *ip);
+
 extern const struct fsverity_operations xfs_verity_ops;
+#else
+# define xfs_verity_cache_init(ip)		((void)0)
+# define xfs_verity_cache_drop(ip)		((void)0)
+# define xfs_verity_cache_destroy(ip)		((void)0)
 #endif	/* CONFIG_FS_VERITY */
 
 #endif	/* __XFS_VERITY_H__ */

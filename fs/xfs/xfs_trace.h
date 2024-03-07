@@ -4772,6 +4772,38 @@ DEFINE_XFBTREE_FREESP_EVENT(xfbtree_alloc_block);
 DEFINE_XFBTREE_FREESP_EVENT(xfbtree_free_block);
 #endif /* CONFIG_XFS_BTREE_IN_MEM */
 
+#ifdef CONFIG_FS_VERITY
+DECLARE_EVENT_CLASS(xfs_verity_cache_class,
+	TP_PROTO(struct xfs_inode *ip, unsigned long key, unsigned long caller_ip),
+	TP_ARGS(ip, key, caller_ip),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(unsigned long, key)
+		__field(void *, caller_ip)
+	),
+	TP_fast_assign(
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->key = key;
+		__entry->caller_ip = (void *)caller_ip;
+	),
+	TP_printk("dev %d:%d ino 0x%llx key 0x%lx caller %pS",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->key,
+		  __entry->caller_ip)
+)
+
+#define DEFINE_XFS_VERITY_CACHE_EVENT(name) \
+DEFINE_EVENT(xfs_verity_cache_class, name, \
+	TP_PROTO(struct xfs_inode *ip, unsigned long key, unsigned long caller_ip), \
+	TP_ARGS(ip, key, caller_ip))
+DEFINE_XFS_VERITY_CACHE_EVENT(xfs_verity_cache_load);
+DEFINE_XFS_VERITY_CACHE_EVENT(xfs_verity_cache_store);
+DEFINE_XFS_VERITY_CACHE_EVENT(xfs_verity_cache_drop);
+#endif /* CONFIG_XFS_VERITY */
+
 #endif /* _TRACE_XFS_H */
 
 #undef TRACE_INCLUDE_PATH
