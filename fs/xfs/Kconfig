@@ -47,6 +47,9 @@ config XFS_SUPPORT_V4
 	  To continue supporting the old V4 format (crc=0), say Y.
 	  To close off an attack surface, say N.
 
+config XFS_BLOBCACHE
+	bool
+
 config XFS_SUPPORT_ASCII_CI
 	bool "Support deprecated case-insensitive ascii (ascii-ci=1) format"
 	depends on XFS_FS

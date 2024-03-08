@@ -44,6 +44,7 @@
 #include "xfs_iunlink_item.h"
 #include "xfs_dahash_test.h"
 #include "xfs_rtbitmap.h"
+#include "xfs_blobcache.h"
 #include "scrub/stats.h"
 #include "scrub/rcbag_btree.h"
 
@@ -2198,8 +2199,13 @@ xfs_init_caches(void)
 	if (!xfs_iunlink_cache)
 		goto out_destroy_attri_cache;
 
+	if (xfs_blobcache_insmod() != 0)
+		goto out_destroy_iunlink_cache;
+
 	return 0;
 
+ out_destroy_iunlink_cache:
+	kmem_cache_destroy(xfs_iunlink_cache);
  out_destroy_attri_cache:
 	kmem_cache_destroy(xfs_attri_cache);
  out_destroy_attrd_cache:
@@ -2256,6 +2262,7 @@ xfs_destroy_caches(void)
 	 * destroy caches.
 	 */
 	rcu_barrier();
+	xfs_blobcache_rmmod();
 	kmem_cache_destroy(xfs_iunlink_cache);
 	kmem_cache_destroy(xfs_attri_cache);
 	kmem_cache_destroy(xfs_attrd_cache);

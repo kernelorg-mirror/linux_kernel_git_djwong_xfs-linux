@@ -82,6 +82,8 @@ struct xfs_perag;
 struct xfbtree;
 struct xfs_btree_ops;
 struct xfs_bmap_intent;
+struct xfs_blobcache;
+struct xfs_blobitem;
 
 #define XFS_ATTR_FILTER_FLAGS \
 	{ XFS_ATTR_ROOT,	"ROOT" }, \
@@ -4771,6 +4773,105 @@ DEFINE_EVENT(xfbtree_freesp_class, name, \
 DEFINE_XFBTREE_FREESP_EVENT(xfbtree_alloc_block);
 DEFINE_XFBTREE_FREESP_EVENT(xfbtree_free_block);
 #endif /* CONFIG_XFS_BTREE_IN_MEM */
+
+#ifdef CONFIG_XFS_BLOBCACHE
+DECLARE_EVENT_CLASS(xfs_blobitem_class,
+	TP_PROTO(struct xfs_blobitem *bi, unsigned long caller_ip),
+	TP_ARGS(bi, caller_ip),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned long long, cookie)
+		__field(unsigned long, key)
+		__field(size_t, bytecount)
+		__field(unsigned int, refcount)
+		__field(unsigned int, shrinkref)
+		__field(void *, caller_ip)
+	),
+	TP_fast_assign(
+		__entry->dev = bi->bi_cache->bc_mount->m_super->s_dev;
+		__entry->cookie = bi->bi_cache->bc_cookie;
+		__entry->key = bi->bi_key;
+		__entry->bytecount = bi->bi_bytecount;
+		__entry->refcount = refcount_read(&bi->bi_refcount);
+		__entry->shrinkref = atomic_read(&bi->bi_shrinkref);
+		__entry->caller_ip = (void *)caller_ip;
+	),
+	TP_printk("dev %d:%d cookie 0x%llx key 0x%lx bytecount 0x%zx refcount %u shrinkref %u caller %pS",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->cookie,
+		  __entry->key,
+		  __entry->bytecount,
+		  __entry->refcount,
+		  __entry->shrinkref,
+		  __entry->caller_ip)
+)
+
+#define DEFINE_XFS_BLOBITEM_EVENT(name) \
+DEFINE_EVENT(xfs_blobitem_class, name, \
+	TP_PROTO(struct xfs_blobitem *bi, unsigned long caller_ip), \
+	TP_ARGS(bi, caller_ip))
+DEFINE_XFS_BLOBITEM_EVENT(xfs_blobitem_free);
+DEFINE_XFS_BLOBITEM_EVENT(xfs_blobitem_rele);
+DEFINE_XFS_BLOBITEM_EVENT(xfs_blobitem_load);
+DEFINE_XFS_BLOBITEM_EVENT(xfs_blobitem_existing);
+DEFINE_XFS_BLOBITEM_EVENT(xfs_blobitem_store);
+DEFINE_XFS_BLOBITEM_EVENT(xfs_blobitem_invalidate);
+DEFINE_XFS_BLOBITEM_EVENT(xfs_blobitem_shrink);
+
+DECLARE_EVENT_CLASS(xfs_blobcache_class,
+	TP_PROTO(struct xfs_blobcache *bc, unsigned long caller_ip),
+	TP_ARGS(bc, caller_ip),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned long long, cookie)
+		__field(void *, caller_ip)
+	),
+	TP_fast_assign(
+		__entry->dev = bc->bc_mount->m_super->s_dev;
+		__entry->cookie = bc->bc_cookie;
+		__entry->caller_ip = (void *)caller_ip;
+	),
+	TP_printk("dev %d:%d cookie 0x%llx caller %pS",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->cookie,
+		  __entry->caller_ip)
+)
+
+#define DEFINE_XFS_BLOBCACHE_EVENT(name) \
+DEFINE_EVENT(xfs_blobcache_class, name, \
+	TP_PROTO(struct xfs_blobcache *bc, unsigned long caller_ip), \
+	TP_ARGS(bc, caller_ip))
+DEFINE_XFS_BLOBCACHE_EVENT(xfs_blobcache_alloc);
+DEFINE_XFS_BLOBCACHE_EVENT(xfs_blobcache_free);
+DEFINE_XFS_BLOBCACHE_EVENT(xfs_blobcache_shrink_count);
+
+DECLARE_EVENT_CLASS(xfs_blobcache_count_class,
+	TP_PROTO(struct xfs_blobcache *bc, unsigned long count),
+	TP_ARGS(bc, count),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned long long, cookie)
+		__field(unsigned long, count)
+	),
+	TP_fast_assign(
+		__entry->dev = bc->bc_mount->m_super->s_dev;
+		__entry->cookie = bc->bc_cookie;
+		__entry->count = count;
+	),
+	TP_printk("dev %d:%d cookie 0x%llx count %lu",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->cookie,
+		  __entry->count)
+)
+
+#define DEFINE_XFS_BLOBCACHE_COUNT_EVENT(name) \
+DEFINE_EVENT(xfs_blobcache_count_class, name, \
+	TP_PROTO(struct xfs_blobcache *bc, unsigned long count), \
+	TP_ARGS(bc, count))
+DEFINE_XFS_BLOBCACHE_COUNT_EVENT(xfs_blobcache_shrink_scan);
+DEFINE_XFS_BLOBCACHE_COUNT_EVENT(xfs_blobcache_shrink_freed);
+DEFINE_XFS_BLOBCACHE_COUNT_EVENT(xfs_blobcache_shrink_counted);
+#endif /* CONFIG_XFS_BLOBCACHE */
 
 #endif /* _TRACE_XFS_H */
 
