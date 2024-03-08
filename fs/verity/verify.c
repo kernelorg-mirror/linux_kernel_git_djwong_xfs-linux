@@ -187,9 +187,9 @@ verify_data_block(struct inode *inode, struct fsverity_info *vi,
 			min(max_ra_pages, params->tree_pages - hpage_idx) : 0;
 
 		if (inode->i_sb->s_vop->read_merkle_tree_block) {
-			err = inode->i_sb->s_vop->read_merkle_tree_block(
-				inode, hblock_pos, block, params->log_blocksize,
-				num_ra_pages);
+			err = fsverity_read_merkle_tree_block(inode, params,
+					level, hblock_pos, block,
+					num_ra_pages);
 		} else {
 			unsigned int blocks_per_page =
 				vi->tree_params.blocks_per_page;

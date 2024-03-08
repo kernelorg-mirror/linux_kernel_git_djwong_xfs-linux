@@ -214,23 +214,21 @@ out:
 
 static int
 xfs_read_merkle_tree_block(
-	struct inode			*inode,
-	u64				pos,
-	struct fsverity_blockbuf	*block,
-	unsigned int			log_blocksize,
-	u64				ra_bytes)
+	const struct fsverity_readmerkle *req,
+	struct fsverity_blockbuf	*block)
 {
-	struct xfs_inode		*ip = XFS_I(inode);
+	struct xfs_inode		*ip = XFS_I(req->inode);
 	struct xfs_fsverity_merkle_key	name;
-	int				error = 0;
 	struct xfs_da_args		args = {
 		.dp			= ip,
 		.attr_filter		= XFS_ATTR_VERITY,
 		.op_flags		= XFS_DA_OP_BUFFER,
 		.namelen		= sizeof(struct xfs_fsverity_merkle_key),
-		.valuelen		= (1 << log_blocksize),
+		.valuelen		= block->size,
 	};
-	xfs_fsverity_merkle_key_to_disk(&name, pos);
+	int				error = 0;
+
+	xfs_fsverity_merkle_key_to_disk(&name, block->offset);
 	args.name = (const uint8_t *)&name.merkleoff;
 
 	error = xfs_attr_get(&args);
@@ -241,8 +239,6 @@ xfs_read_merkle_tree_block(
 		return -ENODATA;
 
 	block->kaddr = args.value;
-	block->offset = pos;
-	block->size = args.valuelen;
 	block->context = args.bp;
 
 	/*
@@ -281,7 +277,7 @@ xfs_read_merkle_tree_block(
 		 * Only remote value buffers would have XBF_DOUBLE_ALLOC flag
 		 */
 		if (args.bp->b_flags & XBF_DOUBLE_ALLOC)
-			fsverity_invalidate_block(inode, block);
+			fsverity_invalidate_block(req->inode, block);
 		else {
 			error = xfs_invalidate_blocks(ip, args.bp);
 			if (error)

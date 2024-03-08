@@ -62,9 +62,10 @@ static int fsverity_read_merkle_tree(struct inode *inode,
 				block.context = page;
 			}
 		} else {
-			err = vops->read_merkle_tree_block(inode,
-					index << log_blocksize,
-					&block, log_blocksize, num_ra_pages);
+			err = fsverity_read_merkle_tree_block(inode,
+					&vi->tree_params, -1,
+					index << log_blocksize, &block,
+					num_ra_pages);
 		}
 
 		if (err) {

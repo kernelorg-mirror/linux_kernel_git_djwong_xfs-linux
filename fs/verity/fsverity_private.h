@@ -54,6 +54,25 @@ struct merkle_tree_params {
 	unsigned long level_start[FS_VERITY_MAX_LEVELS];
 };
 
+static inline int
+fsverity_read_merkle_tree_block(struct inode *inode,
+		const struct merkle_tree_params *params, int level, u64 pos,
+		struct fsverity_blockbuf *block, int num_ra_pages)
+{
+	struct fsverity_readmerkle req = {
+		.inode = inode,
+		.level = level,
+		.num_levels = params->num_levels,
+		.log_blocksize = params->log_blocksize,
+		.ra_bytes = num_ra_pages,
+	};
+
+	block->offset = pos;
+	block->size = 1U << params->log_blocksize;
+
+	return inode->i_sb->s_vop->read_merkle_tree_block(&req, block);
+}
+
 /*
  * fsverity_info - cached verity metadata for an inode
  *
