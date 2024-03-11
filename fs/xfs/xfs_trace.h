@@ -4822,6 +4822,29 @@ TRACE_EVENT(xfs_verity_shrinker_count,
 		  __entry->count,
 		  __entry->caller_ip)
 )
+
+TRACE_EVENT(xfs_verity_shrinker_scan,
+	TP_PROTO(struct xfs_mount *mp, unsigned long scanned,
+		 unsigned long freed, unsigned long caller_ip),
+	TP_ARGS(mp, scanned, freed, caller_ip),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned long, scanned)
+		__field(unsigned long, freed)
+		__field(void *, caller_ip)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->scanned = scanned;
+		__entry->freed = freed;
+		__entry->caller_ip = (void *)caller_ip;
+	),
+	TP_printk("dev %d:%d scanned %lu freed %lu caller %pS",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->scanned,
+		  __entry->freed,
+		  __entry->caller_ip)
+)
 #endif /* CONFIG_XFS_VERITY */
 
 #endif /* _TRACE_XFS_H */
