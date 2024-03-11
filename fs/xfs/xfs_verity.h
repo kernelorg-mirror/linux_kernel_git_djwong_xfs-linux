@@ -31,6 +31,10 @@ void xfs_verity_cache_init(struct xfs_inode *ip);
 void xfs_verity_cache_drop(struct xfs_inode *ip);
 void xfs_verity_cache_destroy(struct xfs_inode *ip);
 
+unsigned long xfs_verity_cache_shrink_scan(struct xfs_inode *ip,
+		unsigned long nr_to_scan);
+unsigned long xfs_verity_cache_shrink_count(struct xfs_inode *ip);
+
 extern const struct fsverity_operations xfs_verity_ops;
 #else
 # define xfs_verity_cache_init(ip)		((void)0)

@@ -1598,7 +1598,25 @@ xfs_verity_scan_inode(
 
 	vs = container_of(icw, struct xfs_verity_scan, icw);
 
-	vs->scanned++;	/* XXX */
+	if (!vs->sc) {
+		/* no shrink control means we're counting */
+		vs->scanned += xfs_verity_cache_shrink_count(ip);
+		goto out_rele;
+	}
+
+	if (vs->scanned < vs->sc->nr_to_scan) {
+		unsigned long	to_scan = vs->sc->nr_to_scan - vs->scanned;
+	
+		vs->scanned += xfs_verity_cache_shrink_scan(ip, to_scan);
+	}
+	if (vs->scanned >= vs->sc->nr_to_scan) {
+		/* Freed enough objects, now we need to stop scanning. */
+		icw->icw_flags |= XFS_ICWALK_FLAG_SCAN_LIMIT;
+		icw->icw_scan_limit = 0;
+	}
+
+out_rele:
+	xfs_irele(ip);
 	return 0;
 }
 
@@ -1647,6 +1665,44 @@ xfs_verity_shrinker_scan(
 	}
 
 	return vs.scanned;
+}
+
+/* Mark this inode as having cached merkle tree blocks */
+void
+xfs_inode_set_verity_tag(
+	struct xfs_inode	*ip)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_perag	*pag;
+
+	pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, ip->i_ino));
+	if (!pag)
+		return;
+
+	spin_lock(&pag->pag_ici_lock);
+	xfs_perag_set_inode_tag(pag, XFS_INO_TO_AGINO(mp, ip->i_ino),
+			XFS_ICI_VERITY_TAG);
+	spin_unlock(&pag->pag_ici_lock);
+	xfs_perag_put(pag);
+}
+
+/* Mark this inode as not having cached merkle tree blocks */
+void
+xfs_inode_clear_verity_tag(
+	struct xfs_inode	*ip)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_perag	*pag;
+
+	pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, ip->i_ino));
+	if (!pag)
+		return;
+
+	spin_lock(&pag->pag_ici_lock);
+	xfs_perag_clear_inode_tag(pag, XFS_INO_TO_AGINO(mp, ip->i_ino),
+			XFS_ICI_VERITY_TAG);
+	spin_unlock(&pag->pag_ici_lock);
+	xfs_perag_put(pag);
 }
 
 /* Register a shrinker so we can accelerate inodegc and throttle queuing. */

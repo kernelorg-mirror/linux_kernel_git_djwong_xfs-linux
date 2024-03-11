@@ -18,6 +18,7 @@
 #include "xfs_trans.h"
 #include "xfs_attr_leaf.h"
 #include "xfs_trace.h"
+#include "xfs_icache.h"
 
 /*
  * Merkle Tree Block Cache
@@ -27,6 +28,9 @@
 struct xfs_merkle_blob {
 	/* refcount of this item; the cache holds its own ref */
 	refcount_t		mk_refcount;
+
+	/* number of times the shrinker should ignore this item */
+	atomic_t		mk_shrinkref;
 
 	/* blob data, must be last! */
 	unsigned char		mk_data[];
@@ -95,6 +99,7 @@ xfs_verity_cache_drop(
 		xfs_merkle_blob_rele(mk);
 	}
 	xas_unlock(&xas);
+	xfs_inode_clear_verity_tag(ip);
 }
 
 /* Destroy the merkle tree block cache */
@@ -179,6 +184,72 @@ xfs_verity_cache_store(
 	 * Return it to the caller.
 	 */
 	return old;
+}
+
+/* Reclaim inactive merkle tree blocks that have run out of second chances. */
+unsigned long
+xfs_verity_cache_shrink_scan(
+	struct xfs_inode	*ip,
+	unsigned long		nr_to_scan)
+{
+	XA_STATE(xas, &ip->i_merkle_blocks, 0);
+	struct xfs_merkle_blob	*mk;
+	unsigned long		freed = 0;
+
+	trace_xfs_verity_cache_shrink_scan(ip, nr_to_scan, _RET_IP_);
+
+	xas_lock(&xas);
+	xas_for_each(&xas, mk, ULONG_MAX) {
+		/* Retain if there are active references */
+		if (refcount_read(&mk->mk_refcount) > 1)
+			continue;
+
+		/* Ignore if the item still has lru refcount */
+		if (atomic_add_unless(&mk->mk_shrinkref, -1, 0))
+			continue;
+
+		trace_xfs_verity_cache_reclaim(ip, xas.xa_index, _RET_IP_);
+
+		freed++;
+		xas_store(&xas, NULL);
+		xfs_merkle_blob_rele(mk);
+
+		if (freed >= nr_to_scan)
+			break;
+	}
+	xas_unlock(&xas);
+
+	/*
+	 * Try to clear the verity tree tag if we reclaimed all the cached
+	 * blocks.  On the flag setting side, we should have IOLOCK_SHARED.
+	 */
+	xfs_ilock(ip, XFS_IOLOCK_EXCL);
+	if (xa_empty(&ip->i_merkle_blocks))
+		xfs_inode_clear_verity_tag(ip);
+	xfs_iunlock(ip, XFS_IOLOCK_EXCL);
+
+	trace_xfs_verity_cache_shrink_freed(ip, freed, _RET_IP_);
+	return freed;
+}
+
+/* Count the number of inactive merkle tree blocks that could be reclaimed. */
+unsigned long
+xfs_verity_cache_shrink_count(
+	struct xfs_inode	*ip)
+{
+	XA_STATE(xas, &ip->i_merkle_blocks, 0);
+	struct xfs_merkle_blob	*mk;
+	unsigned long		count = 0;
+
+	rcu_read_lock();
+	xas_for_each(&xas, mk, ULONG_MAX) {
+		if (refcount_read(&mk->mk_refcount) == 1)
+			count++;
+	}
+	rcu_read_unlock();
+
+	trace_xfs_verity_cache_shrink_count(ip, count, _RET_IP_);
+	return count;
 }
 
 static int
@@ -382,6 +453,13 @@ xfs_read_merkle_tree_block(
 		 * Free the new cache blob and continue with the existing one.
 		 */
 		xfs_merkle_blob_rele(new_mk);
+	} else {
+		/*
+		 * We added this merkle tree block to the cache; tag the inode
+		 * so that reclaim will scan this inode.  The caller holds
+		 * IOLOCK_SHARED this will not race with the shrinker.
+		 */
+		xfs_inode_set_verity_tag(ip);
 	}
 
 	/* We might have loaded this in from disk, fsverity must recheck */
@@ -390,6 +468,13 @@ xfs_read_merkle_tree_block(
 out_hit:
 	block->kaddr   = (void *)mk->mk_data;
 	block->context = mk;
+
+	/*
+	 * Prioritize keeping the root-adjacent levels cached if this isn't a
+	 * streaming read.
+	 */
+	if (req->level >= 0)
+		atomic_set(&mk->mk_shrinkref, req->level + 1);
 	return 0;
 
 out_new_mk:

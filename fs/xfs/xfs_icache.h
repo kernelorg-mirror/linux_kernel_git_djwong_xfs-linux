@@ -94,6 +94,9 @@ xfs_verity_unregister_shrinker(struct xfs_mount *mp)
 {
 	shrinker_free(mp->m_verity_shrinker);
 }
+
+void xfs_inode_set_verity_tag(struct xfs_inode *ip);
+void xfs_inode_clear_verity_tag(struct xfs_inode *ip);
 #else
 # define xfs_verity_register_shrinker(mp)	(0)
 # define xfs_verity_unregister_shrinker(mp)	((void)0)

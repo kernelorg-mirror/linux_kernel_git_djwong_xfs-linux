@@ -4809,6 +4809,37 @@ DEFINE_EVENT(xfs_verity_cache_class, name, \
 DEFINE_XFS_VERITY_CACHE_EVENT(xfs_verity_cache_load);
 DEFINE_XFS_VERITY_CACHE_EVENT(xfs_verity_cache_store);
 DEFINE_XFS_VERITY_CACHE_EVENT(xfs_verity_cache_drop);
+DEFINE_XFS_VERITY_CACHE_EVENT(xfs_verity_cache_reclaim);
+
+DECLARE_EVENT_CLASS(xfs_verity_cache_scan_class,
+	TP_PROTO(struct xfs_inode *ip, unsigned long nr, unsigned long caller_ip),
+	TP_ARGS(ip, nr, caller_ip),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(unsigned long, nr)
+		__field(void *, caller_ip)
+	),
+	TP_fast_assign(
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->nr = nr;
+		__entry->caller_ip = (void *)caller_ip;
+	),
+	TP_printk("dev %d:%d ino 0x%llx nr %lu caller %pS",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->nr,
+		  __entry->caller_ip)
+)
+
+#define DEFINE_XFS_VERITY_CACHE_SCAN_EVENT(name) \
+DEFINE_EVENT(xfs_verity_cache_scan_class, name, \
+	TP_PROTO(struct xfs_inode *ip, unsigned long nr, unsigned long caller_ip), \
+	TP_ARGS(ip, nr, caller_ip))
+DEFINE_XFS_VERITY_CACHE_SCAN_EVENT(xfs_verity_cache_shrink_count);
+DEFINE_XFS_VERITY_CACHE_SCAN_EVENT(xfs_verity_cache_shrink_scan);
+DEFINE_XFS_VERITY_CACHE_SCAN_EVENT(xfs_verity_cache_shrink_freed);
 #endif /* CONFIG_XFS_VERITY */
 
 #endif /* _TRACE_XFS_H */
