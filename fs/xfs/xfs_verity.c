@@ -297,6 +297,44 @@ xfs_verity_get_descriptor(
 	return args.valuelen;
 }
 
+/*
+ * Clear out old fsverity metadata before we start building a new one.  This
+ * could happen if, say, we crashed while building fsverity data.
+ */
+static int
+xfs_verity_drop_old_metadata(
+	struct xfs_inode		*ip,
+	u64				new_tree_size,
+	unsigned int			tree_blocksize)
+{
+	struct xfs_fsverity_merkle_key	name;
+	struct xfs_da_args		args = {
+		.dp			= ip,
+		.whichfork		= XFS_ATTR_FORK,
+		.attr_filter		= XFS_ATTR_VERITY,
+		.op_flags		= XFS_DA_OP_REMOVE,
+		.name			= (const uint8_t *)&name,
+		.namelen		= sizeof(struct xfs_fsverity_merkle_key),
+		/* NULL value make xfs_attr_set remove the attr */
+		.value			= NULL,
+	};
+	u64				offset;
+	int				error = 0;
+
+	/*
+	 * Delete as many merkle tree blocks in increasing blkno order until we
+	 * don't find any more.  That ought to be good enough for avoiding
+	 * dead bloat without excessive runtime.
+	 */
+	for (offset = new_tree_size; !error; offset += tree_blocksize) {
+		xfs_fsverity_merkle_key_to_disk(&name, offset);
+		error = xfs_attr_set(&args);
+	}
+	if (error == -ENOATTR)
+		return 0;
+	return error;
+}
+
 static int
 xfs_verity_begin_enable(
 	struct file		*filp,
@@ -305,7 +343,6 @@ xfs_verity_begin_enable(
 {
 	struct inode		*inode = file_inode(filp);
 	struct xfs_inode	*ip = XFS_I(inode);
-	int			error = 0;
 
 	xfs_assert_ilocked(ip, XFS_IOLOCK_EXCL);
 
@@ -315,7 +352,8 @@ xfs_verity_begin_enable(
 	if (xfs_iflags_test_and_set(ip, XFS_VERITY_CONSTRUCTION))
 		return -EBUSY;
 
-	return error;
+	return xfs_verity_drop_old_metadata(ip, merkle_tree_size,
+			tree_blocksize);
 }
 
 static int
