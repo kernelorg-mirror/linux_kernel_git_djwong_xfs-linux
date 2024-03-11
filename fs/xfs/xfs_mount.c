@@ -813,6 +813,10 @@ xfs_mountfs(
 	if (error)
 		goto out_fail_wait;
 
+	error = xfs_verity_register_shrinker(mp);
+	if (error)
+		goto out_inodegc_shrinker;
+
 	/*
 	 * Log's mount-time initialization. The first part of recovery can place
 	 * some items on the AIL, to be handled when recovery is finished or
@@ -823,7 +827,7 @@ xfs_mountfs(
 			      XFS_FSB_TO_BB(mp, sbp->sb_logblocks));
 	if (error) {
 		xfs_warn(mp, "log mount failed");
-		goto out_inodegc_shrinker;
+		goto out_verity_shrinker;
 	}
 
 	/* Enable background inode inactivation workers. */
@@ -1018,6 +1022,8 @@ xfs_mountfs(
 	xfs_unmount_flush_inodes(mp);
  out_log_dealloc:
 	xfs_log_mount_cancel(mp);
+ out_verity_shrinker:
+	xfs_verity_unregister_shrinker(mp);
  out_inodegc_shrinker:
 	shrinker_free(mp->m_inodegc_shrinker);
  out_fail_wait:
@@ -1100,6 +1106,7 @@ xfs_unmountfs(
 #if defined(DEBUG)
 	xfs_errortag_clearall(mp);
 #endif
+	xfs_verity_unregister_shrinker(mp);
 	shrinker_free(mp->m_inodegc_shrinker);
 	xfs_free_perag(mp);
 

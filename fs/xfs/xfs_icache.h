@@ -18,6 +18,12 @@ struct xfs_icwalk {
 	long		icw_scan_limit;
 };
 
+struct xfs_verity_scan {
+	struct xfs_icwalk	icw;
+	struct shrink_control	*sc;
+	unsigned long		scanned;
+};
+
 /* Flags that reflect xfs_fs_eofblocks functionality. */
 #define XFS_ICWALK_FLAG_SYNC		(1U << 0) /* sync/wait mode scan */
 #define XFS_ICWALK_FLAG_UID		(1U << 1) /* filter by uid */
@@ -80,5 +86,17 @@ int xfs_inodegc_flush(struct xfs_mount *mp);
 void xfs_inodegc_stop(struct xfs_mount *mp);
 void xfs_inodegc_start(struct xfs_mount *mp);
 int xfs_inodegc_register_shrinker(struct xfs_mount *mp);
+
+#ifdef CONFIG_FS_VERITY
+int xfs_verity_register_shrinker(struct xfs_mount *mp);
+static inline void
+xfs_verity_unregister_shrinker(struct xfs_mount *mp)
+{
+	shrinker_free(mp->m_verity_shrinker);
+}
+#else
+# define xfs_verity_register_shrinker(mp)	(0)
+# define xfs_verity_unregister_shrinker(mp)	((void)0)
+#endif /* CONFIG_FS_VERITY */
 
 #endif

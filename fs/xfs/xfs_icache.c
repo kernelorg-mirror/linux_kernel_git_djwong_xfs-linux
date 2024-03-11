@@ -35,6 +35,8 @@
 #define XFS_ICI_RECLAIM_TAG	0
 /* Inode has speculative preallocations (posteof or cow) to clean. */
 #define XFS_ICI_BLOCKGC_TAG	1
+/* Inode has incore merkle tree blocks */
+#define XFS_ICI_VERITY_TAG	2
 
 /*
  * The goal for walking incore inodes.  These can correspond with incore inode
@@ -44,6 +46,7 @@ enum xfs_icwalk_goal {
 	/* Goals directly associated with tagged inodes. */
 	XFS_ICWALK_BLOCKGC	= XFS_ICI_BLOCKGC_TAG,
 	XFS_ICWALK_RECLAIM	= XFS_ICI_RECLAIM_TAG,
+	XFS_ICWALK_VERITY	= XFS_ICI_VERITY_TAG,
 };
 
 static int xfs_icwalk(struct xfs_mount *mp,
@@ -1583,6 +1586,95 @@ xfs_blockgc_free_quota(
 			xfs_inode_dquot(ip, XFS_DQTYPE_PROJ), iwalk_flags);
 }
 
+/* verity cache shrinker */
+
+#ifdef CONFIG_FS_VERITY
+static int
+xfs_verity_scan_inode(
+	struct xfs_inode	*ip,
+	struct xfs_icwalk	*icw)
+{
+	struct xfs_verity_scan	*vs;
+
+	vs = container_of(icw, struct xfs_verity_scan, icw);
+
+	vs->scanned++;	/* XXX */
+	return 0;
+}
+
+static unsigned long
+xfs_verity_shrinker_count(
+	struct shrinker		*shrink,
+	struct shrink_control	*sc)
+{
+	struct xfs_verity_scan	vs = {
+	};
+	struct xfs_mount	*mp = shrink->private_data;
+
+	if (!xfs_has_verity(mp))
+		return 0;
+
+	xfs_icwalk(mp, XFS_ICWALK_VERITY, &vs.icw);
+
+	return vs.scanned;
+}
+
+static unsigned long
+xfs_verity_shrinker_scan(
+	struct shrinker		*shrink,
+	struct shrink_control	*sc)
+{
+	struct xfs_verity_scan	vs = {
+		.sc		= sc,
+	};
+	struct xfs_mount	*mp = shrink->private_data;
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno = 0;
+	int			error;
+
+	/* Don't let reclaim think there's more work to do */
+	if (!xfs_has_verity(mp))
+		return LONG_MAX;
+
+	trace_xfs_verity_shrinker_scan(mp, sc, __return_address);
+
+	for_each_perag_tag(mp, agno, pag, XFS_ICWALK_VERITY) {
+		error = xfs_icwalk_ag(pag, XFS_ICWALK_VERITY, &vs.icw);
+		if (error || vs.scanned >= sc->nr_to_scan) {
+			xfs_perag_rele(pag);
+			break;
+		}
+	}
+
+	return vs.scanned;
+}
+
+/* Register a shrinker so we can accelerate inodegc and throttle queuing. */
+int
+xfs_verity_register_shrinker(
+	struct xfs_mount	*mp)
+{
+	if (!xfs_has_verity(mp))
+		return 0;
+
+	mp->m_verity_shrinker = shrinker_alloc(0, "xfs-verity:%s",
+			mp->m_super->s_id);
+	if (!mp->m_verity_shrinker)
+		return -ENOMEM;
+
+	mp->m_verity_shrinker->count_objects = xfs_verity_shrinker_count;
+	mp->m_verity_shrinker->scan_objects = xfs_verity_shrinker_scan;
+	mp->m_verity_shrinker->seeks = 0;
+	mp->m_verity_shrinker->private_data = mp;
+
+	shrinker_register(mp->m_verity_shrinker);
+
+	return 0;
+}
+#else
+# define xfs_verity_scan_inode(ip, icw)		(-EFSCORRUPTED)
+#endif /* CONFIG_FS_VERITY */
+
 /* XFS Inode Cache Walking Code */
 
 /*
@@ -1606,6 +1698,7 @@ xfs_icwalk_igrab(
 {
 	switch (goal) {
 	case XFS_ICWALK_BLOCKGC:
+	case XFS_ICWALK_VERITY:
 		return xfs_blockgc_igrab(ip);
 	case XFS_ICWALK_RECLAIM:
 		return xfs_reclaim_igrab(ip, icw);
@@ -1633,6 +1726,9 @@ xfs_icwalk_process_inode(
 		break;
 	case XFS_ICWALK_RECLAIM:
 		xfs_reclaim_inode(ip, pag);
+		break;
+	case XFS_ICWALK_VERITY:
+		error = xfs_verity_scan_inode(ip, icw);
 		break;
 	}
 	return error;

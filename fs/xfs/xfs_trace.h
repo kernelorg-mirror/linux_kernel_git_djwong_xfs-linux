@@ -268,7 +268,7 @@ DEFINE_FS_EVENT(xfs_blockgc_stop);
 DEFINE_FS_EVENT(xfs_blockgc_worker);
 DEFINE_FS_EVENT(xfs_blockgc_flush_all);
 
-TRACE_EVENT(xfs_inodegc_shrinker_scan,
+DECLARE_EVENT_CLASS(xfs_fs_shrinker_class,
 	TP_PROTO(struct xfs_mount *mp, struct shrink_control *sc,
 		 void *caller_ip),
 	TP_ARGS(mp, sc, caller_ip),
@@ -287,6 +287,13 @@ TRACE_EVENT(xfs_inodegc_shrinker_scan,
 		  __entry->nr_to_scan,
 		  __entry->caller_ip)
 );
+
+#define DEFINE_FS_SHRINKER_EVENT(name)	\
+DEFINE_EVENT(xfs_fs_shrinker_class, name, \
+	TP_PROTO(struct xfs_mount *mp, struct shrink_control *sc, void *caller_ip), \
+	TP_ARGS(mp, sc, caller_ip))
+DEFINE_FS_SHRINKER_EVENT(xfs_inodegc_shrinker_scan);
+DEFINE_FS_SHRINKER_EVENT(xfs_verity_shrinker_scan);
 
 DECLARE_EVENT_CLASS(xfs_ag_class,
 	TP_PROTO(struct xfs_mount *mp, xfs_agnumber_t agno),

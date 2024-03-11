@@ -255,6 +255,10 @@ typedef struct xfs_mount {
 
 	/* Hook to feed dirent updates to an active online repair. */
 	struct xfs_hooks	m_dir_update_hooks;
+
+#ifdef CONFIG_FS_VERITY
+	struct shrinker		*m_verity_shrinker;
+#endif
 } xfs_mount_t;
 
 #define M_IGEO(mp)		(&(mp)->m_ino_geo)
