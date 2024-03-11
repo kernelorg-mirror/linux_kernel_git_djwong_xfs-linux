@@ -94,11 +94,13 @@ xfs_get_verity_descriptor(
 
 static int
 xfs_begin_enable_verity(
-	struct file	    *filp)
+	struct file		*filp,
+	u64			merkle_tree_size,
+	unsigned int		tree_blocksize)
 {
-	struct inode	    *inode = file_inode(filp);
-	struct xfs_inode    *ip = XFS_I(inode);
-	int		    error = 0;
+	struct inode		*inode = file_inode(filp);
+	struct xfs_inode	*ip = XFS_I(inode);
+	int			error = 0;
 
 	xfs_assert_ilocked(ip, XFS_IOLOCK_EXCL);
 
