@@ -4802,6 +4802,7 @@ DEFINE_EVENT(xfs_verity_cache_class, name, \
 DEFINE_XFS_VERITY_CACHE_EVENT(xfs_verity_cache_load);
 DEFINE_XFS_VERITY_CACHE_EVENT(xfs_verity_cache_store);
 DEFINE_XFS_VERITY_CACHE_EVENT(xfs_verity_cache_drop);
+DEFINE_XFS_VERITY_CACHE_EVENT(xfs_verity_cache_reclaim);
 
 TRACE_EVENT(xfs_verity_shrinker_count,
 	TP_PROTO(struct xfs_mount *mp, unsigned long long count,
