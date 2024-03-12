@@ -216,9 +216,9 @@ static int
 xfs_read_merkle_tree_block(
 	struct inode			*inode,
 	u64				pos,
-	struct fsverity_blockbuf	*block,
+	unsigned long			ra_bytes,
 	unsigned int			log_blocksize,
-	u64				ra_bytes)
+	struct fsverity_blockbuf	*block)
 {
 	struct xfs_inode		*ip = XFS_I(inode);
 	struct xfs_fsverity_merkle_key	name;
@@ -331,7 +331,7 @@ xfs_write_merkle_tree_block(
 }
 
 static void
-xfs_drop_block(
+xfs_drop_merkle_tree_block(
 	struct fsverity_blockbuf	*block)
 {
 	struct xfs_buf			*bp;
@@ -351,5 +351,5 @@ const struct fsverity_operations xfs_verity_ops = {
 	.get_verity_descriptor		= &xfs_get_verity_descriptor,
 	.read_merkle_tree_block		= &xfs_read_merkle_tree_block,
 	.write_merkle_tree_block	= &xfs_write_merkle_tree_block,
-	.drop_block			= &xfs_drop_block,
+	.drop_merkle_tree_block		= &xfs_drop_merkle_tree_block,
 };

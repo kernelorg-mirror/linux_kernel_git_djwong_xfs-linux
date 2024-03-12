@@ -14,76 +14,53 @@
 
 static int fsverity_read_merkle_tree(struct inode *inode,
 				     const struct fsverity_info *vi,
-				     void __user *buf, u64 offset, int length)
+				     void __user *buf, u64 pos, int length)
 {
-	const struct fsverity_operations *vops = inode->i_sb->s_vop;
-	u64 end_offset;
-	unsigned int offs_in_block;
-	pgoff_t index, last_index;
+	const u64 end_pos = min(pos + length, vi->tree_params.tree_size);
+	const struct merkle_tree_params *params = &vi->tree_params;
+	unsigned int offs_in_block = pos & (params->block_size - 1);
 	int retval = 0;
 	int err = 0;
-	const unsigned int block_size = vi->tree_params.block_size;
-	const u8 log_blocksize = vi->tree_params.log_blocksize;
 
-	end_offset = min(offset + length, vi->tree_params.tree_size);
-	if (offset >= end_offset)
+	if (pos >= end_pos)
 		return 0;
-	offs_in_block = offset & (block_size - 1);
-	last_index = (end_offset - 1) >> log_blocksize;
 
 	/*
 	 * Iterate through each Merkle tree block in the requested range and
 	 * copy the requested portion to userspace. Note that we are returning
 	 * a byte stream.
 	 */
-	for (index = offset >> log_blocksize; index <= last_index; index++) {
-		unsigned long num_ra_pages =
-			min_t(unsigned long, last_index - index + 1,
-			      inode->i_sb->s_bdi->io_pages);
-		unsigned int bytes_to_copy = min_t(u64, end_offset - offset,
-						   block_size - offs_in_block);
+	while (pos < end_pos) {
+		unsigned long ra_bytes;
+		unsigned int bytes_to_copy;
 		struct fsverity_blockbuf block = {
-			.size = block_size,
+			.size = params->block_size,
 		};
 
-		if (!vops->read_merkle_tree_block) {
-			unsigned int blocks_per_page =
-				vi->tree_params.blocks_per_page;
-			unsigned long page_idx =
-				round_down(index, blocks_per_page);
-			struct page *page = vops->read_merkle_tree_page(inode,
-					page_idx, num_ra_pages);
+		ra_bytes = min_t(unsigned long, end_pos - pos + 1,
+				 inode->i_sb->s_bdi->io_pages << PAGE_SHIFT);
+		bytes_to_copy = min_t(u64, end_pos - pos,
+				      params->block_size - offs_in_block);
 
-			if (IS_ERR(page)) {
-				err = PTR_ERR(page);
-			} else {
-				block.kaddr = kmap_local_page(page) +
-					((index - page_idx) << log_blocksize);
-				block.context = page;
-			}
-		} else {
-			err = vops->read_merkle_tree_block(inode,
-					index << log_blocksize,
-					&block, log_blocksize, num_ra_pages);
-		}
-
+		err = fsverity_read_merkle_tree_block(inode, &vi->tree_params,
+				pos - offs_in_block, ra_bytes, &block);
 		if (err) {
 			fsverity_err(inode,
-				     "Error %d reading Merkle tree block %lu",
-				     err, index << log_blocksize);
+				     "Error %d reading Merkle tree block %llu",
+				     err, pos);
 			break;
 		}
 
 		if (copy_to_user(buf, block.kaddr + offs_in_block, bytes_to_copy)) {
-			fsverity_drop_block(inode, &block);
+			fsverity_drop_merkle_tree_block(inode, &block);
 			err = -EFAULT;
 			break;
 		}
-		fsverity_drop_block(inode, &block);
+		fsverity_drop_merkle_tree_block(inode, &block);
 
 		retval += bytes_to_copy;
 		buf += bytes_to_copy;
-		offset += bytes_to_copy;
+		pos += bytes_to_copy;
 
 		if (fatal_signal_pending(current))  {
 			err = -EINTR;
