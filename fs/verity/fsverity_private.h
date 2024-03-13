@@ -154,4 +154,41 @@ static inline void fsverity_init_signature(void)
 
 void __init fsverity_init_workqueue(void);
 
+static inline bool fsverity_caches_blocks(const struct inode *inode)
+{
+	const struct fsverity_operations *vops = inode->i_sb->s_vop;
+
+	WARN_ON_ONCE(vops->read_merkle_tree_block &&
+		     !vops->drop_merkle_tree_block);
+
+	return vops->read_merkle_tree_block != NULL;
+}
+
+static inline bool fsverity_uses_bitmap(const struct fsverity_info *vi,
+					const struct inode *inode)
+{
+	if (fsverity_caches_blocks(inode))
+		return false;
+
+	/*
+	 * If fs uses block-based Merkle tree caching, then fs-verity must use
+	 * hash_block_verified bitmap as there's no page to mark it with
+	 * PG_checked.
+	 */
+	return vi->tree_params.block_size != PAGE_SIZE;
+}
+
+int fsverity_read_merkle_tree_block(struct inode *inode,
+				    const struct merkle_tree_params *params,
+				    u64 pos, unsigned long ra_bytes,
+				    struct fsverity_blockbuf *block);
+
+/*
+ * Drop 'block' obtained with ->read_merkle_tree_block(). Calls out back to
+ * filesystem if ->drop_merkle_tree_block() is set, otherwise, drop the
+ * reference in the block->context.
+ */
+void fsverity_drop_merkle_tree_block(struct inode *inode,
+				     struct fsverity_blockbuf *block);
+
 #endif /* _FSVERITY_PRIVATE_H */
