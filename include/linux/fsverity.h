@@ -53,6 +53,26 @@ struct fsverity_blockbuf {
 	void *context;
 };
 
+/**
+ * struct fsverity_readmerkle - Request to read a Merkle Tree block buffer
+ * @inode: the inode to read
+ * @level: expected level of the block; level 0 are the leaves, -1 means a
+ * streaming read
+ * @num_levels: number of levels in the tree total
+ * @log_blocksize: log2 of the size of the expected block
+ * @ra_bytes: The number of bytes that should be prefetched starting at pos
+ *		if the page at @block->offset isn't already cached.
+ *		Implementations may ignore this argument; it's only a
+ *		performance optimization.
+ */
+struct fsverity_readmerkle {
+	struct inode *inode;
+	unsigned long ra_bytes;
+	int level;
+	int num_levels;
+	u8 log_blocksize;
+};
+
 /* Verity operations for filesystems */
 struct fsverity_operations {
 
@@ -139,13 +159,7 @@ struct fsverity_operations {
 
 	/**
 	 * Read a Merkle tree block of the given inode.
-	 * @inode: the inode
-	 * @pos: byte offset of the block within the Merkle tree
-	 * @ra_bytes: The number of bytes that should be
-	 *		prefetched starting at @pos if the page at @pos
-	 *		isn't already cached.  Implementations may ignore this
-	 *		argument; it's only a performance optimization.
-	 * @log_blocksize: log2 of the size of the expected block
+	 * @req: read request; see struct fsverity_readmerkle
 	 * @block: block buffer for filesystem to point it to the block
 	 *
 	 * This can be called at any time on an open verity file.  It may be
@@ -160,9 +174,7 @@ struct fsverity_operations {
 	 *
 	 * Return: 0 on success, -errno on failure
 	 */
-	int (*read_merkle_tree_block)(struct inode *inode,
-				      u64 pos, unsigned long ra_bytes,
-				      unsigned int log_blocksize,
+	int (*read_merkle_tree_block)(const struct fsverity_readmerkle *req,
 				      struct fsverity_blockbuf *block);
 
 	/**
