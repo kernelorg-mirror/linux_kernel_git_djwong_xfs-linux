@@ -252,6 +252,14 @@ bool fsverity_verify_blocks(struct folio *folio, size_t len, size_t offset);
 void fsverity_verify_bio(struct bio *bio);
 void fsverity_enqueue_verify_work(struct work_struct *work);
 
+int __fsverity_init_verify_wq(struct super_block *sb);
+static inline int fsverity_init_verify_wq(struct super_block *sb)
+{
+	if (sb->s_verify_wq)
+		return 0;
+	return __fsverity_init_verify_wq(sb);
+}
+
 #else /* !CONFIG_FS_VERITY */
 
 static inline struct fsverity_info *fsverity_get_info(const struct inode *inode)
@@ -327,6 +335,11 @@ static inline void fsverity_verify_bio(struct bio *bio)
 static inline void fsverity_enqueue_verify_work(struct work_struct *work)
 {
 	WARN_ON_ONCE(1);
+}
+
+static inline int fsverity_init_verify_wq(struct super_block *sb)
+{
+	return -EOPNOTSUPP;
 }
 
 #endif	/* !CONFIG_FS_VERITY */
