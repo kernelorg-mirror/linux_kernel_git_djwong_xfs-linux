@@ -41,10 +41,10 @@
  * written down to disk.
  *
  * While reading the tree, fs-verity calls ->read_merkle_tree_block followed by
- * ->drop_block to let filesystem know that memory can be freed.
+ * ->drop_merkle_tree_block to let filesystem know that memory can be freed.
  *
  * The context is optional. This field can be used by filesystem to passthrough
- * state from ->read_merkle_tree_block to ->drop_block.
+ * state from ->read_merkle_tree_block to ->drop_merkle_tree_block.
  */
 struct fsverity_blockbuf {
 	void *kaddr;
@@ -128,6 +128,9 @@ struct fsverity_operations {
 	 *
 	 * Note that this must retrieve a *page*, not necessarily a *block*.
 	 *
+	 * If this function is implemented, do not implement
+	 * ->read_merkle_tree_block or ->drop_merkle_tree_block.
+	 *
 	 * Return: the page on success, ERR_PTR() on failure
 	 */
 	struct page *(*read_merkle_tree_page)(struct inode *inode,
@@ -138,12 +141,12 @@ struct fsverity_operations {
 	 * Read a Merkle tree block of the given inode.
 	 * @inode: the inode
 	 * @pos: byte offset of the block within the Merkle tree
-	 * @block: block buffer for filesystem to point it to the block
-	 * @log_blocksize: log2 of the size of the expected block
 	 * @ra_bytes: The number of bytes that should be
 	 *		prefetched starting at @pos if the page at @pos
 	 *		isn't already cached.  Implementations may ignore this
 	 *		argument; it's only a performance optimization.
+	 * @log_blocksize: log2 of the size of the expected block
+	 * @block: block buffer for filesystem to point it to the block
 	 *
 	 * This can be called at any time on an open verity file.  It may be
 	 * called by multiple processes concurrently.
@@ -152,13 +155,15 @@ struct fsverity_operations {
 	 * fsverity_invalidate_block() to let fsverity know that block's
 	 * verification state is not valid anymore.
 	 *
+	 * If this function is implemented, ->drop_merkle_tree_block must also
+	 * be implemented.
+	 *
 	 * Return: 0 on success, -errno on failure
 	 */
 	int (*read_merkle_tree_block)(struct inode *inode,
-				      u64 pos,
-				      struct fsverity_blockbuf *block,
+				      u64 pos, unsigned long ra_bytes,
 				      unsigned int log_blocksize,
-				      u64 ra_bytes);
+				      struct fsverity_blockbuf *block);
 
 	/**
 	 * Write a Merkle tree block to the given inode.
@@ -183,8 +188,11 @@ struct fsverity_operations {
 	 *
 	 * This is called when fs-verity is done with a block obtained with
 	 * ->read_merkle_tree_block().
+	 *
+	 * If this function is implemented, ->read_merkle_tree_block must also
+	 * be implemented.
 	 */
-	void (*drop_block)(struct fsverity_blockbuf *block);
+	void (*drop_merkle_tree_block)(struct fsverity_blockbuf *block);
 };
 
 #ifdef CONFIG_FS_VERITY
