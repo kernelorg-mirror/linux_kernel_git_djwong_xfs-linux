@@ -92,6 +92,9 @@ typedef struct xfs_inode {
 	spinlock_t		i_ioend_lock;
 	struct work_struct	i_ioend_work;
 	struct list_head	i_ioend_list;
+#ifdef CONFIG_FS_VERITY
+	struct xarray		i_merkle_blocks;
+#endif
 } xfs_inode_t;
 
 static inline bool xfs_inode_on_unlinked_list(const struct xfs_inode *ip)
@@ -360,6 +363,8 @@ static inline bool xfs_inode_has_large_extent_counts(struct xfs_inode *ip)
  * IREMAPPING is cleared.
  */
 #define XFS_IREMAPPING		(1U << 15)
+
+#define XFS_VERITY_CONSTRUCTION	(1U << 16) /* merkle tree construction */
 
 /* All inode state flags related to inode reclaim. */
 #define XFS_ALL_IRECLAIM_FLAGS	(XFS_IRECLAIMABLE | \
