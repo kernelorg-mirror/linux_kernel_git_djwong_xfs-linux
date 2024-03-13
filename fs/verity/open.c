@@ -213,7 +213,13 @@ struct fsverity_info *fsverity_create_info(const struct inode *inode,
 	if (err)
 		goto fail;
 
-	if (vi->tree_params.block_size != PAGE_SIZE) {
+	/*
+	 * If fs passes Merkle tree blocks to fs-verity (e.g. XFS), then
+	 * fs-verity should use hash_block_verified bitmap as there's no page
+	 * to mark it with PG_checked.
+	 */
+	if (vi->tree_params.block_size != PAGE_SIZE ||
+			inode->i_sb->s_vop->read_merkle_tree_block) {
 		/*
 		 * When the Merkle tree block size and page size differ, we use
 		 * a bitmap to keep track of which hash blocks have been
