@@ -123,6 +123,12 @@ struct xfs_perag {
 
 	/* Hook to feed rmapbt updates to an active online repair. */
 	struct xfs_hooks	pag_rmap_update_hooks;
+
+# ifdef CONFIG_FS_VERITY
+	/* per-inode merkle tree caches */
+	spinlock_t		pagi_merkle_lock;
+	struct rhashtable	pagi_merkle_blobs;
+# endif /* CONFIG_FS_VERITY */
 #endif /* __KERNEL__ */
 };
 
@@ -135,6 +141,7 @@ struct xfs_perag {
 #define XFS_AGSTATE_ALLOWS_INODES	3
 #define XFS_AGSTATE_AGFL_NEEDS_RESET	4
 #define XFS_AGSTATE_NOALLOC		5
+#define XFS_AGSTATE_MERKLE		6
 
 #define __XFS_AG_OPSTATE(name, NAME) \
 static inline bool xfs_perag_ ## name (struct xfs_perag *pag) \
@@ -148,6 +155,7 @@ __XFS_AG_OPSTATE(prefers_metadata, PREFERS_METADATA)
 __XFS_AG_OPSTATE(allows_inodes, ALLOWS_INODES)
 __XFS_AG_OPSTATE(agfl_needs_reset, AGFL_NEEDS_RESET)
 __XFS_AG_OPSTATE(prohibits_alloc, NOALLOC)
+__XFS_AG_OPSTATE(caches_merkle, MERKLE)
 
 void xfs_free_unused_perag_range(struct xfs_mount *mp, xfs_agnumber_t agstart,
 			xfs_agnumber_t agend);
