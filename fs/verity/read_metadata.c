@@ -43,7 +43,7 @@ static int fsverity_read_merkle_tree(struct inode *inode,
 				      params->block_size - offs_in_block);
 
 		err = fsverity_read_merkle_tree_block(inode, &vi->tree_params,
-				pos - offs_in_block, ra_bytes, &block);
+				-1, pos - offs_in_block, ra_bytes, &block);
 		if (err) {
 			fsverity_err(inode,
 				     "Error %d reading Merkle tree block %llu",
