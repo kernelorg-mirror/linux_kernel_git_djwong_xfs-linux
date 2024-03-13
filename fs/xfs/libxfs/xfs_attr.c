@@ -27,6 +27,7 @@
 #include "xfs_attr_item.h"
 #include "xfs_xattr.h"
 #include "xfs_parent.h"
+#include "xfs_verity.h"
 
 struct kmem_cache		*xfs_attr_intent_cache;
 
@@ -1262,6 +1263,43 @@ out_trans_cancel:
 	goto out_unlock;
 }
 
+/*
+ * Retrieve the value stored in the xattr structure under @args->name.
+ *
+ * The caller must have initialized @args and must not hold any ILOCKs.
+ *
+ * Returns -ENOATTR if the name did not already exist.
+ */
+int
+xfs_attr_getname(
+	struct xfs_da_args	*args)
+{
+	unsigned int		lock_mode;
+	int			error;
+
+	ASSERT(!args->trans);
+
+	error = xfs_trans_alloc_empty(args->dp->i_mount, &args->trans);
+	if (error)
+		return error;
+
+	lock_mode = xfs_ilock_attr_map_shared(args->dp);
+
+	/* Make sure the attr fork iext tree is loaded */
+	if (xfs_inode_hasattr(args->dp)) {
+		error = xfs_iread_extents(args->trans, args->dp, XFS_ATTR_FORK);
+		if (error)
+			goto out_unlock;
+	}
+
+	error = xfs_attr_get_ilocked(args);
+out_unlock:
+	xfs_iunlock(args->dp, lock_mode);
+	xfs_trans_cancel(args->trans);
+	args->trans = NULL;
+	return error;
+}
+
 /*========================================================================
  * External routines when attribute list is inside the inode
  *========================================================================*/
@@ -1742,6 +1780,9 @@ xfs_attr_namecheck(
 	/* Only one namespace bit allowed. */
 	if (!xfs_attr_check_namespace(attr_flags))
 		return false;
+
+	if (attr_flags & XFS_ATTR_VERITY)
+		return xfs_verity_namecheck(attr_flags, name, length);
 
 	/*
 	 * MAXNAMELEN includes the trailing null, but (name/length) leave it
