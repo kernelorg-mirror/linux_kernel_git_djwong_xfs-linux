@@ -28,6 +28,7 @@
 #include "xfs_da_format.h"
 #include "xfs_dir2.h"
 #include "xfs_imeta.h"
+#include "xfs_verity.h"
 
 #include <linux/iversion.h>
 
@@ -118,6 +119,7 @@ xfs_inode_alloc(
 	spin_lock_init(&ip->i_ioend_lock);
 	ip->i_next_unlinked = NULLAGINO;
 	ip->i_prev_unlinked = 0;
+	xfs_verity_cache_init(ip);
 
 	return ip;
 }
@@ -128,6 +130,8 @@ xfs_inode_free_callback(
 {
 	struct inode		*inode = container_of(head, struct inode, i_rcu);
 	struct xfs_inode	*ip = XFS_I(inode);
+
+	xfs_verity_cache_destroy(ip);
 
 	switch (VFS_I(ip)->i_mode & S_IFMT) {
 	case S_IFREG:
