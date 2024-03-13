@@ -311,6 +311,7 @@ typedef struct xfs_mount {
 #define XFS_FEAT_EXCHANGE_RANGE	(1ULL << 27)	/* exchange range */
 #define XFS_FEAT_METADIR	(1ULL << 28)	/* metadata directory tree */
 #define XFS_FEAT_RTGROUPS	(1ULL << 29)	/* realtime groups */
+#define XFS_FEAT_VERITY		(1ULL << 30)	/* fs-verity */
 
 /* Mount features */
 #define XFS_FEAT_ADD_LOG_FEAT	(1ULL << 47)	/* can add log incompat features */
@@ -385,6 +386,7 @@ __XFS_MAY_FEAT(add_log_features, ADD_LOG_FEAT)
 __XFS_HAS_FEAT(exchange_range, EXCHANGE_RANGE)
 __XFS_HAS_FEAT(metadir, METADIR)
 __XFS_HAS_FEAT(rtgroups, RTGROUPS)
+__XFS_HAS_FEAT(verity, VERITY)
 
 static inline bool xfs_has_rtrmapbt(struct xfs_mount *mp)
 {
