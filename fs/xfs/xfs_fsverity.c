@@ -21,6 +21,7 @@
 #include "xfs_quota.h"
 #include "xfs_ag.h"
 #include "xfs_fsverity.h"
+#include "xfs_icache.h"
 #include <linux/fsverity.h>
 
 /*
@@ -182,6 +183,7 @@ xfs_fsverity_drop_cache(
 	}
 
 	xfs_perag_put(pag);
+	percpu_counter_sub(&mp->m_verity_blocks, freed);
 }
 
 /*
@@ -283,6 +285,7 @@ xfs_fsverity_cache_store(
 		refcount_inc(&mk->refcount);
 		spin_unlock(&pag->pagi_merkle_lock);
 		xfs_perag_put(pag);
+		percpu_counter_add(&mp->m_verity_blocks, 1);
 
 		trace_xfs_fsverity_cache_store(mp, &mk->key, _RET_IP_);
 		return mk;
@@ -300,6 +303,38 @@ xfs_fsverity_cache_store(
 	return old;
 }
 
+/* Count the merkle tree blocks that we might be able to reclaim. */
+static unsigned long
+xfs_fsverity_shrinker_count(
+	struct shrinker		*shrink,
+	struct shrink_control	*sc)
+{
+	struct xfs_mount	*mp = shrink->private_data;
+	s64			count;
+
+	if (!xfs_has_verity(mp))
+		return SHRINK_EMPTY;
+
+	count = percpu_counter_sum_positive(&mp->m_verity_blocks);
+
+	trace_xfs_fsverity_shrinker_count(mp, count, _RET_IP_);
+	return min_t(u64, ULONG_MAX, count);
+}
+
+/* Actually try to reclaim merkle tree blocks. */
+static unsigned long
+xfs_fsverity_shrinker_scan(
+	struct shrinker		*shrink,
+	struct shrink_control	*sc)
+{
+	struct xfs_mount	*mp = shrink->private_data;
+
+	if (!xfs_has_verity(mp))
+		return SHRINK_STOP;
+
+	return 0;
+}
+
 /* Set up fsverity for this mount. */
 int
 xfs_fsverity_mount(
@@ -312,6 +347,10 @@ xfs_fsverity_mount(
 	if (!xfs_has_verity(mp))
 		return 0;
 
+	error = percpu_counter_init(&mp->m_verity_blocks, 0, GFP_KERNEL);
+	if (error)
+		return error;
+
 	for_each_perag(mp, agno, pag) {
 		spin_lock_init(&pag->pagi_merkle_lock);
 		error = rhashtable_init(&pag->pagi_merkle_blobs,
@@ -322,6 +361,20 @@ xfs_fsverity_mount(
 		}
 		set_bit(XFS_AGSTATE_MERKLE, &pag->pag_opstate);
 	}
+
+	mp->m_verity_shrinker = shrinker_alloc(0, "xfs-verity:%s",
+			mp->m_super->s_id);
+	if (!mp->m_verity_shrinker) {
+		error = -ENOMEM;
+		goto out_perag;
+	}
+
+	mp->m_verity_shrinker->count_objects = xfs_fsverity_shrinker_count;
+	mp->m_verity_shrinker->scan_objects = xfs_fsverity_shrinker_scan;
+	mp->m_verity_shrinker->seeks = 0;
+	mp->m_verity_shrinker->private_data = mp;
+
+	shrinker_register(mp->m_verity_shrinker);
 
 	return 0;
 out_perag:
@@ -405,11 +458,16 @@ xfs_fsverity_unmount(
 	if (!xfs_has_verity(mp))
 		return;
 
+	shrinker_free(mp->m_verity_shrinker);
+
 	for_each_perag(mp, agno, pag) {
 		if (test_and_clear_bit(XFS_AGSTATE_MERKLE, &pag->pag_opstate))
 			rhashtable_free_and_destroy(&pag->pagi_merkle_blobs,
 					xfs_merkle_blob_destroy, &fu);
 	}
+
+	ASSERT(percpu_counter_sum(&mp->m_verity_blocks) == fu.freed);
+	percpu_counter_destroy(&mp->m_verity_blocks);
 }
 
 /*
