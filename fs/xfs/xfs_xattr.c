@@ -21,6 +21,13 @@
 #include <linux/posix_acl_xattr.h>
 
 /*
+ * This file defines interface to work with externally visible extended
+ * attributes, such as those in user, system or security namespaces. This
+ * interface should not be used for internally used attributes (consider
+ * xfs_attr.c).
+ */
+
+/*
  * Get permission to use log-assisted atomic exchange of file extents.
  * Callers must not be running any transactions or hold any ILOCKs.
  */
@@ -215,7 +222,12 @@ xfs_xattr_put_listent(
 
 	ASSERT(context->count >= 0);
 
-	if (flags & XFS_ATTR_PARENT)
+	/*
+	 * Only externally visible attributes should be listed here.
+	 * Internally used attributes (such as parent pointers or fs-verity
+	 * should not be exposed to userspace.
+	 */
+	if (flags & XFS_ATTR_INTERNAL_MASK)
 		return;
 
 	if (flags & XFS_ATTR_ROOT) {
