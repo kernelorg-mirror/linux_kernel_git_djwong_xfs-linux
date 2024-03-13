@@ -499,8 +499,9 @@ xfs_verity_begin_enable(
 			tree_blocksize);
 }
 
+/* Try to remove all the fsverity metadata after a failed enablement. */
 static int
-xfs_drop_merkle_tree(
+xfs_verity_drop_incomplete_tree(
 	struct xfs_inode		*ip,
 	u64				merkle_tree_size,
 	unsigned int			tree_blocksize)
@@ -513,11 +514,14 @@ xfs_drop_merkle_tree(
 
 	for (offset = 0; offset < merkle_tree_size; offset += tree_blocksize) {
 		error = xfs_verity_drop_merkle_block(ip, offset);
+		if (error == -ENOATTR)
+			error = 0;
 		if (error)
 			return error;
 	}
 
-	return xfs_verity_drop_descriptor(ip);
+	error = xfs_verity_drop_descriptor(ip);
+	return error != -ENOATTR ? error : 0;
 }
 
 static int
@@ -575,9 +579,16 @@ xfs_verity_end_enable(
 		inode->i_flags |= S_VERITY;
 
 out:
-	if (error)
-		WARN_ON_ONCE(xfs_drop_merkle_tree(ip, merkle_tree_size,
-						  tree_blocksize));
+	if (error) {
+		int	error2;
+
+		error2 = xfs_verity_drop_incomplete_tree(ip, merkle_tree_size,
+				tree_blocksize);
+		if (error2)
+			xfs_alert(ip->i_mount,
+ "ino 0x%llx failed to clean up new fsverity metadata, err %d",
+					ip->i_ino, error2);
+	}
 
 	xfs_iflags_clear(ip, XFS_VERITY_CONSTRUCTION);
 	return error;
