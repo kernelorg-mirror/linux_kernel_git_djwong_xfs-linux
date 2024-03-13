@@ -185,8 +185,8 @@ verify_data_block(struct inode *inode, struct fsverity_info *vi,
 		else
 			ra_bytes = 0;
 
-		err = fsverity_read_merkle_tree_block(inode, params, hblock_pos,
-				ra_bytes, block);
+		err = fsverity_read_merkle_tree_block(inode, params, level,
+				hblock_pos, ra_bytes, block);
 		if (err) {
 			fsverity_err(inode,
 				     "Error %d reading Merkle tree block %llu",
@@ -403,6 +403,8 @@ void __init fsverity_init_workqueue(void)
  * fsverity_read_merkle_tree_block() - read Merkle tree block
  * @inode: inode to which this Merkle tree blocks belong
  * @params: merkle tree parameters
+ * @level: expected level of the block; level 0 are the leaves, -1 means a
+ * streaming read
  * @pos: byte position within merkle tree
  * @ra_bytes: try to read ahead this many btes
  * @block: block to be loaded
@@ -411,7 +413,7 @@ void __init fsverity_init_workqueue(void)
  */
 int fsverity_read_merkle_tree_block(struct inode *inode,
 				    const struct merkle_tree_params *params,
-				    u64 pos, unsigned long ra_bytes,
+				    int level, u64 pos, unsigned long ra_bytes,
 				    struct fsverity_blockbuf *block)
 {
 	const struct fsverity_operations *vops = inode->i_sb->s_vop;
@@ -420,10 +422,20 @@ int fsverity_read_merkle_tree_block(struct inode *inode,
 	unsigned long index;
 	unsigned int offset_in_page;
 
+	block->offset = pos;
+	block->size = params->block_size;
+
 	if (fsverity_caches_blocks(inode)) {
+		struct fsverity_readmerkle req = {
+			.inode = inode,
+			.level = level,
+			.num_levels = params->num_levels,
+			.log_blocksize = params->log_blocksize,
+			.ra_bytes = ra_bytes,
+		};
+
 		block->verified = false;
-		return vops->read_merkle_tree_block(inode, pos, ra_bytes,
-				params->log_blocksize, block);
+		return vops->read_merkle_tree_block(&req, block);
 	}
 
 	index = pos >> params->log_blocksize;
