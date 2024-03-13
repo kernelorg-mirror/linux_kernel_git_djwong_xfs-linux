@@ -81,4 +81,12 @@ void xfs_inodegc_stop(struct xfs_mount *mp);
 void xfs_inodegc_start(struct xfs_mount *mp);
 int xfs_inodegc_register_shrinker(struct xfs_mount *mp);
 
+#ifdef CONFIG_FS_VERITY
+int xfs_icwalk_verity(struct xfs_mount *mp, struct xfs_icwalk *icw);
+void xfs_icwalk_verity_stop(struct xfs_icwalk *icw);
+
+void xfs_inode_set_verity_tag(struct xfs_inode *ip);
+void xfs_inode_clear_verity_tag(struct xfs_inode *ip);
+#endif /* CONFIG_FS_VERITY */
+
 #endif
