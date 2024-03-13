@@ -35,6 +35,8 @@
 #define XFS_ICI_RECLAIM_TAG	0
 /* Inode has speculative preallocations (posteof or cow) to clean. */
 #define XFS_ICI_BLOCKGC_TAG	1
+/* Inode has incore merkle tree blocks */
+#define XFS_ICI_VERITY_TAG	2
 
 /*
  * The goal for walking incore inodes.  These can correspond with incore inode
@@ -44,6 +46,7 @@ enum xfs_icwalk_goal {
 	/* Goals directly associated with tagged inodes. */
 	XFS_ICWALK_BLOCKGC	= XFS_ICI_BLOCKGC_TAG,
 	XFS_ICWALK_RECLAIM	= XFS_ICI_RECLAIM_TAG,
+	XFS_ICWALK_VERITY	= XFS_ICI_VERITY_TAG,
 };
 
 static int xfs_icwalk(struct xfs_mount *mp,
@@ -1606,6 +1609,7 @@ xfs_icwalk_igrab(
 {
 	switch (goal) {
 	case XFS_ICWALK_BLOCKGC:
+	case XFS_ICWALK_VERITY:
 		return xfs_blockgc_igrab(ip);
 	case XFS_ICWALK_RECLAIM:
 		return xfs_reclaim_igrab(ip, icw);
@@ -1633,6 +1637,9 @@ xfs_icwalk_process_inode(
 		break;
 	case XFS_ICWALK_RECLAIM:
 		xfs_reclaim_inode(ip, pag);
+		break;
+	case XFS_ICWALK_VERITY:
+		error = xfs_verity_scan_inode(ip, icw);
 		break;
 	}
 	return error;
@@ -1749,6 +1756,80 @@ restart:
 	}
 	return last_error;
 }
+
+#ifdef CONFIG_FS_VERITY
+/* Mark this inode as having cached merkle tree blocks */
+void
+xfs_inode_set_verity_tag(
+	struct xfs_inode	*ip)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_perag	*pag;
+
+	pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, ip->i_ino));
+	if (!pag)
+		return;
+
+	spin_lock(&pag->pag_ici_lock);
+	xfs_perag_set_inode_tag(pag, XFS_INO_TO_AGINO(mp, ip->i_ino),
+			XFS_ICI_VERITY_TAG);
+	spin_unlock(&pag->pag_ici_lock);
+	xfs_perag_put(pag);
+}
+
+/* Mark this inode as not having cached merkle tree blocks */
+void
+xfs_inode_clear_verity_tag(
+	struct xfs_inode	*ip)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_perag	*pag;
+
+	pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, ip->i_ino));
+	if (!pag)
+		return;
+
+	spin_lock(&pag->pag_ici_lock);
+	xfs_perag_clear_inode_tag(pag, XFS_INO_TO_AGINO(mp, ip->i_ino),
+			XFS_ICI_VERITY_TAG);
+	spin_unlock(&pag->pag_ici_lock);
+	xfs_perag_put(pag);
+}
+
+/* Walk all the verity inodes in the filesystem. */
+int
+xfs_icwalk_verity(
+	struct xfs_mount	*mp,
+	struct xfs_icwalk	*icw)
+{
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno = 0;
+	int			error = 0;
+
+	for_each_perag_tag(mp, agno, pag, XFS_ICWALK_VERITY) {
+		error = xfs_icwalk_ag(pag, XFS_ICWALK_VERITY, icw);
+		if (error)
+			break;
+
+		if ((icw->icw_flags & XFS_ICWALK_FLAG_SCAN_LIMIT) &&
+		    icw->icw_scan_limit <= 0) {
+			xfs_perag_rele(pag);
+			break;
+		}
+	}
+
+	return error;
+}
+
+/* Stop a verity incore walk scan. */
+void
+xfs_icwalk_verity_stop(
+	struct xfs_icwalk	*icw)
+{
+	icw->icw_flags |= XFS_ICWALK_FLAG_SCAN_LIMIT;
+	icw->icw_scan_limit = -1;
+}
+#endif /* CONFIG_FS_VERITY */
 
 /* Walk all incore inodes to achieve a given goal. */
 static int
