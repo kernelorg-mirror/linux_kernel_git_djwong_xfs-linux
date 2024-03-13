@@ -562,6 +562,7 @@ void xfs_init_attr_trans(struct xfs_da_args *args, struct xfs_trans_res *tres,
 
 int xfs_attr_setname(struct xfs_da_args *args, bool rsvd);
 int xfs_attr_removename(struct xfs_da_args *args, bool rsvd);
+int xfs_attr_getname(struct xfs_da_args *args);
 
 /*
  * Check to see if the attr should be upgraded from non-existent or shortform to
