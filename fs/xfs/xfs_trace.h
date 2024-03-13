@@ -5938,6 +5938,7 @@ DEFINE_EVENT(xfs_fsverity_cache_class, name, \
 DEFINE_XFS_FSVERITY_CACHE_EVENT(xfs_fsverity_cache_load);
 DEFINE_XFS_FSVERITY_CACHE_EVENT(xfs_fsverity_cache_store);
 DEFINE_XFS_FSVERITY_CACHE_EVENT(xfs_fsverity_cache_drop);
+DEFINE_XFS_FSVERITY_CACHE_EVENT(xfs_fsverity_cache_reclaim);
 
 TRACE_EVENT(xfs_fsverity_shrinker_count,
 	TP_PROTO(struct xfs_mount *mp, unsigned long long count,
