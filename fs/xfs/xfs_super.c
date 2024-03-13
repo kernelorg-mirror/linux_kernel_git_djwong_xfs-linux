@@ -30,6 +30,7 @@
 #include "xfs_filestream.h"
 #include "xfs_quota.h"
 #include "xfs_sysfs.h"
+#include "xfs_verity.h"
 #include "xfs_ondisk.h"
 #include "xfs_rmap_item.h"
 #include "xfs_refcount_item.h"
@@ -673,6 +674,8 @@ xfs_fs_destroy_inode(
 	XFS_STATS_INC(ip->i_mount, vn_rele);
 	XFS_STATS_INC(ip->i_mount, vn_remove);
 	fsverity_cleanup_inode(inode);
+	if (IS_VERITY(inode))
+		xfs_verity_cache_drop(ip);
 	xfs_inode_mark_reclaimable(ip);
 }
 
@@ -1536,6 +1539,11 @@ xfs_fs_fill_super(
 	sb->s_quota_types = QTYPE_MASK_USR | QTYPE_MASK_GRP | QTYPE_MASK_PRJ;
 #endif
 	sb->s_op = &xfs_super_operations;
+#ifdef CONFIG_FS_VERITY
+	error = fsverity_set_ops(sb, &xfs_verity_ops);
+	if (error)
+		return error;
+#endif
 
 	/*
 	 * Delay mount work if the debug hook is set. This is debug
@@ -1776,6 +1784,10 @@ xfs_fs_fill_super(
 	if (xfs_has_parent(mp))
 		xfs_warn(mp,
 	"EXPERIMENTAL parent pointer feature enabled. Use at your own risk!");
+
+	if (xfs_has_verity(mp))
+		xfs_alert(mp,
+	"EXPERIMENTAL fs-verity feature in use. Use at your own risk!");
 
 	error = xfs_mountfs(mp);
 	if (error)
