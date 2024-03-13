@@ -400,6 +400,7 @@ xfs_verity_get_descriptor(
 		.namelen	= XFS_VERITY_DESCRIPTOR_NAME_LEN,
 		.value		= buf,
 		.valuelen	= buf_size,
+		.owner		= ip->i_ino,
 	};
 
 	/*
@@ -433,6 +434,7 @@ xfs_verity_drop_old_metadata(
 		.namelen		= sizeof(struct xfs_verity_merkle_key),
 		/* NULL value make xfs_attr_set remove the attr */
 		.value			= NULL,
+		.owner			= ip->i_ino,
 	};
 	u64				offset;
 	int				error = 0;
@@ -489,6 +491,7 @@ xfs_verity_drop_incomplete_tree(
 		.namelen		= sizeof(struct xfs_verity_merkle_key),
 		/* NULL value make xfs_attr_set remove the attr */
 		.value			= NULL,
+		.owner			= ip->i_ino,
 	};
 	u64				offset;
 	int				error;
@@ -533,6 +536,7 @@ xfs_verity_end_enable(
 		.namelen	= XFS_VERITY_DESCRIPTOR_NAME_LEN,
 		.value		= (void *)desc,
 		.valuelen	= desc_size,
+		.owner		= ip->i_ino,
 	};
 	int			error = 0;
 
@@ -596,6 +600,7 @@ xfs_verity_read_merkle(
 		.name			= (const uint8_t *)&name,
 		.namelen		= sizeof(struct xfs_verity_merkle_key),
 		.valuelen		= block->size,
+		.owner			= ip->i_ino,
 	};
 	struct xfs_merkle_blob		*mk, *new_mk;
 	unsigned long			key = block->offset >> req->log_blocksize;
@@ -680,6 +685,7 @@ xfs_verity_write_merkle(
 		.namelen		= sizeof(struct xfs_verity_merkle_key),
 		.value			= (void *)buf,
 		.valuelen		= size,
+		.owner			= ip->i_ino,
 	};
 
 	xfs_verity_merkle_key_to_disk(&name, pos);
