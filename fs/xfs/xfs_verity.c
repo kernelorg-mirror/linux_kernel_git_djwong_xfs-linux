@@ -472,15 +472,14 @@ xfs_verity_begin_enable(
 			tree_blocksize);
 }
 
+/* Try to remove all the fsverity metadata after a failed enablement. */
 static int
-xfs_drop_merkle_tree(
+xfs_verity_drop_incomplete_tree(
 	struct xfs_inode		*ip,
 	u64				merkle_tree_size,
 	unsigned int			tree_blocksize)
 {
 	struct xfs_verity_merkle_key	name;
-	int				error = 0;
-	u64				offset = 0;
 	struct xfs_da_args		args = {
 		.dp			= ip,
 		.whichfork		= XFS_ATTR_FORK,
@@ -491,6 +490,8 @@ xfs_drop_merkle_tree(
 		/* NULL value make xfs_attr_set remove the attr */
 		.value			= NULL,
 	};
+	u64				offset;
+	int				error;
 
 	if (!merkle_tree_size)
 		return 0;
@@ -498,6 +499,8 @@ xfs_drop_merkle_tree(
 	for (offset = 0; offset < merkle_tree_size; offset += tree_blocksize) {
 		xfs_verity_merkle_key_to_disk(&name, offset);
 		error = xfs_attr_set(&args);
+		if (error == -ENOATTR)
+			error = 0;
 		if (error)
 			return error;
 	}
@@ -505,7 +508,8 @@ xfs_drop_merkle_tree(
 	args.name = (const uint8_t *)XFS_VERITY_DESCRIPTOR_NAME;
 	args.namelen = XFS_VERITY_DESCRIPTOR_NAME_LEN;
 	error = xfs_attr_set(&args);
-
+	if (error == -ENOATTR)
+		return 0;
 	return error;
 }
 
@@ -564,9 +568,16 @@ xfs_verity_end_enable(
 		inode->i_flags |= S_VERITY;
 
 out:
-	if (error)
-		WARN_ON_ONCE(xfs_drop_merkle_tree(ip, merkle_tree_size,
-						  tree_blocksize));
+	if (error) {
+		int	error2;
+
+		error2 = xfs_verity_drop_incomplete_tree(ip, merkle_tree_size,
+				tree_blocksize);
+		if (error2)
+			xfs_alert(ip->i_mount,
+ "ino 0x%llx failed to clean up new fsverity metadata, err %d",
+					ip->i_ino, error2);
+	}
 
 	xfs_iflags_clear(ip, XFS_VERITY_CONSTRUCTION);
 	return error;
