@@ -268,7 +268,6 @@ xchk_xattr_actor(
 		.dp			= ip,
 		.name			= name,
 		.namelen		= namelen,
-		.hashval		= xfs_da_hashname(name, namelen),
 		.trans			= sc->tp,
 		.valuelen		= valuelen,
 		.owner			= ip->i_ino,
@@ -276,6 +275,7 @@ xchk_xattr_actor(
 	struct xchk_xattr_buf		*ab;
 	int				error = 0;
 
+	args.hashval = xfs_attr_hashname(attr_flags, name, namelen);
 	ab = sc->buf;
 
 	if (xchk_should_terminate(sc, &error))
@@ -629,7 +629,8 @@ xchk_xattr_rec(
 			xchk_da_set_corrupt(ds, level);
 			goto out;
 		}
-		calc_hash = xfs_da_hashname(lentry->nameval, lentry->namelen);
+		calc_hash = xfs_attr_hashname(ent->flags, lentry->nameval,
+				lentry->namelen);
 	} else {
 		rentry = (struct xfs_attr_leaf_name_remote *)
 				(((char *)bp->b_addr) + nameidx);
@@ -637,7 +638,8 @@ xchk_xattr_rec(
 			xchk_da_set_corrupt(ds, level);
 			goto out;
 		}
-		calc_hash = xfs_da_hashname(rentry->name, rentry->namelen);
+		calc_hash = xfs_attr_hashname(ent->flags, rentry->name,
+				rentry->namelen);
 	}
 	if (calc_hash != hash)
 		xchk_da_set_corrupt(ds, level);

@@ -917,12 +917,13 @@ xrep_parent_fetch_xattr_remote(
 		.dp		= ip,
 		.name		= name,
 		.namelen	= namelen,
-		.hashval	= xfs_da_hashname(name, namelen),
 		.trans		= sc->tp,
 		.valuelen	= valuelen,
 		.owner		= ip->i_ino,
 	};
 	int			error;
+
+	args.hashval = xfs_attr_hashname(attr_flags, name, namelen),
 
 	/*
 	 * If we need a larger value buffer, try to allocate one.  If that

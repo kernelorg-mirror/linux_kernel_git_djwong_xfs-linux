@@ -624,7 +624,8 @@ xfs_attri_recover_work(
 	args->namelen = nv->name.i_len;
 	args->new_name = nv->new_name.i_addr;
 	args->new_namelen = nv->new_name.i_len;
-	args->hashval = xfs_da_hashname(args->name, args->namelen);
+	args->hashval = xfs_attr_hashname(attrp->alfi_attr_filter, args->name,
+					  args->namelen);
 	args->value = nv->value.i_addr;
 	args->valuelen = nv->value.i_len;
 	args->new_value = nv->new_value.i_addr;
