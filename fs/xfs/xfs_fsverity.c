@@ -21,6 +21,7 @@
 #include "xfs_quota.h"
 #include "xfs_fsverity.h"
 #include "xfs_icache.h"
+#include "xfs_health.h"
 #include <linux/fsverity.h>
 
 /*
@@ -775,6 +776,15 @@ xfs_fsverity_drop_merkle(
 	block->context = NULL;
 }
 
+static void
+xfs_fsverity_fail_validation(
+	struct inode		*inode,
+	loff_t			pos,
+	size_t			len)
+{
+	xfs_inode_mark_sick(XFS_I(inode), XFS_SICK_INO_DATA);
+}
+
 const struct fsverity_operations xfs_fsverity_ops = {
 	.begin_enable_verity		= xfs_fsverity_begin_enable,
 	.end_enable_verity		= xfs_fsverity_end_enable,
@@ -782,4 +792,5 @@ const struct fsverity_operations xfs_fsverity_ops = {
 	.read_merkle_tree_block		= xfs_fsverity_read_merkle,
 	.write_merkle_tree_block	= xfs_fsverity_write_merkle,
 	.drop_merkle_tree_block		= xfs_fsverity_drop_merkle,
+	.fail_validation		= xfs_fsverity_fail_validation,
 };
