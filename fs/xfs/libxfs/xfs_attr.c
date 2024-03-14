@@ -238,6 +238,16 @@ xfs_attr_get_ilocked(
 	return xfs_attr_node_get(args);
 }
 
+/* Compute hash for an extended attribute name. */
+xfs_dahash_t
+xfs_attr_hashname(
+	unsigned int		attr_flags,
+	const uint8_t		*name,
+	unsigned int		namelen)
+{
+	return xfs_da_hashname(name, namelen);
+}
+
 /*
  * Retrieve an extended attribute by name, and its value if requested.
  *
@@ -270,7 +280,8 @@ xfs_attr_get(
 		args->owner = args->dp->i_ino;
 	args->geo = args->dp->i_mount->m_attr_geo;
 	args->whichfork = XFS_ATTR_FORK;
-	args->hashval = xfs_da_hashname(args->name, args->namelen);
+	args->hashval = xfs_attr_hashname(args->attr_filter, args->name,
+					  args->namelen);
 
 	/* Entirely possible to look up a name which doesn't exist */
 	args->op_flags = XFS_DA_OP_OKNOENT;
@@ -439,7 +450,8 @@ xfs_attr_complete_op(
 
 	args->name = args->new_name;
 	args->namelen = args->new_namelen;
-	args->hashval = xfs_da_hashname(args->name, args->namelen);
+	args->hashval = xfs_attr_hashname(args->attr_filter, args->name,
+					  args->namelen);
 	args->value = args->new_value;
 	args->valuelen = args->new_valuelen;
 
@@ -970,7 +982,8 @@ xfs_attr_set(
 		args->owner = args->dp->i_ino;
 	args->geo = mp->m_attr_geo;
 	args->whichfork = XFS_ATTR_FORK;
-	args->hashval = xfs_da_hashname(args->name, args->namelen);
+	args->hashval = xfs_attr_hashname(args->attr_filter, args->name,
+					  args->namelen);
 
 	/*
 	 * We have no control over the attribute names that userspace passes us

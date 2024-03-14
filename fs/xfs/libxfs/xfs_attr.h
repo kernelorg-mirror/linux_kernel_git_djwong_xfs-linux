@@ -627,5 +627,7 @@ void xfs_attr_intent_destroy_cache(void);
 
 int xfs_attr_sf_totsize(struct xfs_inode *dp);
 int xfs_attr_add_fork(struct xfs_inode *ip, int size, int rsvd);
+xfs_dahash_t xfs_attr_hashname(unsigned int attr_flags,
+		const uint8_t *name_string, unsigned int name_length);
 
 #endif	/* __XFS_ATTR_H__ */
