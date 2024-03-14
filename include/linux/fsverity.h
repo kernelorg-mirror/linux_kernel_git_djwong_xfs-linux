@@ -236,6 +236,17 @@ struct fsverity_operations {
 	 * be implemented.
 	 */
 	void (*drop_merkle_tree_block)(struct fsverity_blockbuf *block);
+
+	/**
+	 * Notify the filesystem that file data validation failed
+	 *
+	 * @inode: the inode being validated
+	 * @pos: the file position of the invalid data
+	 * @len: the length of the invalid data
+	 *
+	 * This is called when fs-verity cannot validate the file contents.
+	 */
+	void (*fail_validation)(struct inode *inode, loff_t pos, size_t len);
 };
 
 #ifdef CONFIG_FS_VERITY
