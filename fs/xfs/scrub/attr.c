@@ -17,6 +17,7 @@
 #include "xfs_attr.h"
 #include "xfs_attr_leaf.h"
 #include "xfs_attr_sf.h"
+#include "xfs_parent.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/dabtree.h"
@@ -209,6 +210,19 @@ xchk_xattr_actor(
 	if (!xfs_attr_namecheck(sc->mp, name, namelen, attr_flags)) {
 		xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, args.blkno);
 		return -ECANCELED;
+	}
+
+	/* Check parent pointer geometry. */
+	if (attr_flags & XFS_ATTR_PARENT) {
+		if (!xfs_has_parent(sc->mp)) {
+			xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, args.blkno);
+			return -ECANCELED;
+		}
+
+		if (!xfs_parent_valuecheck(sc->mp, value, valuelen)) {
+			xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, args.blkno);
+			return -ECANCELED;
+		}
 	}
 
 	/*
