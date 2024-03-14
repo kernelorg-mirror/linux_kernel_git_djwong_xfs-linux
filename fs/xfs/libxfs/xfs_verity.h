@@ -9,5 +9,6 @@ void xfs_merkle_key_to_disk(struct xfs_merkle_key *key, uint64_t pos);
 uint64_t xfs_merkle_key_from_disk(const void *attr_name, int namelen);
 bool xfs_verity_namecheck(unsigned int attr_flags, const void *name,
 		int namelen);
+xfs_dahash_t xfs_verity_hashname(const uint8_t *name, unsigned int namelen);
 
 #endif	/* __XFS_VERITY_H__ */
