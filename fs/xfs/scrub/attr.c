@@ -17,6 +17,7 @@
 #include "xfs_attr.h"
 #include "xfs_attr_leaf.h"
 #include "xfs_attr_sf.h"
+#include "xfs_parent.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/dabtree.h"
@@ -200,6 +201,13 @@ xchk_xattr_actor(
 
 	/* Does this name make sense? */
 	if (!xfs_attr_namecheck(attr_flags, name, namelen)) {
+		xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, args.blkno);
+		return -ECANCELED;
+	}
+
+	/* Check parent pointer record. */
+	if ((attr_flags & XFS_ATTR_PARENT) &&
+	    !xfs_parent_valuecheck(sc->mp, value, valuelen)) {
 		xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, args.blkno);
 		return -ECANCELED;
 	}
