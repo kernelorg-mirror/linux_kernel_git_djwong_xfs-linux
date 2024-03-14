@@ -18,6 +18,7 @@
 #include "xfs_attr_leaf.h"
 #include "xfs_attr_sf.h"
 #include "xfs_parent.h"
+#include "xfs_verity.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/dabtree.h"
@@ -126,6 +127,47 @@ resize_value:
 	return 0;
 }
 
+#ifdef CONFIG_FS_VERITY
+/*
+ * Obtain merkle tree geometry information for a verity file so that we can
+ * perform sanity checks of the fsverity xattrs.
+ */
+STATIC int
+xchk_xattr_setup_verity(
+	struct xfs_scrub	*sc)
+{
+	struct xchk_xattr_buf	*ab;
+	int			error;
+
+	/*
+	 * Drop the ILOCK and the transaction because loading the fsverity
+	 * metadata will call into the xattr code.  S_VERITY is enabled with
+	 * IOLOCK_EXCL held, so it should not change here.
+	 */
+	xchk_iunlock(sc, XFS_ILOCK_EXCL);
+	xchk_trans_cancel(sc);
+
+	error = xchk_setup_xattr_buf(sc, 0);
+	if (error)
+		return error;
+
+	ab = sc->buf;
+	error = xchk_inode_setup_verity(sc, &ab->merkle_blocksize,
+			&ab->merkle_tree_size);
+	if (error)
+		return error;
+
+	error = xchk_trans_alloc(sc, 0);
+	if (error)
+		return error;
+
+	xchk_ilock(sc, XFS_ILOCK_EXCL);
+	return 0;
+}
+#else
+# define xchk_xattr_setup_verity(...)	(0)
+#endif /* CONFIG_FS_VERITY */
+
 /* Set us up to scrub an inode's extended attributes. */
 int
 xchk_setup_xattr(
@@ -150,8 +192,88 @@ xchk_setup_xattr(
 			return error;
 	}
 
-	return xchk_setup_inode_contents(sc, 0);
+	error = xchk_setup_inode_contents(sc, 0);
+	if (error)
+		return error;
+
+	if (IS_VERITY(VFS_I(sc->ip))) {
+		error = xchk_xattr_setup_verity(sc);
+		if (error)
+			return error;
+	}
+
+	return error;
 }
+
+#ifdef CONFIG_FS_VERITY
+/* Check the merkle tree xattrs. */
+STATIC void
+xchk_xattr_verity(
+	struct xfs_scrub		*sc,
+	xfs_dablk_t			blkno,
+	const unsigned char		*name,
+	unsigned int			namelen,
+	unsigned int			valuelen)
+{
+	struct xchk_xattr_buf		*ab = sc->buf;
+
+	/* Non-verity filesystems should never have verity xattrs. */
+	if (!xfs_has_verity(sc->mp)) {
+		xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, blkno);
+		return;
+	}
+
+	/*
+	 * Any verity metadata on a non-verity file are leftovers from a
+	 * previous attempt to enable verity.
+	 */
+	if (!IS_VERITY(VFS_I(sc->ip))) {
+		xchk_ino_set_preen(sc, sc->ip->i_ino);
+		return;
+	}
+
+	/* Zero blocksize occurs if we couldn't load the merkle tree data. */
+	if (ab->merkle_blocksize == 0)
+		return;
+
+	switch (namelen) {
+	case sizeof(struct xfs_merkle_key):
+		/* Oversized blocks are not allowed */
+		if (valuelen > ab->merkle_blocksize) {
+			xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, blkno);
+			return;
+		}
+		break;
+	case XFS_VERITY_DESCRIPTOR_NAME_LEN:
+		/* Has to match the descriptor xattr name */
+		if (memcmp(name, XFS_VERITY_DESCRIPTOR_NAME, namelen))
+			xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, blkno);
+		return;
+	default:
+		xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, blkno);
+		return;
+	}
+
+	/*
+	 * Merkle tree blocks beyond the end of the tree are leftovers from
+	 * a previous failed attempt to enable verity.
+	 */
+	if (xfs_merkle_key_from_disk(name, namelen) >= ab->merkle_tree_size)
+		xchk_ino_set_preen(sc, sc->ip->i_ino);
+}
+#else
+static void
+xchk_xattr_verity(
+	struct xfs_scrub		*sc,
+	xfs_dablk_t			blkno,
+	const unsigned char		*name,
+	unsigned int			namelen,
+	unsigned int			valuelen)
+{
+	/* Should never see verity xattrs when verity is not enabled. */
+	xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, blkno);
+}
+#endif /* CONFIG_FS_VERITY */
 
 /* Extended Attributes */
 
@@ -214,6 +336,13 @@ xchk_xattr_actor(
 	    !xfs_parent_valuecheck(sc->mp, value, valuelen)) {
 		xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, args.blkno);
 		return -ECANCELED;
+	}
+
+	/* Check verity xattr geometry */
+	if (attr_flags & XFS_ATTR_VERITY) {
+		xchk_xattr_verity(sc, args.blkno, name, namelen, valuelen);
+		if (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
+			return -ECANCELED;
 	}
 
 	/*
@@ -645,6 +774,13 @@ xchk_xattr(
 
 	if (!xfs_inode_hasattr(sc->ip))
 		return -ENOENT;
+
+	/*
+	 * If this is a verity file that won't activate, we cannot check the
+	 * merkle tree geometry.
+	 */
+	if (xchk_inode_verity_broken(sc->ip))
+		xchk_set_incomplete(sc);
 
 	/*
 	 * If this is a verity file that won't activate, we cannot check the
