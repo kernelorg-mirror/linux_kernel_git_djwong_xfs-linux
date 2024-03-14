@@ -412,6 +412,32 @@ void __fsverity_cleanup_inode(struct inode *inode)
 }
 EXPORT_SYMBOL_GPL(__fsverity_cleanup_inode);
 
+/**
+ * fsverity_merkle_tree_geometry() - return Merkle tree geometry
+ * @inode: the inode for which the Merkle tree is being built
+ * @block_size: size of a merkle tree block, in bytes
+ * @tree_size: size of the merkle tree, in bytes
+ */
+int fsverity_merkle_tree_geometry(struct inode *inode, unsigned int *block_size,
+				  u64 *tree_size)
+{
+	struct fsverity_info *vi;
+	int error;
+
+	if (!IS_VERITY(inode))
+		return -EOPNOTSUPP;
+
+	error = ensure_verity_info(inode);
+	if (error)
+		return error;
+
+	vi = fsverity_get_info(inode);
+	*block_size = vi->tree_params.block_size;
+	*tree_size = vi->tree_params.tree_size;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(fsverity_merkle_tree_geometry);
+
 void __init fsverity_init_info_cache(void)
 {
 	fsverity_info_cachep = KMEM_CACHE_USERCOPY(
