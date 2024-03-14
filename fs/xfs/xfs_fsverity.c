@@ -874,6 +874,16 @@ xfs_fsverity_write_merkle(
 		.value			= (void *)buf,
 		.valuelen		= size,
 	};
+	const char			*p;
+
+	/*
+	 * Don't store trailing zeroes, except for the first byte, which we
+	 * need to avoid ENODATA errors in the merkle read path.
+	 */
+	p = buf + size - 1;
+	while (p >= (const char *)buf && *p == 0)
+		p--;
+	args.valuelen = max(1, p - (const char *)buf + 1);
 
 	xfs_fsverity_init_merkle_args(ip, &name, pos, &args);
 	return xfs_attr_set(&args, XFS_ATTRUPDATE_UPSERT, false);
