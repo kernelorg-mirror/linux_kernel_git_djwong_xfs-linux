@@ -245,6 +245,13 @@ xfs_attr_hashname(
 	const uint8_t		*name,
 	unsigned int		namelen)
 {
+	if ((attr_flags & XFS_ATTR_VERITY) &&
+	    namelen == sizeof(struct xfs_verity_merkle_key)) {
+		uint64_t	off = xfs_verity_merkle_key_from_disk(name);
+
+		return off >> XFS_VERITY_MIN_MERKLE_BLOCKLOG;
+	}
+
 	return xfs_da_hashname(name, namelen);
 }
 
