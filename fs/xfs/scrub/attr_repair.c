@@ -159,6 +159,44 @@ xrep_setup_xattr(
 	return xrep_tempfile_create(sc, S_IFREG);
 }
 
+#ifdef CONFIG_FS_VERITY
+static int
+xrep_xattr_want_salvage_verity(
+	struct xrep_xattr	*rx,
+	const void		*name,
+	int			namelen,
+	int			valuelen)
+{
+	struct xchk_xattr_buf	*ab = rx->sc->buf;
+
+	if (!xfs_has_verity(rx->sc->mp))
+		return false;
+	if (!IS_VERITY(VFS_I(rx->sc->ip)))
+		return false;
+
+	switch (namelen) {
+	case sizeof(struct xfs_verity_merkle_key):
+		/* Oversized blocks are not allowed */
+		if (valuelen > ab->merkle_blocksize)
+			return false;
+		break;
+	case XFS_VERITY_DESCRIPTOR_NAME_LEN:
+		/* Has to match the descriptor xattr name */
+		return !memcmp(name, XFS_VERITY_DESCRIPTOR_NAME, namelen);
+	default:
+		return false;
+	}
+
+	/*
+	 * Merkle tree blocks beyond the end of the tree are leftovers from
+	 * a previous failed attempt to enable verity.
+	 */
+	return xfs_verity_merkle_key_from_disk(name) < ab->merkle_tree_size;
+}
+#else
+# define xrep_xattr_want_salvage_verity(...)	(false)
+#endif /* CONFIG_FS_VERITY */
+
 /*
  * Decide if we want to salvage this attribute.  We don't bother with
  * incomplete or oversized keys or values.  The @value parameter can be null
@@ -189,6 +227,9 @@ xrep_xattr_want_salvage(
 			return false;
 		return xfs_parent_valuecheck(rx->sc->mp, value, valuelen);
 	}
+	if (attr_flags & XFS_ATTR_VERITY)
+		return xrep_xattr_want_salvage_verity(rx, name, namelen,
+				valuelen);
 	return true;
 }
 
@@ -220,6 +261,11 @@ xrep_xattr_salvage_key(
 		key.namelen = namelen;
 
 		trace_xrep_xattr_salvage_pptr(rx->sc->ip, flags, name,
+				key.namelen, value, valuelen);
+	} else if (flags & XFS_ATTR_VERITY) {
+		key.namelen = namelen;
+
+		trace_xrep_xattr_salvage_verity(rx->sc->ip, flags, name,
 				key.namelen, value, valuelen);
 	} else {
 		while (i < namelen && name[i] != 0)
@@ -671,6 +717,9 @@ xrep_xattr_insert_rec(
 		trace_xrep_xattr_insert_pptr(rx->sc->tempip, key->flags,
 				ab->name, key->namelen, ab->value,
 				key->valuelen);
+	else if (key->flags & XFS_ATTR_VERITY)
+		trace_xrep_xattr_insert_verity(rx->sc->ip, key->flags, ab->name,
+				key->namelen, ab->value, key->valuelen);
 	else
 		trace_xrep_xattr_insert_rec(rx->sc->tempip, key->flags,
 				ab->name, key->namelen, key->valuelen);
