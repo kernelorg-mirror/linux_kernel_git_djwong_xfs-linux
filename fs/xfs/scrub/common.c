@@ -45,6 +45,8 @@
 #include "scrub/health.h"
 #include "scrub/tempfile.h"
 
+#include <linux/fsverity.h>
+
 /* Common code for the metadata scrubbers. */
 
 /*
@@ -1432,6 +1434,25 @@ xchk_irele(
 	xfs_irele(ip);
 }
 
+#ifdef CONFIG_FS_VERITY
+/*
+ * Make sure the fsverity information is attached, so we don't have to do that
+ * later after taking locks.
+ */
+static inline int
+xchk_setup_fsverity(
+	struct xfs_scrub	*sc)
+{
+	unsigned int		dontcare;
+	u64			alsodontcare;
+
+	return fsverity_merkle_tree_geometry(VFS_I(sc->ip),
+			&dontcare, &alsodontcare);
+}
+#else
+# define xchk_setup_fsverity(sc)	(0)
+#endif
+
 /*
  * Set us up to scrub metadata mapped by a file's fork.  Callers must not use
  * this to operate on user-accessible regular file data because the MMAPLOCK is
@@ -1454,6 +1475,12 @@ xchk_setup_inode_contents(
 
 	/* Lock the inode so the VFS cannot touch this file. */
 	xchk_ilock(sc, XFS_IOLOCK_EXCL);
+
+	if (IS_VERITY(VFS_I(sc->ip))) {
+		error = xchk_setup_fsverity(sc);
+		if (error)
+			goto out;
+	}
 
 	error = xchk_trans_alloc(sc, resblks);
 	if (error)
