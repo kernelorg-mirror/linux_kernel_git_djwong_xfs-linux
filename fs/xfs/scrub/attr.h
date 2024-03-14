@@ -22,6 +22,12 @@ struct xchk_xattr_buf {
 	/* Memory buffer used to extract xattr values. */
 	void			*value;
 	size_t			value_sz;
+
+#ifdef CONFIG_FS_VERITY
+	/* Geometry of the merkle tree attached to this verity file. */
+	u64			merkle_tree_size;
+	unsigned int		merkle_blocksize;
+#endif
 };
 
 bool xchk_xattr_set_map(struct xfs_scrub *sc, unsigned long *map,
