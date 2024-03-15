@@ -179,7 +179,7 @@ static inline bool fsverity_uses_bitmap(const struct fsverity_info *vi,
 
 int fsverity_read_merkle_tree_block(struct inode *inode,
 				    const struct merkle_tree_params *params,
-				    u64 pos, unsigned long ra_bytes,
+				    int level, u64 pos, unsigned long ra_bytes,
 				    struct fsverity_blockbuf *block);
 
 /*
