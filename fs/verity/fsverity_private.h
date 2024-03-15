@@ -154,4 +154,12 @@ static inline void fsverity_init_signature(void)
 
 void __init fsverity_init_workqueue(void);
 
+/*
+ * Drop 'block' obtained with ->read_merkle_tree_block(). Calls out back to
+ * filesystem if ->drop_block() is set, otherwise, drop the reference in the
+ * block->context.
+ */
+void fsverity_drop_block(struct inode *inode,
+			 struct fsverity_blockbuf *block);
+
 #endif /* _FSVERITY_PRIVATE_H */
