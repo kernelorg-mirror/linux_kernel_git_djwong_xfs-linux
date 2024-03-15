@@ -226,18 +226,46 @@ xfs_verity_shrinker_count(
 	return min_t(s64, ULONG_MAX, count);
 }
 
+struct xfs_verity_scan {
+	struct xfs_icwalk	icw;
+	struct shrink_control	*sc;
+
+	unsigned long		scanned;
+	unsigned long		freed;
+};
+
+/* Scan an inode as part of a verity scan. */
+int
+xfs_verity_scan_inode(
+	struct xfs_inode	*ip,
+	struct xfs_icwalk	*icw)
+{
+	xfs_irele(ip);
+	return 0;
+}
+
 /* Actually try to reclaim merkle tree blocks. */
 static unsigned long
 xfs_verity_shrinker_scan(
 	struct shrinker		*shrink,
 	struct shrink_control	*sc)
 {
+	struct xfs_verity_scan	vs = {
+		.sc		= sc,
+	};
 	struct xfs_mount	*mp = shrink->private_data;
+	int			error;
 
 	if (!xfs_has_verity(mp))
 		return SHRINK_STOP;
 
-	return 0;
+	error = xfs_icwalk_verity(mp, &vs.icw);
+	if (error)
+		xfs_alert(mp, "%s: verity scan failed, error %d", __func__,
+				error);
+
+	trace_xfs_verity_shrinker_scan(mp, vs.scanned, vs.freed, _RET_IP_);
+	return vs.freed;
 }
 
 /* Register a shrinker so we can release cached merkle tree blocks. */
