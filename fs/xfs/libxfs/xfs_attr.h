@@ -619,4 +619,7 @@ extern struct kmem_cache *xfs_attr_intent_cache;
 int __init xfs_attr_intent_init_cache(void);
 void xfs_attr_intent_destroy_cache(void);
 
+xfs_dahash_t xfs_attr_hashname(unsigned int attr_flags,
+		const uint8_t *name_string, unsigned int name_length);
+
 #endif	/* __XFS_ATTR_H__ */

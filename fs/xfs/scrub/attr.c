@@ -253,7 +253,6 @@ xchk_xattr_listent(
 		.dp			= context->dp,
 		.name			= name,
 		.namelen		= namelen,
-		.hashval		= xfs_da_hashname(name, namelen),
 		.trans			= context->tp,
 		.valuelen		= valuelen,
 	};
@@ -263,6 +262,7 @@ xchk_xattr_listent(
 
 	sx = container_of(context, struct xchk_xattr, context);
 	ab = sx->sc->buf;
+	args.hashval = xfs_attr_hashname(flags, name, namelen);
 
 	if (xchk_should_terminate(sx->sc, &error)) {
 		context->seen_enough = error;
@@ -600,7 +600,8 @@ xchk_xattr_rec(
 			xchk_da_set_corrupt(ds, level);
 			goto out;
 		}
-		calc_hash = xfs_da_hashname(lentry->nameval, lentry->namelen);
+		calc_hash = xfs_attr_hashname(ent->flags, lentry->nameval,
+				lentry->namelen);
 	} else {
 		rentry = (struct xfs_attr_leaf_name_remote *)
 				(((char *)bp->b_addr) + nameidx);
@@ -608,7 +609,8 @@ xchk_xattr_rec(
 			xchk_da_set_corrupt(ds, level);
 			goto out;
 		}
-		calc_hash = xfs_da_hashname(rentry->name, rentry->namelen);
+		calc_hash = xfs_attr_hashname(ent->flags, rentry->name,
+				rentry->namelen);
 	}
 	if (calc_hash != hash)
 		xchk_da_set_corrupt(ds, level);
