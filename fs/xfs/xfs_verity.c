@@ -18,6 +18,7 @@
 #include "xfs_trans.h"
 #include "xfs_attr_leaf.h"
 #include "xfs_trace.h"
+#include "xfs_icache.h"
 #include <linux/fsverity.h>
 
 /*
@@ -205,6 +206,82 @@ xfs_verity_cache_store(
 	 * Return it to the caller.
 	 */
 	return old;
+}
+
+/* Count the merkle tree blocks that we might be able to reclaim. */
+static unsigned long
+xfs_verity_shrinker_count(
+	struct shrinker		*shrink,
+	struct shrink_control	*sc)
+{
+	struct xfs_mount	*mp = shrink->private_data;
+	s64			count;
+
+	if (!xfs_has_verity(mp))
+		return SHRINK_EMPTY;
+
+	count = percpu_counter_sum_positive(&mp->m_verity_blocks);
+
+	trace_xfs_verity_shrinker_count(mp, count, _RET_IP_);
+	return min_t(s64, ULONG_MAX, count);
+}
+
+/* Actually try to reclaim merkle tree blocks. */
+static unsigned long
+xfs_verity_shrinker_scan(
+	struct shrinker		*shrink,
+	struct shrink_control	*sc)
+{
+	struct xfs_mount	*mp = shrink->private_data;
+
+	if (!xfs_has_verity(mp))
+		return SHRINK_STOP;
+
+	return 0;
+}
+
+/* Register a shrinker so we can release cached merkle tree blocks. */
+int
+xfs_verity_register_shrinker(
+	struct xfs_mount	*mp)
+{
+	int			error;
+
+	if (!xfs_has_verity(mp))
+		return 0;
+
+	error = percpu_counter_init(&mp->m_verity_blocks, 0, GFP_KERNEL);
+	if (error)
+		return error;
+
+	mp->m_verity_shrinker = shrinker_alloc(0, "xfs-verity:%s",
+			mp->m_super->s_id);
+	if (!mp->m_verity_shrinker) {
+		percpu_counter_destroy(&mp->m_verity_blocks);
+		return -ENOMEM;
+	}
+
+	mp->m_verity_shrinker->count_objects = xfs_verity_shrinker_count;
+	mp->m_verity_shrinker->scan_objects = xfs_verity_shrinker_scan;
+	mp->m_verity_shrinker->seeks = 0;
+	mp->m_verity_shrinker->private_data = mp;
+
+	shrinker_register(mp->m_verity_shrinker);
+
+	return 0;
+}
+
+/* Unregister the merkle tree block shrinker. */
+void
+xfs_verity_unregister_shrinker(struct xfs_mount *mp)
+{
+	if (!xfs_has_verity(mp))
+		return;
+
+	ASSERT(percpu_counter_sum(&mp->m_verity_blocks) == 0);
+
+	shrinker_free(mp->m_verity_shrinker);
+	percpu_counter_destroy(&mp->m_verity_blocks);
 }
 
 static int
