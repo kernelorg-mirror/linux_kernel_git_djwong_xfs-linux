@@ -622,11 +622,6 @@ xfs_verity_read_merkle(
 	if (error)
 		goto out_new_mk;
 
-	if (!args.valuelen) {
-		error = -ENODATA;
-		goto out_new_mk;
-	}
-
 	mk = xfs_verity_cache_store(ip, key, new_mk);
 	if (mk != new_mk) {
 		/*
@@ -681,6 +676,12 @@ xfs_verity_write_merkle(
 		.value			= (void *)buf,
 		.valuelen		= size,
 	};
+	const char			*p = buf + size - 1;
+
+	/* Don't store trailing zeroes. */
+	while (p >= (const char *)buf && *p == 0)
+		p--;
+	args.valuelen = p - (const char *)buf + 1;
 
 	xfs_verity_merkle_key_to_disk(&name, pos);
 	return xfs_attr_set(&args);
