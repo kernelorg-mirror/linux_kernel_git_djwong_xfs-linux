@@ -255,6 +255,15 @@ error:
 	return false;
 }
 
+static void fsverity_fail_validation(struct inode *inode, loff_t pos,
+				     size_t len)
+{
+	const struct fsverity_operations *vops = inode->i_sb->s_vop;
+
+	if (vops->fail_validation)
+		vops->fail_validation(inode, pos, len);
+}
+
 static bool
 verify_data_blocks(struct folio *data_folio, size_t len, size_t offset,
 		   unsigned long max_ra_bytes)
@@ -277,8 +286,11 @@ verify_data_blocks(struct folio *data_folio, size_t len, size_t offset,
 		valid = verify_data_block(inode, vi, data, pos + offset,
 					  max_ra_bytes);
 		kunmap_local(data);
-		if (!valid)
+		if (!valid) {
+			fsverity_fail_validation(inode, pos + offset,
+						 block_size);
 			return false;
+		}
 		offset += block_size;
 		len -= block_size;
 	} while (len);
