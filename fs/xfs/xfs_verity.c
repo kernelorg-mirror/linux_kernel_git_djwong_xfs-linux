@@ -42,6 +42,9 @@ struct xfs_merkle_blob {
 	/* refcount of this item; the cache holds its own ref */
 	refcount_t		refcount;
 
+	/* number of times the shrinker should ignore this item */
+	atomic_t		shrinkref;
+
 	unsigned long		flags;
 
 	/* Pointer to the merkle tree block, which is power-of-2 sized */
@@ -72,6 +75,7 @@ xfs_merkle_blob_alloc(
 
 	/* Caller owns this refcount. */
 	refcount_set(&mk->refcount, 1);
+	atomic_set(&mk->shrinkref, 0);
 	mk->flags = 0;
 	return mk;
 }
@@ -104,8 +108,10 @@ xfs_verity_cache_drop(
 	struct xfs_inode	*ip)
 {
 	XA_STATE(xas, &ip->i_merkle_blocks, 0);
+	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_merkle_blob	*mk;
 	unsigned long		flags;
+	s64			freed = 0;
 
 	xas_lock_irqsave(&xas, flags);
 	xas_for_each(&xas, mk, ULONG_MAX) {
@@ -113,10 +119,13 @@ xfs_verity_cache_drop(
 
 		trace_xfs_verity_cache_drop(ip, xas.xa_index, _RET_IP_);
 
+		freed++;
 		xas_store(&xas, NULL);
 		xfs_merkle_blob_rele(mk);
 	}
+	percpu_counter_sub(&mp->m_verity_blocks, freed);
 	xas_unlock_irqrestore(&xas, flags);
+	xfs_inode_clear_verity_tag(ip);
 }
 
 /* Destroy the merkle tree block cache */
@@ -175,6 +184,7 @@ xfs_verity_cache_store(
 	unsigned long		key,
 	struct xfs_merkle_blob	*mk)
 {
+	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_merkle_blob	*old;
 	unsigned long		flags;
 
@@ -189,6 +199,8 @@ xfs_verity_cache_store(
 		old = __xa_cmpxchg(&ip->i_merkle_blocks, key, NULL, mk,
 				GFP_KERNEL);
 	} while (old && !refcount_inc_not_zero(&old->refcount));
+	if (!old)
+		percpu_counter_add(&mp->m_verity_blocks, 1);
 	xa_unlock_irqrestore(&ip->i_merkle_blocks, flags);
 
 	if (old == NULL) {
@@ -234,12 +246,73 @@ struct xfs_verity_scan {
 	unsigned long		freed;
 };
 
+/* Reclaim inactive merkle tree blocks that have run out of second chances. */
+static void
+xfs_verity_cache_reclaim(
+	struct xfs_inode	*ip,
+	struct xfs_verity_scan	*vs)
+{
+	XA_STATE(xas, &ip->i_merkle_blocks, 0);
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_merkle_blob	*mk;
+	unsigned long		flags;
+	s64			freed = 0;
+
+	xas_lock_irqsave(&xas, flags);
+	xas_for_each(&xas, mk, ULONG_MAX) {
+		/*
+		 * Tell the shrinker that we scanned this merkle tree block,
+		 * even if we don't remove it.
+		 */
+		vs->scanned++;
+		if (vs->sc->nr_to_scan-- == 0)
+			break;
+
+		/* Retain if there are active references */
+		if (refcount_read(&mk->refcount) > 1)
+			continue;
+
+		/* Ignore if the item still has lru refcount */
+		if (atomic_add_unless(&mk->shrinkref, -1, 0))
+			continue;
+
+		trace_xfs_verity_cache_reclaim(ip, xas.xa_index, _RET_IP_);
+
+		freed++;
+		xas_store(&xas, NULL);
+		xfs_merkle_blob_rele(mk);
+	}
+	percpu_counter_sub(&mp->m_verity_blocks, freed);
+	xas_unlock_irqrestore(&xas, flags);
+
+	/*
+	 * Try to clear the verity tree tag if we reclaimed all the cached
+	 * blocks.  On the flag setting side, we should have IOLOCK_SHARED.
+	 */
+	xfs_ilock(ip, XFS_IOLOCK_EXCL);
+	if (xa_empty(&ip->i_merkle_blocks))
+		xfs_inode_clear_verity_tag(ip);
+	xfs_iunlock(ip, XFS_IOLOCK_EXCL);
+
+	vs->freed += freed;
+}
+
 /* Scan an inode as part of a verity scan. */
 int
 xfs_verity_scan_inode(
 	struct xfs_inode	*ip,
 	struct xfs_icwalk	*icw)
 {
+	struct xfs_verity_scan	*vs;
+
+	vs = container_of(icw, struct xfs_verity_scan, icw);
+
+	if (vs->sc->nr_to_scan > 0)
+		xfs_verity_cache_reclaim(ip, vs);
+
+	if (vs->sc->nr_to_scan == 0)
+		xfs_icwalk_verity_stop(icw);
+
 	xfs_irele(ip);
 	return 0;
 }
@@ -512,12 +585,26 @@ xfs_verity_read_merkle(
 		 * Free the new cache blob and continue with the existing one.
 		 */
 		xfs_merkle_blob_rele(new_mk);
+	} else {
+		/*
+		 * We added this merkle tree block to the cache; tag the inode
+		 * so that reclaim will scan this inode.  The caller holds
+		 * IOLOCK_SHARED this will not race with the shrinker.
+		 */
+		xfs_inode_set_verity_tag(ip);
 	}
 
 out_hit:
 	block->kaddr   = (void *)mk->data;
 	block->context = mk;
 	block->verified = test_bit(XFS_MERKLE_BLOB_VERIFIED_BIT, &mk->flags);
+
+	/*
+	 * Prioritize keeping the root-adjacent levels cached if this isn't a
+	 * streaming read.
+	 */
+	if (req->level >= 0)
+		atomic_set(&mk->shrinkref, req->level + 1);
 
 	return 0;
 
