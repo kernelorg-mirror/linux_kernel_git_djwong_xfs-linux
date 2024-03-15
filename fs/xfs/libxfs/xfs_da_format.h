@@ -946,4 +946,6 @@ xfs_verity_merkle_key_from_disk(
 #define XFS_VERITY_DESCRIPTOR_NAME	"vdesc"
 #define XFS_VERITY_DESCRIPTOR_NAME_LEN	(sizeof(XFS_VERITY_DESCRIPTOR_NAME) - 1)
 
+#define XFS_VERITY_MIN_MERKLE_BLOCKLOG	(10)
+
 #endif /* __XFS_DA_FORMAT_H__ */
