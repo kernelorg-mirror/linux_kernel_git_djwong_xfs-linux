@@ -914,4 +914,36 @@ struct xfs_parent_name_rec {
  */
 #define XFS_PARENT_DIRENT_NAME_MAX_SIZE		(MAXNAMELEN - 1)
 
+/*
+ * fs-verity attribute name format
+ *
+ * Merkle tree blocks are stored under extended attributes of the inode. The
+ * name of the attributes are byte offsets into merkle tree.
+ */
+struct xfs_verity_merkle_key {
+	__be64	vi_merkleoff;
+};
+
+static inline void
+xfs_verity_merkle_key_to_disk(
+	struct xfs_verity_merkle_key	*key,
+	uint64_t			offset)
+{
+	key->vi_merkleoff = cpu_to_be64(offset);
+}
+
+static inline uint64_t
+xfs_verity_merkle_key_from_disk(
+	const void			*attr_name)
+{
+	const struct xfs_verity_merkle_key *key = attr_name;
+
+	return be64_to_cpu(key->vi_merkleoff);
+}
+
+
+/* ondisk xattr name used for the fsverity descriptor */
+#define XFS_VERITY_DESCRIPTOR_NAME	"vdesc"
+#define XFS_VERITY_DESCRIPTOR_NAME_LEN	(sizeof(XFS_VERITY_DESCRIPTOR_NAME) - 1)
+
 #endif /* __XFS_DA_FORMAT_H__ */
