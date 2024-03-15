@@ -21,6 +21,8 @@
 #include "scrub/dabtree.h"
 #include "scrub/attr.h"
 
+#include <linux/fsverity.h>
+
 /* Free the buffers linked from the xattr buffer. */
 static void
 xchk_xattr_buf_cleanup(
@@ -135,6 +137,91 @@ xchk_setup_xattr(
 	return xchk_setup_inode_contents(sc, 0);
 }
 
+#ifdef CONFIG_FS_VERITY
+/* Extract merkle tree geometry from incore information. */
+static int
+xchk_xattr_extract_verity(
+	struct xfs_scrub		*sc)
+{
+	struct xchk_xattr_buf		*ab = sc->buf;
+
+	/* setup should have allocated the buffer */
+	if (!ab) {
+		ASSERT(0);
+		return -EFSCORRUPTED;
+	}
+
+	return fsverity_merkle_tree_geometry(VFS_I(sc->ip),
+			&ab->merkle_blocksize, &ab->merkle_tree_size);
+}
+
+/* Check the merkle tree xattrs. */
+STATIC void
+xchk_xattr_verity(
+	struct xfs_scrub		*sc,
+	xfs_dablk_t			blkno,
+	const unsigned char		*name,
+	unsigned int			namelen,
+	unsigned int			valuelen)
+{
+	struct xchk_xattr_buf		*ab = sc->buf;
+
+	/* Non-verity filesystems should never have verity xattrs. */
+	if (!xfs_has_verity(sc->mp)) {
+		xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, blkno);
+		return;
+	}
+
+	/*
+	 * Any verity metadata on a non-verity file are leftovers from a
+	 * previous attempt to enable verity.
+	 */
+	if (!IS_VERITY(VFS_I(sc->ip))) {
+		xchk_ino_set_preen(sc, sc->ip->i_ino);
+		return;
+	}
+
+	switch (namelen) {
+	case sizeof(struct xfs_verity_merkle_key):
+		/* Oversized blocks are not allowed */
+		if (valuelen > ab->merkle_blocksize) {
+			xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, blkno);
+			return;
+		}
+		break;
+	case XFS_VERITY_DESCRIPTOR_NAME_LEN:
+		/* Has to match the descriptor xattr name */
+		if (memcmp(name, XFS_VERITY_DESCRIPTOR_NAME, namelen)) {
+			xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, blkno);
+		}
+		return;
+	default:
+		xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, blkno);
+		return;
+	}
+
+	/*
+	 * Merkle tree blocks beyond the end of the tree are leftovers from
+	 * a previous failed attempt to enable verity.
+	 */
+	if (xfs_verity_merkle_key_from_disk(name) >= ab->merkle_tree_size)
+		xchk_ino_set_preen(sc, sc->ip->i_ino);
+}
+#else
+# define xchk_xattr_extract_verity(sc)	(0)
+
+static void
+xchk_xattr_verity(
+	struct xfs_scrub	*sc,
+	xfs_dablk_t		blkno,
+	const unsigned char	*name,
+	unsigned int		namelen)
+{
+	/* Should never see verity xattrs when verity is not enabled. */
+	xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, blkno);
+}
+#endif /* CONFIG_FS_VERITY */
+
 /* Extended Attributes */
 
 struct xchk_xattr {
@@ -192,6 +279,15 @@ xchk_xattr_listent(
 	if (hweight32(flags & XFS_ATTR_NSP_ONDISK_MASK) > 1) {
 		xchk_fblock_set_corrupt(sx->sc, XFS_ATTR_FORK, args.blkno);
 		goto fail_xref;
+	}
+
+	/* Check verity xattr geometry */
+	if (flags & XFS_ATTR_VERITY) {
+		xchk_xattr_verity(sx->sc, args.blkno, name, namelen, valuelen);
+		if (sx->sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT) {
+			context->seen_enough = 1;
+			return;
+		}
 	}
 
 	/* Does this name make sense? */
@@ -610,6 +706,12 @@ xchk_xattr(
 		return -EDEADLOCK;
 	if (error)
 		return error;
+
+	if (IS_VERITY(VFS_I(sc->ip))) {
+		error = xchk_xattr_extract_verity(sc);
+		if (error)
+			return error;
+	}
 
 	/* Check the physical structure of the xattr. */
 	if (sc->ip->i_af.if_format == XFS_DINODE_FMT_LOCAL)
