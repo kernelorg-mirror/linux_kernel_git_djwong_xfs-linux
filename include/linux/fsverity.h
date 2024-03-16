@@ -66,6 +66,8 @@ struct fsverity_blockbuf {
  *		if the page at @block->offset isn't already cached.
  *		Implementations may ignore this argument; it's only a
  *		performance optimization.
+ * @zero_digest: the hash for a data block of zeroes
+ * @digest_size: size of zero_digest
  */
 struct fsverity_readmerkle {
 	struct inode *inode;
@@ -73,6 +75,8 @@ struct fsverity_readmerkle {
 	int level;
 	int num_levels;
 	u8 log_blocksize;
+	const u8 *zero_digest;
+	unsigned int digest_size;
 };
 
 /**
@@ -81,12 +85,16 @@ struct fsverity_readmerkle {
  * @level: level of the block; level 0 are the leaves
  * @num_levels: number of levels in the tree total
  * @log_blocksize: log2 of the size of the block
+ * @zero_digest: the hash for a data block of zeroes
+ * @digest_size: size of zero_digest
  */
 struct fsverity_writemerkle {
 	struct inode *inode;
 	int level;
 	int num_levels;
 	u8 log_blocksize;
+	const u8 *zero_digest;
+	unsigned int digest_size;
 };
 
 /* Verity operations for filesystems */
