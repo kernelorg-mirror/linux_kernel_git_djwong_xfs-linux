@@ -144,6 +144,13 @@ int fsverity_init_merkle_tree_params(struct merkle_tree_params *params,
 		goto out_err;
 	}
 
+	err = fsverity_hash_buffer(params->hash_alg, page_address(ZERO_PAGE(0)),
+				   i_blocksize(inode), params->zero_digest);
+	if (err) {
+		fsverity_err(inode, "Error %d computing zero digest", err);
+		goto out_err;
+	}
+
 	params->tree_size = offset << log_blocksize;
 	params->tree_pages = PAGE_ALIGN(params->tree_size) >> PAGE_SHIFT;
 	return 0;
