@@ -109,25 +109,6 @@ TRACE_EVENT(fsverity_merkle_tree_block_verified,
 		__entry->direction == 0 ? "ascend" : "descend")
 );
 
-TRACE_EVENT(fsverity_invalidate_block,
-	TP_PROTO(struct inode *inode, struct fsverity_blockbuf *block),
-	TP_ARGS(inode, block),
-	TP_STRUCT__entry(
-		__field(ino_t, ino)
-		__field(u64, offset)
-		__field(unsigned int, block_size)
-	),
-	TP_fast_assign(
-		__entry->ino = inode->i_ino;
-		__entry->offset = block->offset;
-		__entry->block_size = block->size;
-	),
-	TP_printk("ino %lu block position %llu block size %u",
-		(unsigned long) __entry->ino,
-		__entry->offset,
-		__entry->block_size)
-);
-
 TRACE_EVENT(fsverity_read_merkle_tree_block,
 	TP_PROTO(struct inode *inode, u64 offset, unsigned int log_blocksize),
 	TP_ARGS(inode, offset, log_blocksize),
