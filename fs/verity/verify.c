@@ -26,12 +26,11 @@ static bool is_hash_block_verified(struct inode *inode,
 	struct page *hpage;
 
 	/*
-	 * If the filesystem uses block-based caching, then
-	 * ->hash_block_verified is always used and the filesystem pushes
-	 * invalidations to it as needed.
+	 * If the filesystem uses block-based caching, then rely on the
+	 * implementation to retain verified status.
 	 */
 	if (fsverity_caches_blocks(inode))
-		return test_bit(hblock_idx, vi->hash_block_verified);
+		return block->verified;
 
 	/* Otherwise, the filesystem uses page-based caching. */
 	hpage = (struct page *)block->context;
@@ -224,7 +223,9 @@ descend:
 		 * idempotent, as the same hash block might be verified by
 		 * multiple threads concurrently.
 		 */
-		if (fsverity_uses_bitmap(vi, inode))
+		if (fsverity_caches_blocks(inode))
+			block->verified = true;
+		else if (fsverity_uses_bitmap(vi, inode))
 			set_bit(hblock_idx, vi->hash_block_verified);
 		else
 			SetPageChecked((struct page *)block->context);
@@ -376,33 +377,6 @@ void __init fsverity_init_workqueue(void)
 }
 
 /**
- * fsverity_invalidate_block() - invalidate Merkle tree block
- * @inode: inode to which this Merkle tree blocks belong
- * @block: block to be invalidated
- *
- * This function invalidates/clears "verified" state of Merkle tree block
- * in the fs-verity bitmap. The block needs to have ->offset set.
- */
-void fsverity_invalidate_block(struct inode *inode,
-		struct fsverity_blockbuf *block)
-{
-	struct fsverity_info *vi = inode->i_verity_info;
-	const unsigned int log_blocksize = vi->tree_params.log_blocksize;
-
-	trace_fsverity_invalidate_block(inode, block);
-
-	if (block->offset >= vi->tree_params.tree_size) {
-		fsverity_err(inode,
-"Trying to invalidate beyond Merkle tree (tree %lld, offset %lld)",
-			     vi->tree_params.tree_size, block->offset);
-		return;
-	}
-
-	clear_bit(block->offset >> log_blocksize, vi->hash_block_verified);
-}
-EXPORT_SYMBOL_GPL(fsverity_invalidate_block);
-
-/**
  * fsverity_read_merkle_tree_block() - read Merkle tree block
  * @inode: inode to which this Merkle tree blocks belong
  * @params: merkle tree parameters
@@ -436,6 +410,7 @@ int fsverity_read_merkle_tree_block(struct inode *inode,
 			.log_blocksize = params->log_blocksize,
 			.ra_bytes = ra_bytes,
 		};
+		block->verified = false;
 
 		return vops->read_merkle_tree_block(&req, block);
 	}
