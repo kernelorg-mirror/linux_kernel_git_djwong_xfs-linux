@@ -666,6 +666,20 @@ xfs_fsverity_read_merkle(
 	/* Read the block in from disk and try to store it in the cache. */
 	xfs_fsverity_init_merkle_args(ip, &name, block->offset, &args);
 	error = xfs_attr_get(&args);
+	if (error == -ENOATTR) {
+		u8		*p;
+		unsigned int	i;
+
+		/*
+		 * No attribute found.  Synthesize a buffer full of the zero
+		 * digests on the assumption that we elided them at write time.
+		 */
+		for (i = 0, p = new_mk->data;
+		     i < block->size;
+		     i += req->digest_size, p += req->digest_size)
+			memcpy(p, req->zero_digest, req->digest_size);
+		error = 0;
+	}
 	if (error)
 		goto out_new_mk;
 
@@ -719,12 +733,29 @@ xfs_fsverity_write_merkle(
 		.value			= (void *)buf,
 		.valuelen		= size,
 	};
-	const char			*p = buf + size - 1;
+	const char			*p;
+	unsigned int			i;
 
-	/* Don't store trailing zeroes. */
+	/*
+	 * If this is a block full of hashes of zeroed blocks, don't bother
+	 * storing the block.  We can synthesize them later.
+	 */
+	for (i = 0, p = buf;
+	     i < size;
+	     i += req->digest_size, p += req->digest_size)
+		if (memcmp(p, req->zero_digest, req->digest_size))
+			break;
+	if (i == size)
+		return 0;
+
+	/*
+	 * Don't store trailing zeroes.  Store at least one byte so that the
+	 * block cannot be mistaken for an elided one.
+	 */
+	p = buf + size - 1;
 	while (p >= (const char *)buf && *p == 0)
 		p--;
-	args.valuelen = p - (const char *)buf + 1;
+	args.valuelen = max(1, p - (const char *)buf + 1);
 
 	xfs_fsverity_init_merkle_args(ip, &name, pos, &args);
 	return xfs_attr_set(&args, XFS_ATTRUPDATE_UPSERT, false);
