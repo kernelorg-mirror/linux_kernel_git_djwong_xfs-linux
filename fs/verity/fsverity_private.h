@@ -167,14 +167,15 @@ static inline bool fsverity_caches_blocks(const struct inode *inode)
 static inline bool fsverity_uses_bitmap(const struct fsverity_info *vi,
 					const struct inode *inode)
 {
+	if (fsverity_caches_blocks(inode))
+		return false;
+
 	/*
 	 * If fs uses block-based Merkle tree caching, then fs-verity must use
 	 * hash_block_verified bitmap as there's no page to mark it with
 	 * PG_checked.
 	 */
-	if (vi->tree_params.block_size != PAGE_SIZE)
-		return true;
-	return fsverity_caches_blocks(inode);
+	return vi->tree_params.block_size != PAGE_SIZE;
 }
 
 int fsverity_read_merkle_tree_block(struct inode *inode,
