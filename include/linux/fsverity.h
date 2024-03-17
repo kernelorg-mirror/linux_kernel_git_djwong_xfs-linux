@@ -32,6 +32,7 @@
  * @offset: block's offset into Merkle tree
  * @size: the Merkle tree block size
  * @context: filesystem private context
+ * @verified: has this buffer been validated?
  *
  * Buffer containing single Merkle Tree block. These buffers are passed
  *  - to filesystem, when fs-verity is building merkel tree,
@@ -49,6 +50,7 @@
 struct fsverity_blockbuf {
 	void *kaddr;
 	u64 offset;
+	unsigned int verified:1;
 	unsigned int size;
 	void *context;
 };
@@ -168,9 +170,9 @@ struct fsverity_operations {
 	 * This can be called at any time on an open verity file.  It may be
 	 * called by multiple processes concurrently.
 	 *
-	 * In case that block was evicted from the memory filesystem has to use
-	 * fsverity_invalidate_block() to let fsverity know that block's
-	 * verification state is not valid anymore.
+	 * Implementations may cache the @block->verified state in
+	 * ->drop_merkle_tree_block.  They must clear the @block->verified
+	 * flag for a cache miss.
 	 *
 	 * If this function is implemented, ->drop_merkle_tree_block must also
 	 * be implemented.
@@ -203,6 +205,9 @@ struct fsverity_operations {
 	 *
 	 * This is called when fs-verity is done with a block obtained with
 	 * ->read_merkle_tree_block().
+	 *
+	 * Implementations should cache a @block->verified==1 state to avoid
+	 * unnecessary revalidations during later accesses.
 	 *
 	 * If this function is implemented, ->read_merkle_tree_block must also
 	 * be implemented.
@@ -264,8 +269,6 @@ int fsverity_ioctl_read_metadata(struct file *filp, const void __user *uarg);
 bool fsverity_verify_blocks(struct folio *folio, size_t len, size_t offset);
 void fsverity_verify_bio(struct bio *bio);
 void fsverity_enqueue_verify_work(struct work_struct *work);
-void fsverity_invalidate_block(struct inode *inode,
-		struct fsverity_blockbuf *block);
 
 static inline int fsverity_set_ops(struct super_block *sb,
 				   const struct fsverity_operations *ops)
