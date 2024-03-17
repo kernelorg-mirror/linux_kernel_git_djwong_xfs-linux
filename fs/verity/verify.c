@@ -409,6 +409,8 @@ int fsverity_read_merkle_tree_block(struct inode *inode,
 			.num_levels = params->num_levels,
 			.log_blocksize = params->log_blocksize,
 			.ra_bytes = ra_bytes,
+			.zero_digest = params->zero_digest,
+			.digest_size = params->digest_size,
 		};
 		block->verified = false;
 
