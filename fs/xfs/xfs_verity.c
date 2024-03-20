@@ -761,3 +761,72 @@ const struct fsverity_operations xfs_verity_ops = {
 	.drop_merkle_tree_block		= xfs_verity_drop_merkle,
 	.fail_validation		= xfs_verity_fail_validation,
 };
+
+/* Turn off fs-verity. */
+int
+xfs_verity_disable(
+	struct file		*file)
+{
+	struct inode		*inode = file_inode(file);
+	struct xfs_inode	*ip = XFS_I(inode);
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_trans	*tp;
+	u64			merkle_tree_size;
+	unsigned int		merkle_blocksize;
+	int			error;
+
+	BUILD_BUG_ON(FS_IOC_DISABLE_VERITY == FS_IOC_ENABLE_VERITY);
+
+	if (!xfs_has_verity(mp))
+		return -EOPNOTSUPP;
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	xfs_ilock(ip, XFS_IOLOCK_EXCL);
+
+	if (!IS_VERITY(inode)) {
+		error = 0;
+		goto out_iolock;
+	}
+
+	if (xfs_iflags_test(ip, XFS_VERITY_CONSTRUCTION)) {
+		error = -EBUSY;
+		goto out_iolock;
+	}
+
+	error = fsverity_merkle_tree_geometry(inode, &merkle_blocksize,
+			&merkle_tree_size);
+	if (error)
+		goto out_iolock;
+
+	xfs_verity_cache_drop(ip);
+
+	/* Clear fsverity inode flag */
+	error = xfs_trans_alloc_inode(ip, &M_RES(mp)->tr_ichange, 0, 0, false,
+			&tp);
+	if (error)
+		goto out_iolock;
+
+	ip->i_diflags2 &= ~XFS_DIFLAG2_VERITY;
+
+	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
+	xfs_trans_set_sync(tp);
+
+	error = xfs_trans_commit(tp);
+	xfs_iunlock(ip, XFS_ILOCK_EXCL);
+	if (error)
+		goto out_iolock;
+
+	inode->i_flags &= ~S_VERITY;
+	fsverity_cleanup_inode(inode);
+
+	/* Remove the fsverity xattrs. */
+	error = xfs_verity_drop_incomplete_tree(ip, merkle_tree_size,
+			merkle_blocksize);
+	if (error)
+		goto out_iolock;
+
+out_iolock:
+	xfs_iunlock(ip, XFS_IOLOCK_EXCL);
+	return error;
+}
