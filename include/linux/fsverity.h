@@ -136,6 +136,24 @@ struct fsverity_operations {
 				 unsigned int tree_blocksize);
 
 	/**
+	 * Disable verity on the given file.
+	 *
+	 * @filp: a readonly file descriptor for the file
+	 * @merkle_tree_size: total bytes the Merkle tree takes up
+	 * @tree_blocksize: the Merkle tree block size
+	 *
+	 * The filesystem must do any needed filesystem-specific preparations
+	 * for disabling verity, e.g. truncating the merkle tree.  It also must
+	 * return -EBUSY if verity is already being enabled on the given file.
+	 *
+	 * i_rwsem is held for write.
+	 *
+	 * Return: 0 on success, -errno on failure
+	 */
+	int (*disable_verity)(struct file *filp, u64 merkle_tree_size,
+			      unsigned int tree_blocksize);
+
+	/**
 	 * Get the verity descriptor of the given inode.
 	 *
 	 * @inode: an inode with the S_VERITY flag set
@@ -260,6 +278,7 @@ static inline struct fsverity_info *fsverity_get_info(const struct inode *inode)
 /* enable.c */
 
 int fsverity_ioctl_enable(struct file *filp, const void __user *arg);
+int fsverity_ioctl_disable(struct file *filp);
 
 /* measure.c */
 
@@ -322,6 +341,11 @@ static inline struct fsverity_info *fsverity_get_info(const struct inode *inode)
 
 static inline int fsverity_ioctl_enable(struct file *filp,
 					const void __user *arg)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int fsverity_ioctl_disable(struct file *filp)
 {
 	return -EOPNOTSUPP;
 }
