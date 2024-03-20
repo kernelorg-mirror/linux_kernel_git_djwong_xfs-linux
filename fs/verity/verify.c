@@ -10,8 +10,6 @@
 #include <crypto/hash.h>
 #include <linux/bio.h>
 
-static struct workqueue_struct *fsverity_read_workqueue;
-
 /*
  * Returns true if the hash block with index @hblock_idx in the tree has
  * already been verified.
@@ -384,32 +382,17 @@ EXPORT_SYMBOL_GPL(__fsverity_init_verify_wq);
 
 /**
  * fsverity_enqueue_verify_work() - enqueue work on the fs-verity workqueue
+ * @sb: superblock for this filesystem
  * @work: the work to enqueue
  *
  * Enqueue verification work for asynchronous processing.
  */
-void fsverity_enqueue_verify_work(struct work_struct *work)
+void fsverity_enqueue_verify_work(struct super_block *sb,
+				  struct work_struct *work)
 {
-	queue_work(fsverity_read_workqueue, work);
+	queue_work(sb->s_verify_wq, work);
 }
 EXPORT_SYMBOL_GPL(fsverity_enqueue_verify_work);
-
-void __init fsverity_init_workqueue(void)
-{
-	/*
-	 * Use a high-priority workqueue to prioritize verification work, which
-	 * blocks reads from completing, over regular application tasks.
-	 *
-	 * For performance reasons, don't use an unbound workqueue.  Using an
-	 * unbound workqueue for crypto operations causes excessive scheduler
-	 * latency on ARM64.
-	 */
-	fsverity_read_workqueue = alloc_workqueue("fsverity_read_queue",
-						  WQ_HIGHPRI,
-						  num_online_cpus());
-	if (!fsverity_read_workqueue)
-		panic("failed to allocate fsverity_read_queue");
-}
 
 /**
  * fsverity_read_merkle_tree_block() - read Merkle tree block
