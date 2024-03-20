@@ -638,9 +638,9 @@ void generic_shutdown_super(struct super_block *sb)
 		}
 
 #ifdef CONFIG_FS_VERITY
-		if (sb->s_read_done_wq) {
-			destroy_workqueue(sb->s_read_done_wq);
-			sb->s_read_done_wq = NULL;
+		if (sb->s_verify_wq) {
+			destroy_workqueue(sb->s_verify_wq);
+			sb->s_verify_wq = NULL;
 		}
 #endif
 

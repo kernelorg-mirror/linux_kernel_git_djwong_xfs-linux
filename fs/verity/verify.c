@@ -347,6 +347,26 @@ void fsverity_verify_bio(struct bio *bio)
 EXPORT_SYMBOL_GPL(fsverity_verify_bio);
 #endif /* CONFIG_BLOCK */
 
+int __fsverity_init_verify_wq(struct super_block *sb)
+{
+	struct workqueue_struct *wq, *old;
+
+	wq = alloc_workqueue("fsverity/%s", WQ_MEM_RECLAIM | WQ_FREEZABLE, 0,
+			sb->s_id);
+	if (!wq)
+		return -ENOMEM;
+
+	/*
+	 * This has to be atomic as readaheads can race to create the
+	 * workqueue.  If someone created workqueue before us, we drop ours.
+	 */
+	old = cmpxchg(&sb->s_verify_wq, NULL, wq);
+	if (old)
+		destroy_workqueue(wq);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(__fsverity_init_verify_wq);
+
 /**
  * fsverity_enqueue_verify_work() - enqueue work on the fs-verity workqueue
  * @work: the work to enqueue

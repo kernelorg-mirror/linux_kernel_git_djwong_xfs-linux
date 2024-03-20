@@ -252,20 +252,12 @@ bool fsverity_verify_blocks(struct folio *folio, size_t len, size_t offset);
 void fsverity_verify_bio(struct bio *bio);
 void fsverity_enqueue_verify_work(struct work_struct *work);
 
-static inline int fsverity_set_ops(struct super_block *sb,
-				   const struct fsverity_operations *ops)
+int __fsverity_init_verify_wq(struct super_block *sb);
+static inline int fsverity_init_verify_wq(struct super_block *sb)
 {
-	sb->s_vop = ops;
-
-	/* Create per-sb workqueue for post read bio verification */
-	struct workqueue_struct *wq = alloc_workqueue(
-		"pread/%s", (WQ_FREEZABLE | WQ_MEM_RECLAIM), 0, sb->s_id);
-	if (!wq)
-		return -ENOMEM;
-
-	sb->s_read_done_wq = wq;
-
-	return 0;
+	if (sb->s_verify_wq)
+		return 0;
+	return __fsverity_init_verify_wq(sb);
 }
 
 #else /* !CONFIG_FS_VERITY */
@@ -345,8 +337,7 @@ static inline void fsverity_enqueue_verify_work(struct work_struct *work)
 	WARN_ON_ONCE(1);
 }
 
-static inline int fsverity_set_ops(struct super_block *sb,
-				   const struct fsverity_operations *ops)
+static inline int fsverity_init_verify_wq(struct super_block *sb)
 {
 	return -EOPNOTSUPP;
 }
