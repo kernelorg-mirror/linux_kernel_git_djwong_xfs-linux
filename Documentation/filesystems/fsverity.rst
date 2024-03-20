@@ -189,6 +189,16 @@ FS_IOC_ENABLE_VERITY can fail with the following errors:
   caller's file descriptor, another open file descriptor, or the file
   reference held by a writable memory map.
 
+FS_IOC_DISABLE_VERITY
+--------------------
+
+The FS_IOC_DISABLE_VERITY ioctl disables fs-verity on a file.  It takes
+a file descriptor.
+
+FS_IOC_DISABLE_VERITY can fail with the following errors:
+
+- ``EOPNOTSUPP``: the filesystem does not support disabling fs-verity.
+
 FS_IOC_MEASURE_VERITY
 ---------------------
 
