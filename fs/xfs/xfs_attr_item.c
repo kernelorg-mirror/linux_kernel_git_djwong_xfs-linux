@@ -486,6 +486,9 @@ xfs_attri_validate(
 	if (attrp->alfi_attr_filter & ~XFS_ATTRI_FILTER_MASK)
 		return false;
 
+	if (hweight32(attrp->alfi_attr_filter & XFS_ATTR_NSP_ONDISK_MASK) > 1)
+		return false;
+
 	/* alfi_op_flags should be either a set or remove */
 	switch (op) {
 	case XFS_ATTRI_OP_FLAGS_SET:
