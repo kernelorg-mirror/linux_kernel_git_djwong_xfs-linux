@@ -415,3 +415,53 @@ out_drop_write:
 	return err;
 }
 EXPORT_SYMBOL_GPL(fsverity_ioctl_enable);
+
+/**
+ * fsverity_ioctl_disable() - disable verity on a file
+ * @filp: file to enable verity on
+ *
+ * Disable fs-verity on a file.  See the "FS_IOC_DISABLE_VERITY" section of
+ * Documentation/filesystems/fsverity.rst for the documentation.
+ *
+ * Return: 0 on success, -errno on failure
+ */
+int fsverity_ioctl_disable(struct file *filp)
+{
+	struct inode *inode = file_inode(filp);
+	const struct fsverity_operations *vops = inode->i_sb->s_vop;
+	struct fsverity_info *vi;
+	u64 tree_size = 0;
+	unsigned int block_size = 0;
+	int err;
+
+	trace_fsverity_disable(inode);
+
+	inode_lock(inode);
+	if (IS_VERITY(inode)) {
+		err = 0;
+		goto out_unlock;
+	}
+
+	if (!vops->disable_verity) {
+		err = -EOPNOTSUPP;
+		goto out_unlock;
+	}
+
+	vi = fsverity_get_info(inode);
+	if (vi) {
+		block_size = vi->tree_params.block_size;
+		tree_size = vi->tree_params.tree_size;
+	}
+
+	err = vops->disable_verity(filp, tree_size, block_size);
+	if (err)
+		goto out_unlock;
+
+	fsverity_cleanup_inode(inode);
+	inode_unlock(inode);
+	return 0;
+out_unlock:
+	inode_unlock(inode);
+	return err;
+}
+EXPORT_SYMBOL_GPL(fsverity_ioctl_disable);
