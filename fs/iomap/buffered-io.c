@@ -336,10 +336,50 @@ struct iomap_fsverity_bio {
 	struct work_struct	work;
 	struct bio		bio;
 };
-static struct bio_set iomap_fsverity_bioset;
+static struct bio_set *iomap_fsverity_bioset;
+
+#define IOMAP_FSVERITY_POOL_SIZE	(4 * (PAGE_SIZE / SECTOR_SIZE))
+
+static int iomap_fsverity_init_bioset(void)
+{
+	struct bio_set *bs, *old;
+	int error;
+
+	bs = kmalloc(sizeof(*bs), GFP_KERNEL);
+	if (!bs)
+		return -ENOMEM;
+
+	error = bioset_init(bs, IOMAP_FSVERITY_POOL_SIZE,
+			    offsetof(struct iomap_fsverity_bio, bio),
+			    BIOSET_NEED_BVECS);
+	if (error)
+		goto out_exit;
+
+	/*
+	 * This has to be atomic as readaheads can race to create the
+	 * bioset.  If someone set the pointer before us, we drop ours.
+	 */
+	old = cmpxchg(&iomap_fsverity_bioset, NULL, bs);
+	if (old)
+		goto out_exit;
+
+	return 0;
+out_exit:
+	bioset_exit(bs);
+	kfree(bs);
+	return error;
+}
 
 int iomap_init_fsverity(struct super_block *sb)
 {
+	int ret;
+
+	if (!iomap_fsverity_bioset) {
+		ret = iomap_fsverity_init_bioset();
+		if (ret)
+			return ret;
+	}
+
 	return fsverity_init_verify_wq(sb);
 }
 EXPORT_SYMBOL_GPL(iomap_init_fsverity);
@@ -363,6 +403,24 @@ iomap_read_fsverity_end_io(struct bio *bio)
 	INIT_WORK(&fbio->work, iomap_read_fsverify_end_io_work);
 	queue_work(bio->bi_private, &fbio->work);
 }
+
+static struct bio *
+iomap_fsverity_read_bio_alloc(struct inode *inode, struct block_device *bdev,
+			    int nr_vecs, gfp_t gfp)
+{
+	struct bio *bio;
+
+	bio = bio_alloc_bioset(bdev, nr_vecs, REQ_OP_READ, gfp,
+			iomap_fsverity_bioset);
+	if (bio) {
+		bio->bi_private = inode->i_sb->s_verify_wq;
+		bio->bi_end_io = iomap_read_fsverity_end_io;
+	}
+	return bio;
+}
+#else
+# define iomap_verity_read_bio_alloc(...)	(NULL)
+# define iomap_fsverity_init_bioset(...)	(-EOPNOTSUPP)
 #endif /* CONFIG_FS_VERITY */
 
 static struct bio *iomap_read_bio_alloc(struct inode *inode,
@@ -370,17 +428,9 @@ static struct bio *iomap_read_bio_alloc(struct inode *inode,
 {
 	struct bio *bio;
 
-#ifdef CONFIG_FS_VERITY
-	if (fsverity_active(inode)) {
-		bio = bio_alloc_bioset(bdev, nr_vecs, REQ_OP_READ, gfp,
-					&iomap_fsverity_bioset);
-		if (bio) {
-			bio->bi_private = inode->i_sb->s_verify_wq;
-			bio->bi_end_io = iomap_read_fsverity_end_io;
-		}
-		return bio;
-	}
-#endif
+	if (fsverity_active(inode))
+		return iomap_fsverity_read_bio_alloc(inode, bdev, nr_vecs, gfp);
+
 	bio = bio_alloc(bdev, nr_vecs, REQ_OP_READ, gfp);
 	if (bio)
 		bio->bi_end_io = iomap_read_end_io;
@@ -2064,21 +2114,8 @@ EXPORT_SYMBOL_GPL(iomap_writepages);
 
 static int __init iomap_init(void)
 {
-	int error;
-
-	error = bioset_init(&iomap_ioend_bioset, IOMAP_POOL_SIZE,
+	return bioset_init(&iomap_ioend_bioset, IOMAP_POOL_SIZE,
 			    offsetof(struct iomap_ioend, io_inline_bio),
 			    BIOSET_NEED_BVECS);
-#ifdef CONFIG_FS_VERITY
-	if (error)
-		return error;
-
-	error = bioset_init(&iomap_fsverity_bioset, IOMAP_POOL_SIZE,
-			    offsetof(struct iomap_fsverity_bio, bio),
-			    BIOSET_NEED_BVECS);
-	if (error)
-		bioset_exit(&iomap_ioend_bioset);
-#endif
-	return error;
 }
 fs_initcall(iomap_init);
