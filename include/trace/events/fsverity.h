@@ -11,14 +11,10 @@ struct fsverity_descriptor;
 struct merkle_tree_params;
 struct fsverity_info;
 
-#define FSVERITY_TRACE_DIR_ASCEND	(1ul << 0)
-#define FSVERITY_TRACE_DIR_DESCEND	(1ul << 1)
-#define FSVERITY_HASH_SHOWN_LEN		20
-
 TRACE_EVENT(fsverity_enable,
-	TP_PROTO(struct inode *inode, struct fsverity_descriptor *desc,
-		struct merkle_tree_params *params),
-	TP_ARGS(inode, desc, params),
+	TP_PROTO(const struct inode *inode,
+		 const struct merkle_tree_params *params),
+	TP_ARGS(inode, params),
 	TP_STRUCT__entry(
 		__field(ino_t, ino)
 		__field(u64, data_size)
@@ -28,7 +24,7 @@ TRACE_EVENT(fsverity_enable,
 	),
 	TP_fast_assign(
 		__entry->ino = inode->i_ino;
-		__entry->data_size = desc->data_size;
+		__entry->data_size = i_size_read(inode);
 		__entry->block_size = params->block_size;
 		__entry->num_levels = params->num_levels;
 		__entry->tree_size = params->tree_size;
@@ -42,118 +38,102 @@ TRACE_EVENT(fsverity_enable,
 );
 
 TRACE_EVENT(fsverity_tree_done,
-	TP_PROTO(struct inode *inode, struct fsverity_descriptor *desc,
-		struct merkle_tree_params *params),
-	TP_ARGS(inode, desc, params),
+	TP_PROTO(const struct inode *inode, const struct fsverity_info *vi,
+		 const struct merkle_tree_params *params),
+	TP_ARGS(inode, vi, params),
 	TP_STRUCT__entry(
 		__field(ino_t, ino)
 		__field(unsigned int, levels)
-		__field(unsigned int, tree_blocks)
+		__field(unsigned int, block_size)
 		__field(u64, tree_size)
-		__array(u8, tree_hash, 64)
+		__dynamic_array(u8, root_hash, params->digest_size)
+		__dynamic_array(u8, file_digest, params->digest_size)
 	),
 	TP_fast_assign(
 		__entry->ino = inode->i_ino;
 		__entry->levels = params->num_levels;
-		__entry->tree_blocks =
-			params->tree_size >> params->log_blocksize;
+		__entry->block_size = params->block_size;
 		__entry->tree_size = params->tree_size;
-		memcpy(__entry->tree_hash, desc->root_hash, 64);
+		memcpy(__get_dynamic_array(root_hash), vi->root_hash, __get_dynamic_array_len(root_hash));
+		memcpy(__get_dynamic_array(file_digest), vi->file_digest, __get_dynamic_array_len(file_digest));
 	),
-	TP_printk("ino %lu levels %d tree_blocks %d tree_size %lld root_hash %s",
+	TP_printk("ino %lu levels %d block_size %d tree_size %lld root_hash %s digest %s",
 		(unsigned long) __entry->ino,
 		__entry->levels,
-		__entry->tree_blocks,
+		__entry->block_size,
 		__entry->tree_size,
-		__print_hex(__entry->tree_hash, 64))
+		__print_hex_str(__get_dynamic_array(root_hash), __get_dynamic_array_len(root_hash)),
+		__print_hex_str(__get_dynamic_array(file_digest), __get_dynamic_array_len(file_digest)))
 );
 
-TRACE_EVENT(fsverity_verify_block,
-	TP_PROTO(struct inode *inode, u64 offset),
-	TP_ARGS(inode, offset),
+TRACE_EVENT(fsverity_verify_data_block,
+	TP_PROTO(const struct inode *inode,
+		 const struct merkle_tree_params *params,
+		 u64 data_pos),
+	TP_ARGS(inode, params, data_pos),
 	TP_STRUCT__entry(
 		__field(ino_t, ino)
-		__field(u64, offset)
+		__field(u64, data_pos)
 		__field(unsigned int, block_size)
 	),
 	TP_fast_assign(
 		__entry->ino = inode->i_ino;
-		__entry->offset = offset;
-		__entry->block_size =
-			inode->i_verity_info->tree_params.block_size;
+		__entry->data_pos = data_pos;
+		__entry->block_size = params->block_size;
 	),
-	TP_printk("ino %lu data offset %lld data block size %u",
+	TP_printk("ino %lu pos %lld merkle_blocksize %u",
 		(unsigned long) __entry->ino,
-		__entry->offset,
+		__entry->data_pos,
 		__entry->block_size)
 );
 
-TRACE_EVENT(fsverity_merkle_tree_block_verified,
-	TP_PROTO(struct inode *inode,
-		 struct fsverity_blockbuf *block,
-		 u8 direction),
-	TP_ARGS(inode, block, direction),
+TRACE_EVENT(fsverity_merkle_hit,
+	TP_PROTO(const struct inode *inode, u64 data_pos, u64 merkle_pos,
+		 unsigned int level, unsigned int hidx),
+	TP_ARGS(inode, data_pos, merkle_pos, level, hidx),
 	TP_STRUCT__entry(
 		__field(ino_t, ino)
-		__field(u64, offset)
-		__field(u8, direction)
+		__field(u64, data_pos)
+		__field(u64, merkle_pos)
+		__field(unsigned int, level)
+		__field(unsigned int, hidx)
 	),
 	TP_fast_assign(
 		__entry->ino = inode->i_ino;
-		__entry->offset = block->offset;
-		__entry->direction = direction;
+		__entry->data_pos = data_pos;
+		__entry->merkle_pos = merkle_pos;
+		__entry->level = level;
+		__entry->hidx = hidx;
 	),
-	TP_printk("ino %lu block offset %llu %s",
+	TP_printk("ino %lu data_pos %llu merkle_pos %llu level %u hidx %u",
 		(unsigned long) __entry->ino,
-		__entry->offset,
-		__entry->direction == 0 ? "ascend" : "descend")
+		__entry->data_pos,
+		__entry->merkle_pos,
+		__entry->level,
+		__entry->hidx)
 );
 
-TRACE_EVENT(fsverity_read_merkle_tree_block,
-	TP_PROTO(struct inode *inode, u64 offset, unsigned int log_blocksize),
-	TP_ARGS(inode, offset, log_blocksize),
+TRACE_EVENT(fsverity_verify_merkle_block,
+	TP_PROTO(const struct inode *inode, u64 merkle_pos, unsigned int level,
+		unsigned int hidx),
+	TP_ARGS(inode, merkle_pos, level, hidx),
 	TP_STRUCT__entry(
 		__field(ino_t, ino)
-		__field(u64, offset)
-		__field(u64, index)
-		__field(unsigned int, block_size)
+		__field(u64, merkle_pos)
+		__field(unsigned int, level)
+		__field(unsigned int, hidx)
 	),
 	TP_fast_assign(
 		__entry->ino = inode->i_ino;
-		__entry->offset = offset;
-		__entry->index = offset >> log_blocksize;
-		__entry->block_size = 1 << log_blocksize;
+		__entry->merkle_pos = merkle_pos;
+		__entry->level = level;
+		__entry->hidx = hidx;
 	),
-	TP_printk("ino %lu tree offset %llu block index %llu block hize %u",
+	TP_printk("ino %lu merkle_pos %llu level %u hidx %u",
 		(unsigned long) __entry->ino,
-		__entry->offset,
-		__entry->index,
-		__entry->block_size)
-);
-
-TRACE_EVENT(fsverity_verify_signature,
-	TP_PROTO(const struct inode *inode, const u8 *signature, size_t sig_size),
-	TP_ARGS(inode, signature, sig_size),
-	TP_STRUCT__entry(
-		__field(ino_t, ino)
-		__dynamic_array(u8, signature, sig_size)
-		__field(size_t, sig_size)
-		__field(size_t, sig_size_show)
-	),
-	TP_fast_assign(
-		__entry->ino = inode->i_ino;
-		memcpy(__get_dynamic_array(signature), signature, sig_size);
-		__entry->sig_size = sig_size;
-		__entry->sig_size_show = (sig_size > FSVERITY_HASH_SHOWN_LEN ?
-			FSVERITY_HASH_SHOWN_LEN : sig_size);
-	),
-	TP_printk("ino %lu sig_size %zu %s%s%s",
-		(unsigned long) __entry->ino,
-		__entry->sig_size,
-		(__entry->sig_size ? "sig " : ""),
-		__print_hex(__get_dynamic_array(signature),
-			__entry->sig_size_show),
-		(__entry->sig_size ? "..." : ""))
+		__entry->merkle_pos,
+		__entry->level,
+		__entry->hidx)
 );
 
 #endif /* _TRACE_FSVERITY_H */
