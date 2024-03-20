@@ -42,6 +42,7 @@
 #include "xfs_exchrange.h"
 #include "xfs_handle.h"
 #include "xfs_rtgroup.h"
+#include "xfs_fsverity.h"
 
 #include <linux/mount.h>
 #include <linux/fileattr.h>
@@ -1589,6 +1590,11 @@ xfs_file_ioctl(
 		if (!xfs_has_verity(mp))
 			return -EOPNOTSUPP;
 		return fsverity_ioctl_read_metadata(filp, arg);
+
+	case FS_IOC_DISABLE_VERITY:
+		if (!xfs_has_verity(mp))
+			return -EOPNOTSUPP;
+		return fsverity_ioctl_disable(filp);
 
 	default:
 		return -ENOTTY;
