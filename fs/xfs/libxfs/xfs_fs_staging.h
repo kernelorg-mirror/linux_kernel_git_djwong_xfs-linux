@@ -131,4 +131,7 @@ struct xfs_map_freesp {
  */
 #define XFS_IOC_MAP_FREESP	_IOWR('X', 64, struct xfs_map_freesp)
 
+/* Turn off fs-verity */
+#define FS_IOC_DISABLE_VERITY	_IO('f', 133)
+
 #endif /* __XFS_FS_STAGING_H__ */
