@@ -44,6 +44,7 @@
 #include "xfs_file.h"
 #include "xfs_exchrange.h"
 #include "xfs_rtgroup.h"
+#include "xfs_verity.h"
 
 #include <linux/mount.h>
 #include <linux/namei.h>
@@ -2711,6 +2712,11 @@ xfs_file_ioctl(
 
 	case XFS_IOC_MAP_FREESP:
 		return xfs_ioc_map_freesp(filp, arg);
+
+#ifdef CONFIG_XFS_EXPERIMENTAL_IOCTLS
+	case FS_IOC_DISABLE_VERITY:
+		return xfs_verity_disable(filp);
+#endif
 
 	case FS_IOC_ENABLE_VERITY:
 		if (!xfs_has_verity(mp))

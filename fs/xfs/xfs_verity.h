@@ -17,6 +17,8 @@ struct xfs_icwalk;
 int xfs_verity_scan_inode(struct xfs_inode *ip, struct xfs_icwalk *icw);
 
 extern const struct fsverity_operations xfs_verity_ops;
+
+int xfs_verity_disable(struct file *file);
 #else
 # define xfs_verity_cache_init(ip)		((void)0)
 # define xfs_verity_cache_drop(ip)		((void)0)
@@ -24,6 +26,7 @@ extern const struct fsverity_operations xfs_verity_ops;
 # define xfs_verity_register_shrinker(mp)	(0)
 # define xfs_verity_unregister_shrinker(mp)	((void)0)
 # define xfs_verity_scan_inode(ip, icw)		(0)
+# define xfs_verity_disable(ip)			(-EOPNOTSUPP)
 #endif	/* CONFIG_FS_VERITY */
 
 #endif	/* __XFS_VERITY_H__ */
