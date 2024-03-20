@@ -154,8 +154,6 @@ static inline void fsverity_init_signature(void)
 
 /* verify.c */
 
-void __init fsverity_init_workqueue(void);
-
 static inline bool fsverity_caches_blocks(const struct inode *inode)
 {
 	const struct fsverity_operations *vops = inode->i_sb->s_vop;
