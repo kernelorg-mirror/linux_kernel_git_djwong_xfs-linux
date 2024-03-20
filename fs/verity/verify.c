@@ -122,7 +122,9 @@ verify_data_block(struct inode *inode, struct fsverity_info *vi,
 		/* Byte offset of the wanted hash relative to @addr */
 		unsigned int hoffset;
 	} hblocks[FS_VERITY_MAX_LEVELS];
-	trace_fsverity_verify_block(inode, data_pos);
+
+	trace_fsverity_verify_data_block(inode, params, data_pos);
+
 	/*
 	 * The index of the previous level's block within that level; also the
 	 * index of that block's hash within the current level.
@@ -195,8 +197,9 @@ verify_data_block(struct inode *inode, struct fsverity_info *vi,
 		if (is_hash_block_verified(inode, block, hblock_idx)) {
 			memcpy(_want_hash, block->kaddr + hoffset, hsize);
 			want_hash = _want_hash;
-			trace_fsverity_merkle_tree_block_verified(inode,
-					block, FSVERITY_TRACE_DIR_ASCEND);
+			trace_fsverity_merkle_hit(inode, data_pos, hblock_pos,
+					level,
+					hoffset >> params->log_digestsize);
 			fsverity_drop_merkle_tree_block(inode, block);
 			goto descend;
 		}
@@ -231,8 +234,8 @@ descend:
 			SetPageChecked((struct page *)block->context);
 		memcpy(_want_hash, haddr + hoffset, hsize);
 		want_hash = _want_hash;
-		trace_fsverity_merkle_tree_block_verified(inode, block,
-				FSVERITY_TRACE_DIR_DESCEND);
+		trace_fsverity_verify_merkle_block(inode, block->offset,
+				level, hoffset >> params->log_digestsize);
 		fsverity_drop_merkle_tree_block(inode, block);
 	}
 
