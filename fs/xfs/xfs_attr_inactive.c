@@ -110,7 +110,7 @@ xfs_attr3_leaf_inactive(
 		if (!name_rmt->valueblk)
 			continue;
 
-		blkcnt = xfs_attr3_rmt_blocks(dp->i_mount,
+		blkcnt = xfs_attr3_rmt_blocks(dp->i_mount, entry->flags,
 				be32_to_cpu(name_rmt->valuelen));
 		error = xfs_attr3_rmt_stale(dp,
 				be32_to_cpu(name_rmt->valueblk), blkcnt);

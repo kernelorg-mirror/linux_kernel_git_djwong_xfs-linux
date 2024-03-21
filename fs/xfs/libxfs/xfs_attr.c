@@ -342,7 +342,8 @@ xfs_attr_calc_size(
 		 * Out of line attribute, cannot double split, but
 		 * make room for the attribute value itself.
 		 */
-		uint	dblocks = xfs_attr3_rmt_blocks(mp, args->valuelen);
+		uint	dblocks = xfs_attr3_rmt_blocks(mp, args->attr_filter,
+						       args->valuelen);
 		nblks += dblocks;
 		nblks += XFS_NEXTENTADD_SPACE_RES(mp, dblocks, XFS_ATTR_FORK);
 	}
@@ -1056,7 +1057,8 @@ xfs_attr_set(
 		}
 
 		if (!local)
-			rmt_blks = xfs_attr3_rmt_blocks(mp, args->valuelen);
+			rmt_blks = xfs_attr3_rmt_blocks(mp, args->valuelen,
+					args->valuelen);
 		break;
 	case XFS_ATTRUPDATE_REMOVE:
 		XFS_STATS_INC(mp, xs_attr_remove);

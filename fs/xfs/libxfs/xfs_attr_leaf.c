@@ -1566,7 +1566,8 @@ xfs_attr3_leaf_add_work(
 		name_rmt->valuelen = 0;
 		name_rmt->valueblk = 0;
 		args->rmtblkno = 1;
-		args->rmtblkcnt = xfs_attr3_rmt_blocks(mp, args->valuelen);
+		args->rmtblkcnt = xfs_attr3_rmt_blocks(mp, args->attr_filter,
+				args->valuelen);
 		args->rmtvaluelen = args->valuelen;
 	}
 	xfs_trans_log_buf(args->trans, bp,
@@ -2501,6 +2502,7 @@ xfs_attr3_leaf_lookup_int(
 			args->rmtblkno = be32_to_cpu(name_rmt->valueblk);
 			args->rmtblkcnt = xfs_attr3_rmt_blocks(
 							args->dp->i_mount,
+							args->attr_filter,
 							args->rmtvaluelen);
 			return -EEXIST;
 		}
@@ -2549,6 +2551,7 @@ xfs_attr3_leaf_getvalue(
 	args->rmtvaluelen = be32_to_cpu(name_rmt->valuelen);
 	args->rmtblkno = be32_to_cpu(name_rmt->valueblk);
 	args->rmtblkcnt = xfs_attr3_rmt_blocks(args->dp->i_mount,
+					       args->attr_filter,
 					       args->rmtvaluelen);
 	return xfs_attr_copy_value(args, NULL, args->rmtvaluelen);
 }
