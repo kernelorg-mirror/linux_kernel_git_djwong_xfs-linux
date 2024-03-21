@@ -1495,8 +1495,25 @@ xfs_file_open(
 			FMODE_DIO_PARALLEL_WRITE | FMODE_CAN_ODIRECT;
 
 	error = fsverity_file_open(inode, file);
-	if (error)
+	switch (error) {
+	case -EFBIG:
+	case -EINVAL:
+	case -EMSGSIZE:
+	case -EFSCORRUPTED:
+		/*
+		 * Be selective about which fsverity errors we propagate to
+		 * userspace; we still want to be able to open this file even
+		 * if reads don't work.  Someone might want to perform an
+		 * online repair.
+		 */
+		if (has_capability_noaudit(current, CAP_SYS_ADMIN))
+			break;
 		return error;
+	case 0:
+		break;
+	default:
+		return error;
+	}
 
 	return generic_file_open(inode, file);
 }

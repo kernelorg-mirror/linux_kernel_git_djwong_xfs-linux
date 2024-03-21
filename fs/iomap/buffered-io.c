@@ -487,6 +487,14 @@ static loff_t iomap_readpage_iter(const struct iomap_iter *iter,
 	size_t poff, plen;
 	sector_t sector;
 
+	/*
+	 * If this verity file hasn't been activated, fail read attempts.  This
+	 * can happen if the calling filesystem allows files to be opened even
+	 * with damaged verity metadata.
+	 */
+	if (IS_VERITY(iter->inode) && !fsverity_active(iter->inode))
+		return -EIO;
+
 	if (iomap->type == IOMAP_INLINE)
 		return iomap_read_inline_data(iter, folio);
 
