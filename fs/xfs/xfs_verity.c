@@ -385,6 +385,47 @@ xfs_verity_unregister_shrinker(struct xfs_mount *mp)
 	percpu_counter_destroy(&mp->m_verity_blocks);
 }
 
+/* Delete the verity descriptor. */
+static int
+xfs_verity_drop_descriptor(
+	struct xfs_inode	*ip)
+{
+	struct xfs_da_args		args = {
+		.dp			= ip,
+		.whichfork		= XFS_ATTR_FORK,
+		.attr_filter		= XFS_ATTR_VERITY,
+		.op_flags		= XFS_DA_OP_REMOVE | XFS_DA_OP_OKNOENT,
+		.name			= (const uint8_t *)XFS_VERITY_DESCRIPTOR_NAME,
+		.namelen		= XFS_VERITY_DESCRIPTOR_NAME_LEN,
+		/* NULL value make xfs_attr_set remove the attr */
+		.value			= NULL,
+	};
+
+	return xfs_attr_set(&args);
+}
+
+/* Delete a merkle tree block. */
+static int
+xfs_verity_drop_merkle_block(
+	struct xfs_inode		*ip,
+	u64				offset)
+{
+	struct xfs_verity_merkle_key	name = { };
+	struct xfs_da_args		args = {
+		.dp			= ip,
+		.whichfork		= XFS_ATTR_FORK,
+		.attr_filter		= XFS_ATTR_VERITY,
+		.op_flags		= XFS_DA_OP_REMOVE | XFS_DA_OP_OKNOENT,
+		.name			= (const uint8_t *)&name,
+		.namelen		= sizeof(struct xfs_verity_merkle_key),
+		/* NULL value make xfs_attr_set remove the attr */
+		.value			= NULL,
+	};
+
+	xfs_verity_merkle_key_to_disk(&name, offset);
+	return xfs_attr_set(&args);
+}
+
 static int
 xfs_verity_get_descriptor(
 	struct inode		*inode,
@@ -440,35 +481,19 @@ xfs_drop_merkle_tree(
 	u64				merkle_tree_size,
 	unsigned int			tree_blocksize)
 {
-	struct xfs_verity_merkle_key	name;
-	int				error = 0;
-	u64				offset = 0;
-	struct xfs_da_args		args = {
-		.dp			= ip,
-		.whichfork		= XFS_ATTR_FORK,
-		.attr_filter		= XFS_ATTR_VERITY,
-		.op_flags		= XFS_DA_OP_REMOVE,
-		.name			= (const uint8_t *)&name,
-		.namelen		= sizeof(struct xfs_verity_merkle_key),
-		/* NULL value make xfs_attr_set remove the attr */
-		.value			= NULL,
-	};
+	int				error;
+	u64				offset;
 
 	if (!merkle_tree_size)
 		return 0;
 
 	for (offset = 0; offset < merkle_tree_size; offset += tree_blocksize) {
-		xfs_verity_merkle_key_to_disk(&name, offset);
-		error = xfs_attr_set(&args);
+		error = xfs_verity_drop_merkle_block(ip, offset);
 		if (error)
 			return error;
 	}
 
-	args.name = (const uint8_t *)XFS_VERITY_DESCRIPTOR_NAME;
-	args.namelen = XFS_VERITY_DESCRIPTOR_NAME_LEN;
-	error = xfs_attr_set(&args);
-
-	return error;
+	return xfs_verity_drop_descriptor(ip);
 }
 
 static int
