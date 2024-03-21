@@ -43,14 +43,23 @@
  * the logging system and therefore never have a log item.
  */
 
+static inline bool
+xfs_attr3_rmt_has_header(
+	struct xfs_mount	*mp,
+	unsigned int		attrns)
+{
+	return xfs_has_crc(mp) && !(attrns & XFS_ATTR_VERITY);
+}
+
 /* How many bytes can be stored in a remote value buffer? */
 inline unsigned int
 xfs_attr3_rmt_buf_space(
-	struct xfs_mount	*mp)
+	struct xfs_mount	*mp,
+	unsigned int		attrns)
 {
 	unsigned int		blocksize = mp->m_attr_geo->blksize;
 
-	if (xfs_has_crc(mp))
+	if (xfs_attr3_rmt_has_header(mp, attrns))
 		return blocksize - sizeof(struct xfs_attr3_rmt_hdr);
 
 	return blocksize;
@@ -60,14 +69,15 @@ xfs_attr3_rmt_buf_space(
 unsigned int
 xfs_attr3_rmt_blocks(
 	struct xfs_mount	*mp,
+	unsigned int		attrns,
 	unsigned int		attrlen)
 {
 	/*
 	 * Each contiguous block has a header, so it is not just a simple
 	 * attribute length to FSB conversion.
 	 */
-	if (xfs_has_crc(mp))
-		return howmany(attrlen, xfs_attr3_rmt_buf_space(mp));
+	if (xfs_attr3_rmt_has_header(mp, attrns))
+		return howmany(attrlen, xfs_attr3_rmt_buf_space(mp, attrns));
 
 	return XFS_B_TO_FSB(mp, attrlen);
 }
@@ -248,6 +258,42 @@ const struct xfs_buf_ops xfs_attr3_rmt_buf_ops = {
 	.verify_struct = xfs_attr3_rmt_verify_struct,
 };
 
+static void
+xfs_attr3_rmtverity_read_verify(
+	struct xfs_buf	*bp)
+{
+}
+
+static xfs_failaddr_t
+xfs_attr3_rmtverity_verify_struct(
+	struct xfs_buf	*bp)
+{
+	return NULL;
+}
+
+static void
+xfs_attr3_rmtverity_write_verify(
+	struct xfs_buf	*bp)
+{
+}
+
+const struct xfs_buf_ops xfs_attr3_rmtverity_buf_ops = {
+	.name = "xfs_attr3_remote_verity",
+	.magic = { 0, 0 },
+	.verify_read = xfs_attr3_rmtverity_read_verify,
+	.verify_write = xfs_attr3_rmtverity_write_verify,
+	.verify_struct = xfs_attr3_rmtverity_verify_struct,
+};
+
+inline const struct xfs_buf_ops *
+xfs_attr3_remote_buf_ops(
+	unsigned int		attrns)
+{
+	if (attrns & XFS_ATTR_VERITY)
+		return &xfs_attr3_rmtverity_buf_ops;
+	return &xfs_attr3_rmt_buf_ops;
+}
+
 STATIC int
 xfs_attr3_rmt_hdr_set(
 	struct xfs_mount	*mp,
@@ -284,6 +330,40 @@ xfs_attr3_rmt_hdr_set(
 	return sizeof(struct xfs_attr3_rmt_hdr);
 }
 
+static void
+xfs_attr_rmtverity_transform(
+	struct xfs_buf		*bp,
+	xfs_ino_t		ino,
+	void			*buf,
+	unsigned int		byte_cnt)
+{
+	struct xfs_mount	*mp = bp->b_mount;
+	struct xfs_attr3_rmtverity_hdr	*hdr = buf;
+	char			*dst;
+	const char		*src;
+	unsigned int		i;
+
+	if (byte_cnt >= offsetofend(struct xfs_attr3_rmtverity_hdr, rmv_owner))
+		hdr->rmv_owner ^= cpu_to_be64(ino);
+
+	if (byte_cnt >= offsetofend(struct xfs_attr3_rmtverity_hdr, rmv_blkno))
+		hdr->rmv_blkno ^= cpu_to_be64(xfs_buf_daddr(bp));
+
+	if (byte_cnt >= offsetofend(struct xfs_attr3_rmtverity_hdr, rmv_magic))
+		hdr->rmv_magic ^= cpu_to_be32(XFS_ATTR3_RMTVERITY_MAGIC);
+
+	if (byte_cnt <= offsetof(struct xfs_attr3_rmtverity_hdr, rmv_uuid))
+		return;
+
+	byte_cnt -= offsetof(struct xfs_attr3_rmtverity_hdr, rmv_uuid);
+	byte_cnt = min(byte_cnt, sizeof(uuid_t));
+
+	dst = (void *)&hdr->rmv_uuid;
+	src = (void *)&mp->m_sb.sb_meta_uuid;
+	for (i = 0; i < byte_cnt; i++)
+		dst[i] ^= src[i];
+}
+
 /*
  * Helper functions to copy attribute data in and out of the one disk extents
  */
@@ -293,6 +373,7 @@ xfs_attr_rmtval_copyout(
 	struct xfs_buf		*bp,
 	struct xfs_inode	*dp,
 	xfs_ino_t		owner,
+	unsigned int		attrns,
 	unsigned int		*offset,
 	unsigned int		*valuelen,
 	uint8_t			**dst)
@@ -306,11 +387,11 @@ xfs_attr_rmtval_copyout(
 
 	while (len > 0 && *valuelen > 0) {
 		unsigned int hdr_size = 0;
-		unsigned int byte_cnt = xfs_attr3_rmt_buf_space(mp);
+		unsigned int byte_cnt = xfs_attr3_rmt_buf_space(mp, attrns);
 
 		byte_cnt = min(*valuelen, byte_cnt);
 
-		if (xfs_has_crc(mp)) {
+		if (xfs_attr3_rmt_has_header(mp, attrns)) {
 			if (xfs_attr3_rmt_hdr_ok(src, owner, *offset,
 						  byte_cnt, bno)) {
 				xfs_alert(mp,
@@ -323,6 +404,10 @@ xfs_attr_rmtval_copyout(
 		}
 
 		memcpy(*dst, src + hdr_size, byte_cnt);
+
+		if (attrns & XFS_ATTR_VERITY)
+			xfs_attr_rmtverity_transform(bp, dp->i_ino, *dst,
+					byte_cnt);
 
 		/* roll buffer forwards */
 		len -= blksize;
@@ -342,6 +427,7 @@ xfs_attr_rmtval_copyin(
 	struct xfs_mount *mp,
 	struct xfs_buf	*bp,
 	xfs_ino_t	ino,
+	unsigned int	attrns,
 	unsigned int	*offset,
 	unsigned int	*valuelen,
 	uint8_t		**src)
@@ -354,14 +440,19 @@ xfs_attr_rmtval_copyin(
 	ASSERT(len >= blksize);
 
 	while (len > 0 && *valuelen > 0) {
-		unsigned int hdr_size;
-		unsigned int byte_cnt = xfs_attr3_rmt_buf_space(mp);
+		unsigned int hdr_size = 0;
+		unsigned int byte_cnt = xfs_attr3_rmt_buf_space(mp, attrns);
 
 		byte_cnt = min(*valuelen, byte_cnt);
-		hdr_size = xfs_attr3_rmt_hdr_set(mp, dst, ino, *offset,
-						 byte_cnt, bno);
+		if (xfs_attr3_rmt_has_header(mp, attrns))
+			hdr_size = xfs_attr3_rmt_hdr_set(mp, dst, ino, *offset,
+					byte_cnt, bno);
 
 		memcpy(dst + hdr_size, *src, byte_cnt);
+
+		if (attrns & XFS_ATTR_VERITY)
+			xfs_attr_rmtverity_transform(bp, ino, dst + hdr_size,
+					byte_cnt);
 
 		/*
 		 * If this is the last block, zero the remainder of it.
@@ -407,6 +498,7 @@ xfs_attr_rmtval_get(
 	unsigned int		blkcnt = args->rmtblkcnt;
 	int			i;
 	unsigned int		offset = 0;
+	const struct xfs_buf_ops *ops = xfs_attr3_remote_buf_ops(args->attr_filter);
 
 	trace_xfs_attr_rmtval_get(args);
 
@@ -432,14 +524,15 @@ xfs_attr_rmtval_get(
 			dblkno = XFS_FSB_TO_DADDR(mp, map[i].br_startblock);
 			dblkcnt = XFS_FSB_TO_BB(mp, map[i].br_blockcount);
 			error = xfs_buf_read(mp->m_ddev_targp, dblkno, dblkcnt,
-					0, &bp, &xfs_attr3_rmt_buf_ops);
+					0, &bp, ops);
 			if (xfs_metadata_is_sick(error))
 				xfs_dirattr_mark_sick(args->dp, XFS_ATTR_FORK);
 			if (error)
 				return error;
 
 			error = xfs_attr_rmtval_copyout(mp, bp, args->dp,
-					args->owner, &offset, &valuelen, &dst);
+					args->owner, args->attr_filter,
+					&offset, &valuelen, &dst);
 			xfs_buf_relse(bp);
 			if (error)
 				return error;
@@ -472,7 +565,7 @@ xfs_attr_rmt_find_hole(
 	 * straight byte to FSB conversion and have to take the header space
 	 * into account.
 	 */
-	blkcnt = xfs_attr3_rmt_blocks(mp, args->rmtvaluelen);
+	blkcnt = xfs_attr3_rmt_blocks(mp, args->attr_filter, args->rmtvaluelen);
 	error = xfs_bmap_first_unused(args->trans, args->dp, blkcnt, &lfileoff,
 						   XFS_ATTR_FORK);
 	if (error)
@@ -534,10 +627,10 @@ xfs_attr_rmtval_set_value(
 		error = xfs_buf_get(mp->m_ddev_targp, dblkno, dblkcnt, &bp);
 		if (error)
 			return error;
-		bp->b_ops = &xfs_attr3_rmt_buf_ops;
+		bp->b_ops = xfs_attr3_remote_buf_ops(args->attr_filter);
 
-		xfs_attr_rmtval_copyin(mp, bp, args->owner, &offset, &valuelen,
-				&src);
+		xfs_attr_rmtval_copyin(mp, bp, args->owner, args->attr_filter,
+				&offset, &valuelen, &src);
 
 		error = xfs_bwrite(bp);	/* GROT: NOTE: synchronous write */
 		xfs_buf_relse(bp);
