@@ -227,7 +227,7 @@ xrep_bufscan_max_sectors(
 	int			max_fsbs;
 
 	/* Remote xattr values are the largest buffers that we support. */
-	max_fsbs = xfs_attr3_rmt_blocks(mp, XFS_XATTR_SIZE_MAX);
+	max_fsbs = xfs_attr3_max_rmt_blocks(mp);
 
 	return XFS_FSB_TO_BB(mp, min_t(xfs_extlen_t, fsblocks, max_fsbs));
 }
@@ -1070,7 +1070,7 @@ xreap_bmapi_binval(
 	 * of the next hole.
 	 */
 	off = imap->br_startoff + imap->br_blockcount;
-	max_off = off + xfs_attr3_rmt_blocks(mp, XFS_XATTR_SIZE_MAX);
+	max_off = off + xfs_attr3_max_rmt_blocks(mp);
 	while (off < max_off) {
 		struct xfs_bmbt_irec	hmap;
 		int			nhmaps = 1;
