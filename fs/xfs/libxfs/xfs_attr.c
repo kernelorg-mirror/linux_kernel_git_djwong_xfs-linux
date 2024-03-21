@@ -1080,7 +1080,7 @@ xfs_attr_set(
 			rmt_blks = xfs_attr3_rmt_blocks(mp, args->valuelen);
 	} else {
 		XFS_STATS_INC(mp, xs_attr_remove);
-		rmt_blks = xfs_attr3_rmt_blocks(mp, XFS_XATTR_SIZE_MAX);
+		rmt_blks = xfs_attr3_max_rmt_blocks(mp);
 	}
 
 	/*
@@ -1245,7 +1245,7 @@ xfs_attr_removename(
 	ASSERT(!args->trans);
 
 	rmt_extents = XFS_IEXT_ATTR_MANIP_CNT(
-				xfs_attr3_rmt_blocks(mp, XFS_XATTR_SIZE_MAX));
+				xfs_attr3_max_rmt_blocks(mp));
 
 	xfs_init_attr_trans(args, &tres, &total);
 	error = xfs_trans_alloc_inode(dp, &tres, total, 0, rsvd, &args->trans);
