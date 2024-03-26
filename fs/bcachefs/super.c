@@ -56,7 +56,6 @@
 #include "super.h"
 #include "super-io.h"
 #include "sysfs.h"
-#include "thread_with_file.h"
 #include "trace.h"
 
 #include <linux/backing-dev.h>
@@ -68,6 +67,7 @@
 #include <linux/percpu.h>
 #include <linux/random.h>
 #include <linux/sysfs.h>
+#include <linux/thread_with_file.h>
 #include <crypto/hash.h>
 
 MODULE_LICENSE("GPL");
@@ -95,7 +95,7 @@ static void bch2_print_maybe_redirect(struct stdio_redirect *stdio, const char *
 		if (fmt[0] == KERN_SOH[0])
 			fmt += 2;
 
-		bch2_stdio_redirect_vprintf(stdio, true, fmt, args);
+		stdio_redirect_vprintf(stdio, true, fmt, args);
 		return;
 	}
 #endif
