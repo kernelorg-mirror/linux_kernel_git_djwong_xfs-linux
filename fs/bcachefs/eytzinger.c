@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 
-#include "eytzinger.h"
+#include <linux/eytzinger.h>
 
 /**
  * is_aligned - is this pointer & size okay for word-wide copying?
