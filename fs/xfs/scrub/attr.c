@@ -197,14 +197,8 @@ xchk_xattr_actor(
 		return 0;
 	}
 
-	/* Only one namespace bit allowed. */
-	if (hweight32(attr_flags & XFS_ATTR_NSP_ONDISK_MASK) > 1) {
-		xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, args.blkno);
-		return -ECANCELED;
-	}
-
 	/* Does this name make sense? */
-	if (!xfs_attr_namecheck(name, namelen)) {
+	if (!xfs_attr_namecheck(attr_flags, name, namelen)) {
 		xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, args.blkno);
 		return -ECANCELED;
 	}
@@ -513,8 +507,15 @@ xchk_xattr_rec(
 	hash = be32_to_cpu(ent->hashval);
 	badflags = ~(XFS_ATTR_LOCAL | XFS_ATTR_ROOT | XFS_ATTR_SECURE |
 			XFS_ATTR_INCOMPLETE | XFS_ATTR_PARENT);
-	if ((ent->flags & badflags) != 0)
+	if ((ent->flags & badflags) != 0) {
 		xchk_da_set_corrupt(ds, level);
+		return error;
+	}
+	if (!xfs_attr_check_namespace(ent->flags)) {
+		xchk_da_set_corrupt(ds, level);
+		return error;
+	}
+
 	if (ent->flags & XFS_ATTR_LOCAL) {
 		lentry = (struct xfs_attr_leaf_name_local *)
 				(((char *)bp->b_addr) + nameidx);
