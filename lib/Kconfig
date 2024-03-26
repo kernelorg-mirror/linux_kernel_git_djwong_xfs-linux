@@ -782,3 +782,7 @@ config POLYNOMIAL
 
 config FIRMWARE_TABLE
 	bool
+
+config TIME_STATS
+	tristate
+	select MEAN_AND_VARIANCE
