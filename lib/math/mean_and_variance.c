@@ -40,9 +40,8 @@
 #include <linux/limits.h>
 #include <linux/math.h>
 #include <linux/math64.h>
+#include <linux/mean_and_variance.h>
 #include <linux/module.h>
-
-#include "mean_and_variance.h"
 
 u128_u u128_div(u128_u n, u64 d)
 {
@@ -58,6 +57,7 @@ u128_u u128_div(u128_u n, u64 d)
 	r = u128_add(r,          u64_to_u128(div64_u64_rem(lo + (rem << 32), d, &rem)));
 	return r;
 }
+EXPORT_SYMBOL_GPL(u128_div);
 
 /**
  * mean_and_variance_get_mean() - get mean from @s
@@ -67,6 +67,7 @@ s64 mean_and_variance_get_mean(struct mean_and_variance s)
 {
 	return s.n ? div64_u64(s.sum, s.n) : 0;
 }
+EXPORT_SYMBOL_GPL(mean_and_variance_get_mean);
 
 /**
  * mean_and_variance_get_variance() -  get variance from @s1
@@ -85,6 +86,7 @@ u64 mean_and_variance_get_variance(struct mean_and_variance s1)
 		return 0;
 	}
 }
+EXPORT_SYMBOL_GPL(mean_and_variance_get_variance);
 
 /**
  * mean_and_variance_get_stddev() - get standard deviation from @s
@@ -94,6 +96,7 @@ u32 mean_and_variance_get_stddev(struct mean_and_variance s)
 {
 	return int_sqrt64(mean_and_variance_get_variance(s));
 }
+EXPORT_SYMBOL_GPL(mean_and_variance_get_stddev);
 
 /**
  * mean_and_variance_weighted_update() - exponentially weighted variant of mean_and_variance_update()
@@ -126,6 +129,7 @@ void mean_and_variance_weighted_update(struct mean_and_variance_weighted *s,
 		s->variance = ((var_w0 << w) - var_w0 + ((diff_w * (x_w - u_w1)) >> w)) >> w;
 	}
 }
+EXPORT_SYMBOL_GPL(mean_and_variance_weighted_update);
 
 /**
  * mean_and_variance_weighted_get_mean() - get mean from @s
@@ -137,6 +141,7 @@ s64 mean_and_variance_weighted_get_mean(struct mean_and_variance_weighted s,
 {
 	return fast_divpow2(s.mean, weight);
 }
+EXPORT_SYMBOL_GPL(mean_and_variance_weighted_get_mean);
 
 /**
  * mean_and_variance_weighted_get_variance() -- get variance from @s
@@ -149,6 +154,7 @@ u64 mean_and_variance_weighted_get_variance(struct mean_and_variance_weighted s,
 	// always positive don't need fast divpow2
 	return s.variance >> weight;
 }
+EXPORT_SYMBOL_GPL(mean_and_variance_weighted_get_variance);
 
 /**
  * mean_and_variance_weighted_get_stddev() - get standard deviation from @s
@@ -160,6 +166,7 @@ u32 mean_and_variance_weighted_get_stddev(struct mean_and_variance_weighted s,
 {
 	return int_sqrt64(mean_and_variance_weighted_get_variance(s, weight));
 }
+EXPORT_SYMBOL_GPL(mean_and_variance_weighted_get_stddev);
 
 MODULE_AUTHOR("Daniel B. Hill");
 MODULE_LICENSE("GPL");
