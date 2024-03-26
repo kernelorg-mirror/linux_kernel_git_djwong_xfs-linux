@@ -552,7 +552,8 @@ int xfs_attr_get(struct xfs_da_args *args);
 int xfs_attr_set(struct xfs_da_args *args);
 int xfs_attr_set_iter(struct xfs_attr_intent *attr);
 int xfs_attr_remove_iter(struct xfs_attr_intent *attr);
-bool xfs_attr_namecheck(const void *name, size_t length);
+bool xfs_attr_namecheck(unsigned int attr_flags, const void *name,
+		size_t length);
 int xfs_attr_calc_size(struct xfs_da_args *args, int *local);
 void xfs_init_attr_trans(struct xfs_da_args *args, struct xfs_trans_res *tres,
 			 unsigned int *total);
@@ -620,7 +621,7 @@ xfs_attr_init_replace_state(struct xfs_da_args *args)
 
 xfs_dahash_t xfs_attr_hashname(const uint8_t *name, int namelen);
 
-xfs_dahash_t xfs_attr_hashval(struct xfs_mount *mp, unsigned int attrns,
+xfs_dahash_t xfs_attr_hashval(struct xfs_mount *mp, unsigned int attr_flags,
 		const uint8_t *name, int namelen, const void *value,
 		int valuelen);
 
@@ -631,6 +632,8 @@ static inline void xfs_attr_sethash(struct xfs_da_args *args)
 					 args->name, args->namelen,
 					 args->value, args->valuelen);
 }
+
+bool xfs_attr_check_namespace(unsigned int attr_flags);
 
 extern struct kmem_cache *xfs_attr_intent_cache;
 int __init xfs_attr_intent_init_cache(void);
