@@ -559,6 +559,9 @@ xrep_xattr_insert_rec(
 		.namelen		= key->namelen,
 		.valuelen		= key->valuelen,
 		.owner			= rx->sc->ip->i_ino,
+		.geo			= rx->sc->mp->m_attr_geo,
+		.whichfork		= XFS_ATTR_FORK,
+		.op_flags		= XFS_DA_OP_OKNOENT,
 	};
 	struct xchk_xattr_buf		*ab = rx->sc->buf;
 	int				error;
@@ -600,10 +603,12 @@ xrep_xattr_insert_rec(
 			key->namelen, key->valuelen);
 
 	/*
-	 * xfs_attr_set creates and commits its own transaction.  If the attr
-	 * already exists, we'll just drop it during the rebuild.
+	 * xfs_attr_setname creates and commits its own transaction.  If the
+	 * attr already exists, we'll just drop it during the rebuild.  Don't
+	 * use reserved blocks because we can abort the repair with ENOSPC.
 	 */
-	error = xfs_attr_set(&args);
+	xfs_attr_sethash(&args);
+	error = xfs_attr_setname(&args, false);
 	if (error == -EEXIST)
 		error = 0;
 
