@@ -560,6 +560,9 @@ int xfs_attr_calc_size(struct xfs_da_args *args, int *local);
 void xfs_init_attr_trans(struct xfs_da_args *args, struct xfs_trans_res *tres,
 			 unsigned int *total);
 
+int xfs_attr_setname(struct xfs_da_args *args, bool rsvd);
+int xfs_attr_removename(struct xfs_da_args *args, bool rsvd);
+
 /*
  * Check to see if the attr should be upgraded from non-existent or shortform to
  * single-leaf-block attribute list.
