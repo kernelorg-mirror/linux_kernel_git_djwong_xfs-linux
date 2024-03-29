@@ -362,7 +362,7 @@ xfs_attr_filter(
 }
 
 static unsigned int
-xfs_attr_flags(
+xfs_xattr_flags(
 	u32			ioc_flags)
 {
 	if (ioc_flags & XFS_IOC_ATTR_CREATE)
@@ -476,7 +476,7 @@ xfs_attrmulti_attr_get(
 	struct xfs_da_args	args = {
 		.dp		= XFS_I(inode),
 		.attr_filter	= xfs_attr_filter(flags),
-		.attr_flags	= xfs_attr_flags(flags),
+		.xattr_flags	= xfs_xattr_flags(flags),
 		.name		= name,
 		.namelen	= strlen(name),
 		.valuelen	= *len,
@@ -510,7 +510,7 @@ xfs_attrmulti_attr_set(
 	struct xfs_da_args	args = {
 		.dp		= XFS_I(inode),
 		.attr_filter	= xfs_attr_filter(flags),
-		.attr_flags	= xfs_attr_flags(flags),
+		.xattr_flags	= xfs_xattr_flags(flags),
 		.name		= name,
 		.namelen	= strlen(name),
 	};

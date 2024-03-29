@@ -557,7 +557,7 @@ xrep_xattr_insert_rec(
 	struct xfs_da_args		args = {
 		.dp			= rx->sc->tempip,
 		.attr_filter		= key->flags,
-		.attr_flags		= XATTR_CREATE,
+		.xattr_flags		= XATTR_CREATE,
 		.namelen		= key->namelen,
 		.valuelen		= key->valuelen,
 		.owner			= rx->sc->ip->i_ino,
