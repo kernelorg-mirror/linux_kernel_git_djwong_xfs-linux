@@ -610,21 +610,28 @@ xfs_attr_recover_work(
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
 	xfs_trans_ijoin(tp, ip, 0);
 
+	if (xfs_inode_has_attr_fork(ip)) {
+		error = xfs_iread_extents(tp, ip, XFS_ATTR_FORK);
+		if (error)
+			goto out_cancel;
+	}
+
 	error = xlog_recover_finish_intent(tp, dfp);
 	if (error == -EFSCORRUPTED)
 		XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
 				&attrip->attri_format,
 				sizeof(attrip->attri_format));
-	if (error) {
-		xfs_trans_cancel(tp);
-		goto out_unlock;
-	}
+	if (error)
+		goto out_cancel;
 
 	error = xfs_defer_ops_capture_and_commit(tp, capture_list);
 out_unlock:
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	xfs_irele(ip);
 	return error;
+out_cancel:
+	xfs_trans_cancel(tp);
+	goto out_unlock;
 }
 
 /* Re-log an intent item to push the log tail forward. */
