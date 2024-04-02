@@ -314,7 +314,7 @@ xchk_parent_pptr_and_dotdot(
 		return 0;
 
 	/* Otherwise, walk the pptrs again, and check. */
-	error = xchk_xattr_walk(sc, sc->ip, xchk_parent_scan_dotdot, pp);
+	error = xchk_xattr_walk(sc, sc->ip, xchk_parent_scan_dotdot, NULL, pp);
 	if (error == -ECANCELED) {
 		/* Found a parent pointer that matches dotdot. */
 		return 0;
@@ -692,7 +692,8 @@ xchk_parent_count_pptrs(
 	 */
 	if (pp->need_revalidate) {
 		pp->pptrs_found = 0;
-		error = xchk_xattr_walk(sc, sc->ip, xchk_parent_count_pptr, pp);
+		error = xchk_xattr_walk(sc, sc->ip, xchk_parent_count_pptr,
+				NULL, pp);
 		if (error == -EFSCORRUPTED) {
 			/* Found a bad parent pointer */
 			xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, 0);
@@ -751,7 +752,7 @@ xchk_parent_pptr(
 	if (error)
 		goto out_entries;
 
-	error = xchk_xattr_walk(sc, sc->ip, xchk_parent_scan_attr, pp);
+	error = xchk_xattr_walk(sc, sc->ip, xchk_parent_scan_attr, NULL, pp);
 	if (error == -ECANCELED) {
 		error = 0;
 		goto out_names;
