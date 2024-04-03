@@ -933,7 +933,10 @@ struct xfs_commit_range {
 /* Cursor is done iterating pptrs */
 #define XFS_GETPARENTS_OFLAG_DONE	(1U << 1)
 
-#define XFS_GETPARENTS_FLAG_ALL		(XFS_GETPARENTS_OFLAG_ROOT | \
+#define XFS_GETPARENTS_OFLAGS_ALL	(XFS_GETPARENTS_OFLAG_ROOT | \
+					 XFS_GETPARENTS_OFLAG_DONE)
+
+#define XFS_GETPARENTS_FLAGS_ALL	(XFS_GETPARENTS_OFLAG_ROOT | \
 					 XFS_GETPARENTS_OFLAG_DONE)
 
 struct xfs_getparents_rec {
@@ -942,11 +945,14 @@ struct xfs_getparents_rec {
 	__u8			gpr_name[]; /* Null-terminated filename */
 } __packed;
 
-/* Iterate through an inodes parent pointers */
-struct xfs_getparents {
-	/* Handle to file whose parents we want, or zeroes to use the fd. */
-	struct xfs_handle		gp_handle;
+static inline struct xfs_getparents_rec *
+xfs_getparents_next_rec(struct xfs_getparents_rec *gpr)
+{
+	return (struct xfs_getparents_rec *)((char *)gpr + gpr->gpr_reclen);
+}
 
+/* Iterate through this file's directory parent pointers */
+struct xfs_getparents {
 	/*
 	 * Structure to track progress in iterating the parent pointers.
 	 * Must be initialized to zeroes before the first ioctl call, and
@@ -957,30 +963,26 @@ struct xfs_getparents {
 	/* Operational flags: XFS_GETPARENTS_*FLAG* */
 	__u32				gp_flags;
 
-	/* Must be set to zero */
-	__u32				gp_reserved;
+	/* # of entries filled in (output) */
+	__u32				gp_count;
 
 	/* Size of the buffer in bytes, including this header */
 	__u32				gp_bufsize;
 
-	/* # of entries filled in (output) */
-	__u32				gp_count;
-
 	/* Must be set to zero */
-	__u64				gp_reserved2[5];
+	__u32				__pad;
 
-	/* Byte offset of each record within the buffer */
-	__u32				gp_offsets[];
+	/* Must come last!! */
+	struct xfs_getparents_rec	gp_records[];
 };
 
-static inline struct xfs_getparents_rec*
-xfs_getparents_rec(
-	struct xfs_getparents	*info,
-	unsigned int		idx)
-{
-	return (struct xfs_getparents_rec *)((char *)info +
-					     info->gp_offsets[idx]);
-}
+/* Iterate through this file handle's directory parent pointers. */
+struct xfs_getparents_by_handle {
+	/* Handle to file whose parents we want. */
+	struct xfs_handle		gph_handle;
+
+	struct xfs_getparents		gph_request;
+};
 
 /*
  * ioctl commands that are used by Linux filesystems
@@ -1021,6 +1023,7 @@ xfs_getparents_rec(
 #define XFS_IOC_SCRUBV_METADATA	_IOWR('X', 60, struct xfs_scrub_vec_head)
 #define XFS_IOC_AG_GEOMETRY	_IOWR('X', 61, struct xfs_ag_geometry)
 #define XFS_IOC_GETPARENTS	_IOWR('X', 62, struct xfs_getparents)
+#define XFS_IOC_GETPARENTS_BY_HANDLE _IOWR('X', 62, struct xfs_getparents_by_handle)
 /*	XFS_IOC_RTGROUP_GEOMETRY - staging 63	   */
 /*	XFS_IOC_MAP_FREESP ---- staging 64	   */
 

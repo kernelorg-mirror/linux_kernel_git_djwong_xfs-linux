@@ -5641,14 +5641,16 @@ TRACE_EVENT(xfs_exchmaps_delta_nextents,
 		  __entry->d_nexts1, __entry->d_nexts2)
 );
 
-TRACE_EVENT(xfs_getparent_listent,
+TRACE_EVENT(xfs_getparents_put_listent,
 	TP_PROTO(struct xfs_inode *ip, const struct xfs_getparents *ppi,
+		 const struct xfs_attr_list_context *context,
 	         const struct xfs_getparents_rec *pptr),
-	TP_ARGS(ip, ppi, pptr),
+	TP_ARGS(ip, ppi, context, pptr),
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_ino_t, ino)
 		__field(unsigned int, count)
+		__field(unsigned int, firstu)
 		__field(unsigned int, bufsize)
 		__field(xfs_ino_t, parent_ino)
 		__field(unsigned int, parent_gen)
@@ -5658,14 +5660,16 @@ TRACE_EVENT(xfs_getparent_listent,
 		__entry->dev = ip->i_mount->m_super->s_dev;
 		__entry->ino = ip->i_ino;
 		__entry->count = ppi->gp_count;
+		__entry->firstu = context->firstu;
 		__entry->bufsize = ppi->gp_bufsize;
 		__entry->parent_ino = pptr->gpr_parent.ha_fid.fid_ino;
 		__entry->parent_gen = pptr->gpr_parent.ha_fid.fid_gen;
 		__assign_str(name, pptr->gpr_name);
 	),
-	TP_printk("dev %d:%d ino 0x%llx bufsize %u count %u parent_ino 0x%llx parent_gen 0x%x name '%s'",
+	TP_printk("dev %d:%d ino 0x%llx firstu %u bufsize %u count %u parent_ino 0x%llx parent_gen 0x%x name '%s'",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ino,
+		  __entry->firstu,
 		  __entry->bufsize,
 		  __entry->count,
 		  __entry->parent_ino,
@@ -5673,7 +5677,7 @@ TRACE_EVENT(xfs_getparent_listent,
 		  __get_str(name))
 );
 
-TRACE_EVENT(xfs_getparent_pointers,
+TRACE_EVENT(xfs_getparents,
 	TP_PROTO(struct xfs_inode *ip, const struct xfs_getparents *ppi,
 		 const struct xfs_attrlist_cursor_kern *cur),
 	TP_ARGS(ip, ppi, cur),

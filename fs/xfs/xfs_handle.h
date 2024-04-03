@@ -26,6 +26,8 @@ int xfs_ioc_attr_list(struct xfs_inode *dp, void __user *ubuf,
 struct dentry *xfs_handle_to_dentry(struct file *parfilp, void __user *uhandle,
 		u32 hlen);
 
-int xfs_ioc_get_parent_pointer(struct file *filp, void __user *arg);
+int xfs_ioc_getparents(struct file *filp, struct xfs_getparents __user *arg);
+int xfs_ioc_getparents_by_handle(struct file *filp,
+		struct xfs_getparents_by_handle __user *arg);
 
 #endif	/* __XFS_HANDLE_H__ */

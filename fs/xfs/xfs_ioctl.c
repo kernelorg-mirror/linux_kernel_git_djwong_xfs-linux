@@ -1933,7 +1933,9 @@ xfs_file_ioctl(
 	case XFS_IOC_FSGETXATTRA:
 		return xfs_ioc_fsgetxattra(ip, arg);
 	case XFS_IOC_GETPARENTS:
-		return xfs_ioc_get_parent_pointer(filp, arg);
+		return xfs_ioc_getparents(filp, arg);
+	case XFS_IOC_GETPARENTS_BY_HANDLE:
+		return xfs_ioc_getparents_by_handle(filp, arg);
 	case XFS_IOC_GETBMAP:
 	case XFS_IOC_GETBMAPA:
 	case XFS_IOC_GETBMAPX:
