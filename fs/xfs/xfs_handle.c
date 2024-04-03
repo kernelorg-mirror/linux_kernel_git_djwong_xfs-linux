@@ -30,6 +30,35 @@
 
 #include <linux/namei.h>
 
+static size_t
+xfs_filehandle_init(
+	struct xfs_mount	*mp,
+	xfs_ino_t		ino,
+	uint32_t		gen,
+	struct xfs_handle	*handle)
+{
+	memcpy(&handle->ha_fsid, mp->m_fixedfsid, sizeof(struct xfs_fsid));
+
+	handle->ha_fid.fid_len = sizeof(struct xfs_fid) -
+				 sizeof(handle->ha_fid.fid_len);
+	handle->ha_fid.fid_pad = 0;
+	handle->ha_fid.fid_gen = gen;
+	handle->ha_fid.fid_ino = ino;
+
+	return sizeof(struct xfs_handle);
+}
+
+static size_t
+xfs_fshandle_init(
+	struct xfs_mount	*mp,
+	struct xfs_handle	*handle)
+{
+	memcpy(&handle->ha_fsid, mp->m_fixedfsid, sizeof(struct xfs_fsid));
+	memset(&handle->ha_fid, 0, sizeof(handle->ha_fid));
+
+	return sizeof(struct xfs_fsid);
+}
+
 /*
  * xfs_find_handle maps from userspace xfs_fsop_handlereq structure to
  * a file or fs handle.
@@ -84,20 +113,11 @@ xfs_find_handle(
 
 	memcpy(&handle.ha_fsid, ip->i_mount->m_fixedfsid, sizeof(xfs_fsid_t));
 
-	if (cmd == XFS_IOC_PATH_TO_FSHANDLE) {
-		/*
-		 * This handle only contains an fsid, zero the rest.
-		 */
-		memset(&handle.ha_fid, 0, sizeof(handle.ha_fid));
-		hsize = sizeof(xfs_fsid_t);
-	} else {
-		handle.ha_fid.fid_len = sizeof(xfs_fid_t) -
-					sizeof(handle.ha_fid.fid_len);
-		handle.ha_fid.fid_pad = 0;
-		handle.ha_fid.fid_gen = inode->i_generation;
-		handle.ha_fid.fid_ino = ip->i_ino;
-		hsize = sizeof(xfs_handle_t);
-	}
+	if (cmd == XFS_IOC_PATH_TO_FSHANDLE)
+		hsize = xfs_fshandle_init(ip->i_mount, &handle);
+	else
+		hsize = xfs_filehandle_init(ip->i_mount, ip->i_ino,
+				inode->i_generation, &handle);
 
 	error = -EFAULT;
 	if (copy_to_user(hreq->ohandle, &handle, hsize) ||
@@ -126,6 +146,26 @@ xfs_handle_acceptable(
 	return 1;
 }
 
+/* Convert handle already copied to kernel space into a dentry. */
+static struct dentry *
+xfs_khandle_to_dentry(
+	struct vfsmount		*mnt,
+	struct xfs_handle	*handle)
+{
+	struct xfs_fid64        fid = {
+		.ino		= handle->ha_fid.fid_ino,
+		.gen		= handle->ha_fid.fid_gen,
+	};
+
+	if (handle->ha_fid.fid_len !=
+	    sizeof(handle->ha_fid) - sizeof(handle->ha_fid.fid_len))
+		return ERR_PTR(-EINVAL);
+
+	return exportfs_decode_fh(mnt, (struct fid *)&fid, 3,
+			FILEID_INO32_GEN | XFS_FILEID_TYPE_64FLAG,
+			xfs_handle_acceptable, NULL);
+}
+
 /*
  * Convert userspace handle data into a dentry.
  */
@@ -136,7 +176,6 @@ xfs_handle_to_dentry(
 	u32			hlen)
 {
 	xfs_handle_t		handle;
-	struct xfs_fid64	fid;
 
 	/*
 	 * Only allow handle opens under a directory.
@@ -148,17 +187,8 @@ xfs_handle_to_dentry(
 		return ERR_PTR(-EINVAL);
 	if (copy_from_user(&handle, uhandle, hlen))
 		return ERR_PTR(-EFAULT);
-	if (handle.ha_fid.fid_len !=
-	    sizeof(handle.ha_fid) - sizeof(handle.ha_fid.fid_len))
-		return ERR_PTR(-EINVAL);
 
-	memset(&fid, 0, sizeof(struct fid));
-	fid.ino = handle.ha_fid.fid_ino;
-	fid.gen = handle.ha_fid.fid_gen;
-
-	return exportfs_decode_fh(parfilp->f_path.mnt, (struct fid *)&fid, 3,
-			FILEID_INO32_GEN | XFS_FILEID_TYPE_64FLAG,
-			xfs_handle_acceptable, NULL);
+	return xfs_khandle_to_dentry(parfilp->f_path.mnt, &handle);
 }
 
 STATIC struct dentry *
