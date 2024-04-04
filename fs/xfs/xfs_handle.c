@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2000-2005 Silicon Graphics, Inc.
+ * Copyright (c) 2022-2024 Oracle.
  * All rights reserved.
  */
 #include "xfs.h"
@@ -644,4 +645,236 @@ xfs_attrmulti_by_handle(
  out_dput:
 	dput(dentry);
 	return error;
+}
+
+struct xfs_getparents_ctx {
+	struct xfs_attr_list_context	context;
+	struct xfs_getparents_by_handle	gph;
+
+	/* File to target */
+	struct xfs_inode		*ip;
+
+	/* Internal buffer where we format records */
+	void				*krecords;
+};
+
+static inline unsigned int
+xfs_getparents_rec_sizeof(
+	unsigned int		namelen)
+{
+	return round_up(sizeof(struct xfs_getparents_rec) + namelen + 1,
+			sizeof(uint32_t));
+}
+
+static void
+xfs_getparents_put_listent(
+	struct xfs_attr_list_context	*context,
+	int				flags,
+	unsigned char			*name,
+	int				namelen,
+	void				*value,
+	int				valuelen)
+{
+	struct xfs_getparents_ctx	*gpx =
+		container_of(context, struct xfs_getparents_ctx, context);
+	struct xfs_inode		*ip = context->dp;
+	struct xfs_mount		*mp = ip->i_mount;
+	struct xfs_getparents		*gp = &gpx->gph.gph_request;
+	struct xfs_getparents_rec	*gpr = gpx->krecords + context->firstu;
+	unsigned short			reclen = xfs_getparents_rec_sizeof(namelen);
+	xfs_ino_t			ino;
+	uint32_t			gen;
+	int				ret;
+
+	ret = xfs_parent_from_xattr(mp, flags, name, namelen, value, valuelen,
+			&ino, &gen);
+	if (ret < 0) {
+		xfs_inode_mark_sick(ip, XFS_SICK_INO_PARENT);
+		context->seen_enough = -EFSCORRUPTED;
+		return;
+	}
+	if (ret != 1)
+		return;
+
+	/*
+	 * We found a parent pointer, but we've filled up the buffer.  Signal
+	 * to the caller that we did /not/ reach the end of the parent pointer
+	 * recordset.
+	 */
+	if (context->firstu > context->bufsize - reclen) {
+		context->seen_enough = 1;
+		return;
+	}
+
+	/* Format the parent pointer directly into the caller buffer. */
+	gpr->gpr_reclen = reclen;
+	xfs_filehandle_init(mp, ino, gen, &gpr->gpr_parent);
+	memcpy(gpr->gpr_name, name, namelen);
+	gpr->gpr_name[namelen] = 0;
+
+	context->firstu += reclen;
+	gp->gp_count++;
+
+	trace_xfs_getparents_put_listent(ip, gp, context, gpr);
+}
+
+/* Retrieve the parent pointers for a given inode. */
+STATIC int
+xfs_getparents(
+	struct xfs_getparents_ctx	*gpx)
+{
+	struct xfs_getparents		*gp = &gpx->gph.gph_request;
+	struct xfs_inode		*ip = gpx->ip;
+	struct xfs_mount		*mp = ip->i_mount;
+	size_t				bufsize;
+	int				error;
+
+	/* Check size of buffer requested by user */
+	if (gp->gp_bufsize > XFS_XATTR_LIST_MAX)
+		return -ENOMEM;
+	if (gp->gp_bufsize < xfs_getparents_rec_sizeof(1))
+		return -EINVAL;
+
+	if (gp->gp_iflags & ~XFS_GETPARENTS_IFLAGS_ALL)
+		return -EINVAL;
+	if (gp->__pad)
+		return -EINVAL;
+
+	bufsize = round_down(gp->gp_bufsize, sizeof(uint32_t));
+	gpx->krecords = kvzalloc(bufsize, GFP_KERNEL);
+	if (!gpx->krecords) {
+		bufsize = min(bufsize, PAGE_SIZE);
+		gpx->krecords = kvzalloc(bufsize, GFP_KERNEL);
+		if (!gpx->krecords)
+			return -ENOMEM;
+	}
+
+	gpx->context.dp = ip;
+	gpx->context.resynch = 1;
+	gpx->context.put_listent = xfs_getparents_put_listent;
+	gpx->context.bufsize = bufsize;
+	/* firstu is used to track the bytes filled in the buffer */
+	gpx->context.firstu = 0;
+
+	/* Copy the cursor provided by caller */
+	memcpy(&gpx->context.cursor, &gp->gp_cursor,
+			sizeof(struct xfs_attrlist_cursor));
+	gp->gp_count = 0;
+	gp->gp_oflags = 0;
+
+	trace_xfs_getparents_begin(ip, gp, &gpx->context.cursor);
+
+	error = xfs_attr_list(&gpx->context);
+	if (error)
+		goto out_free_buf;
+	if (gpx->context.seen_enough < 0) {
+		error = gpx->context.seen_enough;
+		goto out_free_buf;
+	}
+
+	/* Update the caller with the current cursor position */
+	memcpy(&gp->gp_cursor, &gpx->context.cursor,
+			sizeof(struct xfs_attrlist_cursor));
+
+	/* Is this the root directory? */
+	if (ip->i_ino == mp->m_sb.sb_rootino)
+		gp->gp_oflags |= XFS_GETPARENTS_OFLAG_ROOT;
+
+	if (gpx->context.seen_enough == 0) {
+		/*
+		 * If we did not run out of buffer space, then we reached the
+		 * end of the pptr recordset, so set the DONE flag.
+		 */
+		gp->gp_oflags |= XFS_GETPARENTS_OFLAG_DONE;
+	} else if (gp->gp_count == 0) {
+		/*
+		 * If we ran out of buffer space before copying any parent
+		 * pointers at all, the caller's buffer was too short.  Tell
+		 * userspace that, erm, the message is too long.
+		 */
+		error = -EMSGSIZE;
+		goto out_free_buf;
+	}
+
+	trace_xfs_getparents_end(ip, gp, &gpx->context.cursor);
+
+	ASSERT(gpx->context.firstu <= gpx->gph.gph_request.gp_bufsize);
+
+	/* Copy the records to userspace. */
+	if (copy_to_user((void *)gpx->gph.gph_request.gp_buffer,
+				gpx->krecords, gpx->context.firstu))
+		error = -EFAULT;
+
+out_free_buf:
+	kvfree(gpx->krecords);
+	gpx->krecords = NULL;
+	return error;
+}
+
+/* Retrieve the parents of this file and pass them back to userspace. */
+int
+xfs_ioc_getparents(
+	struct file			*filp,
+	struct xfs_getparents __user	*ureq)
+{
+	struct xfs_getparents_ctx	gpx = {
+		.ip			= XFS_I(file_inode(filp)),
+	};
+	struct xfs_getparents		*kreq = &gpx.gph.gph_request;
+	struct xfs_mount		*mp = gpx.ip->i_mount;
+	int				error;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+	if (!xfs_has_parent(mp))
+		return -EOPNOTSUPP;
+	if (copy_from_user(kreq, ureq, sizeof(*kreq)))
+		return -EFAULT;
+
+	error = xfs_getparents(&gpx);
+	if (error)
+		return error;
+
+	if (copy_to_user(ureq, kreq, sizeof(*kreq)))
+		return -EFAULT;
+		
+	return 0;
+}
+
+/* Retrieve the parents of this file handle and pass them back to userspace. */
+int
+xfs_ioc_getparents_by_handle(
+	struct file			*filp,
+	struct xfs_getparents_by_handle __user	*ureq)
+{
+	struct xfs_getparents_ctx	gpx = { };
+	struct xfs_inode		*ip = XFS_I(file_inode(filp));
+	struct xfs_mount		*mp = ip->i_mount;
+	struct xfs_getparents_by_handle	*kreq = &gpx.gph;
+	struct dentry			*dentry;
+	int				error;
+
+	BUILD_BUG_ON(XFS_IOC_GETPARENTS_BY_HANDLE == XFS_IOC_GETPARENTS);
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+	if (!xfs_has_parent(mp))
+		return -EOPNOTSUPP;
+	if (copy_from_user(kreq, ureq, sizeof(*kreq)))
+		return -EFAULT;
+
+	dentry = xfs_khandle_to_dentry(filp->f_path.mnt, &kreq->gph_handle);
+	if (IS_ERR(dentry))
+		return PTR_ERR(dentry);
+
+	gpx.ip = XFS_I(dentry->d_inode);
+	error = xfs_getparents(&gpx);
+	dput(dentry);
+	if (error)
+		return error;
+
+	if (copy_to_user(ureq, kreq, sizeof(*kreq)))
+		return -EFAULT;
+		
+	return 0;
 }
