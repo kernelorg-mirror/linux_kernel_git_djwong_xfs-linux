@@ -474,7 +474,7 @@ xfs_attri_validate(
 {
 	unsigned int			op = xfs_attr_log_item_op(attrp);
 
-	if (!xfs_is_using_logged_xattrs(mp))
+	if (!xfs_is_using_logged_xattrs(mp) && !xfs_has_parent(mp))
 		return false;
 
 	if (attrp->__pad != 0)
