@@ -963,14 +963,11 @@ struct xfs_getparents {
 	/* Output flags: XFS_GETPARENTS_OFLAG* */
 	__u16				gp_oflags;
 
-	/* # of entries filled in (output) */
-	__u32				gp_count;
-
-	/* Must be set to zero */
-	__u32				__pad;
-
 	/* Size of the gp_buffer in bytes */
 	__u32				gp_bufsize;
+
+	/* Must be set to zero */
+	__u64				__pad;
 
 	/* Pointer to a buffer in which to place xfs_getparents_rec */
 	__u64				gp_buffer;

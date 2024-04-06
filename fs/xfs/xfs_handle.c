@@ -656,6 +656,11 @@ struct xfs_getparents_ctx {
 
 	/* Internal buffer where we format records */
 	void				*krecords;
+
+	/* Last record filled out */
+	struct xfs_getparents_rec	*lastrec;
+
+	unsigned int			count;
 };
 
 static inline unsigned int
@@ -712,10 +717,27 @@ xfs_getparents_put_listent(
 	memcpy(gpr->gpr_name, name, namelen);
 	gpr->gpr_name[namelen] = 0;
 
-	context->firstu += reclen;
-	gp->gp_count++;
-
 	trace_xfs_getparents_put_listent(ip, gp, context, gpr);
+
+	context->firstu += reclen;
+	gpx->count++;
+	gpx->lastrec = gpr;
+}
+
+/* Expand the last record to fill the rest of the caller's buffer. */
+static inline void
+xfs_getparents_expand_lastrec(
+	struct xfs_getparents_ctx	*gpx)
+{
+	struct xfs_getparents		*gp = &gpx->gph.gph_request;
+	struct xfs_getparents_rec	*gpr = gpx->lastrec;
+
+	if (!gpx->lastrec)
+		gpr = gpx->krecords;
+
+	gpr->gpr_reclen = gp->gp_bufsize - ((void *)gpr - gpx->krecords);
+
+	trace_xfs_getparents_expand_lastrec(gpx->ip, gp, &gpx->context, gpr);
 }
 
 static inline void __user *u64_to_uptr(u64 val)
@@ -764,7 +786,7 @@ xfs_getparents(
 	/* Copy the cursor provided by caller */
 	memcpy(&gpx->context.cursor, &gp->gp_cursor,
 			sizeof(struct xfs_attrlist_cursor));
-	gp->gp_count = 0;
+	gpx->count = 0;
 	gp->gp_oflags = 0;
 
 	trace_xfs_getparents_begin(ip, gp, &gpx->context.cursor);
@@ -776,6 +798,7 @@ xfs_getparents(
 		error = gpx->context.seen_enough;
 		goto out_free_buf;
 	}
+	xfs_getparents_expand_lastrec(gpx);
 
 	/* Update the caller with the current cursor position */
 	memcpy(&gp->gp_cursor, &gpx->context.cursor,
@@ -791,7 +814,7 @@ xfs_getparents(
 		 * end of the pptr recordset, so set the DONE flag.
 		 */
 		gp->gp_oflags |= XFS_GETPARENTS_OFLAG_DONE;
-	} else if (gp->gp_count == 0) {
+	} else if (gpx->count == 0) {
 		/*
 		 * If we ran out of buffer space before copying any parent
 		 * pointers at all, the caller's buffer was too short.  Tell
