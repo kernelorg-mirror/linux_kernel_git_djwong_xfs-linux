@@ -231,7 +231,9 @@ xfs_exchmaps_create_intent(
 	xlf = &xmi_lip->xmi_format;
 
 	xlf->xmi_inode1 = xmi->xmi_ip1->i_ino;
+	xlf->xmi_igen1 = VFS_I(xmi->xmi_ip1)->i_generation;
 	xlf->xmi_inode2 = xmi->xmi_ip2->i_ino;
+	xlf->xmi_igen2 = VFS_I(xmi->xmi_ip2)->i_generation;
 	xlf->xmi_startoff1 = xmi->xmi_startoff1;
 	xlf->xmi_startoff2 = xmi->xmi_startoff2;
 	xlf->xmi_blockcount = xmi->xmi_blockcount;
@@ -377,6 +379,14 @@ xfs_xmi_item_recover_intent(
 	if (error)
 		goto err_rele1;
 
+	if (VFS_I(ip1)->i_generation != xlf->xmi_igen1 ||
+	    VFS_I(ip2)->i_generation != xlf->xmi_igen2) {
+		XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
+				xlf, sizeof(*xlf));
+		error = -EFSCORRUPTED;
+		goto err_rele2;
+	}
+
 	req->ip1 = ip1;
 	req->ip2 = ip2;
 	req->startoff1 = xlf->xmi_startoff1;
@@ -485,6 +495,8 @@ xfs_exchmaps_relog_intent(
 
 	new_xlf->xmi_inode1	= old_xlf->xmi_inode1;
 	new_xlf->xmi_inode2	= old_xlf->xmi_inode2;
+	new_xlf->xmi_igen1	= old_xlf->xmi_igen1;
+	new_xlf->xmi_igen2	= old_xlf->xmi_igen2;
 	new_xlf->xmi_startoff1	= old_xlf->xmi_startoff1;
 	new_xlf->xmi_startoff2	= old_xlf->xmi_startoff2;
 	new_xlf->xmi_blockcount	= old_xlf->xmi_blockcount;
