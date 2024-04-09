@@ -382,14 +382,22 @@ xfs_attr_log_item(
 	attrp->alfi_op_flags = attr->xattri_op_flags;
 	attrp->alfi_value_len = attr->xattri_nameval->value.i_len;
 
-	if (xfs_attr_log_item_op(attrp) == XFS_ATTRI_OP_FLAGS_PPTR_REPLACE) {
+	switch (xfs_attr_log_item_op(attrp)) {
+	case XFS_ATTRI_OP_FLAGS_PPTR_REPLACE:
 		ASSERT(attr->xattri_nameval->value.i_len ==
 		       attr->xattri_nameval->new_value.i_len);
 
+		attrp->alfi_igen = VFS_I(attr->xattri_da_args->dp)->i_generation;
 		attrp->alfi_old_name_len = attr->xattri_nameval->name.i_len;
 		attrp->alfi_new_name_len = attr->xattri_nameval->new_name.i_len;
-	} else {
+		break;
+	case XFS_ATTRI_OP_FLAGS_PPTR_REMOVE:
+	case XFS_ATTRI_OP_FLAGS_PPTR_SET:
+		attrp->alfi_igen = VFS_I(attr->xattri_da_args->dp)->i_generation;
+		fallthrough;
+	default:
 		attrp->alfi_name_len = attr->xattri_nameval->name.i_len;
+		break;
 	}
 
 	ASSERT(!(attr->xattri_da_args->attr_filter & ~XFS_ATTRI_FILTER_MASK));
@@ -632,6 +640,19 @@ xfs_attri_recover_work(
 	if (error)
 		return ERR_PTR(error);
 
+	switch (xfs_attr_log_item_op(attrp)) {
+	case XFS_ATTRI_OP_FLAGS_PPTR_SET:
+	case XFS_ATTRI_OP_FLAGS_PPTR_REPLACE:
+	case XFS_ATTRI_OP_FLAGS_PPTR_REMOVE:
+		if (VFS_I(ip)->i_generation != attrp->alfi_igen) {
+			xfs_irele(ip);
+			XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
+					attrp, sizeof(*attrp));
+			return ERR_PTR(-EFSCORRUPTED);
+		}
+		break;
+	}
+
 	if (xfs_inode_has_attr_fork(ip)) {
 		error = xfs_attri_iread_extents(ip);
 		if (error) {
@@ -782,6 +803,7 @@ xfs_attr_relog_intent(
 	new_attrp = &new_attrip->attri_format;
 
 	new_attrp->alfi_ino = old_attrp->alfi_ino;
+	new_attrp->alfi_igen = old_attrp->alfi_igen;
 	new_attrp->alfi_op_flags = old_attrp->alfi_op_flags;
 	new_attrp->alfi_value_len = old_attrp->alfi_value_len;
 
