@@ -13,7 +13,9 @@ struct kmem_zone;
 
 struct xfs_attri_log_nameval {
 	struct xfs_log_iovec	name;
+	struct xfs_log_iovec	new_name;	/* PPTR_REPLACE only */
 	struct xfs_log_iovec	value;
+	struct xfs_log_iovec	new_value;	/* PPTR_REPLACE only */
 	refcount_t		refcount;
 
 	/* name and value follow the end of this struct */
@@ -58,5 +60,7 @@ enum xfs_attr_defer_op {
 };
 
 void xfs_attr_defer_add(struct xfs_da_args *args, enum xfs_attr_defer_op op);
+void xfs_attr_defer_parent(struct xfs_da_args *args,
+		enum xfs_attr_defer_op op);
 
 #endif	/* __XFS_ATTR_ITEM_H__ */
