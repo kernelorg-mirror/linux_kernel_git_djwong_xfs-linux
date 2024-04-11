@@ -1027,14 +1027,21 @@ xfs_attr_set(
 	case -EEXIST:
 		if (op == XFS_ATTRUPDATE_REMOVE) {
 			/* if no value, we are performing a remove operation */
-			xfs_attr_defer_add(args, XFS_ATTR_DEFER_REMOVE);
+			if (args->attr_filter & XFS_ATTR_PARENT)
+				xfs_attr_defer_parent(args,
+						XFS_ATTR_DEFER_REMOVE);
+			else
+				xfs_attr_defer_add(args, XFS_ATTR_DEFER_REMOVE);
 			break;
 		}
 
 		/* Pure create fails if the attr already exists */
 		if (op == XFS_ATTRUPDATE_CREATE)
 			goto out_trans_cancel;
-		xfs_attr_defer_add(args, XFS_ATTR_DEFER_REPLACE);
+		if (args->attr_filter & XFS_ATTR_PARENT)
+			xfs_attr_defer_parent(args, XFS_ATTR_DEFER_REPLACE);
+		else
+			xfs_attr_defer_add(args, XFS_ATTR_DEFER_REPLACE);
 		break;
 	case -ENOATTR:
 		/* Can't remove what isn't there. */
@@ -1044,7 +1051,10 @@ xfs_attr_set(
 		/* Pure replace fails if no existing attr to replace. */
 		if (op == XFS_ATTRUPDATE_REPLACE)
 			goto out_trans_cancel;
-		xfs_attr_defer_add(args, XFS_ATTR_DEFER_SET);
+		if (args->attr_filter & XFS_ATTR_PARENT)
+			xfs_attr_defer_parent(args, XFS_ATTR_DEFER_SET);
+		else
+			xfs_attr_defer_add(args, XFS_ATTR_DEFER_SET);
 		break;
 	default:
 		goto out_trans_cancel;
