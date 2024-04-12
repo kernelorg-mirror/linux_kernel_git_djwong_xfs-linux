@@ -6,24 +6,24 @@
 #define __XFS_FSVERITY_H__
 
 #ifdef CONFIG_FS_VERITY
-void xfs_fsverity_cache_init(struct xfs_inode *ip);
+struct xfs_merkle_bkey {
+	xfs_ino_t		ino;
+	u64			offset;
+};
+
 void xfs_fsverity_destroy_inode(struct xfs_inode *ip);
-void xfs_fsverity_cache_destroy(struct xfs_inode *ip);
 
-int xfs_fsverity_register_shrinker(struct xfs_mount *mp);
-void xfs_fsverity_unregister_shrinker(struct xfs_mount *mp);
-
-struct xfs_icwalk;
-int xfs_fsverity_scan_inode(struct xfs_inode *ip, struct xfs_icwalk *icw);
+int xfs_fsverity_mount(struct xfs_mount *mp);
+void xfs_fsverity_unmount(struct xfs_mount *mp);
+int xfs_fsverity_growfs(struct xfs_mount *mp, xfs_agnumber_t old_agcount,
+		xfs_agnumber_t new_agcount);
 
 extern const struct fsverity_operations xfs_fsverity_ops;
 #else
-# define xfs_fsverity_cache_init(ip)		((void)0)
 # define xfs_fsverity_destroy_inode(ip)		((void)0)
-# define xfs_fsverity_cache_destroy(ip)		((void)0)
-# define xfs_fsverity_register_shrinker(mp)	(0)
-# define xfs_fsverity_unregister_shrinker(mp)	((void)0)
-# define xfs_fsverity_scan_inode(ip, icw)	(0)
+# define xfs_fsverity_mount(mp)			(0)
+# define xfs_fsverity_unmount(mp)		((void)0)
+# define xfs_fsverity_growfs(mp, o, n)		(0)
 #endif	/* CONFIG_FS_VERITY */
 
 #endif	/* __XFS_FSVERITY_H__ */
