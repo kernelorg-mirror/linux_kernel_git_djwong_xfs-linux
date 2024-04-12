@@ -882,7 +882,7 @@ xfs_mountfs(
 	if (error)
 		goto out_fail_wait;
 
-	error = xfs_fsverity_register_shrinker(mp);
+	error = xfs_fsverity_mount(mp);
 	if (error)
 		goto out_inodegc_shrinker;
 
@@ -896,7 +896,7 @@ xfs_mountfs(
 			      XFS_FSB_TO_BB(mp, sbp->sb_logblocks));
 	if (error) {
 		xfs_warn(mp, "log mount failed");
-		goto out_verity_shrinker;
+		goto out_fsverity;
 	}
 
 	/*
@@ -1108,8 +1108,8 @@ xfs_mountfs(
 	 */
 	xfs_unmount_flush_inodes(mp);
 	xfs_log_mount_cancel(mp);
- out_verity_shrinker:
-	xfs_fsverity_unregister_shrinker(mp);
+ out_fsverity:
+	xfs_fsverity_unmount(mp);
  out_inodegc_shrinker:
 	shrinker_free(mp->m_inodegc_shrinker);
  out_fail_wait:
@@ -1201,7 +1201,7 @@ xfs_unmountfs(
 #if defined(DEBUG)
 	xfs_errortag_clearall(mp);
 #endif
-	xfs_fsverity_unregister_shrinker(mp);
+	xfs_fsverity_unmount(mp);
 	shrinker_free(mp->m_inodegc_shrinker);
 	xfs_free_rtgroups(mp);
 	xfs_free_perag(mp);
