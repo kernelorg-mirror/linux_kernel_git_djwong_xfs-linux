@@ -163,12 +163,16 @@ xfs_khandle_to_dentry(
 		.ino		= handle->ha_fid.fid_ino,
 		.gen		= handle->ha_fid.fid_gen,
 	};
+	struct xfs_mount	*mp = XFS_I(file_inode(file))->i_mount;
 
 	/*
 	 * Only allow handle opens under a directory.
 	 */
 	if (!S_ISDIR(file_inode(file)->i_mode))
 		return ERR_PTR(-ENOTDIR);
+
+	if (memcmp(&handle->ha_fsid, mp->m_fixedfsid, sizeof(struct xfs_fsid)))
+		return ERR_PTR(-ESTALE);
 
 	if (handle->ha_fid.fid_len != xfs_filehandle_fid_len())
 		return ERR_PTR(-EINVAL);
