@@ -102,6 +102,7 @@ struct xfs_extent_free_item;
 struct xfs_rmap_intent;
 struct xfs_refcount_intent;
 struct xfs_fsrefs;
+struct xfs_merkle_bkey;
 
 #define XFS_ATTR_FILTER_FLAGS \
 	{ XFS_ATTR_ROOT,	"ROOT" }, \
@@ -5924,36 +5925,39 @@ TRACE_EVENT(xfs_growfs_check_rtgeom,
 
 #ifdef CONFIG_FS_VERITY
 DECLARE_EVENT_CLASS(xfs_fsverity_cache_class,
-	TP_PROTO(struct xfs_inode *ip, unsigned long key, unsigned long caller_ip),
-	TP_ARGS(ip, key, caller_ip),
+	TP_PROTO(struct xfs_mount *mp, const struct xfs_merkle_bkey *key,
+		 unsigned long caller_ip),
+	TP_ARGS(mp, key, caller_ip),
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(xfs_ino_t, ino)
-		__field(unsigned long, key)
+		__field(u64, offset)
 		__field(void *, caller_ip)
 	),
 	TP_fast_assign(
-		__entry->dev = ip->i_mount->m_super->s_dev;
-		__entry->ino = ip->i_ino;
-		__entry->key = key;
+		__entry->dev = mp->m_super->s_dev;
+		__entry->ino = key->ino;
+		__entry->offset = key->offset;
 		__entry->caller_ip = (void *)caller_ip;
 	),
-	TP_printk("dev %d:%d ino 0x%llx key 0x%lx caller %pS",
+	TP_printk("dev %d:%d ino 0x%llx offset 0x%llx caller %pS",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ino,
-		  __entry->key,
+		  __entry->offset,
 		  __entry->caller_ip)
 )
 
 #define DEFINE_XFS_FSVERITY_CACHE_EVENT(name) \
 DEFINE_EVENT(xfs_fsverity_cache_class, name, \
-	TP_PROTO(struct xfs_inode *ip, unsigned long key, unsigned long caller_ip), \
-	TP_ARGS(ip, key, caller_ip))
+	TP_PROTO(struct xfs_mount *mp, const struct xfs_merkle_bkey *key, \
+		 unsigned long caller_ip), \
+	TP_ARGS(mp, key, caller_ip))
 DEFINE_XFS_FSVERITY_CACHE_EVENT(xfs_fsverity_cache_miss);
 DEFINE_XFS_FSVERITY_CACHE_EVENT(xfs_fsverity_cache_hit);
 DEFINE_XFS_FSVERITY_CACHE_EVENT(xfs_fsverity_cache_reuse);
 DEFINE_XFS_FSVERITY_CACHE_EVENT(xfs_fsverity_cache_store);
 DEFINE_XFS_FSVERITY_CACHE_EVENT(xfs_fsverity_cache_drop);
+DEFINE_XFS_FSVERITY_CACHE_EVENT(xfs_fsverity_cache_unmount);
 DEFINE_XFS_FSVERITY_CACHE_EVENT(xfs_fsverity_cache_reclaim);
 
 TRACE_EVENT(xfs_fsverity_shrinker_count,

@@ -22,6 +22,8 @@
 #include "xfs_fsverity.h"
 #include "xfs_icache.h"
 #include "xfs_health.h"
+#include "xfs_ag.h"
+
 #include <linux/fsverity.h>
 
 /*
@@ -32,16 +34,21 @@
  * tree blocks.  XFS stores merkle tree blocks in the extended attribute data,
  * which makes it important to keep copies in memory for as long as possible.
  * This is performed by allocating the data blob structure defined below,
- * passing the data portion of the blob to xfs_attr_get, and later adding the
- * data blob to an xarray embedded in the xfs_inode structure.
+ * passing the data portion of the blob to xfs_attr_get, and later caching the
+ * data blob via a per-ag hashtable.
  *
- * The xarray structure indexes merkle tree blocks by the offset given to us by
+ * The cache structure indexes merkle tree blocks by the offset given to us by
  * fsverity, which drastically reduces lookups.  First, it eliminating the need
  * to walk the xattr structure to find the remote block containing the merkle
  * tree block.  Second, access to each block in the xattr structure requires a
  * lookup in the incore extent btree.
  */
 struct xfs_merkle_blob {
+	struct rhash_head	rhash;
+	struct rcu_head		rcu;
+
+	struct xfs_merkle_bkey	key;
+
 	/* refcount of this item; the cache holds its own ref */
 	refcount_t		refcount;
 
@@ -56,12 +63,21 @@ struct xfs_merkle_blob {
 
 #define XFS_MERKLE_BLOB_VERIFIED_BIT	(0) /* fsverity validated this */
 
+static const struct rhashtable_params xfs_fsverity_merkle_hash_params = {
+	.key_len		= sizeof(struct xfs_merkle_bkey),
+	.key_offset		= offsetof(struct xfs_merkle_blob, key),
+	.head_offset		= offsetof(struct xfs_merkle_blob, rhash),
+	.automatic_shrinking	= true,
+};
+
 /*
  * Allocate a merkle tree blob object to prepare for reading a merkle tree
  * object from disk.
  */
 static inline struct xfs_merkle_blob *
 xfs_merkle_blob_alloc(
+	struct xfs_inode	*ip,
+	u64			offset,
 	unsigned int		blocksize)
 {
 	struct xfs_merkle_blob	*mk;
@@ -80,7 +96,21 @@ xfs_merkle_blob_alloc(
 	refcount_set(&mk->refcount, 1);
 	atomic_set(&mk->shrinkref, 0);
 	mk->flags = 0;
+	mk->key.ino = ip->i_ino;
+	mk->key.offset = offset;
 	return mk;
+}
+
+/* Actually free this blob. */
+static void
+xfs_merkle_blob_free(
+	struct callback_head	*cb)
+{
+	struct xfs_merkle_blob	*mk =
+		container_of(cb, struct xfs_merkle_blob, rcu);
+
+	kvfree(mk->data);
+	kfree(mk);
 }
 
 /* Free a merkle tree blob. */
@@ -88,18 +118,78 @@ static inline void
 xfs_merkle_blob_rele(
 	struct xfs_merkle_blob	*mk)
 {
-	if (refcount_dec_and_test(&mk->refcount)) {
-		kvfree(mk->data);
-		kfree(mk);
-	}
+	if (refcount_dec_and_test(&mk->refcount))
+		call_rcu(&mk->rcu, xfs_merkle_blob_free);
 }
 
-/* Initialize the merkle tree block cache */
-void
-xfs_fsverity_cache_init(
-	struct xfs_inode	*ip)
+/*
+ * Drop this merkle tree blob from the cache.  Caller must have a reference to
+ * the blob, which will be dropped at the end.
+ */
+static inline void
+xfs_merkle_blob_drop(
+	struct xfs_perag	*pag,
+	struct xfs_merkle_blob	*mk)
 {
-	xa_init(&ip->i_merkle_blocks);
+	/*
+	 * Remove the blob from the hash table and drop the cache's
+	 * ref to the blob handle.
+	 */
+	spin_lock(&pag->pagi_merkle_lock);
+	rhashtable_remove_fast(&pag->pagi_merkle_blobs, &mk->rhash,
+			xfs_fsverity_merkle_hash_params);
+	xfs_merkle_blob_rele(mk);
+	spin_unlock(&pag->pagi_merkle_lock);
+
+	/* Drop the reference we obtained above. */
+	xfs_merkle_blob_rele(mk);
+}
+
+/* Drop all the merkle tree blocks from this part of the cache. */
+STATIC void
+xfs_fsverity_drop_cache(
+	struct xfs_inode	*ip,
+	u64			tree_size,
+	unsigned int		block_size)
+{
+	struct xfs_merkle_bkey	key = {
+		.ino		= ip->i_ino,
+		.offset		= 0,
+	};
+	struct xfs_perag	*pag;
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_merkle_blob	*mk;
+	s64			freed = 0;
+
+	pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, ip->i_ino));
+	if (!pag)
+		return;
+
+	for (key.offset = 0; key.offset < tree_size; key.offset += block_size) {
+		/*
+		 * Try to grab the blob from the hash table and get our own
+		 * reference to the object.  If there's a blob handle but it
+		 * has zero refcount then we're racing with reclaim and can
+		 * move on.
+		 */
+		rcu_read_lock();
+		mk = rhashtable_lookup(&pag->pagi_merkle_blobs, &key,
+				xfs_fsverity_merkle_hash_params);
+		if (mk && !refcount_inc_not_zero(&mk->refcount))
+			mk = NULL;
+		rcu_read_unlock();
+
+		if (!mk)
+			continue;
+
+		trace_xfs_fsverity_cache_drop(mp, &mk->key, _RET_IP_);
+
+		xfs_merkle_blob_drop(pag, mk);
+		freed++;
+	}
+
+	xfs_perag_put(pag);
+	percpu_counter_sub(&mp->m_verity_blocks, freed);
 }
 
 /*
@@ -110,66 +200,50 @@ void
 xfs_fsverity_destroy_inode(
 	struct xfs_inode	*ip)
 {
-	XA_STATE(xas, &ip->i_merkle_blocks, 0);
-	struct xfs_mount	*mp = ip->i_mount;
-	struct xfs_merkle_blob	*mk;
-	unsigned long		flags;
-	s64			freed = 0;
+	u64			tree_size;
+	unsigned int		block_size;
+	int			error;
 
-	xas_lock_irqsave(&xas, flags);
-	xas_for_each(&xas, mk, ULONG_MAX) {
-		ASSERT(refcount_read(&mk->refcount) == 1);
+	error = fsverity_merkle_tree_geometry(VFS_I(ip), &block_size,
+			&tree_size);
+	if (error)
+		return;
 
-		trace_xfs_fsverity_cache_drop(ip, xas.xa_index, _RET_IP_);
-
-		freed++;
-		xas_store(&xas, NULL);
-		xfs_merkle_blob_rele(mk);
-	}
-	percpu_counter_sub(&mp->m_verity_blocks, freed);
-	xas_unlock_irqrestore(&xas, flags);
-	xfs_inode_clear_verity_tag(ip);
-}
-
-/* Destroy the merkle tree block cache */
-void
-xfs_fsverity_cache_destroy(
-	struct xfs_inode	*ip)
-{
-	ASSERT(xa_empty(&ip->i_merkle_blocks));
-
-	/*
-	 * xa_destroy calls xas_lock from rcu freeing softirq context, so
-	 * we must use xa*_lock_irqsave.
-	 */
-	xa_destroy(&ip->i_merkle_blocks);
+	xfs_fsverity_drop_cache(ip, tree_size, block_size);
 }
 
 /* Return a cached merkle tree block, or NULL. */
 static struct xfs_merkle_blob *
 xfs_fsverity_cache_load(
 	struct xfs_inode	*ip,
-	unsigned long		key)
+	u64			offset)
 {
-	XA_STATE(xas, &ip->i_merkle_blocks, key);
+	struct xfs_merkle_bkey	key = {
+		.ino		= ip->i_ino,
+		.offset		= offset,
+	};
+	struct xfs_perag	*pag;
+	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_merkle_blob	*mk;
 
-	/* Look up the cached item and try to get an active ref. */
+	pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, ip->i_ino));
+	if (!pag)
+		return NULL;
+
 	rcu_read_lock();
-	do {
-		mk = xas_load(&xas);
-		if (xa_is_zero(mk))
-			mk = NULL;
-	} while (xas_retry(&xas, mk) ||
-		 (mk && !refcount_inc_not_zero(&mk->refcount)));
+	mk = rhashtable_lookup(&pag->pagi_merkle_blobs, &key,
+			xfs_fsverity_merkle_hash_params);
+	if (mk && !refcount_inc_not_zero(&mk->refcount))
+		mk = NULL;
 	rcu_read_unlock();
+	xfs_perag_put(pag);
 
 	if (!mk) {
-		trace_xfs_fsverity_cache_miss(ip, key, _RET_IP_);
+		trace_xfs_fsverity_cache_miss(mp, &key, _RET_IP_);
 		return NULL;
 	}
 
-	trace_xfs_fsverity_cache_hit(ip, key, _RET_IP_);
+	trace_xfs_fsverity_cache_hit(mp, &mk->key, _RET_IP_);
 	return mk;
 }
 
@@ -186,34 +260,40 @@ xfs_fsverity_cache_load(
 static struct xfs_merkle_blob *
 xfs_fsverity_cache_store(
 	struct xfs_inode	*ip,
-	unsigned long		key,
 	struct xfs_merkle_blob	*mk)
 {
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_merkle_blob	*old;
-	unsigned long		flags;
+	struct xfs_perag	*pag;
 
-	/*
-	 * Either replace a NULL entry with mk, or take an active ref to
-	 * whatever's currently there.
-	 */
-	xa_lock_irqsave(&ip->i_merkle_blocks, flags);
-	do {
-		old = __xa_cmpxchg(&ip->i_merkle_blocks, key, NULL, mk,
-				GFP_KERNEL);
-	} while (old && !refcount_inc_not_zero(&old->refcount));
-	if (!old)
-		percpu_counter_add(&mp->m_verity_blocks, 1);
-	xa_unlock_irqrestore(&ip->i_merkle_blocks, flags);
+	ASSERT(ip->i_ino == mk->key.ino);
 
-	if (old == NULL) {
+	pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, ip->i_ino));
+	if (!pag) {
+		ASSERT(pag);
+		return ERR_PTR(-EFSCORRUPTED);
+	}
+
+	spin_lock(&pag->pagi_merkle_lock);
+	old = rhashtable_lookup_get_insert_fast(&pag->pagi_merkle_blobs,
+			&mk->rhash, xfs_fsverity_merkle_hash_params);
+	if (IS_ERR(old)) {
+		spin_unlock(&pag->pagi_merkle_lock);
+		xfs_perag_put(pag);
+		return old;
+	}
+	if (!old) {
 		/*
 		 * There was no previous value.  @mk is now live in the cache.
 		 * Bump the active refcount to transfer ownership to the cache
 		 * and return @mk to the caller.
 		 */
 		refcount_inc(&mk->refcount);
-		trace_xfs_fsverity_cache_store(ip, key, _RET_IP_);
+		spin_unlock(&pag->pagi_merkle_lock);
+		xfs_perag_put(pag);
+		percpu_counter_add(&mp->m_verity_blocks, 1);
+
+		trace_xfs_fsverity_cache_store(mp, &mk->key, _RET_IP_);
 		return mk;
 	}
 
@@ -221,7 +301,11 @@ xfs_fsverity_cache_store(
 	 * We obtained an active reference to a previous value in the cache.
 	 * Return it to the caller.
 	 */
-	trace_xfs_fsverity_cache_reuse(ip, key, _RET_IP_);
+	refcount_inc(&old->refcount);
+	spin_unlock(&pag->pagi_merkle_lock);
+	xfs_perag_put(pag);
+
+	trace_xfs_fsverity_cache_reuse(mp, &old->key, _RET_IP_);
 	return old;
 }
 
@@ -311,7 +395,6 @@ xfs_fsverity_shrinker_count(
 }
 
 struct xfs_fsverity_scan {
-	struct xfs_icwalk	icw;
 	struct shrink_control	*sc;
 
 	unsigned long		scanned;
@@ -320,18 +403,21 @@ struct xfs_fsverity_scan {
 
 /* Reclaim inactive merkle tree blocks that have run out of second chances. */
 static void
-xfs_fsverity_cache_reclaim(
-	struct xfs_inode		*ip,
+xfs_fsverity_perag_reclaim(
+	struct xfs_perag		*pag,
 	struct xfs_fsverity_scan	*vs)
 {
-	XA_STATE(xas, &ip->i_merkle_blocks, 0);
-	struct xfs_mount		*mp = ip->i_mount;
+	struct rhashtable_iter		iter;
+	struct xfs_mount		*mp = pag->pag_mount;
 	struct xfs_merkle_blob		*mk;
-	unsigned long			flags;
 	s64				freed = 0;
 
-	xas_lock_irqsave(&xas, flags);
-	xas_for_each(&xas, mk, ULONG_MAX) {
+	rhashtable_walk_enter(&pag->pagi_merkle_blobs, &iter);
+	rhashtable_walk_start(&iter);
+	while ((mk = rhashtable_walk_next(&iter)) != NULL) {
+		if (IS_ERR(mk))
+			continue;
+
 		/*
 		 * Tell the shrinker that we scanned this merkle tree block,
 		 * even if we don't remove it.
@@ -348,45 +434,27 @@ xfs_fsverity_cache_reclaim(
 		if (atomic_add_unless(&mk->shrinkref, -1, 0))
 			continue;
 
-		trace_xfs_fsverity_cache_reclaim(ip, xas.xa_index, _RET_IP_);
+		/*
+		 * Grab our own active reference to the blob handle.  If we
+		 * can't, then we're racing with a cache drop and can move on.
+		 */
+		if (!refcount_inc_not_zero(&mk->refcount))
+			continue;
 
+		rhashtable_walk_stop(&iter);
+
+		trace_xfs_fsverity_cache_reclaim(mp, &mk->key, _RET_IP_);
+
+		xfs_merkle_blob_drop(pag, mk);
 		freed++;
-		xas_store(&xas, NULL);
-		xfs_merkle_blob_rele(mk);
+
+		rhashtable_walk_start(&iter);
 	}
+	rhashtable_walk_stop(&iter);
+	rhashtable_walk_exit(&iter);
+
 	percpu_counter_sub(&mp->m_verity_blocks, freed);
-	xas_unlock_irqrestore(&xas, flags);
-
-	/*
-	 * Try to clear the verity tree tag if we reclaimed all the cached
-	 * blocks.  On the flag setting side, we should have IOLOCK_SHARED.
-	 */
-	xfs_ilock(ip, XFS_IOLOCK_EXCL);
-	if (xa_empty(&ip->i_merkle_blocks))
-		xfs_inode_clear_verity_tag(ip);
-	xfs_iunlock(ip, XFS_IOLOCK_EXCL);
-
 	vs->freed += freed;
-}
-
-/* Scan an inode as part of a verity scan. */
-int
-xfs_fsverity_scan_inode(
-	struct xfs_inode		*ip,
-	struct xfs_icwalk		*icw)
-{
-	struct xfs_fsverity_scan	*vs;
-
-	vs = container_of(icw, struct xfs_fsverity_scan, icw);
-
-	if (vs->sc->nr_to_scan > 0)
-		xfs_fsverity_cache_reclaim(ip, vs);
-
-	if (vs->sc->nr_to_scan == 0)
-		xfs_icwalk_verity_stop(icw);
-
-	xfs_irele(ip);
-	return 0;
 }
 
 /* Actually try to reclaim merkle tree blocks. */
@@ -395,29 +463,34 @@ xfs_fsverity_shrinker_scan(
 	struct shrinker		*shrink,
 	struct shrink_control	*sc)
 {
-	struct xfs_fsverity_scan	vs = {
-		.sc		= sc,
-	};
+	struct xfs_fsverity_scan vs = { .sc = sc };
 	struct xfs_mount	*mp = shrink->private_data;
-	int			error;
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
 
 	if (!xfs_has_verity(mp))
 		return SHRINK_STOP;
 
-	error = xfs_icwalk_verity(mp, &vs.icw);
-	if (error)
-		xfs_alert(mp, "%s: verity scan failed, error %d", __func__,
-				error);
+	for_each_perag(mp, agno, pag) {
+		xfs_fsverity_perag_reclaim(pag, &vs);
+
+		if (sc->nr_to_scan == 0) {
+			xfs_perag_put(pag);
+			break;
+		}
+	}
 
 	trace_xfs_fsverity_shrinker_scan(mp, vs.scanned, vs.freed, _RET_IP_);
 	return vs.freed;
 }
 
-/* Register a shrinker so we can release cached merkle tree blocks. */
+/* Set up fsverity for this mount. */
 int
-xfs_fsverity_register_shrinker(
+xfs_fsverity_mount(
 	struct xfs_mount	*mp)
 {
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
 	int			error;
 
 	if (!xfs_has_verity(mp))
@@ -427,11 +500,22 @@ xfs_fsverity_register_shrinker(
 	if (error)
 		return error;
 
+	for_each_perag(mp, agno, pag) {
+		spin_lock_init(&pag->pagi_merkle_lock);
+		error = rhashtable_init(&pag->pagi_merkle_blobs,
+				&xfs_fsverity_merkle_hash_params);
+		if (error) {
+			xfs_perag_put(pag);
+			goto out_perag;
+		}
+		set_bit(XFS_AGSTATE_MERKLE, &pag->pag_opstate);
+	}
+
 	mp->m_verity_shrinker = shrinker_alloc(0, "xfs-verity:%s",
 			mp->m_super->s_id);
 	if (!mp->m_verity_shrinker) {
-		percpu_counter_destroy(&mp->m_verity_blocks);
-		return -ENOMEM;
+		error = -ENOMEM;
+		goto out_perag;
 	}
 
 	mp->m_verity_shrinker->count_objects = xfs_fsverity_shrinker_count;
@@ -442,18 +526,96 @@ xfs_fsverity_register_shrinker(
 	shrinker_register(mp->m_verity_shrinker);
 
 	return 0;
+out_perag:
+	for_each_perag(mp, agno, pag) {
+		if (test_and_clear_bit(XFS_AGSTATE_MERKLE, &pag->pag_opstate))
+			rhashtable_destroy(&pag->pagi_merkle_blobs);
+	}
+
+	return error;
 }
 
-/* Unregister the merkle tree block shrinker. */
-void
-xfs_fsverity_unregister_shrinker(struct xfs_mount *mp)
+/* Set up new merkle tree caches for new AGs. */
+int
+xfs_fsverity_growfs(
+	struct xfs_mount	*mp,
+	xfs_agnumber_t		old_agcount,
+	xfs_agnumber_t		new_agcount)
 {
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+	int			error;
+
+	if (!xfs_has_verity(mp))
+		return 0;
+
+	agno = old_agcount;
+	for_each_perag_range(mp, agno, new_agcount - 1, pag) {
+		spin_lock_init(&pag->pagi_merkle_lock);
+		error = rhashtable_init(&pag->pagi_merkle_blobs,
+				&xfs_fsverity_merkle_hash_params);
+		if (error) {
+			xfs_perag_put(pag);
+			goto out_perag;
+		}
+		set_bit(XFS_AGSTATE_MERKLE, &pag->pag_opstate);
+	}
+
+	return 0;
+out_perag:
+	agno = old_agcount;
+	for_each_perag_range(mp, agno, new_agcount - 1, pag) {
+		if (test_and_clear_bit(XFS_AGSTATE_MERKLE, &pag->pag_opstate))
+			rhashtable_destroy(&pag->pagi_merkle_blobs);
+	}
+
+	return error;
+}
+
+struct xfs_fsverity_umount {
+	struct xfs_mount	*mp;
+	s64			freed;
+};
+
+/* Destroy this blob that's still left over in the cache. */
+static void
+xfs_merkle_blob_destroy(
+	void			*ptr,
+	void			*arg)
+{
+	struct xfs_fsverity_umount *fu = arg;
+	struct xfs_merkle_blob	*mk = ptr;
+
+	trace_xfs_fsverity_cache_unmount(fu->mp, &mk->key, _RET_IP_);
+
+	xfs_merkle_blob_rele(ptr);
+	fu->freed++;
+}
+
+/* Tear down fsverity from this mount. */
+void
+xfs_fsverity_unmount(
+	struct xfs_mount	*mp)
+{
+	struct xfs_fsverity_umount fu = {
+		.mp		= mp,
+		.freed		= 0,
+	};
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
+
 	if (!xfs_has_verity(mp))
 		return;
 
-	ASSERT(percpu_counter_sum(&mp->m_verity_blocks) == 0);
-
 	shrinker_free(mp->m_verity_shrinker);
+
+	for_each_perag(mp, agno, pag) {
+		if (test_and_clear_bit(XFS_AGSTATE_MERKLE, &pag->pag_opstate))
+			rhashtable_free_and_destroy(&pag->pagi_merkle_blobs,
+					xfs_merkle_blob_destroy, &fu);
+	}
+
+	ASSERT(percpu_counter_sum(&mp->m_verity_blocks) == fu.freed);
 	percpu_counter_destroy(&mp->m_verity_blocks);
 }
 
@@ -649,17 +811,14 @@ xfs_fsverity_read_merkle(
 		.valuelen		= block->size,
 	};
 	struct xfs_merkle_blob		*mk, *new_mk;
-	unsigned long			key = block->offset >> req->log_blocksize;
 	int				error;
 
-	ASSERT(block->offset >> req->log_blocksize <= ULONG_MAX);
-
 	/* Is the block already cached? */
-	mk = xfs_fsverity_cache_load(ip, key);
+	mk = xfs_fsverity_cache_load(ip, block->offset);
 	if (mk)
 		goto out_hit;
 
-	new_mk = xfs_merkle_blob_alloc(block->size);
+	new_mk = xfs_merkle_blob_alloc(ip, block->offset, block->size);
 	if (!new_mk)
 		return -ENOMEM;
 	args.value = new_mk->data;
@@ -684,20 +843,17 @@ xfs_fsverity_read_merkle(
 	if (error)
 		goto out_new_mk;
 
-	mk = xfs_fsverity_cache_store(ip, key, new_mk);
+	mk = xfs_fsverity_cache_store(ip, new_mk);
+	if (IS_ERR(mk)) {
+		xfs_merkle_blob_rele(new_mk);
+		return PTR_ERR(mk);
+	}
 	if (mk != new_mk) {
 		/*
 		 * We raced with another thread to populate the cache and lost.
 		 * Free the new cache blob and continue with the existing one.
 		 */
 		xfs_merkle_blob_rele(new_mk);
-	} else {
-		/*
-		 * We added this merkle tree block to the cache; tag the inode
-		 * so that reclaim will scan this inode.  The caller holds
-		 * IOLOCK_SHARED this will not race with the shrinker.
-		 */
-		xfs_inode_set_verity_tag(ip);
 	}
 
 out_hit:
@@ -805,7 +961,7 @@ xfs_fsverity_disable(
 	if (error)
 		return error;
 
-	xfs_fsverity_destroy_inode(ip);
+	xfs_fsverity_drop_cache(ip, tree_size, block_size);
 
 	/* Clear fsverity inode flag */
 	error = xfs_trans_alloc_inode(ip, &M_RES(mp)->tr_ichange, 0, 0, false,
