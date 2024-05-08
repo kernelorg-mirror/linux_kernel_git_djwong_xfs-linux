@@ -339,26 +339,31 @@ xfs_attr_calc_size(
 	return nblks;
 }
 
-/* Initialize transaction reservation for attr operations */
-void
-xfs_init_attr_trans(
+/* Initialize transaction reservation for an xattr set/replace/upsert */
+unsigned int
+xfs_attr_init_set_trans(
 	struct xfs_da_args	*args,
-	struct xfs_trans_res	*tres,
-	unsigned int		*total)
+	struct xfs_trans_res	*tres)
 {
 	struct xfs_mount	*mp = args->dp->i_mount;
 
-	if (args->value) {
-		tres->tr_logres = M_RES(mp)->tr_attrsetm.tr_logres +
-				 M_RES(mp)->tr_attrsetrt.tr_logres *
-				 args->total;
-		tres->tr_logcount = XFS_ATTRSET_LOG_COUNT;
+	tres->tr_logres = M_RES(mp)->tr_attrsetm.tr_logres +
+			  M_RES(mp)->tr_attrsetrt.tr_logres * args->total;
+	tres->tr_logcount = XFS_ATTRSET_LOG_COUNT;
 		tres->tr_logflags = XFS_TRANS_PERM_LOG_RES;
-		*total = args->total;
-	} else {
-		*tres = M_RES(mp)->tr_attrrm;
-		*total = XFS_ATTRRM_SPACE_RES(mp);
-	}
+	return args->total;
+}
+
+/* Initialize transaction reservation for an xattr remove */
+unsigned int
+xfs_attr_init_remove_trans(
+	struct xfs_da_args	*args,
+	struct xfs_trans_res	*tres)
+{
+	struct xfs_mount	*mp = args->dp->i_mount;
+
+	*tres = M_RES(mp)->tr_attrrm;
+	return XFS_ATTRRM_SPACE_RES(mp);
 }
 
 /*
@@ -1021,7 +1026,7 @@ xfs_attr_set(
 	struct xfs_trans_res	tres;
 	int			error, local;
 	int			rmt_blks = 0;
-	unsigned int		total;
+	unsigned int		total = 0;
 
 	ASSERT(!args->trans);
 
@@ -1049,10 +1054,12 @@ xfs_attr_set(
 		if (!local)
 			rmt_blks = xfs_attr3_rmt_blocks(mp, args->attr_filter,
 					args->valuelen);
+		total = xfs_attr_init_set_trans(args, &tres);
 		break;
 	case XFS_ATTRUPDATE_REMOVE:
 		XFS_STATS_INC(mp, xs_attr_remove);
 		rmt_blks = xfs_attr3_max_rmt_blocks(mp);
+		total = xfs_attr_init_remove_trans(args, &tres);
 		break;
 	}
 
@@ -1060,7 +1067,6 @@ xfs_attr_set(
 	 * Root fork attributes can use reserved data blocks for this
 	 * operation if necessary
 	 */
-	xfs_init_attr_trans(args, &tres, &total);
 	error = xfs_trans_alloc_inode(dp, &tres, total, 0, rsvd, &args->trans);
 	if (error)
 		return error;

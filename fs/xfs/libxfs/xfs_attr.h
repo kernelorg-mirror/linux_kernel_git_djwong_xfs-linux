@@ -565,8 +565,10 @@ bool xfs_attr_check_namespace(unsigned int attr_flags);
 bool xfs_attr_namecheck(unsigned int attr_flags, const void *name,
 		size_t length);
 int xfs_attr_calc_size(struct xfs_da_args *args, int *local);
-void xfs_init_attr_trans(struct xfs_da_args *args, struct xfs_trans_res *tres,
-			 unsigned int *total);
+unsigned int xfs_attr_init_set_trans(struct xfs_da_args *args,
+		struct xfs_trans_res *tres);
+unsigned int xfs_attr_init_remove_trans(struct xfs_da_args *args,
+		struct xfs_trans_res *tres);
 
 /*
  * Check to see if the attr should be upgraded from non-existent or shortform to

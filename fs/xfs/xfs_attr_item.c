@@ -746,7 +746,7 @@ xfs_attr_recover_work(
 	struct xfs_attri_log_format	*attrp;
 	struct xfs_attri_log_nameval	*nv = attrip->attri_nameval;
 	int				error;
-	int				total;
+	unsigned int			total = 0;
 
 	/*
 	 * First check the validity of the attr described by the ATTRI.  If any
@@ -763,7 +763,18 @@ xfs_attr_recover_work(
 		return PTR_ERR(attr);
 	args = attr->xattri_da_args;
 
-	xfs_init_attr_trans(args, &resv, &total);
+	switch (xfs_attr_intent_op(attr)) {
+	case XFS_ATTRI_OP_FLAGS_PPTR_SET:
+	case XFS_ATTRI_OP_FLAGS_PPTR_REPLACE:
+	case XFS_ATTRI_OP_FLAGS_SET:
+	case XFS_ATTRI_OP_FLAGS_REPLACE:
+		total = xfs_attr_init_set_trans(args, &resv);
+		break;
+	case XFS_ATTRI_OP_FLAGS_PPTR_REMOVE:
+	case XFS_ATTRI_OP_FLAGS_REMOVE:
+		total = xfs_attr_init_remove_trans(args, &resv);
+		break;
+	}
 	resv = xlog_recover_resv(&resv);
 	error = xfs_trans_alloc(mp, &resv, total, 0, XFS_TRANS_RESERVE, &tp);
 	if (error)
