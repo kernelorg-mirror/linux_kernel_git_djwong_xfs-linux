@@ -84,4 +84,6 @@ void xfs_rtrmapbt_destroy_cur_cache(void);
 #define xfs_rtrmapbt_create_path(mp, rgno) \
 	xfs_rtinode_create_path((mp), (rgno), "rmap")
 
+xfs_filblks_t xfs_rtrmapbt_calc_reserves(struct xfs_mount *mp);
+
 #endif	/* __XFS_RTRMAP_BTREE_H__ */
