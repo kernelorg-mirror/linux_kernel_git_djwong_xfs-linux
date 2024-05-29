@@ -11,6 +11,7 @@ struct xfs_trans;
 
 enum xfs_rtg_inodes {
 	XFS_RTG_RMAP,		/* rmap btree inode */
+	XFS_RTG_REFCOUNT,	/* refcount btree inode */
 	XFS_RTG_MAX,
 };
 
