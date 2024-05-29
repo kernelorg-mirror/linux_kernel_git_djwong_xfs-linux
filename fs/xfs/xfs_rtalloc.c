@@ -1415,7 +1415,7 @@ __xfs_rt_iget(
 	struct xfs_trans	*tp,
 	xfs_ino_t		ino,
 	struct lock_class_key	*lockdep_key,
-	const char		*lockdep_key_name,
+	int			subclass,
 	struct xfs_inode	**ipp)
 {
 	int			error;
@@ -1424,13 +1424,12 @@ __xfs_rt_iget(
 	if (error)
 		return error;
 
-	lockdep_set_class_and_name(&(*ipp)->i_lock, lockdep_key,
-			lockdep_key_name);
+	lockdep_set_class_and_subclass(&(*ipp)->i_lock, lockdep_key, subclass);
 	return 0;
 }
 
-#define xfs_rt_iget(tp, ino, lockdep_key, ipp) \
-	__xfs_rt_iget((tp), (ino), (lockdep_key), #lockdep_key, (ipp))
+#define xfs_rt_iget(tp, ino, lockdep_key, lockdep_subclass, ipp) \
+	__xfs_rt_iget((tp), (ino), (lockdep_key), (lockdep_subclass), (ipp))
 
 /*
  * Read in the bmbt of an rt metadata inode so that we never have to load them
@@ -1479,7 +1478,7 @@ xfs_rtmount_inodes(
 	if (error)
 		return error;
 
-	error = xfs_rt_iget(tp, mp->m_sb.sb_rbmino, &xfs_rbmip_key,
+	error = xfs_rt_iget(tp, mp->m_sb.sb_rbmino, &xfs_rbmip_key, 0,
 			&mp->m_rbmip);
 	if (xfs_metadata_is_sick(error))
 		xfs_rt_mark_sick(mp, XFS_SICK_RT_BITMAP);
@@ -1491,7 +1490,7 @@ xfs_rtmount_inodes(
 	if (error)
 		goto out_rele_bitmap;
 
-	error = xfs_rt_iget(tp, mp->m_sb.sb_rsumino, &xfs_rsumip_key,
+	error = xfs_rt_iget(tp, mp->m_sb.sb_rsumino, &xfs_rsumip_key, 0,
 			&mp->m_rsumip);
 	if (xfs_metadata_is_sick(error))
 		xfs_rt_mark_sick(mp, XFS_SICK_RT_SUMMARY);
