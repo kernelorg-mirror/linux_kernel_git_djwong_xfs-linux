@@ -13,6 +13,12 @@ struct xchk_rtbitmap {
 	unsigned int		resblks;
 };
 
+struct xchk_rgbitmap {
+	struct xfs_scrub	*sc;
+
+	struct xchk_rtbitmap	rtb;
+};
+
 #ifdef CONFIG_XFS_ONLINE_REPAIR
 int xrep_setup_rtbitmap(struct xfs_scrub *sc, struct xchk_rtbitmap *rtb);
 #else
