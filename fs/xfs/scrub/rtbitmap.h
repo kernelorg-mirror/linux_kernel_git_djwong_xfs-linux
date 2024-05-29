@@ -17,6 +17,9 @@ struct xchk_rgbitmap {
 	struct xfs_scrub	*sc;
 
 	struct xchk_rtbitmap	rtb;
+
+	/* The next free rt group block number that we expect to see. */
+	xfs_rgblock_t		next_free_rgbno;
 };
 
 #ifdef CONFIG_XFS_ONLINE_REPAIR
