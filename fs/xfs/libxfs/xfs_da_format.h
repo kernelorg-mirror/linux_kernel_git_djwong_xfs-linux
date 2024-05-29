@@ -745,6 +745,9 @@ struct xfs_attr3_leafblock {
  */
 #define	XFS_ATTR_LEAF_NAME_ALIGN	((uint)sizeof(xfs_dablk_t))
 
+/* Maximum file block offset of a directory or an xattr. */
+#define	XFS_MAX_DABLK			((xfs_dablk_t)-1U)
+
 static inline int
 xfs_attr3_leaf_hdr_size(struct xfs_attr_leafblock *leafp)
 {
