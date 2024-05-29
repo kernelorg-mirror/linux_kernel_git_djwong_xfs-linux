@@ -522,8 +522,12 @@ xfs_can_free_eofblocks(
 	if (xfs_need_iread_extents(&ip->i_df))
 		return false;
 
-	/* Only free real extents for inodes with persistent preallocations. */
-	if ((ip->i_diflags & XFS_DIFLAG_PREALLOC) && !ip->i_delayed_blks)
+	/*
+	 * Only free real extents for inodes with persistent preallocations
+	 * or no extent size hint.
+	 */
+	if ((xfs_get_extsz_hint(ip) ||
+	     (ip->i_diflags & XFS_DIFLAG_PREALLOC)) && !ip->i_delayed_blks)
 		return false;
 
 	/*
