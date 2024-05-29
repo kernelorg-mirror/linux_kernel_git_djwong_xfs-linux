@@ -14,6 +14,9 @@ struct xfs_imeta_path {
 	/* Array of string pointers. */
 	const char		**im_path;
 
+	/* Set bits correspond to components of im_path needing to be freed */
+	unsigned long long	im_dynamicmask;
+
 	/* Number of strings in path.  0 here means the metadir root. */
 	uint8_t			im_depth;
 
@@ -56,6 +59,10 @@ int xfs_imeta_lookup(struct xfs_trans *tp, const struct xfs_imeta_path *path,
 		xfs_ino_t *ino);
 int xfs_imeta_iget_parent(struct xfs_trans *tp,
 		const struct xfs_imeta_path *path, struct xfs_inode **dpp);
+
+int xfs_imeta_create_file_path(struct xfs_mount *mp,
+		unsigned int nr_components, struct xfs_imeta_path **pathp);
+void xfs_imeta_free_path(const struct xfs_imeta_path *path);
 
 void xfs_imeta_set_iflag(struct xfs_trans *tp, struct xfs_inode *ip);
 void xfs_imeta_clear_iflag(struct xfs_trans *tp, struct xfs_inode *ip);
