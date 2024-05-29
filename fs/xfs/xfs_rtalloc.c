@@ -807,6 +807,70 @@ xfs_alloc_rsum_cache(
  * Visible (exported) functions.
  */
 
+static int
+xfs_growfs_rt_free_new(
+	struct xfs_mount	*mp,
+	struct xfs_rtalloc_args	*nargs,
+	xfs_rtbxlen_t		*freed_rtx)
+{
+	struct xfs_mount	*nmp = nargs->mp;
+	struct xfs_sb		*sbp = &mp->m_sb;
+	struct xfs_sb		*nsbp = &nmp->m_sb;
+	xfs_rtxnum_t		start_rtx = sbp->sb_rextents;
+
+	/*
+	 * Compute the first new extent that we want to free, being careful to
+	 * skip past a realtime superblock at the start of the realtime volume.
+	 */
+	if (xfs_has_rtsuper(mp) && start_rtx == 0)
+		start_rtx++;
+
+	*freed_rtx = nsbp->sb_rextents - start_rtx;
+	return xfs_rtfree_range(nargs, start_rtx, *freed_rtx);
+}
+
+static int
+xfs_growfs_rt_init_primary(
+	struct xfs_mount	*mp)
+{
+	struct xfs_buf		*rtsb_bp;
+	int			error;
+
+	error = xfs_buf_get_uncached(mp->m_rtdev_targp, XFS_FSB_TO_BB(mp, 1),
+			0, &rtsb_bp);
+	if (error)
+		return error;
+
+	rtsb_bp->b_maps[0].bm_bn = XFS_RTSB_DADDR;
+	rtsb_bp->b_ops = &xfs_rtsb_buf_ops;
+
+	xfs_rtgroup_update_super(rtsb_bp, mp->m_sb_bp);
+	mp->m_rtsb_bp = rtsb_bp;
+	error = xfs_bwrite(rtsb_bp);
+	xfs_buf_unlock(rtsb_bp);
+	return error;
+}
+
+/* Add rtgroups as needed to deal with this phase of rt expansion. */
+STATIC int
+xfs_growfsrt_alloc_rtgroups(
+	struct xfs_mount	*mp,
+	struct xfs_sb		*nsbp)
+{
+	nsbp->sb_rgcount = howmany_64(nsbp->sb_rblocks, nsbp->sb_rgblocks);
+	return xfs_initialize_rtgroups(mp, nsbp->sb_rgcount);
+}
+
+/* Remove excess rtgroups after a grow failed. */
+STATIC void
+xfs_growfsrt_free_rtgroups(
+	struct xfs_mount	*mp,
+	struct xfs_sb		*nsbp)
+{
+	xfs_free_unused_rtgroup_range(mp, mp->m_sb.sb_rgcount + 1,
+			nsbp->sb_rgcount);
+}
+
 /*
  * Grow the realtime area of the filesystem.
  */
@@ -897,6 +961,30 @@ xfs_growfs_rt(
 	 */
 	if (nrsumblocks > (mp->m_sb.sb_logblocks >> 1))
 		return -EINVAL;
+
+	/* Allocate the new rt group structures */
+	if (xfs_has_rtgroups(mp)) {
+		uint64_t	new_rgcount;
+
+		new_rgcount = howmany_64(nrblocks, mp->m_sb.sb_rgblocks);
+		if (new_rgcount > XFS_MAX_RGNUMBER)
+			return -EINVAL;
+
+		/*
+		 * We don't support changing the group size to match the extent
+		 * size, even if the size of the rt section is currently zero.
+		 */
+		if (mp->m_sb.sb_rgblocks % in->extsize != 0)
+			return -EOPNOTSUPP;
+	}
+
+	/* Set up the realtime superblock if we're adding a new rt section. */
+	if (xfs_has_rtsuper(mp) && mp->m_sb.sb_rblocks == 0) {
+		error = xfs_growfs_rt_init_primary(mp);
+		if (error)
+			return error;
+	}
+
 	/*
 	 * Get the old block counts for bitmap and summary inodes.
 	 * These can't change since other growfs callers are locked out.
@@ -938,7 +1026,10 @@ xfs_growfs_rt(
 			.mp		= nmp,
 		};
 		struct xfs_trans	*tp;
+		struct xfs_rtgroup	*rtg;
 		xfs_rfsblock_t		nrblocks_step;
+		xfs_rtbxlen_t		freed_rtx = 0;
+		xfs_rgnumber_t		last_rgno = mp->m_sb.sb_rgcount - 1;
 
 		*nmp = *mp;
 		nsbp = &nmp->m_sb;
@@ -960,6 +1051,12 @@ xfs_growfs_rt(
 		nmp->m_rsumsize = nrsumsize = XFS_FSB_TO_B(mp, nrsumblocks);
 		/* recompute growfsrt reservation from new rsumsize */
 		xfs_trans_resv_calc(nmp, &nmp->m_resv);
+
+		if (xfs_has_rtgroups(mp)) {
+			error = xfs_growfsrt_alloc_rtgroups(mp, nsbp);
+			if (error)
+				goto out_free;
+		}
 
 		/*
 		 * Start a transaction, get the log reservation.
@@ -1003,6 +1100,7 @@ xfs_growfs_rt(
 			if (error)
 				goto error_cancel;
 		}
+
 		/*
 		 * Update superblock fields.
 		 */
@@ -1021,11 +1119,14 @@ xfs_growfs_rt(
 		if (nsbp->sb_rextslog != sbp->sb_rextslog)
 			xfs_trans_mod_sb(tp, XFS_TRANS_SB_REXTSLOG,
 				nsbp->sb_rextslog - sbp->sb_rextslog);
+		if (nsbp->sb_rgcount != sbp->sb_rgcount)
+			xfs_trans_mod_sb(tp, XFS_TRANS_SB_RGCOUNT,
+				nsbp->sb_rgcount - sbp->sb_rgcount);
+
 		/*
 		 * Free new extent.
 		 */
-		error = xfs_rtfree_range(&nargs, sbp->sb_rextents,
-				nsbp->sb_rextents - sbp->sb_rextents);
+		error = xfs_growfs_rt_free_new(mp, &nargs, &freed_rtx);
 		xfs_rtbuf_cache_relse(&nargs);
 		if (error) {
 error_cancel:
@@ -1035,8 +1136,7 @@ error_cancel:
 		/*
 		 * Mark more blocks free in the superblock.
 		 */
-		xfs_trans_mod_sb(tp, XFS_TRANS_SB_FREXTENTS,
-			nsbp->sb_rextents - sbp->sb_rextents);
+		xfs_trans_mod_sb(tp, XFS_TRANS_SB_FREXTENTS, freed_rtx);
 		/*
 		 * Update mp values into the real mp structure.
 		 */
@@ -1049,11 +1149,18 @@ error_cancel:
 		if (error)
 			break;
 
+		for_each_rtgroup_from(mp, last_rgno, rtg)
+			rtg->rtg_blockcount = xfs_rtgroup_block_count(mp,
+								rtg->rtg_rgno);
+
 		/* Ensure the mount RT feature flag is now set. */
 		mp->m_features |= XFS_FEAT_REALTIME;
 	}
-	if (error)
+	if (error) {
+		if (xfs_has_rtgroups(mp))
+			xfs_growfsrt_free_rtgroups(mp, nsbp);
 		goto out_free;
+	}
 
 	/* Update secondary superblocks now the physical grow has completed */
 	error = xfs_update_secondary_sbs(mp);
