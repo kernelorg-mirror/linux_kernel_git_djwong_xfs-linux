@@ -1078,6 +1078,19 @@ xfs_getfsrefs_advance(
 /* fcr_flags values - returned for each non-header segment */
 #define FCR_OF_LAST		(1U << 0) /* last record in the dataset */
 
+/* map free space to file */
+
+/*
+ * XFS_IOC_MAP_FREESP maps all the free physical space in the filesystem into
+ * the file at the same offsets.  This ioctl requires CAP_SYS_ADMIN.
+ */
+struct xfs_map_freesp {
+	__s64	offset;		/* disk address to map, in bytes */
+	__s64	len;		/* length in bytes */
+	__u64	flags;		/* must be zero */
+	__u64	pad;		/* must be zero */
+};
+
 /*
  * ioctl commands that are used by Linux filesystems
  */
@@ -1118,6 +1131,7 @@ xfs_getfsrefs_advance(
 #define XFS_IOC_SCRUBV_METADATA	_IOWR('X', 64, struct xfs_scrub_vec_head)
 #define XFS_IOC_RTGROUP_GEOMETRY _IOWR('X', 65, struct xfs_rtgroup_geometry)
 #define XFS_IOC_GETFSREFCOUNTS	_IOWR('X', 66, struct xfs_getfsrefs_head)
+#define XFS_IOC_MAP_FREESP	_IOW ('X', 67, struct xfs_map_freesp)
 
 /*
  * ioctl commands that replace IRIX syssgi()'s
