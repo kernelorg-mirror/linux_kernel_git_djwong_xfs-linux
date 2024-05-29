@@ -29,6 +29,16 @@
 #include "xfs_imeta.h"
 
 /*
+ * Realtime metadata files are not quite regular files because userspace can't
+ * access the realtime bitmap directly, and because we take the ILOCK of the rt
+ * bitmap file (and then the rt summary file) while holding the ILOCK of a
+ * regular realtime file.  This double locking confuses lockdep, so create
+ * different lockdep classes here to help it keep things straight.
+ */
+static struct lock_class_key xfs_rtbitmap_key;
+static struct lock_class_key xfs_rtsummary_key;
+
+/*
  * Return whether there are any free extents in the size range given
  * by low and high, for the bitmap block bbno.
  */
@@ -1202,6 +1212,8 @@ xfs_rtmount_inodes(
 		goto out_trans;
 	ASSERT(mp->m_rbmip != NULL);
 
+	lockdep_set_class(&mp->m_rbmip->i_lock, &xfs_rtbitmap_key);
+
 	error = xfs_rtmount_iread_extents(tp, mp->m_rbmip, XFS_ILOCK_RTBITMAP);
 	if (error)
 		goto out_rele_bitmap;
@@ -1212,6 +1224,8 @@ xfs_rtmount_inodes(
 	if (error)
 		goto out_rele_bitmap;
 	ASSERT(mp->m_rsumip != NULL);
+
+	lockdep_set_class(&mp->m_rsumip->i_lock, &xfs_rtsummary_key);
 
 	error = xfs_rtmount_iread_extents(tp, mp->m_rsumip, XFS_ILOCK_RTSUM);
 	if (error)
