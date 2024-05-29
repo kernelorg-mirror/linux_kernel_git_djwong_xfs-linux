@@ -2021,7 +2021,10 @@ xfs_bmap_rtalloc(
 	};
 	int			error;
 
-	align = xfs_get_extsz_hint(ap->ip);
+	if (ap->flags & XFS_BMAPI_COWFORK)
+		align = xfs_get_cowextsz_hint(ap->ip);
+	else
+		align = xfs_get_extsz_hint(ap->ip);
 	if (!align)
 		align = 1;
 retry:
