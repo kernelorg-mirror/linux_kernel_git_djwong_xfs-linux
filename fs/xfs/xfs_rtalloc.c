@@ -26,8 +26,11 @@
 #include "xfs_health.h"
 #include "xfs_da_format.h"
 #include "xfs_imeta.h"
+#include "xfs_imeta_utils.h"
 #include "xfs_rtgroup.h"
 #include "xfs_error.h"
+#include "xfs_btree.h"
+#include "xfs_rmap.h"
 #include "xfs_rtrmap_btree.h"
 #include "xfs_trace.h"
 
@@ -938,14 +941,138 @@ xfs_rtgroup_irele(
 	*ipp = NULL;
 }
 
+/* Add a metadata inode for a realtime rmap btree. */
+static int
+xfs_growfsrt_create_rtrmap(
+	struct xfs_rtgroup	*rtg)
+{
+	struct xfs_mount	*mp = rtg->rtg_mount;
+	struct xfs_imeta_update	upd;
+	struct xfs_rmap_irec	rmap = {
+		.rm_startblock	= 0,
+		.rm_blockcount	= mp->m_sb.sb_rextsize,
+		.rm_owner	= XFS_RMAP_OWN_FS,
+		.rm_offset	= 0,
+		.rm_flags	= 0,
+	};
+	struct xfs_btree_cur	*cur;
+	struct xfs_imeta_path	*path;
+	struct xfs_trans	*tp = NULL;
+	struct xfs_inode	*ip = NULL;
+	xfs_ino_t		ino;
+	int			error;
+
+	if (!xfs_has_rtrmapbt(mp) || rtg->rtg_rmapip)
+		return 0;
+
+	error = xfs_rtrmapbt_create_path(mp, rtg->rtg_rgno, &path);
+	if (error)
+		return error;
+
+	error = xfs_imeta_ensure_dirpath(mp, path);
+	if (error)
+		goto out_path;
+
+	/* Does this file already exist at the end of the path? */
+	error = xfs_trans_alloc_empty(mp, &tp);
+	if (error)
+		goto out_path;
+
+	error = xfs_imeta_lookup(tp, path, &ino);
+	if (error)
+		goto out_trans;
+
+	if (ino != NULLFSINO) {
+		/* Inode already exists; load it. */
+		error = xfs_imeta_iget(tp, ino, XFS_DIR3_FT_REG_FILE, &ip);
+		xfs_trans_cancel(tp);
+		tp = NULL;
+		if (error)
+			goto out_path;
+
+		if (XFS_IS_CORRUPT(mp, ip->i_df.if_format !=
+							XFS_DINODE_FMT_RMAP)) {
+			error = -EFSCORRUPTED;
+			xfs_imeta_irele(ip);
+			goto out_path;
+		}
+
+		lockdep_set_class_and_subclass(&ip->i_lock, &rtg->lock_class,
+				XFS_RTRMAP_SUBCLASS);
+
+		rtg->rtg_rmapip = ip;
+		goto out_path;
+	}
+	xfs_trans_cancel(tp);
+	tp = NULL;
+
+	/* Inode does not exist; create it. */
+	error = xfs_imeta_start_create(mp, path, &upd);
+	if (error)
+		goto out_path;
+
+	error = xfs_rtrmapbt_create(&upd, &ip);
+	if (error)
+		goto out_cancel;
+
+	lockdep_set_class_and_subclass(&ip->i_lock, &rtg->lock_class,
+			XFS_RTRMAP_SUBCLASS);
+
+	/* Rmap the rtgroup superblock; this had better fit in the data fork. */
+	cur = xfs_rtrmapbt_init_cursor(mp, upd.tp, rtg, ip);
+	error = xfs_rmap_map_raw(cur, &rmap);
+	xfs_btree_del_cursor(cur, error);
+	if (error)
+		goto out_cancel;
+
+	error = xfs_imeta_commit_update(&upd);
+	if (error)
+		goto out_path;
+
+	xfs_imeta_free_path(path);
+	xfs_finish_inode_setup(ip);
+	rtg->rtg_rmapip = ip;
+	return 0;
+
+out_cancel:
+	xfs_imeta_cancel_update(&upd, error);
+	/* Have to finish setting up the inode to ensure it's deleted. */
+	if (ip) {
+		xfs_finish_inode_setup(ip);
+		xfs_imeta_irele(ip);
+	}
+out_trans:
+	if (tp)
+		xfs_trans_cancel(tp);
+out_path:
+	xfs_imeta_free_path(path);
+	return error;
+}
+
 /* Add rtgroups as needed to deal with this phase of rt expansion. */
 STATIC int
 xfs_growfsrt_alloc_rtgroups(
 	struct xfs_mount	*mp,
+	xfs_rgnumber_t		last_rgno,
 	struct xfs_sb		*nsbp)
 {
+	struct xfs_rtgroup	*rtg;
+	int			error;
+
 	nsbp->sb_rgcount = howmany_64(nsbp->sb_rblocks, nsbp->sb_rgblocks);
-	return xfs_initialize_rtgroups(mp, nsbp->sb_rgcount);
+	error = xfs_initialize_rtgroups(mp, nsbp->sb_rgcount);
+	if (error)
+		return error;
+
+	for_each_rtgroup_range(mp, last_rgno, nsbp->sb_rgcount, rtg) {
+		error = xfs_growfsrt_create_rtrmap(rtg);
+		if (error) {
+			xfs_rtgroup_rele(rtg);
+			return error;
+		}
+	}
+
+	return 0;
 }
 
 /* Remove excess rtgroups after a grow failed. */
@@ -954,6 +1081,13 @@ xfs_growfsrt_free_rtgroups(
 	struct xfs_mount	*mp,
 	struct xfs_sb		*nsbp)
 {
+	struct xfs_rtgroup	*rtg;
+	xfs_rgnumber_t		rgno = mp->m_sb.sb_rgcount + 1;
+
+	for_each_rtgroup_range(mp, rgno, nsbp->sb_rgcount, rtg) {
+		xfs_rtgroup_irele(&rtg->rtg_rmapip);
+	}
+
 	xfs_free_unused_rtgroup_range(mp, mp->m_sb.sb_rgcount + 1,
 			nsbp->sb_rgcount);
 }
@@ -1064,7 +1198,9 @@ xfs_growfs_rt(
 		return -EINVAL;
 
 	/* Unsupported realtime features. */
-	if (xfs_has_rmapbt(mp) || xfs_has_reflink(mp) || xfs_has_quota(mp))
+	if (!xfs_has_rtgroups(mp) && xfs_has_rmapbt(mp))
+		return -EOPNOTSUPP;
+	if (xfs_has_reflink(mp) || xfs_has_quota(mp))
 		return -EOPNOTSUPP;
 
 	nrblocks = in->newblocks;
@@ -1198,7 +1334,7 @@ xfs_growfs_rt(
 		xfs_trans_resv_calc(nmp, &nmp->m_resv);
 
 		if (xfs_has_rtgroups(mp)) {
-			error = xfs_growfsrt_alloc_rtgroups(mp, nsbp);
+			error = xfs_growfsrt_alloc_rtgroups(mp, last_rgno, nsbp);
 			if (error)
 				goto out_free;
 		}
