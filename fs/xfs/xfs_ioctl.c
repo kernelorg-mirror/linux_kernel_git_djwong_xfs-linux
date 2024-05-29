@@ -29,6 +29,7 @@
 #include "xfs_btree.h"
 #include <linux/fsmap.h>
 #include "xfs_fsmap.h"
+#include "xfs_fsrefs.h"
 #include "scrub/xfs_scrub.h"
 #include "xfs_sb.h"
 #include "xfs_ag.h"
@@ -1405,6 +1406,9 @@ xfs_file_ioctl(
 
 	case FS_IOC_GETFSMAP:
 		return xfs_ioc_getfsmap(ip, arg);
+
+	case XFS_IOC_GETFSREFCOUNTS:
+		return xfs_ioc_getfsrefcounts(ip, arg);
 
 	case XFS_IOC_SCRUBV_METADATA:
 		return xfs_ioc_scrubv_metadata(filp, arg);
