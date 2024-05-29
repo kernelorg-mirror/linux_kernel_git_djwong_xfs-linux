@@ -1,6 +1,4 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-#include <linux/mean_and_variance.h>
-
 #ifndef MEAN_AND_VARIANCE_H_
 #define MEAN_AND_VARIANCE_H_
 
