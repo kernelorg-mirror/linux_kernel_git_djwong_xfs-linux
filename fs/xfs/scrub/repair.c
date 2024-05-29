@@ -42,6 +42,7 @@
 #include "xfs_rtalloc.h"
 #include "xfs_metafile.h"
 #include "xfs_rtrefcount_btree.h"
+#include "xfs_timestats.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -61,7 +62,6 @@ xrep_attempt(
 	struct xfs_scrub	*sc,
 	struct xchk_stats_run	*run)
 {
-	u64			repair_start;
 	int			error = 0;
 
 	trace_xrep_attempt(XFS_I(file_inode(sc->file)), sc->sm, error);
@@ -72,10 +72,10 @@ xrep_attempt(
 	/* Repair whatever's broken. */
 	ASSERT(sc->ops->repair);
 	run->repair_attempted = true;
-	repair_start = xchk_stats_now();
+	run->repair_start = xchk_stats_now();
 	error = sc->ops->repair(sc);
+	run->repair_stop = xchk_stats_now();
 	trace_xrep_done(XFS_I(file_inode(sc->file)), sc->sm, error);
-	run->repair_ns += xchk_stats_elapsed_ns(repair_start);
 	switch (error) {
 	case 0:
 		/*
