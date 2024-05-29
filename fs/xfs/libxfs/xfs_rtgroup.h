@@ -22,6 +22,9 @@ struct xfs_rtgroup {
 	/* for rcu-safe freeing */
 	struct rcu_head		rcu_head;
 
+	/* reverse mapping btree inode */
+	struct xfs_inode	*rtg_rmapip;
+
 	/* Number of blocks in this group */
 	xfs_rgblock_t		rtg_blockcount;
 
@@ -251,5 +254,8 @@ int xfs_rtgroup_get_geometry(struct xfs_rtgroup *rtg,
 # define xfs_rtgroup_unlock(rtg, gf)		((void)0)
 # define xfs_rtgroup_get_geometry(rtg, rgeo)	(-EOPNOTSUPP)
 #endif /* CONFIG_XFS_RT */
+
+struct xfs_imeta_path *xfs_rtinode_create_path(struct xfs_mount *mp,
+		xfs_rgnumber_t rgno, const char *name);
 
 #endif /* __LIBXFS_RTGROUP_H */

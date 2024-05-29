@@ -31,6 +31,7 @@
 #include "xfs_buf_item.h"
 #include "xfs_rtgroup.h"
 #include "xfs_rtbitmap.h"
+#include "xfs_imeta.h"
 
 /*
  * Passive reference counting access wrappers to the rtgroup structures.  If
@@ -464,4 +465,25 @@ xfs_rtgroup_get_geometry(
 	rgeo->rg_length = rtg->rtg_blockcount;
 	xfs_rtgroup_geom_health(rtg, rgeo);
 	return 0;
+}
+
+/* Create the metadata directory path for an RT inode. */
+struct xfs_imeta_path *
+xfs_rtinode_create_path(
+	struct xfs_mount	*mp,
+	xfs_rgnumber_t		rgno,
+	const char		*name)
+{
+	struct xfs_imeta_path	*path;
+
+	if (xfs_imeta_create_file_path(mp, 2, &path) < 0)
+		return NULL;
+	path->im_dynamicmask = 0x2;
+	path->im_path[0] = "realtime";
+	path->im_path[1] = kasprintf(GFP_KERNEL, "%u.%s", rgno, name);
+	if (!path->im_path[1]) {
+		xfs_imeta_free_path(path);
+		return NULL;
+	}
+	return path;
 }
