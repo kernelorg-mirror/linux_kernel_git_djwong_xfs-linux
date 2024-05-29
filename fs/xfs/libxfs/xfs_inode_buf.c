@@ -440,6 +440,12 @@ xfs_dinode_verify_fork(
 		if (!(dip->di_flags2 & cpu_to_be64(XFS_DIFLAG2_METADIR)))
 			return __this_address;
 		break;
+	case XFS_DINODE_FMT_REFCOUNT:
+		if (!xfs_has_rtreflink(mp))
+			return __this_address;
+		if (!(dip->di_flags2 & cpu_to_be64(XFS_DIFLAG2_METADIR)))
+			return __this_address;
+		break;
 	default:
 		return __this_address;
 	}
@@ -460,6 +466,7 @@ xfs_dinode_verify_forkoff(
 			return __this_address;
 		break;
 	case XFS_DINODE_FMT_RMAP:
+	case XFS_DINODE_FMT_REFCOUNT:
 		if (!(xfs_has_metadir(mp) && xfs_has_parent(mp)))
 			return __this_address;
 		fallthrough;
@@ -741,6 +748,7 @@ xfs_dinode_verify(
 	if (flags2 & XFS_DIFLAG2_METADIR) {
 		switch (XFS_DFORK_FORMAT(dip, XFS_DATA_FORK)) {
 		case XFS_DINODE_FMT_RMAP:
+		case XFS_DINODE_FMT_REFCOUNT:
 			break;
 		default:
 			if (nextents + naextents == 0 && nblocks != 0)
