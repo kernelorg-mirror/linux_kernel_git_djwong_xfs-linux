@@ -27,6 +27,8 @@
 #include "xfs_da_format.h"
 #include "xfs_imeta.h"
 #include "xfs_rtgroup.h"
+#include "xfs_error.h"
+#include "xfs_rtrmap_btree.h"
 
 /*
  * Realtime metadata files are not quite regular files because userspace can't
@@ -37,6 +39,12 @@
  */
 static struct lock_class_key xfs_rbmip_key;
 static struct lock_class_key xfs_rsumip_key;
+
+/*
+ * Each realtime allocation group has a lockdep class key for the metadata
+ * inodes.  Each metadata inode in a group gets its own subclass.
+ */
+#define XFS_RTRMAP_SUBCLASS		(0)
 
 /*
  * Return whether there are any free extents in the size range given
@@ -911,6 +919,24 @@ xfs_growfs_rt_init_primary(
 	return 0;
 }
 
+static inline void
+xfs_rtgroup_irele(
+	struct xfs_inode	**ipp)
+{
+	struct xfs_inode	*ip = *ipp;
+
+	if (!ip)
+		return;
+
+	/*
+	 * Detach from the rtgroup's dynamic lockdep class key before we lose
+	 * access to the inode entirely.
+	 */
+	xfs_setup_metadata_inode_lock_class(ip);
+	xfs_imeta_irele(ip);
+	*ipp = NULL;
+}
+
 /* Add rtgroups as needed to deal with this phase of rt expansion. */
 STATIC int
 xfs_growfsrt_alloc_rtgroups(
@@ -1431,6 +1457,53 @@ __xfs_rt_iget(
 #define xfs_rt_iget(tp, ino, lockdep_key, lockdep_subclass, ipp) \
 	__xfs_rt_iget((tp), (ino), (lockdep_key), (lockdep_subclass), (ipp))
 
+/* Load realtime rmap btree inode. */
+STATIC int
+xfs_rtmount_rmapbt(
+	struct xfs_rtgroup	*rtg,
+	struct xfs_trans	*tp)
+{
+	struct xfs_mount	*mp = rtg->rtg_mount;
+	struct xfs_imeta_path	*path;
+	struct xfs_inode	*ip;
+	xfs_ino_t		ino;
+	int			error;
+
+	if (!xfs_has_rtrmapbt(mp))
+		return 0;
+
+	error = xfs_rtrmapbt_create_path(mp, rtg->rtg_rgno, &path);
+	if (error)
+		return error;
+
+	error = xfs_imeta_lookup(tp, path, &ino);
+	if (error)
+		goto out_path;
+
+	if (ino == NULLFSINO) {
+		error = -EFSCORRUPTED;
+		goto out_path;
+	}
+
+	error = xfs_rt_iget(tp, ino, &rtg->lock_class, XFS_RTRMAP_SUBCLASS, &ip);
+	if (error)
+		goto out_path;
+
+	if (XFS_IS_CORRUPT(mp, ip->i_df.if_format != XFS_DINODE_FMT_RMAP)) {
+		error = -EFSCORRUPTED;
+		goto out_rele;
+	}
+
+	rtg->rtg_rmapip = ip;
+	ip = NULL;
+out_rele:
+	if (ip)
+		xfs_imeta_irele(ip);
+out_path:
+	xfs_imeta_free_path(path);
+	return error;
+}
+
 /*
  * Read in the bmbt of an rt metadata inode so that we never have to load them
  * at runtime.  This enables the use of shared ILOCKs for rtbitmap scans.  Use
@@ -1458,6 +1531,18 @@ xfs_rtmount_iread_extents(
 out_unlock:
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	return error;
+}
+
+static void
+xfs_rtgroup_unmount_inodes(
+	struct xfs_mount	*mp)
+{
+	struct xfs_rtgroup	*rtg;
+	xfs_rgnumber_t		rgno;
+
+	for_each_rtgroup(mp, rgno, rtg) {
+		xfs_rtgroup_irele(&rtg->rtg_rmapip);
+	}
 }
 
 /*
@@ -1505,12 +1590,20 @@ xfs_rtmount_inodes(
 	for_each_rtgroup(mp, rgno, rtg) {
 		rtg->rtg_blockcount = xfs_rtgroup_block_count(mp,
 							      rtg->rtg_rgno);
+
+		error = xfs_rtmount_rmapbt(rtg, tp);
+		if (error) {
+			xfs_rtgroup_rele(rtg);
+			goto out_rele_rtgroup;
+		}
 	}
 
 	xfs_alloc_rsum_cache(mp, sbp->sb_rbmblocks);
 	xfs_trans_cancel(tp);
 	return 0;
 
+out_rele_rtgroup:
+	xfs_rtgroup_unmount_inodes(mp);
 out_rele_summary:
 	xfs_imeta_irele(mp->m_rsumip);
 out_rele_bitmap:
@@ -1525,6 +1618,8 @@ xfs_rtunmount_inodes(
 	struct xfs_mount	*mp)
 {
 	kvfree(mp->m_rsum_cache);
+
+	xfs_rtgroup_unmount_inodes(mp);
 	if (mp->m_rbmip)
 		xfs_imeta_irele(mp->m_rbmip);
 	if (mp->m_rsumip)
