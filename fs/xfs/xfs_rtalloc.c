@@ -1530,6 +1530,17 @@ xfs_rtpick_extent(
 
 	xfs_assert_ilocked(mp->m_rbmip, XFS_ILOCK_EXCL);
 
+	if (xfs_has_rtgroups(mp)) {
+		xfs_rtblock_t	rtbno;
+
+		/* Pick the first usable rtx of the group. */
+		rtbno = xfs_rgbno_to_rtb(mp, mp->m_rtgrotor, 0);
+		*pick = xfs_rtb_to_rtx(mp, rtbno) + 1;
+
+		mp->m_rtgrotor = (mp->m_rtgrotor + 1) % mp->m_sb.sb_rgcount;
+		return 0;
+	}
+
 	ts = inode_get_atime(VFS_I(mp->m_rbmip));
 	if (!(mp->m_rbmip->i_diflags & XFS_DIFLAG_NEWRTBM)) {
 		mp->m_rbmip->i_diflags |= XFS_DIFLAG_NEWRTBM;
