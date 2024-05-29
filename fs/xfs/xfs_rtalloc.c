@@ -33,6 +33,7 @@
 #include "xfs_rmap.h"
 #include "xfs_rtrmap_btree.h"
 #include "xfs_trace.h"
+#include "xfs_rtrefcount_btree.h"
 
 /*
  * Realtime metadata files are not quite regular files because userspace can't
@@ -49,6 +50,7 @@ static struct lock_class_key xfs_rtsummary_key;
  * inodes.  Each metadata inode in a group gets its own subclass.
  */
 #define XFS_RTRMAP_SUBCLASS		(0)
+#define XFS_RTREFC_SUBCLASS		(1)
 
 /*
  * Return whether there are any free extents in the size range given
@@ -998,6 +1000,41 @@ xfs_rtrmapip_lookup(
 	return 0;
 }
 
+/* Look up an existing rt refcount btree inode. */
+STATIC int
+xfs_rtrefcountip_lookup(
+	struct xfs_rtgroup	*rtg,
+	struct xfs_trans	*tp,
+	struct xfs_imeta_path	*path)
+{
+	struct xfs_mount	*mp = tp->t_mountp;
+	struct xfs_inode	*ip;
+	xfs_ino_t		ino;
+	int			error;
+
+	error = xfs_imeta_lookup(tp, path, &ino);
+	if (error)
+		return error;
+
+	if (ino == NULLFSINO)
+		return -ENOENT;
+
+	error = xfs_imeta_iget(tp, ino, S_IFREG, &ip);
+	if (error)
+		return error;
+
+	if (XFS_IS_CORRUPT(mp, ip->i_df.if_format != XFS_DINODE_FMT_REFCOUNT)) {
+		xfs_irele(ip);
+		return -EFSCORRUPTED;
+	}
+
+	lockdep_set_class_and_subclass(&ip->i_lock, &rtg->lock_class,
+			XFS_RTREFC_SUBCLASS);
+
+	rtg->rtg_refcountip = ip;
+	return 0;
+}
+
 /* Add a metadata inode for a realtime rmap btree. */
 static int
 xfs_growfsrt_create_rtrmap(
@@ -1714,6 +1751,28 @@ xfs_rtmount_rmapbt(
 	return error;
 }
 
+/* Load realtime refcount btree inode. */
+STATIC int
+xfs_rtmount_refcountbt(
+	struct xfs_rtgroup	*rtg,
+	struct xfs_trans	*tp)
+{
+	struct xfs_mount	*mp = rtg->rtg_mount;
+	struct xfs_imeta_path	*path;
+	int			error;
+
+	if (!xfs_has_rtreflink(mp))
+		return 0;
+
+	path = xfs_rtrefcountbt_create_path(mp, rtg->rtg_rgno);
+	if (!path)
+		return -ENOMEM;
+
+	error = xfs_rtrefcountip_lookup(rtg, tp, path);
+	xfs_imeta_free_path(path);
+	return error;
+}
+
 /*
  * Read in the bmbt of an rt metadata inode so that we never have to load them
  * at runtime.  This enables the use of shared ILOCKs for rtbitmap scans.  Use
@@ -1752,6 +1811,7 @@ xfs_rtgroup_unmount_inodes(
 
 	for_each_rtgroup(mp, rgno, rtg) {
 		xfs_rtgroup_irele(&rtg->rtg_rmapip);
+		xfs_rtgroup_irele(&rtg->rtg_refcountip);
 	}
 }
 
@@ -1804,6 +1864,12 @@ xfs_rtmount_inodes(
 							      rtg->rtg_rgno);
 
 		error = xfs_rtmount_rmapbt(rtg, tp);
+		if (error) {
+			xfs_rtgroup_rele(rtg);
+			goto out_rele_rtgroup;
+		}
+
+		error = xfs_rtmount_refcountbt(rtg, tp);
 		if (error) {
 			xfs_rtgroup_rele(rtg);
 			goto out_rele_rtgroup;
