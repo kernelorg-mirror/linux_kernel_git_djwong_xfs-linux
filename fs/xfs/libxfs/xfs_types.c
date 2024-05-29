@@ -12,6 +12,8 @@
 #include "xfs_bit.h"
 #include "xfs_mount.h"
 #include "xfs_ag.h"
+#include "xfs_rtbitmap.h"
+#include "xfs_rtgroup.h"
 
 
 /*
@@ -135,18 +137,56 @@ xfs_verify_dir_ino(
 }
 
 /*
- * Verify that an realtime block number pointer doesn't point off the
- * end of the realtime device.
+ * Verify that an rtgroup block number pointer neither points outside the
+ * rtgroup nor at static metadata.
+ */
+static inline bool
+xfs_verify_rgno_rgbno(
+	struct xfs_mount	*mp,
+	xfs_rgnumber_t		rgno,
+	xfs_rgblock_t		rgbno)
+{
+	xfs_rgblock_t		eorg;
+
+	eorg = xfs_rtgroup_block_count(mp, rgno);
+	if (rgbno >= eorg)
+		return false;
+	if (xfs_has_rtsuper(mp) && rgno == 0 && rgbno < mp->m_sb.sb_rextsize)
+		return false;
+	return true;
+}
+
+/*
+ * Verify that a realtime block number pointer neither points outside the
+ * allocatable areas of the rtgroup nor off the end of the realtime
+ * device.
  */
 inline bool
 xfs_verify_rtbno(
 	struct xfs_mount	*mp,
 	xfs_rtblock_t		rtbno)
 {
-	return rtbno < mp->m_sb.sb_rblocks;
+	xfs_rgnumber_t		rgno;
+	xfs_rgblock_t		rgbno;
+
+	if (rtbno >= mp->m_sb.sb_rblocks)
+		return false;
+
+	if (!xfs_has_rtgroups(mp))
+		return true;
+
+	rgbno = xfs_rtb_to_rgbno(mp, rtbno, &rgno);
+	if (rgno >= mp->m_sb.sb_rgcount)
+		return false;
+
+	return xfs_verify_rgno_rgbno(mp, rgno, rgbno);
 }
 
-/* Verify that a realtime device extent is fully contained inside the volume. */
+/*
+ * Verify that an allocated realtime device extent neither points outside
+ * allocatable areas of the rtgroup, across an rtgroup boundary, nor off the
+ * end of the realtime device.
+ */
 bool
 xfs_verify_rtbext(
 	struct xfs_mount	*mp,
@@ -159,7 +199,14 @@ xfs_verify_rtbext(
 	if (!xfs_verify_rtbno(mp, rtbno))
 		return false;
 
-	return xfs_verify_rtbno(mp, rtbno + len - 1);
+	if (!xfs_verify_rtbno(mp, rtbno + len - 1))
+		return false;
+
+	if (xfs_has_rtgroups(mp) &&
+	    xfs_rtb_to_rgno(mp, rtbno) != xfs_rtb_to_rgno(mp, rtbno + len - 1))
+		return false;
+
+	return true;
 }
 
 /*
