@@ -12,9 +12,11 @@
 /* Form an imeta path from a simple array of strings. */
 #define XFS_IMETA_DEFINE_PATH(name, path) \
 const struct xfs_imeta_path name = { \
-	.im_path = (path), \
-	.im_depth = ARRAY_SIZE(path), \
-	.im_ftype = XFS_DIR3_FT_REG_FILE, \
+	.im_path	= (path), \
+	.im_dynamicmask	= 0, \
+	.im_flags	= XFS_IMETA_PATH_STATIC, \
+	.im_depth	= ARRAY_SIZE(path), \
+	.im_ftype	= XFS_DIR3_FT_REG_FILE, \
 }
 
 /* Key for looking up metadata inodes. */
@@ -22,12 +24,21 @@ struct xfs_imeta_path {
 	/* Array of string pointers. */
 	const char		**im_path;
 
+	/* Set bits correspond to components of im_path needing to be freed */
+	unsigned long long	im_dynamicmask;
+
+	/* XFS_IMETA_* path flags */
+	uint16_t		im_flags;
+
 	/* Number of strings in path. */
 	uint8_t			im_depth;
 
 	/* Expected file type. */
 	uint8_t			im_ftype;
 };
+
+/* Path is statically allocated. */
+#define XFS_IMETA_PATH_STATIC	(1U << 0)
 
 /* Cleanup widget for metadata inode creation and deletion. */
 struct xfs_imeta_update {
@@ -66,6 +77,10 @@ int xfs_imeta_lookup(struct xfs_trans *tp, const struct xfs_imeta_path *path,
 		xfs_ino_t *ino);
 int xfs_imeta_iget_parent(struct xfs_trans *tp,
 		const struct xfs_imeta_path *path, struct xfs_inode **dpp);
+
+int xfs_imeta_create_file_path(struct xfs_mount *mp,
+		unsigned int nr_components, struct xfs_imeta_path **pathp);
+void xfs_imeta_free_path(const struct xfs_imeta_path *path);
 
 void xfs_imeta_set_iflag(struct xfs_trans *tp, struct xfs_inode *ip);
 void xfs_imeta_clear_iflag(struct xfs_trans *tp, struct xfs_inode *ip);
