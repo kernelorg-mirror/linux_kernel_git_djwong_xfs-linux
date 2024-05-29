@@ -1055,12 +1055,11 @@ xfs_rtalloc_reinit_frextents(
 static inline int
 xfs_rtmount_iread_extents(
 	struct xfs_trans	*tp,
-	struct xfs_inode	*ip,
-	unsigned int		lock_class)
+	struct xfs_inode	*ip)
 {
 	int			error;
 
-	xfs_ilock(ip, XFS_ILOCK_EXCL | lock_class);
+	xfs_ilock(ip, XFS_ILOCK_EXCL);
 
 	error = xfs_iread_extents(tp, ip, XFS_DATA_FORK);
 	if (error)
@@ -1073,7 +1072,7 @@ xfs_rtmount_iread_extents(
 	}
 
 out_unlock:
-	xfs_iunlock(ip, XFS_ILOCK_EXCL | lock_class);
+	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	return error;
 }
 
@@ -1102,7 +1101,7 @@ xfs_rtmount_inodes(
 
 	lockdep_set_class(&mp->m_rbmip->i_lock, &xfs_rtbitmap_key);
 
-	error = xfs_rtmount_iread_extents(tp, mp->m_rbmip, XFS_ILOCK_RTBITMAP);
+	error = xfs_rtmount_iread_extents(tp, mp->m_rbmip);
 	if (error)
 		goto out_rele_bitmap;
 
@@ -1115,7 +1114,7 @@ xfs_rtmount_inodes(
 
 	lockdep_set_class(&mp->m_rsumip->i_lock, &xfs_rtsummary_key);
 
-	error = xfs_rtmount_iread_extents(tp, mp->m_rsumip, XFS_ILOCK_RTSUM);
+	error = xfs_rtmount_iread_extents(tp, mp->m_rsumip);
 	if (error)
 		goto out_rele_summary;
 
