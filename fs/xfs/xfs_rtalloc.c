@@ -33,6 +33,7 @@
 #include "xfs_rmap.h"
 #include "xfs_rtrmap_btree.h"
 #include "xfs_trace.h"
+#include "xfs_rtrefcount_btree.h"
 
 /*
  * Realtime metadata files are not quite regular files because userspace can't
@@ -1437,6 +1438,12 @@ xfs_rt_resv_init(
 		ask = xfs_rtrmapbt_calc_reserves(mp);
 		err2 = xfs_metafile_resv_init(rtg->rtg_inodes[XFS_RTG_RMAP],
 				ask);
+		if (err2 && !error)
+			error = err2;
+
+		ask = xfs_rtrefcountbt_calc_reserves(mp);
+		err2 = xfs_metafile_resv_init(
+				rtg->rtg_inodes[XFS_RTG_REFCOUNT], ask);
 		if (err2 && !error)
 			error = err2;
 	}
