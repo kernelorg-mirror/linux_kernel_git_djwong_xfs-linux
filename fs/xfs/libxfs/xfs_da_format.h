@@ -888,7 +888,27 @@ struct xfs_attr3_rmt_hdr {
 
 #define XFS_ATTR3_RMT_CRC_OFF	offsetof(struct xfs_attr3_rmt_hdr, rm_crc)
 
-unsigned int xfs_attr3_rmt_buf_space(struct xfs_mount *mp);
+unsigned int xfs_attr3_rmt_buf_space(struct xfs_mount *mp, unsigned int attrns);
+
+/*
+ * XFS_ATTR_VERITY remote attribute block format definition
+ *
+ * fsverity stores blocks of a merkle tree in the extended attributes.  The
+ * size of these blocks are a power of two, so we'd like to reduce overhead by
+ * not storing a remote header at the start of each ondisk block.  Because
+ * merkle tree blocks are themselves hashes of other merkle tree or data
+ * blocks, we can detect bitflips without needing our own checksum.  Settle for
+ * XORing the owner, blkno, magic, and metauuid into the start of each ondisk
+ * merkle tree block.
+ */
+#define XFS_ATTR3_RMTVERITY_MAGIC	0x5955434B	/* YUCK */
+
+struct xfs_attr3_rmtverity_hdr {
+	__be64	rmv_owner;
+	__be64	rmv_blkno;
+	__be32	rmv_magic;
+	uuid_t	rmv_uuid;
+} __packed;
 
 /* Number of bytes in a directory block. */
 static inline unsigned int xfs_dir2_dirblock_bytes(struct xfs_sb *sbp)
