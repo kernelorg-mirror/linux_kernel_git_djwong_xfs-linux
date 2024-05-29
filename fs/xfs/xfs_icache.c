@@ -827,8 +827,10 @@ xfs_imeta_iget(
 	struct xfs_inode	*ip;
 	int			error;
 
-	if (!xfs_verify_ino(mp, ino))
+	if (!xfs_verify_ino(mp, ino)) {
+		xfs_fs_mark_sick(mp, XFS_SICK_FS_METADIR);
 		return -EFSCORRUPTED;
+	}
 
 	error = xfs_iget(mp, tp, ino, XFS_IGET_UNTRUSTED, 0, &ip);
 	if (error == -EFSCORRUPTED)
@@ -849,6 +851,7 @@ bad_rele:
 	xfs_irele(ip);
 whine:
 	xfs_err(mp, "metadata inode 0x%llx is corrupt", ino);
+	xfs_fs_mark_sick(mp, XFS_SICK_FS_METADIR);
 	return -EFSCORRUPTED;
 }
 
