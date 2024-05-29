@@ -946,4 +946,10 @@ struct xfs_merkle_key {
 #define XFS_VERITY_DESCRIPTOR_NAME	"vdesc"
 #define XFS_VERITY_DESCRIPTOR_NAME_LEN	(sizeof(XFS_VERITY_DESCRIPTOR_NAME) - 1)
 
+/*
+ * Merkle tree blocks cannot be smaller than 1k in size, so the hash function
+ * can right-shift the merkle offset by this amount without losing anything.
+ */
+#define XFS_VERITY_HASH_SHIFT		(10)
+
 #endif /* __XFS_DA_FORMAT_H__ */
