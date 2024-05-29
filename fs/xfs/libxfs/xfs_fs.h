@@ -991,6 +991,7 @@ struct xfs_rtgroup_geometry {
 };
 #define XFS_RTGROUP_GEOM_SICK_SUPER	(1U << 0)  /* superblock */
 #define XFS_RTGROUP_GEOM_SICK_BITMAP	(1U << 1)  /* rtbitmap for this group */
+#define XFS_RTGROUP_GEOM_SICK_RMAPBT	(1U << 2)  /* reverse mappings */
 
 /*
  * ioctl commands that are used by Linux filesystems
