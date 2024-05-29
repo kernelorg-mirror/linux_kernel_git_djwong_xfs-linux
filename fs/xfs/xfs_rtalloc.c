@@ -1277,6 +1277,14 @@ void
 xfs_rt_resv_free(
 	struct xfs_mount	*mp)
 {
+	struct xfs_rtgroup	*rtg;
+	xfs_rgnumber_t		rgno;
+	unsigned int		i;
+
+	for_each_rtgroup(mp, rgno, rtg) {
+		for (i = 0; i < XFS_RTG_MAX; i++)
+			xfs_metafile_resv_free(rtg->rtg_inodes[i]);
+	}
 }
 
 /* Reserve space for rt metadata inodes' space expansion. */
@@ -1284,7 +1292,22 @@ int
 xfs_rt_resv_init(
 	struct xfs_mount	*mp)
 {
-	return 0;
+	struct xfs_rtgroup	*rtg;
+	xfs_filblks_t		ask;
+	xfs_rgnumber_t		rgno;
+	int			error = 0;
+
+	for_each_rtgroup(mp, rgno, rtg) {
+		int		err2;
+
+		ask = xfs_rtrmapbt_calc_reserves(mp);
+		err2 = xfs_metafile_resv_init(rtg->rtg_inodes[XFS_RTG_RMAP],
+				ask);
+		if (err2 && !error)
+			error = err2;
+	}
+
+	return error;
 }
 
 /*
