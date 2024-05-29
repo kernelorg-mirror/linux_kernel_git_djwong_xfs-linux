@@ -81,6 +81,9 @@ xchk_setup_rtbitmap(
 	struct xchk_rtbitmap	*rtb;
 	int			error;
 
+	if (xchk_need_intent_drain(sc))
+		xchk_fsgates_enable(sc, XCHK_FSGATES_DRAIN);
+
 	rtb = kzalloc(sizeof(struct xchk_rtbitmap), XCHK_GFP_FLAGS);
 	if (!rtb)
 		return -ENOMEM;
