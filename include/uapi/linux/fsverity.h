@@ -99,5 +99,6 @@ struct fsverity_read_metadata_arg {
 #define FS_IOC_MEASURE_VERITY	_IOWR('f', 134, struct fsverity_digest)
 #define FS_IOC_READ_VERITY_METADATA \
 	_IOWR('f', 135, struct fsverity_read_metadata_arg)
+#define FS_IOC_DISABLE_VERITY	_IO('f', 136)
 
 #endif /* _UAPI_LINUX_FSVERITY_H */
