@@ -1145,11 +1145,27 @@ xfs_inodegc_free_percpu(
 }
 
 static void
+xfs_send_unmount_uevent(
+	struct xfs_mount	*mp)
+{
+	char			sid[256] = "";
+	char			*env[] = {
+		"TYPE=mount",
+		sid,
+		NULL,
+	};
+
+	snprintf(sid, sizeof(sid), "SID=%s", mp->m_super->s_id);
+	kobject_uevent_env(&mp->m_kobj.kobject, KOBJ_REMOVE, env);
+}
+
+static void
 xfs_fs_put_super(
 	struct super_block	*sb)
 {
 	struct xfs_mount	*mp = XFS_M(sb);
 
+	xfs_send_unmount_uevent(mp);
 	xfs_notice(mp, "Unmounting Filesystem %pU", &mp->m_sb.sb_uuid);
 	xfs_filestream_unmount(mp);
 	xfs_unmountfs(mp);
@@ -1506,6 +1522,29 @@ xfs_debugfs_mkdir(
 	return child;
 }
 
+/*
+ * Send a uevent signalling that the mount succeeded so we can use udev rules
+ * to start background services.
+ */
+static void
+xfs_send_mount_uevent(
+	struct fs_context	*fc,
+	struct xfs_mount	*mp)
+{
+	char			source[256] = "";
+	char			sid[256] = "";
+	char			*env[] = {
+		"TYPE=mount",
+		source,
+		sid,
+		NULL,
+	};
+
+	snprintf(source, sizeof(source), "SOURCE=%s", fc->source);
+	snprintf(sid, sizeof(sid), "SID=%s", mp->m_super->s_id);
+	kobject_uevent_env(&mp->m_kobj.kobject, KOBJ_ADD, env);
+}
+
 static int
 xfs_fs_fill_super(
 	struct super_block	*sb,
@@ -1838,6 +1877,7 @@ xfs_fs_fill_super(
 		mp->m_debugfs_uuid = NULL;
 	}
 
+	xfs_send_mount_uevent(fc, mp);
 	return 0;
 
  out_filestream_unmount:
