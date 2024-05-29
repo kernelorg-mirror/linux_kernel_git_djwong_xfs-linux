@@ -428,6 +428,15 @@ xfs_rtgroup_lock(
 		xfs_rtbitmap_lock(tp, rtg->rtg_mount);
 	else if (rtglock_flags & XFS_RTGLOCK_BITMAP_SHARED)
 		xfs_rtbitmap_lock_shared(rtg->rtg_mount, XFS_RBMLOCK_BITMAP);
+
+	if (rtglock_flags & XFS_RTGLOCK_RMAP) {
+		struct xfs_inode	*ip = rtg->rtg_inodes[XFS_RTG_RMAP];
+
+		if (ip)
+			xfs_ilock(ip, XFS_ILOCK_EXCL);
+		if (ip && tp)
+			xfs_trans_ijoin(tp, ip, XFS_ILOCK_EXCL);
+	}
 }
 
 /* Unlock metadata inodes associated with this rt group. */
@@ -439,6 +448,9 @@ xfs_rtgroup_unlock(
 	ASSERT(!(rtglock_flags & ~XFS_RTGLOCK_ALL_FLAGS));
 	ASSERT(!(rtglock_flags & XFS_RTGLOCK_BITMAP_SHARED) ||
 	       !(rtglock_flags & XFS_RTGLOCK_BITMAP));
+
+	if ((rtglock_flags & XFS_RTGLOCK_RMAP) && rtg->rtg_inodes[XFS_RTG_RMAP])
+		xfs_iunlock(rtg->rtg_inodes[XFS_RTG_RMAP], XFS_ILOCK_EXCL);
 
 	if (rtglock_flags & XFS_RTGLOCK_BITMAP)
 		xfs_rtbitmap_unlock(rtg->rtg_mount);
