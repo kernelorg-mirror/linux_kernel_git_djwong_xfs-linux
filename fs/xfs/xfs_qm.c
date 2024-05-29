@@ -27,6 +27,8 @@
 #include "xfs_ialloc.h"
 #include "xfs_log_priv.h"
 #include "xfs_health.h"
+#include "xfs_da_format.h"
+#include "xfs_imeta.h"
 
 /*
  * The global quota manager. There is only one of these for the entire
@@ -777,9 +779,17 @@ xfs_qm_qino_alloc(
 			}
 		}
 		if (ino != NULLFSINO) {
-			error = xfs_iget(mp, NULL, ino, 0, 0, ipp);
+			struct xfs_trans	*tp;
+
+			error = xfs_trans_alloc_empty(mp, &tp);
 			if (error)
 				return error;
+
+			error = xfs_imeta_iget(tp, ino, S_IFREG, ipp);
+			xfs_trans_cancel(tp);
+			if (error)
+				return error;
+
 			mp->m_sb.sb_gquotino = NULLFSINO;
 			mp->m_sb.sb_pquotino = NULLFSINO;
 			need_alloc = false;
@@ -1549,6 +1559,7 @@ xfs_qm_init_quotainos(
 	struct xfs_inode	*uip = NULL;
 	struct xfs_inode	*gip = NULL;
 	struct xfs_inode	*pip = NULL;
+	struct xfs_trans	*tp = NULL;
 	int			error;
 	uint			flags = 0;
 
@@ -1558,30 +1569,37 @@ xfs_qm_init_quotainos(
 	 * Get the uquota and gquota inodes
 	 */
 	if (xfs_has_quota(mp)) {
+		error = xfs_trans_alloc_empty(mp, &tp);
+		if (error)
+			return error;
+
 		if (XFS_IS_UQUOTA_ON(mp) &&
 		    mp->m_sb.sb_uquotino != NULLFSINO) {
 			ASSERT(mp->m_sb.sb_uquotino > 0);
-			error = xfs_iget(mp, NULL, mp->m_sb.sb_uquotino,
-					     0, 0, &uip);
+			error = xfs_imeta_iget(tp, mp->m_sb.sb_uquotino,
+					S_IFREG, &uip);
 			if (error)
-				return error;
+				goto error_rele;
 		}
 		if (XFS_IS_GQUOTA_ON(mp) &&
 		    mp->m_sb.sb_gquotino != NULLFSINO) {
 			ASSERT(mp->m_sb.sb_gquotino > 0);
-			error = xfs_iget(mp, NULL, mp->m_sb.sb_gquotino,
-					     0, 0, &gip);
+			error = xfs_imeta_iget(tp, mp->m_sb.sb_gquotino,
+					S_IFREG, &gip);
 			if (error)
 				goto error_rele;
 		}
 		if (XFS_IS_PQUOTA_ON(mp) &&
 		    mp->m_sb.sb_pquotino != NULLFSINO) {
 			ASSERT(mp->m_sb.sb_pquotino > 0);
-			error = xfs_iget(mp, NULL, mp->m_sb.sb_pquotino,
-					     0, 0, &pip);
+			error = xfs_imeta_iget(tp, mp->m_sb.sb_pquotino,
+					S_IFREG, &pip);
 			if (error)
 				goto error_rele;
 		}
+
+		xfs_trans_cancel(tp);
+		tp = NULL;
 	} else {
 		flags |= XFS_QMOPT_SBVERSION;
 	}
@@ -1622,6 +1640,8 @@ xfs_qm_init_quotainos(
 	return 0;
 
 error_rele:
+	if (tp)
+		xfs_trans_cancel(tp);
 	if (uip)
 		xfs_irele(uip);
 	if (gip)

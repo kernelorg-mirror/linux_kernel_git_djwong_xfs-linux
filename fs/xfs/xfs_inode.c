@@ -43,6 +43,7 @@
 #include "xfs_parent.h"
 #include "xfs_xattr.h"
 #include "xfs_inode_util.h"
+#include "xfs_imeta.h"
 
 struct kmem_cache *xfs_inode_cache;
 
