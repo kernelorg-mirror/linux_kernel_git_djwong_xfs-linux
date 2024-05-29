@@ -9,6 +9,9 @@
 enum xfs_healthmon_type {
 	XFS_HEALTHMON_LOST,	/* message lost */
 
+	/* filesystem shutdown */
+	XFS_HEALTHMON_SHUTDOWN,
+
 	/* metadata health events */
 	XFS_HEALTHMON_SICK,	/* runtime corruption observed */
 	XFS_HEALTHMON_CORRUPT,	/* fsck reported corruption */
