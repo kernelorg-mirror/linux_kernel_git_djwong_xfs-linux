@@ -56,3 +56,19 @@ xfs_verity_namecheck(
 
 	return true;
 }
+
+/*
+ * Compute name hash for a verity attribute.  For merkle tree blocks, we want
+ * to use the merkle tree block offset as the hash value to avoid collisions
+ * between blocks unless the merkle tree becomes larger than 2^32 blocks.
+ */
+xfs_dahash_t
+xfs_verity_hashname(
+	const uint8_t		*name,
+	unsigned int		namelen)
+{
+	if (namelen != sizeof(struct xfs_merkle_key))
+		return xfs_attr_hashname(name, namelen);
+
+	return xfs_merkle_key_from_disk(name, namelen) >> XFS_VERITY_HASH_SHIFT;
+}
