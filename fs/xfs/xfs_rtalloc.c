@@ -803,6 +803,12 @@ xfs_growfsrt_alloc_rtgroups(
 			xfs_rtgroup_rele(rtg);
 			return error;
 		}
+
+		error = xfs_rtginode_ensure(rtg, XFS_RTG_REFCOUNT);
+		if (error) {
+			xfs_rtgroup_rele(rtg);
+			return error;
+		}
 	}
 
 	return 0;
@@ -1158,9 +1164,11 @@ xfs_growfs_rt(
 		return -EINVAL;
 
 	/* Unsupported realtime features. */
-	if (!xfs_has_rtgroups(mp) && xfs_has_rmapbt(mp))
+	if (!xfs_has_rtgroups(mp) && (xfs_has_rmapbt(mp) || xfs_has_reflink(mp)))
 		return -EOPNOTSUPP;
-	if (xfs_has_reflink(mp) || xfs_has_quota(mp))
+	if (xfs_has_quota(mp))
+		return -EOPNOTSUPP;
+	if (xfs_has_reflink(mp) && in->extsize != 1)
 		return -EOPNOTSUPP;
 
 	error = xfs_sb_validate_fsb_count(&mp->m_sb, in->newblocks);
