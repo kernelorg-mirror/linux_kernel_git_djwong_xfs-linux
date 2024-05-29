@@ -50,6 +50,9 @@ struct xfs_merkle_blob {
 	/* refcount of this item; the cache holds its own ref */
 	refcount_t		refcount;
 
+	/* number of times the shrinker should ignore this item */
+	atomic_t		shrinkref;
+
 	unsigned long		flags;
 
 	/* Pointer to the merkle tree block, which is power-of-2 sized */
@@ -89,6 +92,7 @@ xfs_merkle_blob_alloc(
 
 	/* Caller owns this refcount. */
 	refcount_set(&mk->refcount, 1);
+	atomic_set(&mk->shrinkref, 0);
 	mk->flags = 0;
 	mk->key.ino = ip->i_ino;
 	mk->key.pos = pos;
@@ -321,18 +325,94 @@ xfs_fsverity_shrinker_count(
 	return min_t(u64, ULONG_MAX, count);
 }
 
+struct xfs_fsverity_scan {
+	struct shrink_control	*sc;
+
+	unsigned long		scanned;
+	unsigned long		freed;
+};
+
+/* Reclaim inactive merkle tree blocks that have run out of second chances. */
+static void
+xfs_fsverity_perag_reclaim(
+	struct xfs_perag		*pag,
+	struct xfs_fsverity_scan	*vs)
+{
+	struct rhashtable_iter		iter;
+	struct xfs_mount		*mp = pag->pag_mount;
+	struct xfs_merkle_blob		*mk;
+	s64				freed = 0;
+
+	rhashtable_walk_enter(&pag->pagi_merkle_blobs, &iter);
+	rhashtable_walk_start(&iter);
+	while ((mk = rhashtable_walk_next(&iter)) != NULL) {
+		if (IS_ERR(mk))
+			continue;
+
+		/*
+		 * Tell the shrinker that we scanned this merkle tree block,
+		 * even if we don't remove it.
+		 */
+		vs->scanned++;
+		if (vs->sc->nr_to_scan-- == 0)
+			break;
+
+		/* Retain if there are active references */
+		if (refcount_read(&mk->refcount) > 1)
+			continue;
+
+		/* Ignore if the item still has lru refcount */
+		if (atomic_add_unless(&mk->shrinkref, -1, 0))
+			continue;
+
+		/*
+		 * Grab our own active reference to the blob handle.  If we
+		 * can't, then we're racing with a cache drop and can move on.
+		 */
+		if (!refcount_inc_not_zero(&mk->refcount))
+			continue;
+
+		rhashtable_walk_stop(&iter);
+
+		trace_xfs_fsverity_cache_reclaim(mp, &mk->key, _RET_IP_);
+
+		xfs_merkle_blob_drop(pag, mk);
+		freed++;
+
+		rhashtable_walk_start(&iter);
+	}
+	rhashtable_walk_stop(&iter);
+	rhashtable_walk_exit(&iter);
+
+	percpu_counter_sub(&mp->m_verity_blocks, freed);
+	vs->freed += freed;
+}
+
 /* Actually try to reclaim merkle tree blocks. */
 static unsigned long
 xfs_fsverity_shrinker_scan(
 	struct shrinker		*shrink,
 	struct shrink_control	*sc)
 {
+	struct xfs_fsverity_scan vs = { .sc = sc };
 	struct xfs_mount	*mp = shrink->private_data;
+	struct xfs_perag	*pag;
+	xfs_agnumber_t		agno;
 
 	if (!xfs_has_verity(mp))
 		return SHRINK_STOP;
 
-	return 0;
+	for_each_perag(mp, agno, pag) {
+		xfs_fsverity_perag_reclaim(pag, &vs);
+
+		if (sc->nr_to_scan == 0) {
+			xfs_perag_rele(pag);
+			break;
+		}
+	}
+
+	trace_xfs_fsverity_shrinker_scan(mp, vs.scanned, vs.freed, _RET_IP_);
+	return vs.freed;
 }
 
 /* Set up fsverity for this mount. */
@@ -764,6 +844,13 @@ out_hit:
 	block->kaddr   = (void *)mk->data;
 	block->context = mk;
 	block->verified = test_bit(XFS_MERKLE_BLOB_VERIFIED_BIT, &mk->flags);
+
+	/*
+	 * Prioritize keeping the root-adjacent levels cached if this isn't a
+	 * streaming read.
+	 */
+	if (req->level != FSVERITY_STREAMING_READ)
+		atomic_set(&mk->shrinkref, req->level + 1);
 
 	return 0;
 
