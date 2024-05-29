@@ -550,6 +550,7 @@ xfs_ag_geom_health(
 static const struct ioctl_sick_map rtgroup_map[] = {
 	{ XFS_SICK_RG_SUPER,	XFS_RTGROUP_GEOM_SICK_SUPER },
 	{ XFS_SICK_RG_BITMAP,	XFS_RTGROUP_GEOM_SICK_BITMAP },
+	{ XFS_SICK_RG_RMAPBT,	XFS_RTGROUP_GEOM_SICK_RMAPBT },
 	{ 0, 0 },
 };
 
@@ -659,7 +660,11 @@ xfs_btree_mark_sick(
 					   cur->bc_ino.whichfork);
 			return;
 		}
-		fallthrough;
+
+		/* The only non-bmap inode btrees are rtgroup metadata */
+		ASSERT(cur->bc_ops->sick_mask);
+		xfs_rtgroup_mark_sick(cur->bc_ino.rtg, cur->bc_ops->sick_mask);
+		return;
 	default:
 		ASSERT(0);
 		return;

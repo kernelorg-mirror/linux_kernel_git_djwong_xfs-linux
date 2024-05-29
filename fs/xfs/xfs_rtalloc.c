@@ -1030,8 +1030,11 @@ xfs_growfsrt_create_rtrmap(
 	xfs_trans_cancel(tp);
 
 	/* error == 0 means the inode already existed. */
-	if (error != -ENOENT)
+	if (error != -ENOENT) {
+		if (xfs_metadata_is_sick(error))
+			xfs_rtgroup_mark_sick(rtg, XFS_SICK_RG_RMAPBT);
 		goto out_path;
+	}
 
 	/* Inode does not exist; create it. */
 	error = xfs_imeta_start_create(mp, path, &upd);
@@ -1705,6 +1708,8 @@ xfs_rtmount_rmapbt(
 		return -ENOMEM;
 
 	error = xfs_rtrmapip_lookup(rtg, tp, path);
+	if (xfs_metadata_is_sick(error))
+		xfs_rtgroup_mark_sick(rtg, XFS_SICK_RG_RMAPBT);
 	xfs_imeta_free_path(path);
 	return error;
 }
