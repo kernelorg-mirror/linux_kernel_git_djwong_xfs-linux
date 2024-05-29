@@ -47,6 +47,7 @@
 #include "xfs_imeta.h"
 #include "xfs_rtgroup.h"
 #include "xfs_fsrefs.h"
+#include "xfs_fsverity.h"
 
 static inline void
 xfs_rmapbt_crack_agno_opdev(
