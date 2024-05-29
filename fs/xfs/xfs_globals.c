@@ -44,6 +44,11 @@ struct xfs_globals xfs_globals = {
 	.pwork_threads		=	-1,	/* automatic thread detection */
 	.larp			=	false,	/* log attribute replay */
 #endif
+#ifdef CONFIG_XFS_ONLINE_SCRUB_WHINE
+	.scrub_whine		=	true,
+#else
+	.scrub_whine		=	false,
+#endif
 
 	/*
 	 * Leave this many record slots empty when bulk loading btrees.  By
