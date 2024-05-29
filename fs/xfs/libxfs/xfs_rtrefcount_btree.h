@@ -72,4 +72,8 @@ void xfs_rtrefcountbt_destroy_cur_cache(void);
 #define xfs_rtrefcountbt_create_path(mp, rgno) \
 	xfs_rtinode_create_path((mp), (rgno), "refcount")
 
+xfs_filblks_t xfs_rtrefcountbt_calc_reserves(struct xfs_mount *mp);
+unsigned long long xfs_rtrefcountbt_calc_size(struct xfs_mount *mp,
+		unsigned long long len);
+
 #endif	/* __XFS_RTREFCOUNT_BTREE_H__ */
