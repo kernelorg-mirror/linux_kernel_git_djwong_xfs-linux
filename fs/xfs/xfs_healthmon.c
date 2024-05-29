@@ -20,6 +20,7 @@
 #include "xfs_rtgroup.h"
 #include "xfs_health.h"
 #include "xfs_healthmon.h"
+#include "xfs_fsops.h"
 
 #include <linux/anon_inodes.h>
 #include <linux/eventpoll.h>
@@ -48,7 +49,7 @@
  * ----------------
  *
  * {
- *	"type": "lost",
+ *	"type": "lost" or "shutdown",
  *	"domain": "mount",
  *	"time_ns": integer
  * }
@@ -140,6 +141,22 @@
  *     "bitmap":     free space bitmap contents for this group
  *     "rmapbt":     reverse mapping btree
  *     "refcountbt": reference count btree
+ *
+ * Abnormal Shutdowns
+ * ------------------
+ *
+ * {
+ *	"type": "shutdown",
+ *	"domain": "mount",
+ *	"reasons": [reason_string list...],
+ *	"time_ns": integer
+ * }
+ *
+ * "shutdown" indicates that the filesystem shut down either due to errors or
+ * due to an explicit request from userspace.
+ *
+ * "reasons" are a list of strings describing why the filesystem went down.
+ * They correspond to the SHUTDOWN_* flags.
  */
 
 /* Allow this many events to build up in memory per healthmon fd. */
@@ -166,6 +183,7 @@ struct xfs_healthmon {
 	struct xfs_healthmon_event	*last_event;
 
 	/* live update hooks */
+	struct xfs_shutdown_hook	shook;
 	struct xfs_health_hook		hhook;
 
 	/* filesystem mount, or NULL if we've unmounted */
@@ -460,6 +478,43 @@ out_unlock:
 	return NOTIFY_DONE;
 }
 
+/* Add a shutdown event to the reporting queue. */
+STATIC int
+xfs_healthmon_shutdown_hook(
+	struct notifier_block		*nb,
+	unsigned long			action,
+	void				*data)
+{
+	struct xfs_healthmon		*hm;
+	struct xfs_healthmon_event	*event;
+	int				error;
+
+	hm = container_of(nb, struct xfs_healthmon, shook.shutdown_hook.nb);
+
+	mutex_lock(&hm->lock);
+
+	trace_xfs_healthmon_shutdown_hook(hm->mp, action, hm->events,
+			hm->lost_prev_event);
+
+	error = xfs_healthmon_start_live_update(hm);
+	if (error)
+		goto out_unlock;
+
+	event = xfs_healthmon_alloc(hm, XFS_HEALTHMON_SHUTDOWN,
+			XFS_HEALTHMON_MOUNT);
+	if (!event)
+		goto out_unlock;
+
+	event->flags = action;
+	error = xfs_healthmon_push(hm, event);
+	if (error)
+		kfree(event);
+
+out_unlock:
+	mutex_unlock(&hm->lock);
+	return NOTIFY_DONE;
+}
+
 /* Render the health update type as a string. */
 STATIC const char *
 xfs_healthmon_typestring(
@@ -467,6 +522,7 @@ xfs_healthmon_typestring(
 {
 	static const char *type_strings[] = {
 		[XFS_HEALTHMON_LOST]		= "lost",
+		[XFS_HEALTHMON_SHUTDOWN]	= "shutdown",
 		[XFS_HEALTHMON_UNMOUNT]		= "unmount",
 		[XFS_HEALTHMON_SICK]		= "sick",
 		[XFS_HEALTHMON_CORRUPT]		= "corrupt",
@@ -697,6 +753,25 @@ xfs_healthmon_format_inode(
 			event->gen);
 }
 
+/* Render shutdown mask as a string set */
+static ssize_t
+xfs_healthmon_format_shutdown(
+	struct seq_buf			*outbuf,
+	const struct xfs_healthmon_event *event)
+{
+	static const struct flag_string	mask_strings[] = {
+		{ SHUTDOWN_META_IO_ERROR,	"meta_ioerr" },
+		{ SHUTDOWN_LOG_IO_ERROR,	"log_ioerr" },
+		{ SHUTDOWN_FORCE_UMOUNT,	"force_umount" },
+		{ SHUTDOWN_CORRUPT_INCORE,	"corrupt_incore" },
+		{ SHUTDOWN_CORRUPT_ONDISK,	"corrupt_ondisk" },
+		{ SHUTDOWN_DEVICE_REMOVED,	"device_removed" },
+	};
+
+	return xfs_healthmon_format_mask(outbuf, "reasons", mask_strings,
+			event->flags);
+}
+
 static inline void
 xfs_healthmon_reset_outbuf(
 	struct xfs_healthmon		*hm)
@@ -731,6 +806,9 @@ xfs_healthmon_format(
 		goto overrun;
 
 	switch (event->type) {
+	case XFS_HEALTHMON_SHUTDOWN:
+		ret = xfs_healthmon_format_shutdown(outbuf, event);
+		break;
 	case XFS_HEALTHMON_LOST:
 		/* empty */
 		break;
@@ -990,6 +1068,7 @@ xfs_healthmon_detach_hooks(
 	 * through the health monitoring subsystem from xfs_fs_put_super, so
 	 * it is now time to detach the hooks.
 	 */
+	xfs_shutdown_hook_del(hm->mp, &hm->shook);
 	xfs_health_hook_del(hm->mp, &hm->hhook);
 	return;
 
@@ -1010,6 +1089,7 @@ xfs_healthmon_release(
 	wake_up_all(&hm->wait);
 
 	iterate_supers_type(hm->fstyp, xfs_healthmon_detach_hooks, hm);
+	xfs_shutdown_hook_disable();
 	xfs_health_hook_disable();
 
 	mutex_destroy(&hm->lock);
@@ -1109,6 +1189,7 @@ xfs_ioc_health_monitor(
 
 	/* Enable hooks to receive events, generally. */
 	xfs_health_hook_enable();
+	xfs_shutdown_hook_enable();
 
 	/* Attach specific event hooks to this monitor. */
 	xfs_health_hook_setup(&hm->hhook, xfs_healthmon_metadata_hook);
@@ -1116,10 +1197,15 @@ xfs_ioc_health_monitor(
 	if (ret)
 		goto out_hooks;
 
+	xfs_shutdown_hook_setup(&hm->shook, xfs_healthmon_shutdown_hook);
+	ret = xfs_shutdown_hook_add(mp, &hm->shook);
+	if (ret)
+		goto out_healthhook;
+
 	/* Set up VFS file and file descriptor. */
 	ret = get_unused_fd_flags(fd_flags);
 	if (ret < 0)
-		goto out_healthhook;
+		goto out_shutdownhook;
 	fd = ret;
 
 	name = kasprintf(GFP_KERNEL, "XFS (%s): healthmon", mp->m_super->s_id);
@@ -1140,10 +1226,13 @@ xfs_ioc_health_monitor(
 
 out_fd:
 	put_unused_fd(fd);
+out_shutdownhook:
+	xfs_shutdown_hook_del(mp, &hm->shook);
 out_healthhook:
 	xfs_health_hook_del(mp, &hm->hhook);
 out_hooks:
 	xfs_health_hook_disable();
+	xfs_shutdown_hook_disable();
 	mutex_destroy(&hm->lock);
 	xfs_healthmon_free_events(hm);
 	kfree(hm->outbuf.buffer);
