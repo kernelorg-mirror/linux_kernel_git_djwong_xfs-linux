@@ -5368,7 +5368,8 @@ xfs_bmap_del_extent_real(
 
 		if (xfs_is_reflink_inode(ip) && whichfork == XFS_DATA_FORK) {
 			xfs_refcount_decrease_extent(tp, isrt, del);
-		} else if (isrt && !xfs_has_rtrmapbt(mp)) {
+		} else if (isrt && !(xfs_has_rtrmapbt(mp) ||
+				     xfs_has_rtreflink(mp))) {
 			/*
 			 * Ensure the bitmap and summary inodes are locked
 			 * and joined to the transaction before modifying them.
@@ -5393,7 +5394,9 @@ xfs_bmap_del_extent_real(
 			 * data device, which is: Remove the file mapping,
 			 * remove the reverse mapping, and then free the
 			 * blocks.  This means that we must delay the freeing
-			 * until after we've scheduled the rmap update.
+			 * until after we've scheduled the rmap update.  For
+			 * rt reflink filesystems, use the realtime efis to
+			 * reduce the time the rtbitmap lock is held.
 			 */
 			if (isrt)
 				efi_flags |= XFS_FREE_EXTENT_REALTIME;
