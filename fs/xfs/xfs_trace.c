@@ -44,6 +44,7 @@
 #include "xfs_parent.h"
 #include "xfs_rmap.h"
 #include "xfs_refcount.h"
+#include "xfs_imeta.h"
 
 /*
  * We include this last to have the helpers above available for the trace
