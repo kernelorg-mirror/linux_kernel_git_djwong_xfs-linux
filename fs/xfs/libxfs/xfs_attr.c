@@ -274,6 +274,8 @@ xfs_attr_get(
 
 	XFS_STATS_INC(args->dp->i_mount, xs_attr_get);
 
+	ASSERT(!args->trans);
+
 	if (xfs_is_shutdown(args->dp->i_mount))
 		return -EIO;
 
@@ -286,8 +288,14 @@ xfs_attr_get(
 	/* Entirely possible to look up a name which doesn't exist */
 	args->op_flags = XFS_DA_OP_OKNOENT;
 
+	error = xfs_trans_alloc_empty(args->dp->i_mount, &args->trans);
+	if (error)
+		return error;
+
 	lock_mode = xfs_ilock_attr_map_shared(args->dp);
 	error = xfs_attr_get_ilocked(args);
+	xfs_trans_cancel(args->trans);
+	args->trans = NULL;
 	xfs_iunlock(args->dp, lock_mode);
 
 	return error;
