@@ -2304,3 +2304,55 @@ xfs_rtallocate_extent(
 	*rtx = r;
 	return 0;
 }
+
+/*
+ * Find the next free realtime extent starting at @rtx and going no higher than
+ * @end_rtx.  Set @rtx and @len_rtx to whatever free extents we find, or to
+ * @end_rtx if we find no space.
+ */
+int
+xfs_rtallocate_find_freesp(
+	struct xfs_trans	*tp,
+	xfs_rtxnum_t		*rtx,
+	xfs_rtxnum_t		end_rtx,
+	xfs_rtxlen_t		*len_rtx)
+{
+	struct xfs_mount	*mp = tp->t_mountp;
+	struct xfs_rtalloc_args	args = {
+		.mp		= mp,
+		.tp		= tp,
+	};
+	unsigned int		max_rt_extlen;
+	int			error;
+
+	trace_xfs_rtallocate_find_freesp(mp, *rtx, end_rtx - *rtx);
+
+	max_rt_extlen = xfs_rtb_to_rtx(mp, XFS_MAX_BMBT_EXTLEN);
+
+	while (*rtx < end_rtx) {
+		xfs_rtblock_t	range_end_rtx;
+		int		is_free = 0;
+
+		/* Is the first block in the range free? */
+		error = xfs_rtcheck_range(&args, *rtx, 1, 1, &range_end_rtx,
+				&is_free);
+		if (error)
+			return error;
+
+		/* Free or not, how many more rtx have the same status? */
+		error = xfs_rtfind_forw(&args, *rtx, end_rtx, &range_end_rtx);
+		if (error)
+			return error;
+
+		if (is_free) {
+			trace_xfs_rtallocate_find_freesp_done(mp, *rtx, *len_rtx);
+			*len_rtx = min_t(xfs_rtblock_t, max_rt_extlen,
+					 range_end_rtx - *rtx + 1);
+			return 0;
+		}
+
+		*rtx = range_end_rtx + 1;
+	}
+
+	return 0;
+}
