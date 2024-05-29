@@ -166,6 +166,7 @@ xfs_initialize_rtgroups(
 		/* Place kernel structure only init below this point. */
 		spin_lock_init(&rtg->rtg_state_lock);
 		init_waitqueue_head(&rtg->rtg_active_wq);
+		xfs_defer_drain_init(&rtg->rtg_intents_drain);
 #endif /* __KERNEL__ */
 
 		/* Active ref owned by mount indicates rtgroup is online. */
@@ -205,6 +206,9 @@ xfs_free_unused_rtgroup_range(
 		spin_unlock(&mp->m_rtgroup_lock);
 		if (!rtg)
 			break;
+#ifdef __KERNEL__
+		xfs_defer_drain_free(&rtg->rtg_intents_drain);
+#endif
 		kfree(rtg);
 	}
 }
@@ -238,6 +242,9 @@ xfs_free_rtgroups(
 		spin_unlock(&mp->m_rtgroup_lock);
 		ASSERT(rtg);
 		XFS_IS_CORRUPT(mp, atomic_read(&rtg->rtg_ref) != 0);
+#ifdef __KERNEL__
+		xfs_defer_drain_free(&rtg->rtg_intents_drain);
+#endif
 
 		/* drop the mount's active reference */
 		xfs_rtgroup_rele(rtg);
