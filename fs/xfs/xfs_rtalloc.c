@@ -33,6 +33,7 @@
 #include "xfs_rmap.h"
 #include "xfs_rtrmap_btree.h"
 #include "xfs_trace.h"
+#include "xfs_rtrefcount_btree.h"
 
 /*
  * Realtime metadata files are not quite regular files because userspace can't
@@ -49,6 +50,7 @@ static struct lock_class_key xfs_rsumip_key;
  * inodes.  Each metadata inode in a group gets its own subclass.
  */
 #define XFS_RTRMAP_SUBCLASS		(0)
+#define XFS_RTREFC_SUBCLASS		(1)
 
 /*
  * Return whether there are any free extents in the size range given
@@ -1753,6 +1755,53 @@ out_unlock:
 	return error;
 }
 
+/* Load realtime refcount btree inode. */
+STATIC int
+xfs_rtmount_refcountbt(
+	struct xfs_rtgroup	*rtg,
+	struct xfs_trans	*tp)
+{
+	struct xfs_mount	*mp = rtg->rtg_mount;
+	struct xfs_imeta_path	*path;
+	struct xfs_inode	*ip;
+	xfs_ino_t		ino;
+	int			error;
+
+	if (!xfs_has_rtreflink(mp))
+		return 0;
+
+	error = xfs_rtrefcountbt_create_path(mp, rtg->rtg_rgno, &path);
+	if (error)
+		return error;
+
+	error = xfs_imeta_lookup(tp, path, &ino);
+	if (error)
+		goto out_path;
+
+	if (ino == NULLFSINO) {
+		error = -EFSCORRUPTED;
+		goto out_path;
+	}
+
+	error = xfs_rt_iget(tp, ino, &rtg->lock_class, XFS_RTREFC_SUBCLASS, &ip);
+	if (error)
+		goto out_path;
+
+	if (XFS_IS_CORRUPT(mp, ip->i_df.if_format != XFS_DINODE_FMT_REFCOUNT)) {
+		error = -EFSCORRUPTED;
+		goto out_rele;
+	}
+
+	rtg->rtg_refcountip = ip;
+	ip = NULL;
+out_rele:
+	if (ip)
+		xfs_imeta_irele(ip);
+out_path:
+	xfs_imeta_free_path(path);
+	return error;
+}
+
 static void
 xfs_rtgroup_unmount_inodes(
 	struct xfs_mount	*mp)
@@ -1762,6 +1811,7 @@ xfs_rtgroup_unmount_inodes(
 
 	for_each_rtgroup(mp, rgno, rtg) {
 		xfs_rtgroup_irele(&rtg->rtg_rmapip);
+		xfs_rtgroup_irele(&rtg->rtg_refcountip);
 	}
 }
 
@@ -1812,6 +1862,12 @@ xfs_rtmount_inodes(
 							      rtg->rtg_rgno);
 
 		error = xfs_rtmount_rmapbt(rtg, tp);
+		if (error) {
+			xfs_rtgroup_rele(rtg);
+			goto out_rele_rtgroup;
+		}
+
+		error = xfs_rtmount_refcountbt(rtg, tp);
 		if (error) {
 			xfs_rtgroup_rele(rtg);
 			goto out_rele_rtgroup;
