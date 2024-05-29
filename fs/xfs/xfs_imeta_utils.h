@@ -17,4 +17,7 @@ int xfs_imeta_start_link(struct xfs_mount *mp,
 int xfs_imeta_commit(struct xfs_imeta_update *upd);
 void xfs_imeta_cancel(struct xfs_imeta_update *upd, int error);
 
+int xfs_imeta_ensure_dirpath(struct xfs_mount *mp,
+		const struct xfs_imeta_path *path);
+
 #endif /* __XFS_IMETA_UTILS_H__ */
