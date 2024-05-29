@@ -24,6 +24,7 @@
 #include "xfs_rtalloc.h"
 #include "xfs_rtrmap_btree.h"
 #include "xfs_rtrefcount_btree.h"
+#include "xfs_fsverity.h"
 
 /*
  * Write new AG headers to disk. Non-transactional, but need to be
@@ -154,6 +155,11 @@ xfs_growfs_data_private(
 		error = xfs_initialize_perag(mp, nagcount, nb, &nagimax);
 		if (error)
 			return error;
+		error = xfs_fsverity_growfs(mp, oagcount, nagcount);
+		if (error) {
+			xfs_free_unused_perag_range(mp, oagcount, nagcount);
+			return error;
+		}
 	} else if (nagcount < oagcount) {
 		/* TODO: shrinking the entire AGs hasn't yet completed */
 		return -EINVAL;
