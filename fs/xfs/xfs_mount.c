@@ -39,6 +39,7 @@
 #include "xfs_rtgroup.h"
 #include "xfs_rtrmap_btree.h"
 #include "xfs_rtrefcount_btree.h"
+#include "xfs_fsverity.h"
 #include "scrub/stats.h"
 
 static DEFINE_MUTEX(xfs_uuid_table_mutex);
@@ -873,6 +874,10 @@ xfs_mountfs(
 	if (error)
 		goto out_fail_wait;
 
+	error = xfs_fsverity_mount(mp);
+	if (error)
+		goto out_inodegc_shrinker;
+
 	/*
 	 * Log's mount-time initialization. The first part of recovery can place
 	 * some items on the AIL, to be handled when recovery is finished or
@@ -883,7 +888,7 @@ xfs_mountfs(
 			      XFS_FSB_TO_BB(mp, sbp->sb_logblocks));
 	if (error) {
 		xfs_warn(mp, "log mount failed");
-		goto out_inodegc_shrinker;
+		goto out_fsverity;
 	}
 
 	/*
@@ -1097,6 +1102,8 @@ xfs_mountfs(
 	 */
 	xfs_unmount_flush_inodes(mp);
 	xfs_log_mount_cancel(mp);
+ out_fsverity:
+	xfs_fsverity_unmount(mp);
  out_inodegc_shrinker:
 	shrinker_free(mp->m_inodegc_shrinker);
  out_fail_wait:
@@ -1188,6 +1195,7 @@ xfs_unmountfs(
 #if defined(DEBUG)
 	xfs_errortag_clearall(mp);
 #endif
+	xfs_fsverity_unmount(mp);
 	shrinker_free(mp->m_inodegc_shrinker);
 	xfs_free_rtgroups(mp);
 	xfs_free_perag(mp);
