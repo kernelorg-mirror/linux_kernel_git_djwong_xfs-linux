@@ -443,6 +443,8 @@ xfs_attr_hashval(
 
 	if (attr_flags & XFS_ATTR_PARENT)
 		return xfs_parent_hashattr(mp, name, namelen, value, valuelen);
+	if (attr_flags & XFS_ATTR_VERITY)
+		return xfs_verity_hashname(name, namelen);
 
 	return xfs_attr_hashname(name, namelen);
 }
