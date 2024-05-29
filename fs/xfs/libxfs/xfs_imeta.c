@@ -27,6 +27,7 @@
 #include "xfs_dir2.h"
 #include "xfs_dir2_priv.h"
 #include "xfs_parent.h"
+#include "xfs_health.h"
 
 /*
  * Metadata Directory Tree
@@ -126,16 +127,22 @@ xfs_imeta_lookup_component(
 	int			type_wanted = xname->type;
 	int			error;
 
-	if (!S_ISDIR(VFS_I(dp)->i_mode))
+	if (!S_ISDIR(VFS_I(dp)->i_mode)) {
+		xfs_fs_mark_sick(dp->i_mount, XFS_SICK_FS_METADIR);
 		return -EFSCORRUPTED;
+	}
 
 	error = xfs_imeta_dir_lookup(tp, dp, xname, ino);
 	if (error)
 		return error;
-	if (!xfs_verify_ino(dp->i_mount, *ino))
+	if (!xfs_verify_ino(dp->i_mount, *ino)) {
+		xfs_fs_mark_sick(dp->i_mount, XFS_SICK_FS_METADIR);
 		return -EFSCORRUPTED;
-	if (type_wanted != XFS_DIR3_FT_UNKNOWN && xname->type != type_wanted)
+	}
+	if (type_wanted != XFS_DIR3_FT_UNKNOWN && xname->type != type_wanted) {
+		xfs_fs_mark_sick(dp->i_mount, XFS_SICK_FS_METADIR);
 		return -EFSCORRUPTED;
+	}
 
 	trace_xfs_imeta_lookup_component(dp, xname, *ino);
 	return 0;
@@ -314,8 +321,12 @@ xfs_imeta_init_update(
 		return error;
 	error = xfs_imeta_iget_parent(tp, upd->path, &upd->dp);
 	xfs_trans_cancel(tp);
-	if (error == -ENOENT)
+	if (error == -ENOENT) {
+		xfs_fs_mark_sick(mp, XFS_SICK_FS_METADIR);
 		return -EFSCORRUPTED;
+	}
+	if (xfs_metadata_is_sick(error))
+		xfs_fs_mark_sick(mp, XFS_SICK_FS_METADIR);
 	if (error)
 		return error;
 
@@ -435,6 +446,7 @@ xfs_imeta_create(
 	/* Metadata directory root cannot be created with this function. */
 	if (upd->path->im_depth == 0) {
 		ASSERT(0);
+		xfs_fs_mark_sick(mp, XFS_SICK_FS_METADIR);
 		return -EFSCORRUPTED;
 	}
 
@@ -570,6 +582,7 @@ xfs_imeta_link(
 	/* Metadata directory root cannot be linked. */
 	if (upd->path->im_depth == 0) {
 		ASSERT(0);
+		xfs_fs_mark_sick(mp, XFS_SICK_FS_METADIR);
 		return -EFSCORRUPTED;
 	}
 
