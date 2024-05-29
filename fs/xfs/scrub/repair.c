@@ -1039,20 +1039,32 @@ xrep_rtgroup_init(
 	return 0;
 }
 
-/* Ensure that all rt blocks in the given range are not marked free. */
+/*
+ * Ensure that all rt blocks in the given range are not marked free.  If
+ * @must_align is true, then both ends must be aligned to a rt extent.
+ */
 int
 xrep_require_rtext_inuse(
 	struct xfs_scrub	*sc,
 	xfs_rtblock_t		rtbno,
-	xfs_filblks_t		len)
+	xfs_filblks_t		len,
+	bool			must_align)
 {
 	struct xfs_mount	*mp = sc->mp;
 	xfs_rtxnum_t		startrtx;
 	xfs_rtxnum_t		endrtx;
+	xfs_extlen_t		mod;
 	bool			is_free = false;
 	int			error;
 
+	mod = xfs_rtb_to_rtxoff(mp, rtbno);
+	if (must_align && mod != 0)
+		return -EFSCORRUPTED;
 	startrtx = xfs_rtb_to_rtx(mp, rtbno);
+
+	mod = xfs_rtb_to_rtxoff(mp, rtbno + len - 1);
+	if (must_align && mod != mp->m_sb.sb_rextsize - 1)
+		return -EFSCORRUPTED;
 	endrtx = xfs_rtb_to_rtx(mp, rtbno + len - 1);
 
 	error = xfs_rtalloc_extent_is_free(mp, sc->tp, startrtx,
@@ -1346,6 +1358,8 @@ xrep_is_rtmeta_ino(
 
 	/* Newer rt metadata files are not guaranteed to exist */
 	if (rtg->rtg_rmapip && ino == rtg->rtg_rmapip->i_ino)
+		return true;
+	if (rtg->rtg_refcountip && ino == rtg->rtg_refcountip->i_ino)
 		return true;
 
 	return false;
