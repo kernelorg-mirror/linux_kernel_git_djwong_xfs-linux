@@ -27,6 +27,7 @@
 #include "xfs_extent_busy.h"
 #include "xfs_rtgroup.h"
 #include "xfs_bmap.h"
+#include "xfs_health.h"
 
 static struct kmem_cache	*xfs_rtrmapbt_cur_cache;
 
@@ -478,6 +479,7 @@ const struct xfs_btree_ops xfs_rtrmapbt_ops = {
 
 	.lru_refs		= XFS_RMAP_BTREE_REF,
 	.statoff		= XFS_STATS_CALC_INDEX(xs_rtrmap_2),
+	.sick_mask		= XFS_SICK_RG_RMAPBT,
 
 	.dup_cursor		= xfs_rtrmapbt_dup_cursor,
 	.alloc_block		= xfs_btree_alloc_imeta_block,
@@ -767,8 +769,10 @@ xfs_iformat_rtrmap(
 	level = be16_to_cpu(dfp->bb_level);
 
 	if (level > mp->m_rtrmap_maxlevels ||
-	    xfs_rtrmap_droot_space_calc(level, numrecs) > dsize)
+	    xfs_rtrmap_droot_space_calc(level, numrecs) > dsize) {
+		xfs_inode_mark_sick(ip, XFS_SICK_INO_CORE);
 		return -EFSCORRUPTED;
+	}
 
 	xfs_iroot_alloc(ip, XFS_DATA_FORK,
 			xfs_rtrmap_broot_space_calc(mp, level, numrecs));
