@@ -213,8 +213,15 @@ xfs_daddr_to_rgbno(
 #ifdef CONFIG_XFS_RT
 xfs_rgblock_t xfs_rtgroup_block_count(struct xfs_mount *mp,
 		xfs_rgnumber_t rgno);
+
+void xfs_rtgroup_update_super(struct xfs_buf *rtsb_bp,
+		const struct xfs_buf *sb_bp);
+struct xfs_buf *xfs_rtgroup_log_super(struct xfs_trans *tp,
+		const struct xfs_buf *sb_bp);
 #else
 # define xfs_rtgroup_block_count(mp, rgno)	(0)
+# define xfs_rtgroup_update_super(bp, sb_bp)	((void)0)
+# define xfs_rtgroup_log_super(tp, sb_bp)	(NULL)
 #endif /* CONFIG_XFS_RT */
 
 #endif /* __LIBXFS_RTGROUP_H */
