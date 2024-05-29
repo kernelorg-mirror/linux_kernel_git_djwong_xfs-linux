@@ -837,6 +837,8 @@ xfs_imeta_iget(
 		goto bad_rele;
 	if (inode_wrong_type(VFS_I(ip), mode))
 		goto bad_rele;
+	if (xfs_has_metadir(mp) && !xfs_is_metadir_inode(ip))
+		goto bad_rele;
 
 	*ipp = ip;
 	return 0;
