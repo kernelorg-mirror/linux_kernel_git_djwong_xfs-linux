@@ -37,6 +37,19 @@ TRACE_EVENT(fsverity_enable,
 		__entry->num_levels)
 );
 
+TRACE_EVENT(fsverity_disable,
+	TP_PROTO(const struct inode *inode),
+	TP_ARGS(inode),
+	TP_STRUCT__entry(
+		__field(ino_t, ino)
+	),
+	TP_fast_assign(
+		__entry->ino = inode->i_ino;
+	),
+	TP_printk("ino %lu",
+		(unsigned long) __entry->ino)
+);
+
 TRACE_EVENT(fsverity_tree_done,
 	TP_PROTO(const struct inode *inode, const struct fsverity_info *vi,
 		 const struct merkle_tree_params *params),
