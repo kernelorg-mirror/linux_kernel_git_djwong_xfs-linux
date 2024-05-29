@@ -27,6 +27,7 @@
 #include "scrub/common.h"
 #include "scrub/btree.h"
 #include "scrub/trace.h"
+#include "scrub/repair.h"
 
 /* Set us up with the realtime metadata locked. */
 int
@@ -39,6 +40,12 @@ xchk_setup_rtrmapbt(
 
 	if (xchk_need_intent_drain(sc))
 		xchk_fsgates_enable(sc, XCHK_FSGATES_DRAIN);
+
+	if (xchk_could_repair(sc)) {
+		error = xrep_setup_rtrmapbt(sc);
+		if (error)
+			return error;
+	}
 
 	rtg = xfs_rtgroup_get(mp, sc->sm->sm_agno);
 	if (!rtg)
