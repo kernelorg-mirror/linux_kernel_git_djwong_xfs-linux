@@ -90,6 +90,12 @@ xfs_symlink(
 	struct xfs_inode	**ipp)
 {
 	struct xfs_mount	*mp = dp->i_mount;
+	struct xfs_icreate_args	args = {
+		.idmap		= idmap,
+		.pip		= dp,
+		.mode		= S_IFLNK | (mode & ~S_IFMT),
+		.flags		= xfs_has_parent(mp) ? XFS_ICREATE_INIT_XATTRS : 0,
+	};
 	struct xfs_trans	*tp = NULL;
 	struct xfs_inode	*ip = NULL;
 	int			error = 0;
@@ -170,9 +176,7 @@ xfs_symlink(
 	 */
 	error = xfs_dialloc(&tp, dp->i_ino, S_IFLNK, &ino);
 	if (!error)
-		error = xfs_init_new_inode(idmap, tp, dp, ino,
-				S_IFLNK | (mode & ~S_IFMT), 1, 0, prid,
-				xfs_has_parent(mp), &ip);
+		error = xfs_icreate(tp, ino, &args, &ip);
 	if (error)
 		goto out_trans_cancel;
 
