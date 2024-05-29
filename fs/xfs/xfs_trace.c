@@ -47,6 +47,28 @@
 #include "xfs_imeta.h"
 #include "xfs_rtgroup.h"
 
+static inline void
+xfs_rmapbt_crack_agno_opdev(
+	struct xfs_btree_cur	*cur,
+	xfs_agnumber_t		*agno,
+	dev_t			*opdev)
+{
+	switch (cur->bc_ops->type) {
+	case XFS_BTREE_TYPE_INODE:
+		*agno = cur->bc_ino.rtg->rtg_rgno;
+		*opdev = cur->bc_mp->m_rtdev_targp->bt_dev;
+		break;
+	case XFS_BTREE_TYPE_AG:
+		*agno = cur->bc_ag.pag->pag_agno;
+		*opdev = cur->bc_mp->m_super->s_dev;
+		break;
+	case XFS_BTREE_TYPE_MEM:
+		*agno = 0;
+		*opdev = (dev_t)-1;
+		break;
+	}
+}
+
 /*
  * We include this last to have the helpers above available for the trace
  * event implementations.
