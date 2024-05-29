@@ -197,4 +197,7 @@ void xfs_iflush_rtrmap(struct xfs_inode *ip, struct xfs_dinode *dip);
 int xfs_rtrmapbt_create(struct xfs_rtgroup *rtg, struct xfs_inode *ip,
 		struct xfs_trans *tp, bool init);
 
+unsigned long long xfs_rtrmapbt_calc_size(struct xfs_mount *mp,
+		unsigned long long len);
+
 #endif	/* __XFS_RTRMAP_BTREE_H__ */
