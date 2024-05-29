@@ -45,6 +45,8 @@
 #include "scrub/health.h"
 #include "scrub/tempfile.h"
 
+#include <linux/fsverity.h>
+
 /* Common code for the metadata scrubbers. */
 
 /*
@@ -1903,6 +1905,72 @@ meta_btree:
 	*nextents = 0;
 	*count = btblocks - 1;
 	return 0;
+}
+
+/*
+ * If this inode has S_VERITY set on it, read the merkle tree geometry, which
+ * will activate the incore fsverity context for this file.  If the activation
+ * fails with anything other than ENOMEM, the file is corrupt, which we can
+ * detect later with fsverity_active.
+ *
+ * Callers must hold the IOLOCK and must not hold the ILOCK of sc->ip because
+ * activation reads xattrs.  @blocksize and @treesize will be filled out with
+ * merkle tree geometry if they are not NULL pointers.
+ */
+int
+xchk_inode_setup_verity(
+	struct xfs_scrub	*sc,
+	unsigned int		*blocksize,
+	u64			*treesize)
+{
+	unsigned int		bs;
+	u64			ts;
+	int			error;
+
+	if (!IS_VERITY(VFS_I(sc->ip)))
+		return 0;
+
+	error = fsverity_merkle_tree_geometry(VFS_I(sc->ip), &bs, &ts);
+	switch (error) {
+	case 0:
+		/* fsverity is active; return tree geometry. */
+		if (blocksize)
+			*blocksize = bs;
+		if (treesize)
+			*treesize = ts;
+		break;
+	case -ENODATA:
+	case -EMSGSIZE:
+	case -EINVAL:
+	case -EFSCORRUPTED:
+	case -EFBIG:
+		/*
+		 * The nonzero errno codes above are the error codes that can
+		 * be returned from fsverity on metadata validation errors.
+		 * Set the geometry to zero.
+		 */
+		if (blocksize)
+			*blocksize = 0;
+		if (treesize)
+			*treesize = 0;
+		return 0;
+	default:
+		/* runtime errors */
+		return error;
+	}
+
+	return 0;
+}
+
+/*
+ * Is this a verity file that failed to activate?  Callers must have tried to
+ * activate fsverity via xchk_inode_setup_verity.
+ */
+bool
+xchk_inode_verity_broken(
+	struct xfs_inode	*ip)
+{
+	return IS_VERITY(VFS_I(ip)) && !fsverity_active(VFS_I(ip));
 }
 
 /* Complain about failures... */
