@@ -446,6 +446,15 @@ xfs_rtgroup_lock(
 		if (ip && tp)
 			xfs_trans_ijoin(tp, ip, XFS_ILOCK_EXCL);
 	}
+
+	if (rtglock_flags & XFS_RTGLOCK_REFCOUNT) {
+		struct xfs_inode	*ip = rtg->rtg_inodes[XFS_RTG_REFCOUNT];
+
+		if (ip)
+			xfs_ilock(ip, XFS_ILOCK_EXCL);
+		if (ip && tp)
+			xfs_trans_ijoin(tp, ip, XFS_ILOCK_EXCL);
+	}
 }
 
 /* Unlock metadata inodes associated with this rt group. */
@@ -457,6 +466,10 @@ xfs_rtgroup_unlock(
 	ASSERT(!(rtglock_flags & ~XFS_RTGLOCK_ALL_FLAGS));
 	ASSERT(!(rtglock_flags & XFS_RTGLOCK_BITMAP_SHARED) ||
 	       !(rtglock_flags & XFS_RTGLOCK_BITMAP));
+
+	if ((rtglock_flags & XFS_RTGLOCK_REFCOUNT) &&
+			rtg->rtg_inodes[XFS_RTG_REFCOUNT])
+		xfs_iunlock(rtg->rtg_inodes[XFS_RTG_REFCOUNT], XFS_ILOCK_EXCL);
 
 	if ((rtglock_flags & XFS_RTGLOCK_RMAP) && rtg->rtg_inodes[XFS_RTG_RMAP])
 		xfs_iunlock(rtg->rtg_inodes[XFS_RTG_RMAP], XFS_ILOCK_EXCL);
