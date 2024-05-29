@@ -23,6 +23,7 @@
 #include "xfs_attr.h"
 #include "xfs_rtgroup.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_rtrefcount_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -108,6 +109,7 @@ xchk_setup_metapath(
 		/* Just probing, nothing else to do. */
 		return 0;
 	case XFS_SCRUB_METAPATH_RTRMAPBT:
+	case XFS_SCRUB_METAPATH_RTREFCBT:
 		/* empty */
 		break;
 	default:
@@ -133,6 +135,18 @@ xchk_setup_metapath(
 		rtg = xfs_rtgroup_get(mp, sc->sm->sm_agno);
 		if (rtg) {
 			ip = rtg->rtg_rmapip;
+			xfs_rtgroup_put(rtg);
+		}
+		break;
+	case XFS_SCRUB_METAPATH_RTREFCBT:
+		error = xfs_rtrefcountbt_create_path(mp, sc->sm->sm_agno,
+				&path);
+		if (error)
+			return error;
+		mpath->path = path;
+		rtg = xfs_rtgroup_get(mp, sc->sm->sm_agno);
+		if (rtg) {
+			ip = rtg->rtg_refcountip;
 			xfs_rtgroup_put(rtg);
 		}
 		break;
