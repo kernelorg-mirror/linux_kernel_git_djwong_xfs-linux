@@ -581,6 +581,7 @@ static const struct xfs_rtginode_ops xfs_rtginode_ops[XFS_RTG_MAX] = {
 	[XFS_RTG_REFCOUNT] = {
 		.name		= "refcount",
 		.format		= XFS_DINODE_FMT_REFCOUNT,
+		.sick		= XFS_SICK_RG_REFCNTBT,
 		.enabled	= xfs_has_rtreflink,
 		.create		= xfs_rtrefcountbt_create,
 	},
