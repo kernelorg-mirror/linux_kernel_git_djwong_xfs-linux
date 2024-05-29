@@ -1272,7 +1272,7 @@ xfs_diflags_to_iflags(
 	inode->i_flags |= flags;
 }
 
-static void
+void
 xfs_setup_metadata_inode_lock_class(
 	struct xfs_inode	*ip)
 {
