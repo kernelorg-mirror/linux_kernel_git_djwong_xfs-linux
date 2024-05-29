@@ -28,6 +28,16 @@
 #include "xfs_imeta.h"
 
 /*
+ * Realtime metadata files are not quite regular files because userspace can't
+ * access the realtime bitmap directly, and because we take the ILOCK of the rt
+ * bitmap file while holding the ILOCK of a regular realtime file.  This double
+ * locking confuses lockdep, so create different lockdep classes here to help
+ * it keep things straight.
+ */
+static struct lock_class_key xfs_rbmip_key;
+static struct lock_class_key xfs_rsumip_key;
+
+/*
  * Return whether there are any free extents in the size range given
  * by low and high, for the bitmap block bbno.
  */
@@ -1148,6 +1158,28 @@ xfs_rtalloc_reinit_frextents(
 	return 0;
 }
 
+static inline int
+__xfs_rt_iget(
+	struct xfs_trans	*tp,
+	xfs_ino_t		ino,
+	struct lock_class_key	*lockdep_key,
+	const char		*lockdep_key_name,
+	struct xfs_inode	**ipp)
+{
+	int			error;
+
+	error = xfs_imeta_iget(tp, ino, XFS_DIR3_FT_REG_FILE, ipp);
+	if (error)
+		return error;
+
+	lockdep_set_class_and_name(&(*ipp)->i_lock, lockdep_key,
+			lockdep_key_name);
+	return 0;
+}
+
+#define xfs_rt_iget(tp, ino, lockdep_key, ipp) \
+	__xfs_rt_iget((tp), (ino), (lockdep_key), #lockdep_key, (ipp))
+
 /*
  * Read in the bmbt of an rt metadata inode so that we never have to load them
  * at runtime.  This enables the use of shared ILOCKs for rtbitmap scans.  Use
@@ -1194,7 +1226,7 @@ xfs_rtmount_inodes(
 	if (error)
 		return error;
 
-	error = xfs_imeta_iget(tp, mp->m_sb.sb_rbmino, XFS_DIR3_FT_REG_FILE,
+	error = xfs_rt_iget(tp, mp->m_sb.sb_rbmino, &xfs_rbmip_key,
 			&mp->m_rbmip);
 	if (xfs_metadata_is_sick(error))
 		xfs_rt_mark_sick(mp, XFS_SICK_RT_BITMAP);
@@ -1206,7 +1238,7 @@ xfs_rtmount_inodes(
 	if (error)
 		goto out_rele_bitmap;
 
-	error = xfs_imeta_iget(tp, mp->m_sb.sb_rsumino, XFS_DIR3_FT_REG_FILE,
+	error = xfs_rt_iget(tp, mp->m_sb.sb_rsumino, &xfs_rsumip_key,
 			&mp->m_rsumip);
 	if (xfs_metadata_is_sick(error))
 		xfs_rt_mark_sick(mp, XFS_SICK_RT_SUMMARY);
