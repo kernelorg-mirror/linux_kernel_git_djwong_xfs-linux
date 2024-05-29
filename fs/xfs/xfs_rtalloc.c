@@ -1078,6 +1078,97 @@ out_path:
 	return error;
 }
 
+/* Add a metadata inode for a realtime refcount btree. */
+static int
+xfs_growfsrt_create_rtrefcount(
+	struct xfs_rtgroup	*rtg)
+{
+	struct xfs_imeta_update	upd = { };
+	struct xfs_mount	*mp = rtg->rtg_mount;
+	struct xfs_imeta_path	*path;
+	struct xfs_trans	*tp = NULL;
+	xfs_ino_t		ino;
+	int			error;
+
+	if (!xfs_has_rtreflink(mp) || rtg->rtg_refcountip)
+		return 0;
+
+	path = xfs_rtrefcountbt_create_path(mp, rtg->rtg_rgno);
+	if (!path)
+		return -ENOMEM;
+
+	error = xfs_imeta_ensure_dirpath(mp, path);
+	if (error)
+		goto out_path;
+
+	/* Does this file already exist at the end of the path? */
+	error = xfs_trans_alloc_empty(mp, &tp);
+	if (error)
+		goto out_path;
+
+	error = xfs_imeta_lookup(tp, path, &ino);
+	if (error)
+		goto out_trans;
+
+	if (ino != NULLFSINO) {
+		/* Inode already exists; load it. */
+		error = xfs_imeta_iget(tp, ino, S_IFREG, &upd.ip);
+		xfs_trans_cancel(tp);
+		tp = NULL;
+		if (error)
+			goto out_path;
+
+		if (XFS_IS_CORRUPT(mp, upd.ip->i_df.if_format !=
+						XFS_DINODE_FMT_REFCOUNT)) {
+			error = -EFSCORRUPTED;
+			xfs_irele(upd.ip);
+			goto out_path;
+		}
+
+		lockdep_set_class_and_subclass(&upd.ip->i_lock,
+				&rtg->lock_class, XFS_RTREFC_SUBCLASS);
+
+		rtg->rtg_refcountip = upd.ip;
+		goto out_path;
+	}
+	xfs_trans_cancel(tp);
+	tp = NULL;
+
+	error = xfs_imeta_start_create(mp, path, &upd);
+	if (error)
+		goto out_path;
+
+	error = xfs_rtrefcountbt_create(&upd);
+	if (error)
+		goto out_cancel;
+
+	lockdep_set_class_and_subclass(&upd.ip->i_lock, &rtg->lock_class,
+			XFS_RTREFC_SUBCLASS);
+
+	error = xfs_imeta_commit(&upd);
+	if (error)
+		goto out_path;
+
+	xfs_imeta_free_path(path);
+	xfs_finish_inode_setup(upd.ip);
+	rtg->rtg_refcountip = upd.ip;
+	return 0;
+
+out_cancel:
+	xfs_imeta_cancel(&upd, error);
+	/* Have to finish setting up the inode to ensure it's deleted. */
+	if (upd.ip) {
+		xfs_finish_inode_setup(upd.ip);
+		xfs_irele(upd.ip);
+	}
+out_trans:
+	if (tp)
+		xfs_trans_cancel(tp);
+out_path:
+	xfs_imeta_free_path(path);
+	return error;
+}
+
 /* Add rtgroups as needed to deal with this phase of rt expansion. */
 STATIC int
 xfs_growfsrt_alloc_rtgroups(
@@ -1099,6 +1190,12 @@ xfs_growfsrt_alloc_rtgroups(
 			xfs_rtgroup_rele(rtg);
 			return error;
 		}
+
+		error = xfs_growfsrt_create_rtrefcount(rtg);
+		if (error) {
+			xfs_rtgroup_rele(rtg);
+			return error;
+		}
 	}
 
 	return 0;
@@ -1115,6 +1212,7 @@ xfs_growfsrt_free_rtgroups(
 
 	for_each_rtgroup_range(mp, rgno, nsbp->sb_rgcount, rtg) {
 		xfs_rtgroup_irele(&rtg->rtg_rmapip);
+		xfs_rtgroup_irele(&rtg->rtg_refcountip);
 	}
 
 	xfs_free_unused_rtgroup_range(mp, mp->m_sb.sb_rgcount + 1,
@@ -1228,9 +1326,11 @@ xfs_growfs_rt(
 		return -EINVAL;
 
 	/* Unsupported realtime features. */
-	if (!xfs_has_rtgroups(mp) && xfs_has_rmapbt(mp))
+	if (!xfs_has_rtgroups(mp) && (xfs_has_rmapbt(mp) || xfs_has_reflink(mp)))
 		return -EOPNOTSUPP;
-	if (xfs_has_reflink(mp) || xfs_has_quota(mp))
+	if (xfs_has_quota(mp))
+		return -EOPNOTSUPP;
+	if (xfs_has_reflink(mp) && in->extsize != 1)
 		return -EOPNOTSUPP;
 
 	nrblocks = in->newblocks;
