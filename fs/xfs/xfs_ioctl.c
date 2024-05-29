@@ -43,6 +43,7 @@
 #include "xfs_handle.h"
 #include "xfs_rtgroup.h"
 #include "xfs_fsverity.h"
+#include "xfs_healthmon.h"
 
 #include <linux/mount.h>
 #include <linux/fileattr.h>
@@ -1595,6 +1596,9 @@ xfs_file_ioctl(
 		if (!xfs_has_verity(mp))
 			return -EOPNOTSUPP;
 		return fsverity_ioctl_disable(filp);
+
+	case XFS_IOC_HEALTH_MONITOR:
+		return xfs_ioc_health_monitor(mp, arg);
 
 	default:
 		return -ENOTTY;
