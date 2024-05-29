@@ -1715,7 +1715,6 @@ out_trans_cancel:
 	goto out_unlock_ilock;
 }
 
-#ifdef CONFIG_XFS_RT
 /*
  * Decide if this is an unwritten extent that isn't aligned to an allocation
  * unit boundary.
@@ -1894,7 +1893,6 @@ xfs_convert_rtbigalloc_file_space(
 
 	return 0;
 }
-#endif /* CONFIG_XFS_RT */
 
 /*
  * Reserve space and quota to this transaction to map in as much free space
