@@ -29,6 +29,8 @@
 #include "xfs_imeta.h"
 #include "xfs_rtgroup.h"
 #include "xfs_error.h"
+#include "xfs_btree.h"
+#include "xfs_rmap.h"
 #include "xfs_rtrmap_btree.h"
 #include "xfs_trace.h"
 
@@ -937,16 +939,76 @@ xfs_growfs_rt_init_super(
 	return error;
 }
 
+/* Ensure that the rtgroup metadata inode is loaded, creating it if neeeded. */
+static int
+xfs_rtginode_ensure(
+	struct xfs_rtgroup	*rtg,
+	enum xfs_rtg_inodes	type)
+{
+	struct xfs_trans	*tp;
+	int			error;
+
+	if (rtg->rtg_inodes[type])
+		return 0;
+
+	error = xfs_trans_alloc_empty(rtg->rtg_mount, &tp);
+	if (error)
+		return error;
+	error = xfs_rtginode_load(rtg, type, tp);
+	xfs_trans_cancel(tp);
+
+	if (error != -ENOENT)
+		return 0;
+	return xfs_rtginode_create(rtg, type, true);
+}
+
 /* Add rtgroups as needed to deal with this phase of rt expansion. */
 STATIC int
 xfs_growfsrt_alloc_rtgroups(
 	struct xfs_mount	*mp,
+	xfs_rgnumber_t		last_rgno,
 	struct xfs_mount	*nmp)
 {
 	struct xfs_sb		*nsbp = &nmp->m_sb;
+	struct xfs_rtgroup	*rtg;
+	struct xfs_trans	*tp;
+	int			error;
+
+	/* Make sure the /rtgroups dir has been created */
+	if (!mp->m_rtdirip) {
+		error = xfs_trans_alloc_empty(mp, &tp);
+		if (error)
+			return error;
+
+		error = xfs_rtginode_load_parent(tp);
+		xfs_trans_cancel(tp);
+		switch (error) {
+		case 0:
+			break;
+		case -ENOENT:
+			error = xfs_rtginode_mkdir_parent(mp);
+			if (error)
+				return error;
+			break;
+		default:
+			return error;
+		}
+	}
 
 	nsbp->sb_rgcount = howmany_64(nsbp->sb_rblocks, nmp->m_rgblocks);
-	return xfs_initialize_rtgroups(mp, nsbp->sb_rgcount);
+	error = xfs_initialize_rtgroups(mp, nsbp->sb_rgcount);
+	if (error)
+		return error;
+
+	for_each_rtgroup_range(mp, last_rgno, nsbp->sb_rgcount, rtg) {
+		error = xfs_rtginode_ensure(rtg, XFS_RTG_RMAP);
+		if (error) {
+			xfs_rtgroup_rele(rtg);
+			return error;
+		}
+	}
+
+	return 0;
 }
 
 /* Remove excess rtgroups after a grow failed. */
@@ -955,6 +1017,15 @@ xfs_growfsrt_free_rtgroups(
 	struct xfs_mount	*mp,
 	struct xfs_sb		*nsbp)
 {
+	struct xfs_rtgroup	*rtg;
+	xfs_rgnumber_t		rgno = mp->m_sb.sb_rgcount + 1;
+	unsigned int		i;
+
+	for_each_rtgroup_range(mp, rgno, nsbp->sb_rgcount, rtg) {
+		for (i = 0; i < XFS_RTG_MAX; i++)
+			xfs_rtginode_irele(&rtg->rtg_inodes[i]);
+	}
+
 	xfs_free_unused_rtgroup_range(mp, mp->m_sb.sb_rgcount + 1,
 			nsbp->sb_rgcount);
 }
@@ -1065,7 +1136,9 @@ xfs_growfs_rt(
 		return -EINVAL;
 
 	/* Unsupported realtime features. */
-	if (xfs_has_rmapbt(mp) || xfs_has_reflink(mp) || xfs_has_quota(mp))
+	if (!xfs_has_rtgroups(mp) && xfs_has_rmapbt(mp))
+		return -EOPNOTSUPP;
+	if (xfs_has_reflink(mp) || xfs_has_quota(mp))
 		return -EOPNOTSUPP;
 
 	nrblocks = in->newblocks;
@@ -1196,7 +1269,7 @@ xfs_growfs_rt(
 		xfs_trans_resv_calc(nmp, &nmp->m_resv);
 
 		if (xfs_has_rtgroups(mp)) {
-			error = xfs_growfsrt_alloc_rtgroups(mp, nmp);
+			error = xfs_growfsrt_alloc_rtgroups(mp, last_rgno, nmp);
 			if (error)
 				goto out_free;
 		}
