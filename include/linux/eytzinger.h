@@ -1,10 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-#include <linux/eytzinger.h>
-
-#define _EYTZINGER_H
-
-#ifndef _EYTZINGER_H
-#define _EYTZINGER_H
+#ifndef _LINUX_EYTZINGER_H
+#define _LINUX_EYTZINGER_H
 
 #include <linux/bitops.h>
 #include <linux/log2.h>
@@ -52,7 +48,7 @@ static inline unsigned eytzinger1_right_child(unsigned i)
 
 static inline unsigned eytzinger1_first(unsigned size)
 {
-	return size ? rounddown_pow_of_two(size) : 0;
+	return rounddown_pow_of_two(size);
 }
 
 static inline unsigned eytzinger1_last(unsigned size)
@@ -105,9 +101,7 @@ static inline unsigned eytzinger1_prev(unsigned i, unsigned size)
 
 static inline unsigned eytzinger1_extra(unsigned size)
 {
-	return size
-		? (size + 1 - rounddown_pow_of_two(size)) << 1
-		: 0;
+	return (size + 1 - rounddown_pow_of_two(size)) << 1;
 }
 
 static inline unsigned __eytzinger1_to_inorder(unsigned i, unsigned size,
@@ -309,4 +303,4 @@ void eytzinger0_sort_r(void *, size_t, size_t,
 		       cmp_r_func_t, swap_r_func_t, const void *);
 void eytzinger0_sort(void *, size_t, size_t, cmp_func_t, swap_func_t);
 
-#endif /* _EYTZINGER_H */
+#endif /* _LINUX_EYTZINGER_H */
