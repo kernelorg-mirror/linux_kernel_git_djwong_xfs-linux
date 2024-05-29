@@ -67,6 +67,7 @@ typedef __u32			xfs_nlink_t;
 # include <linux/seq_buf.h>
 # include <linux/time_stats.h>
 #endif
+#include <linux/sched/clock.h>
 
 #include <asm/page.h>
 #include <asm/div64.h>
