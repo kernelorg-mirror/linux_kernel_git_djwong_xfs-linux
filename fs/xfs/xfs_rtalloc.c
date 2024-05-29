@@ -678,7 +678,7 @@ xfs_rtalloc_sumlevel(
  * specified.  If we don't get maxlen then use prod to trim
  * the length, if given.  The lengths are all in rtextents.
  */
-STATIC int
+static int
 xfs_rtallocate_extent_size(
 	struct xfs_rtalloc_args	*args,
 	xfs_rtxlen_t		minlen,	/* minimum length to allocate */
@@ -2225,5 +2225,47 @@ retry:
 	ap->blkno = xfs_rtx_to_rtb(mp, rtx);
 	ap->length = xfs_rtxlen_to_extlen(mp, ralen);
 	xfs_bmap_alloc_account(ap);
+	return 0;
+}
+
+/*
+ * Allocate an extent in the realtime subvolume.
+ *
+ * If @start is nonzero, try to allocate near that exact rtx.  @maxlen should
+ * be the maximum length to allocate; the allocated space can be as short as a
+ * single rtx.  If no free space was allocated, returns -ENOSPC without
+ * touching @len or @rtx.
+ */
+int
+xfs_rtallocate_extent(
+	struct xfs_trans	*tp,
+	xfs_rtxnum_t		start,	/* starting rtext number to allocate */
+	xfs_rtxlen_t		maxlen,	/* maximum length to allocate */
+	xfs_rtxlen_t		*len,	/* out: actual length allocated */
+	xfs_rtxnum_t		*rtx)	/* out: start rtext allocated */
+{
+	struct xfs_rtalloc_args	args = {
+		.mp		= tp->t_mountp,
+		.tp		= tp,
+	};
+	xfs_rtxnum_t		r;
+	int			error;
+
+	xfs_assert_ilocked(args.mp->m_rbmip, XFS_ILOCK_EXCL);
+
+	if (start == 0) {
+		error = xfs_rtallocate_extent_size(&args, 1, maxlen, len, 1,
+				&r);
+	} else {
+		error = xfs_rtallocate_extent_near(&args, start, 1, maxlen,
+				len, 1, &r);
+	}
+	xfs_rtbuf_cache_relse(&args);
+	if (error)
+		return error;
+
+	ASSERT(*len <= maxlen);
+	xfs_trans_mod_sb(tp, XFS_TRANS_SB_FREXTENTS, -(int64_t)(*len));
+	*rtx = r;
 	return 0;
 }
