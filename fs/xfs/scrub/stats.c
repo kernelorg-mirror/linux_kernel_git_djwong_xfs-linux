@@ -163,13 +163,21 @@ xchk_timestats_register(
 		if (!name_map[i])
 			continue;
 
-		snprintf(name, 32, "scrub::%s", name_map[i]);
+		snprintf(name, 32, "scrub::%s.txt", name_map[i]);
 		debugfs_create_file(name, 0444, ts->parent,
 				&ts->scrub[i].scrub, &xfs_timestats_fops);
 
-		snprintf(name, 32, "repair::%s", name_map[i]);
+		snprintf(name, 32, "repair::%s.txt", name_map[i]);
 		debugfs_create_file(name, 0444, ts->parent,
 				&ts->scrub[i].repair, &xfs_timestats_fops);
+
+		snprintf(name, 32, "scrub::%s.json", name_map[i]);
+		debugfs_create_file(name, 0444, ts->parent,
+				&ts->scrub[i].scrub, &xfs_timestats_json_fops);
+
+		snprintf(name, 32, "repair::%s.json", name_map[i]);
+		debugfs_create_file(name, 0444, ts->parent,
+				&ts->scrub[i].repair, &xfs_timestats_json_fops);
 	}
 }
 
