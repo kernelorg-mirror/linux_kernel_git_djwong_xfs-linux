@@ -22,6 +22,7 @@
 #include "xfs_attr.h"
 #include "xfs_rtgroup.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_rtrefcount_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -181,6 +182,8 @@ xchk_setup_metapath(
 		return xchk_setup_metapath_rtdir(sc);
 	case XFS_SCRUB_METAPATH_RTRMAPBT:
 		return xchk_setup_metapath_rtginode(sc, XFS_RTG_RMAP);
+	case XFS_SCRUB_METAPATH_RTREFCOUNTBT:
+		return xchk_setup_metapath_rtginode(sc, XFS_RTG_REFCOUNT);
 	default:
 		return -EINVAL;
 	}
