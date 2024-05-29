@@ -592,7 +592,7 @@ xfs_validate_sb_common(
 
 		if (!xfs_validate_rtextents(rexts) ||
 		    sbp->sb_rextents != rexts ||
-		    sbp->sb_rextslog != xfs_compute_rextslog(rexts) ||
+		    sbp->sb_rextslog != xfs_compute_rextslog(sbp, rexts) ||
 		    sbp->sb_rbmblocks != rbmblocks) {
 			xfs_notice(mp,
 				"realtime geometry sanity check failed");
@@ -1543,9 +1543,20 @@ check_override:
  */
 uint8_t
 xfs_compute_rextslog(
+	const struct xfs_sb	*sbp,
 	xfs_rtbxlen_t		rtextents)
 {
 	if (!rtextents)
 		return 0;
+
+	/*
+	 * Realtime groups are never larger than 2^32 extents and are never
+	 * fully free, so we can use highbit32 on the number of rtextents per
+	 * group.
+	 */
+	if (xfs_sb_is_v5(sbp) &&
+	    (sbp->sb_features_incompat & XFS_SB_FEAT_INCOMPAT_RTGROUPS))
+		return xfs_highbit32(sbp->sb_rgblocks / sbp->sb_rextsize);
+
 	return xfs_highbit64(rtextents);
 }
