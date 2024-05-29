@@ -60,6 +60,9 @@ int xfs_imeta_iget_parent(struct xfs_trans *tp,
 void xfs_imeta_set_iflag(struct xfs_trans *tp, struct xfs_inode *ip);
 void xfs_imeta_clear_iflag(struct xfs_trans *tp, struct xfs_inode *ip);
 
+int xfs_imeta_ensure_dirpath(struct xfs_mount *mp,
+		const struct xfs_imeta_path *path);
+
 int xfs_imeta_start_create(struct xfs_mount *mp,
 		const struct xfs_imeta_path *path,
 		struct xfs_imeta_update *upd);
