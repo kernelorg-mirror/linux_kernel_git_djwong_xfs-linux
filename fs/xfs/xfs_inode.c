@@ -1163,9 +1163,7 @@ xfs_release(
 		if (error)
 			goto out_unlock;
 
-		/* delalloc blocks after truncation means it really is dirty */
-		if (ip->i_delayed_blks)
-			xfs_iflags_set(ip, XFS_IDIRTY_RELEASE);
+		xfs_iflags_set(ip, XFS_IDIRTY_RELEASE);
 	}
 
 out_unlock:
