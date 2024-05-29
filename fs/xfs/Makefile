@@ -38,6 +38,7 @@ xfs-y				+= $(addprefix libxfs/, \
 				   xfs_ialloc.o \
 				   xfs_ialloc_btree.o \
 				   xfs_iext_tree.o \
+				   xfs_imeta.o \
 				   xfs_inode_fork.o \
 				   xfs_inode_buf.o \
 				   xfs_inode_util.o \
@@ -82,6 +83,7 @@ xfs-y				+= xfs_aops.o \
 				   xfs_handle.o \
 				   xfs_health.o \
 				   xfs_icache.o \
+				   xfs_imeta_utils.o \
 				   xfs_ioctl.o \
 				   xfs_iomap.o \
 				   xfs_iops.o \
