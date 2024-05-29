@@ -898,6 +898,17 @@ xchk_install_handle_inode(
 		return -ENOENT;
 	}
 
+	/*
+	 * On metadir filesystems, scrubbing any directory in the metadata
+	 * directory tree by handle is allowed, because that is the only way to
+	 * validate the metadata directory structure.  Non-directory metadir
+	 * files must be checked with type-specific scrubbers.
+	 */
+	if (xfs_is_metadir_inode(ip) && !S_ISDIR(VFS_I(ip)->i_mode)) {
+		xchk_irele(sc, ip);
+		return -ENOENT;
+	}
+
 	sc->ip = ip;
 	return 0;
 }
