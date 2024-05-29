@@ -30,6 +30,7 @@
 #include "xfs_filestream.h"
 #include "xfs_quota.h"
 #include "xfs_sysfs.h"
+#include "xfs_fsverity.h"
 #include "xfs_ondisk.h"
 #include "xfs_rmap_item.h"
 #include "xfs_refcount_item.h"
@@ -53,6 +54,7 @@
 #include <linux/fs_context.h>
 #include <linux/fs_parser.h>
 #include <linux/fsverity.h>
+#include <linux/iomap.h>
 
 static const struct super_operations xfs_super_operations;
 
@@ -668,6 +670,8 @@ xfs_fs_destroy_inode(
 	ASSERT(!rwsem_is_locked(&inode->i_rwsem));
 	XFS_STATS_INC(ip->i_mount, vn_rele);
 	XFS_STATS_INC(ip->i_mount, vn_remove);
+	if (fsverity_active(inode))
+		xfs_fsverity_destroy_inode(ip);
 	fsverity_cleanup_inode(inode);
 	xfs_inode_mark_reclaimable(ip);
 }
@@ -1533,6 +1537,9 @@ xfs_fs_fill_super(
 	sb->s_quota_types = QTYPE_MASK_USR | QTYPE_MASK_GRP | QTYPE_MASK_PRJ;
 #endif
 	sb->s_op = &xfs_super_operations;
+#ifdef CONFIG_FS_VERITY
+	sb->s_vop = &xfs_fsverity_ops;
+#endif
 
 	/*
 	 * Delay mount work if the debug hook is set. This is debug
@@ -1786,9 +1793,24 @@ xfs_fs_fill_super(
 		xfs_warn(mp,
 	"EXPERIMENTAL parent pointer feature enabled. Use at your own risk!");
 
+	if (xfs_has_verity(mp))
+		xfs_warn(mp,
+	"EXPERIMENTAL fsverity feature in use. Use at your own risk!");
+
 	error = xfs_mountfs(mp);
 	if (error)
 		goto out_filestream_unmount;
+
+#ifdef CONFIG_FS_VERITY
+	/*
+	 * Don't use a high priority workqueue like the other fsverity
+	 * implementations because that will lead to conflicts with the xfs log
+	 * workqueue.
+	 */
+	error = iomap_init_fsverity(mp->m_super, 0, 0);
+	if (error)
+		goto out_unmount;
+#endif
 
 	root = igrab(VFS_I(mp->m_rootip));
 	if (!root) {
