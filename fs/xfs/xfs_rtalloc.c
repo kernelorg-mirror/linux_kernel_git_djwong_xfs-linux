@@ -796,8 +796,7 @@ xfs_growfs_rt_bmblock(
 	xfs_rgnumber_t		last_rgno = mp->m_sb.sb_rgcount - 1;
 	int			error;
 
-
-	nrblocks_step = (bmbno + 1) * NBBY * mp->m_sb.sb_blocksize * rextsize;
+	nrblocks_step = (bmbno + 1) * mp->m_rtx_per_rbmblock * rextsize;
 
 	nmp = nargs.mp = kmemdup(mp, sizeof(*mp), GFP_KERNEL);
 	if (!nmp)
