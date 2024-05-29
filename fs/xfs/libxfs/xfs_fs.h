@@ -824,9 +824,10 @@ struct xfs_scrub_vec_head {
  * path checking.
  */
 #define XFS_SCRUB_METAPATH_PROBE	(0)  /* do we have a metapath scrubber? */
+#define XFS_SCRUB_METAPATH_RTRMAPBT	(1)  /* realtime reverse mapping */
 
 /* Number of metapath sm_ino values */
-#define XFS_SCRUB_METAPATH_NR		1
+#define XFS_SCRUB_METAPATH_NR		(2)
 
 /*
  * ioctl limits
