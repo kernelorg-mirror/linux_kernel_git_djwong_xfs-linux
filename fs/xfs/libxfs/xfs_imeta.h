@@ -83,6 +83,17 @@ int xfs_imeta_link(struct xfs_imeta_update *upd);
 int xfs_imeta_commit(struct xfs_imeta_update *upd);
 void xfs_imeta_cancel(struct xfs_imeta_update *upd, int error);
 
+/* Space reservations for metadata inodes. */
+struct xfs_alloc_arg;
+
+bool xfs_imeta_resv_critical(struct xfs_inode *ip);
+void xfs_imeta_resv_alloc_extent(struct xfs_inode *ip,
+		struct xfs_alloc_arg *args);
+void xfs_imeta_resv_free_extent(struct xfs_inode *ip, struct xfs_trans *tp,
+		xfs_filblks_t len);
+void xfs_imeta_resv_free_inode(struct xfs_inode *ip);
+int xfs_imeta_resv_init_inode(struct xfs_inode *ip, xfs_filblks_t ask);
+
 /* Code specific to kernel/userspace; must be provided externally. */
 
 int xfs_imeta_iget(struct xfs_trans *tp, xfs_ino_t ino, umode_t mode,
