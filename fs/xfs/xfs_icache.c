@@ -827,6 +827,9 @@ xfs_imeta_iget(
 	struct xfs_inode	*ip;
 	int			error;
 
+	if (!xfs_verify_ino(mp, ino))
+		return -EFSCORRUPTED;
+
 	error = xfs_iget(mp, tp, ino, XFS_IGET_UNTRUSTED, 0, &ip);
 	if (error == -EFSCORRUPTED)
 		goto whine;
