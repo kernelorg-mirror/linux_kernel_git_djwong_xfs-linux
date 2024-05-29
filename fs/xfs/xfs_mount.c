@@ -628,6 +628,18 @@ xfs_mount_setup_metadir(
 	if (error)
 		return error;
 
+	/* Load the metadata directory root inode into memory. */
+	if (xfs_has_metadir(mp)) {
+		error = xfs_imeta_iget(tp, mp->m_sb.sb_metadirino,
+				XFS_DIR3_FT_DIR, &mp->m_metadirip);
+		if (error) {
+			xfs_warn(mp,
+ "Failed to load metadir root directory, error %d",
+					error);
+			goto err_cancel;
+		}
+	}
+
 	error = xfs_imeta_mount(tp);
 	if (error) {
 		xfs_warn(mp, "Failed to load metadata inodes, error %d",
@@ -888,7 +900,7 @@ xfs_mountfs(
 
 	error = xfs_mount_setup_metadir(mp);
 	if (error)
-		goto out_log_dealloc;
+		goto out_free_metadir;
 
 	/*
 	 * Get and sanity-check the root inode.
@@ -900,7 +912,7 @@ xfs_mountfs(
 		xfs_warn(mp,
 			"Failed to read root inode 0x%llx, error %d",
 			sbp->sb_rootino, -error);
-		goto out_log_dealloc;
+		goto out_free_metadir;
 	}
 
 	ASSERT(rip != NULL);
@@ -1042,6 +1054,9 @@ xfs_mountfs(
 	xfs_irele(rip);
 	/* Clean out dquots that might be in memory after quotacheck. */
 	xfs_qm_unmount(mp);
+ out_free_metadir:
+	if (mp->m_metadirip)
+		xfs_imeta_irele(mp->m_metadirip);
 
 	/*
 	 * Inactivate all inodes that might still be in memory after a log
@@ -1063,7 +1078,6 @@ xfs_mountfs(
 	 * quota inodes.
 	 */
 	xfs_unmount_flush_inodes(mp);
- out_log_dealloc:
 	xfs_log_mount_cancel(mp);
  out_inodegc_shrinker:
 	shrinker_free(mp->m_inodegc_shrinker);
@@ -1115,6 +1129,8 @@ xfs_unmountfs(
 	xfs_qm_unmount_quotas(mp);
 	xfs_rtunmount_inodes(mp);
 	xfs_irele(mp->m_rootip);
+	if (mp->m_metadirip)
+		xfs_imeta_irele(mp->m_metadirip);
 
 	xfs_unmount_flush_inodes(mp);
 
