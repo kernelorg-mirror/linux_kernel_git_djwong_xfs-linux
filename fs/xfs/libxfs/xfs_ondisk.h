@@ -59,6 +59,7 @@ xfs_check_ondisk_structs(void)
 	XFS_CHECK_STRUCT_SIZE(struct xfs_attr3_leaf_hdr,	80);
 	XFS_CHECK_STRUCT_SIZE(struct xfs_attr3_leafblock,	80);
 	XFS_CHECK_STRUCT_SIZE(struct xfs_attr3_rmt_hdr,		56);
+	XFS_CHECK_STRUCT_SIZE(struct xfs_attr3_rmtverity_hdr,	36);
 	XFS_CHECK_STRUCT_SIZE(struct xfs_da3_blkinfo,		56);
 	XFS_CHECK_STRUCT_SIZE(struct xfs_da3_intnode,		64);
 	XFS_CHECK_STRUCT_SIZE(struct xfs_da3_node_hdr,		64);
@@ -207,6 +208,7 @@ xfs_check_ondisk_structs(void)
 	XFS_CHECK_VALUE(XFS_DQ_BIGTIME_EXPIRY_MIN << XFS_DQ_BIGTIME_SHIFT, 4);
 	XFS_CHECK_VALUE(XFS_DQ_BIGTIME_EXPIRY_MAX << XFS_DQ_BIGTIME_SHIFT,
 			16299260424LL);
+
 }
 
 #endif /* __XFS_ONDISK_H */
