@@ -30,6 +30,7 @@
 #include "xfs_rtgroup.h"
 #include "xfs_error.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_trace.h"
 
 /*
  * Realtime metadata files are not quite regular files because userspace can't
@@ -777,6 +778,27 @@ xfs_growfs_rt_free_new(
 	return xfs_rtfree_range(nargs, start_rtx, *freed_rtx);
 }
 
+static void
+xfs_rt_compute_geometry(
+	struct xfs_mount	*mp,
+	xfs_rfsblock_t		rblocks,
+	xfs_extlen_t		rextsize)
+{
+	mp->m_rtxblklog = -1; /* don't use shift or masking below */
+
+	mp->m_sb.sb_rblocks = rblocks;
+	mp->m_sb.sb_rextsize = rextsize;
+	mp->m_sb.sb_rextents = div_u64(rblocks, rextsize);
+	mp->m_sb.sb_rbmblocks =
+		xfs_rtbitmap_blockcount(mp, mp->m_sb.sb_rextents);
+	mp->m_sb.sb_rextslog = xfs_compute_rextslog(mp->m_sb.sb_rextents);
+
+	mp->m_rsumlevels =  mp->m_sb.sb_rextslog + 1;
+	mp->m_rsumsize = XFS_FSB_TO_B(mp,
+		xfs_rtsummary_blockcount(mp, mp->m_rsumlevels,
+				mp->m_sb.sb_rbmblocks));
+}
+
 static int
 xfs_growfs_rt_bmblock(
 	struct xfs_mount	*mp,
@@ -807,16 +829,7 @@ xfs_growfs_rt_bmblock(
 	/*
 	 * Calculate new sb and mount fields for this round.
 	 */
-	nmp->m_rtxblklog = -1; /* don't use shift or masking */
-	nmp->m_sb.sb_rextsize = rextsize;
-	nmp->m_sb.sb_rbmblocks = bmbno + 1;
-	nmp->m_sb.sb_rblocks = min(nrblocks, nrblocks_step);
-	nmp->m_sb.sb_rextents = xfs_rtb_to_rtx(nmp, nmp->m_sb.sb_rblocks);
-	nmp->m_sb.sb_rextslog = xfs_compute_rextslog(nmp->m_sb.sb_rextents);
-	nmp->m_rsumlevels = nmp->m_sb.sb_rextslog + 1;
-	nmp->m_rsumsize = XFS_FSB_TO_B(mp,
-		xfs_rtsummary_blockcount(mp, nmp->m_rsumlevels,
-			nmp->m_sb.sb_rbmblocks));
+	xfs_rt_compute_geometry(nmp, min(nrblocks, nrblocks_step), rextsize);
 
 	/* recompute growfsrt reservation from new rsumsize */
 	xfs_trans_resv_calc(nmp, &nmp->m_resv);
@@ -921,9 +934,11 @@ xfs_growfs_rt_bmblock(
 				xfs_rtgroup_block_count(mp, rtg->rtg_rgno);
 
 	/*
-	 * Ensure the mount RT feature flag is now set.
+	 * Ensure the mount RT feature flag is now set, and compute new
+	 * maxlevels for rt btrees.
 	 */
 	mp->m_features |= XFS_FEAT_REALTIME;
+	xfs_rtrmapbt_compute_maxlevels(mp);
 
 	kfree(nmp);
 	return 0;
@@ -974,6 +989,54 @@ xfs_growfs_rt_init_super(
 	error = xfs_bwrite(rtsb_bp);
 	xfs_buf_unlock(rtsb_bp);
 	return error;
+}
+
+/*
+ * Check that changes to the realtime geometry won't affect the minimum
+ * log size, which would cause the fs to become unusable.
+ */
+int
+xfs_growfs_check_rtgeom(
+	const struct xfs_mount	*mp,
+	xfs_rfsblock_t		dblocks,
+	xfs_rfsblock_t		rblocks,
+	xfs_extlen_t		rextsize)
+{
+	struct xfs_mount	*fake_mp;
+	xfs_extlen_t		min_logfsbs;
+
+	/*
+	 * Create a dummy xfs_mount with the new rt geometry, and compute the
+	 * new minimum log size.  This ensures that the log is big enough to
+	 * handle the larger transactions that we could start sending.
+	 */
+	fake_mp = kmemdup(mp, sizeof(*mp), GFP_KERNEL);
+	if (!fake_mp)
+		return -ENOMEM;
+
+	fake_mp->m_sb.sb_dblocks = dblocks;
+	xfs_rt_compute_geometry(fake_mp, rblocks, rextsize);
+
+	if (rblocks > 0)
+		fake_mp->m_features |= XFS_FEAT_REALTIME;
+
+	xfs_rtrmapbt_compute_maxlevels(fake_mp);
+	xfs_trans_resv_calc(fake_mp, M_RES(fake_mp));
+
+	/*
+	 * The rtsummary size can't be more than half the size of the log.
+	 *
+	 * This prevents us from getting a log overflow, since we basically log
+	 * the whole summary file at once.
+	 */
+	min_logfsbs = min_t(xfs_extlen_t, xfs_log_calc_minimum_size(fake_mp),
+			XFS_B_TO_FSB(mp, fake_mp->m_rsumsize) * 2);
+	kfree(fake_mp);
+
+	trace_xfs_growfs_check_rtgeom(mp, min_logfsbs);
+	if (min_logfsbs > mp->m_sb.sb_logblocks)
+		return -ENOSPC;
+	return 0;
 }
 
 /*
@@ -1047,13 +1110,11 @@ xfs_growfs_rt(
 	nrsumblocks = xfs_rtsummary_blockcount(mp,
 			xfs_compute_rextslog(nrextents) + 1, nrbmblocks);
 
-	/*
-	 * New summary size can't be more than half the size of
-	 * the log.  This prevents us from getting a log overflow,
-	 * since we'll log basically the whole summary file at once.
-	 */
-	if (nrsumblocks > (mp->m_sb.sb_logblocks >> 1))
-		return -EINVAL;
+	/* Make sure the new fs size won't cause problems with the log. */
+	error = xfs_growfs_check_rtgeom(mp, mp->m_sb.sb_dblocks, in->newblocks,
+			in->extsize);
+	if (error)
+		return error;
 
 	/*
 	 * Compute the new number of rt groups.  Changing the rtgroup size is
