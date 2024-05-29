@@ -13,6 +13,7 @@
 #include "xfs_log_format.h"
 #include "xfs_trans.h"
 #include "xfs_sb.h"
+#include "xfs_rmap.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/repair.h"
@@ -39,6 +40,7 @@ xchk_rgsuperblock_xref(
 
 	rtbno = xfs_rgbno_to_rtb(mp, rgno, 0);
 	xchk_xref_is_used_rt_space(sc, rtbno, 1);
+	xchk_xref_is_only_rt_owned_by(sc, 0, 1, &XFS_RMAP_OINFO_FS);
 }
 
 int
