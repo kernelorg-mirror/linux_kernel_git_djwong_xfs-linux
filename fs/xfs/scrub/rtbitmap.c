@@ -9,6 +9,7 @@
 #include "xfs_format.h"
 #include "xfs_trans_resv.h"
 #include "xfs_mount.h"
+#include "xfs_btree.h"
 #include "xfs_log_format.h"
 #include "xfs_trans.h"
 #include "xfs_rtbitmap.h"
@@ -17,10 +18,13 @@
 #include "xfs_bit.h"
 #include "xfs_sb.h"
 #include "xfs_rtgroup.h"
+#include "xfs_rmap.h"
+#include "xfs_rtrmap_btree.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/repair.h"
 #include "scrub/rtbitmap.h"
+#include "scrub/btree.h"
 
 static inline void
 xchk_rtbitmap_compute_geometry(
@@ -120,6 +124,31 @@ xchk_setup_rtbitmap(
 
 /* Per-rtgroup bitmap contents. */
 
+/* Cross-reference rtbitmap entries with other metadata. */
+STATIC void
+xchk_rgbitmap_xref(
+	struct xchk_rgbitmap	*rgb,
+	xfs_rtblock_t		startblock,
+	xfs_rtblock_t		blockcount)
+{
+	struct xfs_scrub	*sc = rgb->sc;
+	xfs_rgnumber_t		rgno;
+	xfs_rgblock_t		rgbno;
+
+	if (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
+		return;
+	if (!sc->sr.rmap_cur)
+		return;
+
+	rgbno = xfs_rtb_to_rgbno(sc->mp, startblock, &rgno);
+	xchk_xref_has_no_rt_owner(sc, rgbno, blockcount);
+
+	if (rgb->next_free_rgbno < rgbno)
+		xchk_xref_has_rt_owner(sc, rgb->next_free_rgbno,
+				rgbno - rgb->next_free_rgbno);
+	rgb->next_free_rgbno = rgbno + blockcount;
+}
+
 /* Scrub a free extent record from the realtime bitmap. */
 STATIC int
 xchk_rgbitmap_rec(
@@ -138,6 +167,12 @@ xchk_rgbitmap_rec(
 
 	if (!xfs_verify_rtbext(mp, startblock, blockcount))
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, 0);
+
+	xchk_rgbitmap_xref(rgb, startblock, blockcount);
+
+	if (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
+		return -ECANCELED;
+
 	return 0;
 }
 
@@ -163,6 +198,7 @@ xchk_rgbitmap(
 	 * Check only the portion of the rtbitmap that corresponds to this
 	 * realtime group.
 	 */
+	rgb->next_free_rgbno = 0;
 	start = xfs_rgbno_to_rtb(mp, rtg->rtg_rgno, 0);
 	last = xfs_rgbno_to_rtb(mp, rtg->rtg_rgno, last_rgbno);
 
@@ -170,6 +206,15 @@ xchk_rgbitmap(
 			xfs_rtb_to_rtx(mp, last), xchk_rgbitmap_rec, rgb);
 	if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, 0, &error))
 		return error;
+
+	/*
+	 * Check that the are rmappings for all rt extents between the end of
+	 * the last free extent we saw and the last possible extent in the rt
+	 * group.
+	 */
+	if (rgb->next_free_rgbno < last_rgbno)
+		xchk_xref_has_rt_owner(sc, rgb->next_free_rgbno,
+				last_rgbno - rgb->next_free_rgbno);
 
 	return 0;
 }
