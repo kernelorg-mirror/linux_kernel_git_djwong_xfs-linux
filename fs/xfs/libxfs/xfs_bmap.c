@@ -4050,7 +4050,8 @@ xfs_bmapi_reserve_delalloc(
 	xfs_filblks_t		prealloc,
 	struct xfs_bmbt_irec	*got,
 	struct xfs_iext_cursor	*icur,
-	int			eof)
+	int			eof,
+	bool			use_cowextszhint)
 {
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_ifork	*ifp = xfs_ifork_ptr(ip, whichfork);
@@ -4070,8 +4071,15 @@ xfs_bmapi_reserve_delalloc(
 	if (prealloc && alen >= len)
 		prealloc = alen - len;
 
-	/* Figure out the extent size, adjust alen */
-	if (whichfork == XFS_COW_FORK) {
+	/*
+	 * If the caller wants us to do so, try to expand the range of the
+	 * delalloc reservation up and down so that it's aligned with the CoW
+	 * extent size hint.  Unlike the data fork, the CoW cancellation
+	 * functions will free all the reservations at inactivation, so we
+	 * don't require that every delalloc reservation have a dirty
+	 * pagecache.
+	 */
+	if (whichfork == XFS_COW_FORK && use_cowextszhint) {
 		struct xfs_bmbt_irec	prev;
 		xfs_extlen_t		extsz = xfs_get_cowextsz_hint(ip);
 

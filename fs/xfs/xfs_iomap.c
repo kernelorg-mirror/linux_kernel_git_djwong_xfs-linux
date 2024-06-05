@@ -979,6 +979,7 @@ xfs_buffered_write_iomap_begin(
 	int			error = 0;
 	unsigned int		lockmode = XFS_ILOCK_EXCL;
 	u64			seq;
+	bool			use_cowextszhint = false;
 
 	if (xfs_is_shutdown(mp))
 		return -EIO;
@@ -1148,12 +1149,20 @@ xfs_buffered_write_iomap_begin(
 		}
 	}
 
+	/*
+	 * If we're targetting the COW fork but aren't creating a speculative
+	 * posteof preallocation, try to expand the reservation to align with
+	 * the cow extent size hint if there's sufficient free space.
+	 */
+	if (allocfork == XFS_COW_FORK && !prealloc_blocks)
+		use_cowextszhint = true;
 retry:
 	error = xfs_bmapi_reserve_delalloc(ip, allocfork, offset_fsb,
 			end_fsb - offset_fsb, prealloc_blocks,
 			allocfork == XFS_DATA_FORK ? &imap : &cmap,
 			allocfork == XFS_DATA_FORK ? &icur : &ccur,
-			allocfork == XFS_DATA_FORK ? eof : cow_eof);
+			allocfork == XFS_DATA_FORK ? eof : cow_eof,
+			use_cowextszhint);
 	switch (error) {
 	case 0:
 		break;
@@ -1161,7 +1170,8 @@ retry:
 	case -EDQUOT:
 		/* retry without any preallocation */
 		trace_xfs_delalloc_enospc(ip, offset, count);
-		if (prealloc_blocks) {
+		if (prealloc_blocks || use_cowextszhint) {
+			use_cowextszhint = false;
 			prealloc_blocks = 0;
 			goto retry;
 		}
