@@ -820,6 +820,8 @@ xfs_qm_qino_alloc(
 			xfs_trans_cancel(tp);
 			return error;
 		}
+		if (xfs_has_metadir(mp))
+			xfs_imeta_set_iflag(tp, *ipp);
 	}
 
 	/*
