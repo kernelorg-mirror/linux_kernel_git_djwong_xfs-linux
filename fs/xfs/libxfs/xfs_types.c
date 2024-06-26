@@ -162,6 +162,25 @@ xfs_verify_rtbext(
 	return xfs_verify_rtbno(mp, rtbno + len - 1);
 }
 
+/*
+ * Verify that a free realtime device extent is fully contained inside the
+ * volume.  Free extents can cross rtgroup boundaries, if any.
+ */
+bool
+xfs_verify_rt_freesp(
+	struct xfs_mount	*mp,
+	xfs_rtblock_t		rtbno,
+	xfs_filblks_t		len)
+{
+	if (rtbno + len <= rtbno)
+		return false;
+
+	if (!xfs_verify_rtbno(mp, rtbno))
+		return false;
+
+	return xfs_verify_rtbno(mp, rtbno + len - 1);
+}
+
 /* Calculate the range of valid icount values. */
 inline void
 xfs_icount_range(
