@@ -85,7 +85,7 @@ xchk_rtbitmap_rec(
 	startblock = xfs_rtx_to_rtb(mp, rec->ar_startext);
 	blockcount = xfs_rtx_to_rtb(mp, rec->ar_extcount);
 
-	if (!xfs_verify_rtbext(mp, startblock, blockcount))
+	if (!xfs_verify_rt_freesp(mp, startblock, blockcount))
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, 0);
 	return 0;
 }
