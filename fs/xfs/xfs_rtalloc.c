@@ -219,6 +219,23 @@ xfs_rtallocate_clamp_len(
 {
 	xfs_rtxlen_t		ret;
 
+	if (xfs_has_rtgroups(mp)) {
+		xfs_rtxnum_t	next_rtx;
+		xfs_rtblock_t	rtb, next_rtb;
+		xfs_rgnumber_t	rgno;
+
+		/*
+		 * Clamp to the end of the rtgroup, then let the rtvolume clamp
+		 * take care of runt rtgroups.
+		 */
+		rtb = xfs_rtx_to_rtb(mp, startrtx);
+		rgno = xfs_rtb_to_rgno(mp, rtb);
+		next_rtb = xfs_rgbno_to_rtb(mp, rgno + 1, 0);
+		next_rtx = xfs_rtb_to_rtx(mp, next_rtb);
+
+		rtxlen = min(next_rtx, startrtx + rtxlen) - startrtx;
+	}
+
 	ret = min(mp->m_sb.sb_rextents, startrtx + rtxlen) - startrtx;
 	return rounddown(ret, prod);
 }
