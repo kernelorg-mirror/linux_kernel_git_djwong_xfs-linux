@@ -236,6 +236,29 @@ xfs_rtallocate_clamp_len(
 }
 
 /*
+ * Given a candidate range of freespace that might be allocated, clamp the end
+ * of the range to the end of the rtgroup to avoid crossing rtgroup boundaries.
+ * Caller needs to round down the return value to prod if needed.
+ */
+static inline xfs_rtxlen_t
+xfs_rtalloc_clamp_rtgroup(
+	struct xfs_mount	*mp,
+	xfs_rtxnum_t		startrtx,
+	xfs_rtxlen_t		rtxlen)
+{
+	xfs_rtxnum_t		next_rtx;
+	xfs_rtblock_t		rtb, next_rtb;
+	xfs_rgnumber_t		rgno;
+
+	rtb = xfs_rtx_to_rtb(mp, startrtx);
+	rgno = xfs_rtb_to_rgno(mp, rtb);
+	next_rtb = xfs_rgbno_to_rtb(mp, rgno + 1, 0);
+	next_rtx = xfs_rtb_to_rtx(mp, next_rtb);
+
+	return min(next_rtx, startrtx + rtxlen) - startrtx;
+}
+
+/*
  * Attempt to allocate an extent minlen<=len<=maxlen starting from
  * bitmap block bbno.  If we don't get maxlen then use prod to trim
  * the length, if given.  Returns error; returns starting block in *rtx.
@@ -259,6 +282,7 @@ xfs_rtallocate_extent_block(
 	xfs_rtxnum_t		next;	/* next rtext to try */
 	xfs_rtxlen_t		scanlen; /* number of free rtx to look for */
 	xfs_rtxlen_t		bestlen = 0; /* best length found so far */
+	xfs_rtxlen_t		thislen; /* candidate length */
 	int			stat;	/* status from internal calls */
 	int			error;
 
@@ -280,6 +304,19 @@ xfs_rtallocate_extent_block(
 		error = xfs_rtcheck_range(args, i, scanlen, 1, &next, &stat);
 		if (error)
 			return error;
+		if (stat && xfs_has_rtgroups(mp)) {
+			/*
+			 * i to scanlen is all free, but we can't return space
+			 * that would cross an rtgroup boundary.  If it does
+			 * cross the boundary, treat this like a short
+			 * allocation.
+			 */
+			thislen = xfs_rtalloc_clamp_rtgroup(mp, i, scanlen);
+			if (thislen != scanlen) {
+				next = i + thislen;
+				stat = 0;
+			}
+		}
 		if (stat) {
 			/*
 			 * i to scanlen is all free, allocate and return that.
@@ -296,9 +333,11 @@ xfs_rtallocate_extent_block(
 		 * so far, remember it.
 		 */
 		if (minlen < maxlen) {
-			xfs_rtxnum_t	thislen;	/* this extent size */
-
-			thislen = next - i;
+			if (xfs_has_rtgroups(mp))
+				thislen = xfs_rtalloc_clamp_rtgroup(mp, i,
+						next - i);
+			else
+				thislen = next - i;
 			if (thislen >= minlen && thislen > bestlen) {
 				besti = i;
 				bestlen = thislen;
@@ -378,14 +417,29 @@ xfs_rtallocate_extent_exact(
 	if (error)
 		return error;
 
+	if (isfree && xfs_has_rtgroups(mp)) {
+		/*
+		 * start to scanlen is all free, but we can't return space that
+		 * would cross an rtgroup boundary.  If it does, treat this
+		 * like a short allocation.
+		 */
+		alloclen = xfs_rtalloc_clamp_rtgroup(mp, start, scanlen);
+		if (alloclen < scanlen) {
+			next = start + alloclen;
+			isfree = 0;
+		}
+	}
+
 	if (isfree) {
 		/* start to scanlen is all free; allocate it. */
 		alloclen = scanlen;
 	} else {
-		/*
-		 * If not, allocate what there is, if it's at least minlen.
-		 */
-		alloclen = next - start;
+		/* If not, allocate what there is, if it's at least minlen. */
+		if (xfs_has_rtgroups(mp))
+			alloclen = xfs_rtalloc_clamp_rtgroup(mp, start,
+					next - start);
+		else
+			alloclen = next - start;
 		if (alloclen < minlen)
 			return -ENOSPC;
 
