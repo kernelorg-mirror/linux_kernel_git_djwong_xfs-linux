@@ -28,6 +28,8 @@
 #include "xfs_da_format.h"
 #include "xfs_imeta.h"
 #include "xfs_rtgroup.h"
+#include "xfs_error.h"
+#include "xfs_rtrmap_btree.h"
 
 /*
  * Realtime metadata files are not quite regular files because userspace can't
@@ -1457,6 +1459,20 @@ out_unlock:
 	return error;
 }
 
+static void
+xfs_rtgroup_unmount_inodes(
+	struct xfs_mount	*mp)
+{
+	struct xfs_rtgroup	*rtg;
+	xfs_rgnumber_t		rgno;
+	unsigned int		i;
+
+	for_each_rtgroup(mp, rgno, rtg) {
+		for (i = 0; i < XFS_RTG_MAX; i++)
+			xfs_rtginode_irele(&rtg->rtg_inodes[i]);
+	}
+}
+
 /*
  * Get the bitmap and summary inodes and the summary cache into the mount
  * structure at mount time.
@@ -1469,6 +1485,7 @@ xfs_rtmount_inodes(
 	struct xfs_sb		*sbp = &mp->m_sb;
 	struct xfs_rtgroup	*rtg;
 	xfs_rgnumber_t		rgno;
+	unsigned int		i;
 	int			error;
 
 	error = xfs_trans_alloc_empty(mp, &tp);
@@ -1501,15 +1518,33 @@ xfs_rtmount_inodes(
 	if (error)
 		goto out_rele_summary;
 
+	if (xfs_has_rtgroups(mp) && mp->m_sb.sb_rgcount > 0) {
+		error = xfs_rtginode_load_parent(tp);
+		if (error)
+			return error;
+	}
+
 	for_each_rtgroup(mp, rgno, rtg) {
 		rtg->rtg_blockcount = xfs_rtgroup_block_count(mp,
 							      rtg->rtg_rgno);
+
+		for (i = 0; i < XFS_RTG_MAX; i++) {
+			error = xfs_rtginode_load(rtg, i, tp);
+			if (error) {
+				xfs_rtgroup_rele(rtg);
+				goto out_rele_inodes;
+			}
+		}
 	}
 
 	xfs_alloc_rsum_cache(mp, sbp->sb_rbmblocks);
 	xfs_trans_cancel(tp);
 	return 0;
 
+out_rele_inodes:
+	xfs_rtgroup_unmount_inodes(mp);
+	if (mp->m_rtdirip)
+		xfs_irele(mp->m_rtdirip);
 out_rele_summary:
 	xfs_irele(mp->m_rsumip);
 out_rele_bitmap:
@@ -1524,6 +1559,10 @@ xfs_rtunmount_inodes(
 	struct xfs_mount	*mp)
 {
 	kvfree(mp->m_rsum_cache);
+
+	xfs_rtgroup_unmount_inodes(mp);
+	if (mp->m_rtdirip)
+		xfs_irele(mp->m_rtdirip);
 	if (mp->m_rbmip)
 		xfs_irele(mp->m_rbmip);
 	if (mp->m_rsumip)
