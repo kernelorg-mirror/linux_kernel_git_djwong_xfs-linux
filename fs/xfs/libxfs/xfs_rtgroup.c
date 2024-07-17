@@ -31,6 +31,7 @@
 #include "xfs_buf_item.h"
 #include "xfs_rtgroup.h"
 #include "xfs_rtbitmap.h"
+#include "xfs_imeta.h"
 
 /*
  * Passive reference counting access wrappers to the rtgroup structures.  If
@@ -509,3 +510,168 @@ xfs_rtginode_lockdep_setup(
 #else
 #define xfs_rtginode_lockdep_setup(ip, rgno, type)	do { } while (0)
 #endif /* CONFIG_PROVE_LOCKING */
+
+struct xfs_rtginode_ops {
+	const char	*name;	/* short name */
+	int8_t		format;	/* data fork format */
+	unsigned int	sick;	/* rtgroup sickness flag */
+
+	/* Does the fs have this feature? */
+	bool		(*enabled)(struct xfs_mount *mp);
+
+	/* Create this rtgroup metadata inode and initialize it. */
+	int		(*create)(struct xfs_rtgroup *rtg,
+				  struct xfs_inode *ip, struct xfs_trans *tp,
+				  bool init);
+};
+
+static const struct xfs_rtginode_ops xfs_rtginode_ops[XFS_RTG_MAX] = {
+};
+
+/* Return the shortname of this rtgroup inode. */
+const char *
+xfs_rtginode_name(
+	enum xfs_rtg_inodes	type)
+{
+	return xfs_rtginode_ops[type].name;
+}
+
+/* Should this rtgroup inode be present? */
+bool
+xfs_rtginode_enabled(
+	struct xfs_rtgroup	*rtg,
+	enum xfs_rtg_inodes	type)
+{
+	const struct xfs_rtginode_ops *ops = &xfs_rtginode_ops[type];
+
+	return ops->enabled(rtg->rtg_mount);
+}
+
+/* Load and existing rtgroup inode into the rtgroup structure. */
+int
+xfs_rtginode_load(
+	struct xfs_rtgroup	*rtg,
+	enum xfs_rtg_inodes	type,
+	struct xfs_trans	*tp)
+{
+	const struct xfs_rtginode_ops *ops = &xfs_rtginode_ops[type];
+	struct xfs_mount	*mp = tp->t_mountp;
+	const char		*path;
+	struct xfs_inode	*ip;
+	int			error;
+
+	if (!xfs_rtginode_enabled(rtg, type))
+		return 0;
+
+	path = xfs_rtginode_path(rtg->rtg_rgno, type);
+	if (!path)
+		return -ENOMEM;
+	error = xfs_imeta_load(tp, mp->m_rtdirip, path, S_IFREG, &ip);
+	kfree(path);
+
+	if (error) {
+		if (xfs_metadata_is_sick(error))
+			xfs_rtgroup_mark_sick(rtg, ops->sick);
+		return error;
+	}
+
+	if (XFS_IS_CORRUPT(mp, ip->i_df.if_format != ops->format)) {
+		xfs_irele(ip);
+		xfs_rtgroup_mark_sick(rtg, ops->sick);
+		return -EFSCORRUPTED;
+	}
+
+	if (XFS_IS_CORRUPT(mp, ip->i_projid != rtg->rtg_rgno)) {
+		xfs_irele(ip);
+		xfs_rtgroup_mark_sick(rtg, ops->sick);
+		return -EFSCORRUPTED;
+	}
+
+	xfs_rtginode_lockdep_setup(ip, rtg->rtg_rgno, type);
+	rtg->rtg_inodes[type] = ip;
+	return 0;
+}
+
+/* Release an rtgroup metadata inode. */
+void
+xfs_rtginode_irele(
+	struct xfs_inode	**ipp)
+{
+	if (*ipp)
+		xfs_irele(*ipp);
+	*ipp = NULL;
+}
+
+/* Add a metadata inode for a realtime rmap btree. */
+int
+xfs_rtginode_create(
+	struct xfs_rtgroup	*rtg,
+	enum xfs_rtg_inodes	type,
+	bool			init)
+{
+	const struct xfs_rtginode_ops *ops = &xfs_rtginode_ops[type];
+	struct xfs_mount	*mp = rtg->rtg_mount;
+	struct xfs_imeta_update	upd = { };
+	const char		*path;
+	int			error;
+
+	if (!xfs_rtginode_enabled(rtg, type))
+		return 0;
+
+	path = xfs_rtginode_path(rtg->rtg_rgno, type);
+	if (!path)
+		return -ENOMEM;
+
+	error = xfs_imeta_start_create(mp->m_rtdirip, path, &upd);
+	if (error)
+		goto out_path;
+
+	error = xfs_imeta_create(&upd, S_IFREG);
+	if (error)
+		return error;
+
+	xfs_rtginode_lockdep_setup(upd.ip, rtg->rtg_rgno, type);
+
+	error = ops->create(rtg, upd.ip, upd.tp, init);
+	if (error)
+		goto out_cancel;
+
+	error = xfs_imeta_commit(&upd);
+	if (error)
+		goto out_path;
+
+	kfree(path);
+	xfs_finish_inode_setup(upd.ip);
+	rtg->rtg_inodes[type] = upd.ip;
+	return 0;
+
+out_cancel:
+	xfs_imeta_cancel(&upd, error);
+	/* Have to finish setting up the inode to ensure it's deleted. */
+	if (upd.ip) {
+		xfs_finish_inode_setup(upd.ip);
+		xfs_irele(upd.ip);
+	}
+out_path:
+	kfree(path);
+	return error;
+}
+
+/* Create the parent directory for all rtgroup inodes and load it. */
+int
+xfs_rtginode_mkdir_parent(
+	struct xfs_mount	*mp)
+{
+	return xfs_imeta_mkdir(mp->m_metadirip, "rtgroups", &mp->m_rtdirip);
+}
+
+/* Load the parent directory of all rtgroup inodes. */
+int
+xfs_rtginode_load_parent(
+	struct xfs_trans	*tp)
+{
+	struct xfs_mount	*mp = tp->t_mountp;
+
+	return xfs_imeta_load(tp, mp->m_metadirip, "rtgroups", S_IFDIR,
+			&mp->m_rtdirip);
+}
