@@ -257,6 +257,11 @@ static inline const char *xfs_rtginode_path(xfs_rgnumber_t rgno,
 {
 	return kasprintf(GFP_KERNEL, "%u.%s", rgno, xfs_rtginode_name(type));
 }
+
+void xfs_rtgroup_update_super(struct xfs_buf *rtsb_bp,
+		const struct xfs_buf *sb_bp);
+struct xfs_buf *xfs_rtgroup_log_super(struct xfs_trans *tp,
+		const struct xfs_buf *sb_bp);
 #else
 # define xfs_rtgroup_extents(mp, rgno)		(0)
 # define xfs_rtgroup_lock(rtg, gf)		((void)0)
@@ -264,6 +269,8 @@ static inline const char *xfs_rtginode_path(xfs_rgnumber_t rgno,
 # define xfs_rtgroup_trans_join(tp, rtg, gf)	((void)0)
 # define xfs_rtginode_mkdir_parent(...)		(-EOPNOTSUPP)
 # define xfs_rtginode_load_parent(...)		(-EOPNOTSUPP)
+# define xfs_rtgroup_update_super(bp, sb_bp)	((void)0)
+# define xfs_rtgroup_log_super(tp, sb_bp)	(NULL)
 #endif /* CONFIG_XFS_RT */
 
 #endif /* __LIBXFS_RTGROUP_H */
