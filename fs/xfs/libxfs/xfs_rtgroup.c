@@ -324,6 +324,7 @@ xfs_rtginode_lockdep_setup(
 
 struct xfs_rtginode_ops {
 	const char	*name;	/* short name */
+	unsigned int	sick;	/* rtgroup sickness flag */
 
 	/* Does the fs have this feature? */
 	bool		(*enabled)(struct xfs_mount *mp);
@@ -337,10 +338,12 @@ struct xfs_rtginode_ops {
 static const struct xfs_rtginode_ops xfs_rtginode_ops[XFS_RTG_MAX] = {
 	[XFS_RTG_BITMAP] = {
 		.name		= "bitmap",
+		.sick		= XFS_SICK_RG_BITMAP,
 		.create		= xfs_rtbitmap_create,
 	},
 	[XFS_RTG_SUMMARY] = {
 		.name		= "summary",
+		.sick		= XFS_SICK_RG_SUMMARY,
 		.create		= xfs_rtsummary_create,
 	},
 };
@@ -366,6 +369,16 @@ xfs_rtginode_enabled(
 	return ops->enabled(rtg->rtg_mount);
 }
 
+void
+xfs_rtginode_mark_sick(
+	struct xfs_rtgroup	*rtg,
+	enum xfs_rtg_inodes	type)
+{
+	const struct xfs_rtginode_ops *ops = &xfs_rtginode_ops[type];
+
+	xfs_rtgroup_mark_sick(rtg, ops->sick);
+}
+
 /* Load and existing rtgroup inode into the rtgroup structure. */
 int
 xfs_rtginode_load(
@@ -380,8 +393,10 @@ xfs_rtginode_load(
 	if (!xfs_rtginode_enabled(rtg, type))
 		return 0;
 
-	if (!mp->m_rtdirip)
+	if (!mp->m_rtdirip) {
+		xfs_fs_mark_sick(mp, XFS_SICK_FS_METADIR);
 		return -EFSCORRUPTED;
+	}
 
 	if (!xfs_has_rtgroups(mp)) {
 		xfs_ino_t	ino;
@@ -408,11 +423,15 @@ xfs_rtginode_load(
 		kfree(path);
 	}
 
-	if (error)
+	if (error) {
+		if (xfs_metadata_is_sick(error))
+			xfs_rtginode_mark_sick(rtg, type);
 		return error;
+	}
 
 	if (XFS_IS_CORRUPT(mp, ip->i_projid != rtg->rtg_rgno)) {
 		xfs_irele(ip);
+		xfs_rtginode_mark_sick(rtg, type);
 		return -EFSCORRUPTED;
 	}
 
@@ -448,8 +467,10 @@ xfs_rtginode_create(
 	if (!xfs_rtginode_enabled(rtg, type))
 		return 0;
 
-	if (!mp->m_rtdirip)
+	if (!mp->m_rtdirip) {
+		xfs_fs_mark_sick(mp, XFS_SICK_FS_METADIR);
 		return -EFSCORRUPTED;
+	}
 
 	upd.path = xfs_rtginode_path(rtg->rtg_rgno, type);
 	if (!upd.path)
@@ -496,8 +517,10 @@ int
 xfs_rtginode_mkdir_parent(
 	struct xfs_mount	*mp)
 {
-	if (!mp->m_metadirip)
+	if (!mp->m_metadirip) {
+		xfs_fs_mark_sick(mp, XFS_SICK_FS_METADIR);
 		return -EFSCORRUPTED;
+	}
 
 	return xfs_metadir_mkdir(mp->m_metadirip, "rtgroups", &mp->m_rtdirip);
 }
@@ -509,8 +532,10 @@ xfs_rtginode_load_parent(
 {
 	struct xfs_mount	*mp = tp->t_mountp;
 
-	if (!mp->m_metadirip)
+	if (!mp->m_metadirip) {
+		xfs_fs_mark_sick(mp, XFS_SICK_FS_METADIR);
 		return -EFSCORRUPTED;
+	}
 
 	return xfs_metadir_load(tp, mp->m_metadirip, "rtgroups", S_IFDIR,
 			&mp->m_rtdirip);
