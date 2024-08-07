@@ -28,6 +28,7 @@
 #include "xfs_ag.h"
 #include "xfs_quota.h"
 #include "xfs_reflink.h"
+#include "xfs_rtgroup.h"
 
 #define BLK_AVG(blk1, blk2)	((blk1+blk2) >> 1)
 
@@ -3346,6 +3347,7 @@ xlog_do_recover(
 	struct xfs_mount	*mp = log->l_mp;
 	struct xfs_buf		*bp = mp->m_sb_bp;
 	struct xfs_sb		*sbp = &mp->m_sb;
+	xfs_rgnumber_t		old_rgcount = sbp->sb_rgcount;
 	int			error;
 
 	trace_xfs_log_recover(log, head_blk, tail_blk);
@@ -3398,6 +3400,24 @@ xlog_do_recover(
 	if (error) {
 		xfs_warn(mp, "Failed post-recovery per-ag init: %d", error);
 		return error;
+	}
+
+	if (sbp->sb_rgcount < old_rgcount) {
+		xfs_warn(mp, "rgcount shrink not supported");
+		return -EINVAL;
+	}
+	if (sbp->sb_rgcount > old_rgcount) {
+		xfs_rgnumber_t		rgno;
+
+		for (rgno = old_rgcount; rgno < sbp->sb_rgcount; rgno++) {
+			error = xfs_rtgroup_alloc(mp, rgno);
+			if (error) {
+				xfs_warn(mp,
+	"Failed post-recovery rtgroup init: %d",
+						error);
+				return error;
+			}
+		}
 	}
 	mp->m_alloc_set_aside = xfs_alloc_set_aside(mp);
 
