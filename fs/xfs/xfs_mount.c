@@ -36,6 +36,7 @@
 #include "xfs_ag.h"
 #include "xfs_rtbitmap.h"
 #include "xfs_metafile.h"
+#include "xfs_rtgroup.h"
 #include "scrub/stats.h"
 
 static DEFINE_MUTEX(xfs_uuid_table_mutex);
@@ -664,6 +665,7 @@ xfs_mountfs(
 	struct xfs_ino_geometry	*igeo = M_IGEO(mp);
 	uint			quotamount = 0;
 	uint			quotaflags = 0;
+	xfs_rgnumber_t		rgno;
 	int			error = 0;
 
 	xfs_sb_mount_common(mp, sbp);
@@ -830,10 +832,18 @@ xfs_mountfs(
 		goto out_free_dir;
 	}
 
+	for (rgno = 0; rgno < mp->m_sb.sb_rgcount; rgno++) {
+		error = xfs_rtgroup_alloc(mp, rgno);
+		if (error) {
+			xfs_warn(mp, "Failed rtgroup init: %d", error);
+			goto out_free_rtgroup;
+		}
+	}
+
 	if (XFS_IS_CORRUPT(mp, !sbp->sb_logblocks)) {
 		xfs_warn(mp, "no log defined");
 		error = -EFSCORRUPTED;
-		goto out_free_perag;
+		goto out_free_rtgroup;
 	}
 
 	error = xfs_inodegc_register_shrinker(mp);
@@ -1068,7 +1078,8 @@ xfs_mountfs(
 	if (mp->m_logdev_targp && mp->m_logdev_targp != mp->m_ddev_targp)
 		xfs_buftarg_drain(mp->m_logdev_targp);
 	xfs_buftarg_drain(mp->m_ddev_targp);
- out_free_perag:
+ out_free_rtgroup:
+	xfs_free_rtgroups(mp, rgno);
 	xfs_free_perag(mp);
  out_free_dir:
 	xfs_da_unmount(mp);
@@ -1152,6 +1163,7 @@ xfs_unmountfs(
 	xfs_errortag_clearall(mp);
 #endif
 	shrinker_free(mp->m_inodegc_shrinker);
+	xfs_free_rtgroups(mp, mp->m_sb.sb_rgcount);
 	xfs_free_perag(mp);
 
 	xfs_errortag_del(mp);
