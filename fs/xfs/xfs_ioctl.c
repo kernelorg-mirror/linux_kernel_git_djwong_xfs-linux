@@ -1362,6 +1362,8 @@ xfs_file_ioctl(
 		return xfs_ioc_getlabel(mp, arg);
 	case FS_IOC_SETFSLABEL:
 		return xfs_ioc_setlabel(filp, mp, arg);
+	case XFS_IOC_ADDFEATURE:
+		return xfs_ioc_addfeature(filp, arg);
 	case XFS_IOC_ALLOCSP:
 	case XFS_IOC_FREESP:
 	case XFS_IOC_ALLOCSP64:
