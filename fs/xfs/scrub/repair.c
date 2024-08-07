@@ -21,6 +21,7 @@
 #include "xfs_rmap.h"
 #include "xfs_rmap_btree.h"
 #include "xfs_refcount_btree.h"
+#include "xfs_rtbitmap.h"
 #include "xfs_extent_busy.h"
 #include "xfs_ag.h"
 #include "xfs_ag_resv.h"
@@ -953,6 +954,29 @@ xrep_ag_init(
 	return 0;
 }
 
+#ifdef CONFIG_XFS_RT
+/*
+ * Given a reference to a rtgroup structure, lock rtgroup btree inodes and
+ * create btree cursors.  Must only be called to repair a regular rt file.
+ */
+int
+xrep_rtgroup_init(
+	struct xfs_scrub	*sc,
+	struct xfs_rtgroup	*rtg,
+	struct xchk_rt		*sr,
+	unsigned int		rtglock_flags)
+{
+	ASSERT(sr->rtg == NULL);
+
+	xfs_rtgroup_lock(rtg, rtglock_flags);
+	sr->rtlock_flags = rtglock_flags;
+
+	/* Grab our own passive reference from the caller's ref. */
+	sr->rtg = xfs_rtgroup_hold(rtg);
+	return 0;
+}
+#endif /* CONFIG_XFS_RT */
+
 /* Reinitialize the per-AG block reservation for the AG we just fixed. */
 int
 xrep_reset_perag_resv(
@@ -1213,4 +1237,20 @@ xrep_buf_verify_struct(
 	bp->b_error = old_error;
 
 	return fa == NULL;
+}
+
+/* Are we looking at a realtime metadata inode? */
+bool
+xrep_is_rtmeta_ino(
+	struct xfs_rtgroup	*rtg,
+	xfs_ino_t		ino)
+{
+	unsigned int		i;
+
+	for (i = 0; i < XFS_RTG_MAX; i++) {
+		if (rtg->rtg_inodes[i] && ino == rtg->rtg_inodes[i]->i_ino)
+			return true;
+	}
+
+	return false;
 }
