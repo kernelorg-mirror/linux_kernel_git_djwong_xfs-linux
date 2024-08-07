@@ -2014,6 +2014,7 @@ static int xfs_init_fs_context(
 
 	spin_lock_init(&mp->m_sb_lock);
 	xa_init(&mp->m_perags);
+	xa_init(&mp->m_rtgroups);
 	mutex_init(&mp->m_growlock);
 	INIT_WORK(&mp->m_flush_inodes_work, xfs_flush_inodes_worker);
 	INIT_DELAYED_WORK(&mp->m_reclaim_work, xfs_reclaim_worker);
