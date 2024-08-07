@@ -291,16 +291,9 @@ xfs_rtallocate_extent_block(
 			return error;
 	}
 
-	/*
-	 * Searched the whole thing & didn't find a maxlen free extent.
-	 */
-	if (minlen > maxlen || besti == -1) {
-		/*
-		 * Allocation failed.  Set *nextp to the next block to try.
-		 */
-		*nextp = next;
-		return -ENOSPC;
-	}
+	/* Searched the whole thing & didn't find a maxlen free extent. */
+	if (minlen > maxlen || besti == -1)
+		goto nospace;
 
 	/*
 	 * If size should be a multiple of prod, make that so.
@@ -313,12 +306,20 @@ xfs_rtallocate_extent_block(
 			bestlen -= p;
 	}
 
+	/* Don't return a too-short extent. */
+	if (bestlen < minlen)
+		goto nospace;
+
 	/*
 	 * Pick besti for bestlen & return that.
 	 */
 	*len = bestlen;
 	*rtx = besti;
 	return 0;
+nospace:
+	/* Allocation failed.  Set *nextp to the next block to try. */
+	*nextp = next;
+	return -ENOSPC;
 }
 
 /*
