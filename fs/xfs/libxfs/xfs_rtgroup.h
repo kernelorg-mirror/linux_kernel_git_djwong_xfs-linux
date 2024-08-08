@@ -129,6 +129,57 @@ xfs_rtgroup_next(
 	(rgno) = 0; \
 	for_each_rtgroup_from((mp), (rgno), (rtg))
 
+static inline struct xfs_rtgroup *
+xfs_rtgroup_next_wrap(
+	struct xfs_rtgroup	*rtg,
+	xfs_rgnumber_t		*rgno,
+	xfs_rgnumber_t		stop_rgno,
+	xfs_rgnumber_t		restart_rgno,
+	xfs_rgnumber_t		wrap_rgno)
+{
+	struct xfs_mount	*mp = rtg->rtg_mount;
+
+	*rgno = rtg->rtg_rgno + 1;
+	xfs_rtgroup_rele(rtg);
+	while (*rgno != stop_rgno) {
+		if (*rgno >= wrap_rgno) {
+			if (restart_rgno >= stop_rgno)
+				break;
+			*rgno = restart_rgno;
+		}
+
+		rtg = xfs_rtgroup_grab(mp, *rgno);
+		if (rtg)
+			return rtg;
+		(*rgno)++;
+	}
+	return NULL;
+}
+
+/*
+ * Iterate all rtgroups from start_rgno through wrap_rgno, then restart_rgno
+ * through (start_rgno - 1).
+ */
+#define for_each_rtgroup_wrap_range(mp, start_rgno, restart_rgno, wrap_rgno, rgno, rtg) \
+	for ((rgno) = (start_rgno), (rtg) = xfs_rtgroup_grab((mp), (rgno)); \
+		(rtg) != NULL; \
+		(rtg) = xfs_rtgroup_next_wrap((rtg), &(rgno), (start_rgno), \
+				(restart_rgno), (wrap_rgno)))
+/*
+ * Iterate all rtgroups from start_rgno through wrap_rgno, then 0 through
+ * (start_rgno - 1).
+ */
+#define for_each_rtgroup_wrap_at(mp, start_rgno, wrap_rgno, rgno, rtg) \
+	for_each_rtgroup_wrap_range((mp), (start_rgno), 0, (wrap_rgno), (rgno), (rtg))
+
+/*
+ * Iterate all rtgroups from start_rgno through to the end of the filesystem,
+ * then 0 through (start_rgno - 1).
+ */
+#define for_each_rtgroup_wrap(mp, start_rgno, rgno, rtg) \
+	for_each_rtgroup_wrap_at((mp), (start_rgno), (mp)->m_sb.sb_rgcount, \
+				(rgno), (rtg))
+
 static inline bool
 xfs_verify_rgbno(
 	struct xfs_rtgroup	*rtg,
