@@ -1603,7 +1603,7 @@ xfs_rtalloc_align_minmax(
 static int
 xfs_rtallocate_rtg(
 	struct xfs_trans	*tp,
-	xfs_rgnumber_t		rgno,
+	struct xfs_rtgroup	*rtg,
 	xfs_rtblock_t		bno_hint,
 	xfs_rtxlen_t		minlen,
 	xfs_rtxlen_t		maxlen,
@@ -1617,15 +1617,12 @@ xfs_rtallocate_rtg(
 	struct xfs_rtalloc_args	args = {
 		.mp		= tp->t_mountp,
 		.tp		= tp,
+		.rtg		= rtg,
 	};
 	xfs_rtxnum_t		start = 0;
 	xfs_rtxnum_t		rtx;
 	xfs_rtxlen_t		len = 0;
 	int			error = 0;
-
-	args.rtg = xfs_rtgroup_grab(args.mp, rgno);
-	if (!args.rtg)
-		return -ENOSPC;
 
 	/*
 	 * We need to lock out modifications to both the RT bitmap and summary
@@ -1702,7 +1699,6 @@ xfs_rtallocate_rtg(
 	*blen = xfs_rtxlen_to_extlen(args.mp, len);
 
 out_release:
-	xfs_rtgroup_rele(args.rtg);
 	xfs_rtbuf_cache_relse(&args);
 	return error;
 }
@@ -1720,6 +1716,7 @@ xfs_rtallocate_rtgs(
 	xfs_extlen_t		*blen)
 {
 	struct xfs_mount	*mp = tp->t_mountp;
+	struct xfs_rtgroup	*rtg;
 	xfs_rgnumber_t		start_rgno, rgno;
 	int			error;
 
@@ -1735,21 +1732,20 @@ xfs_rtallocate_rtgs(
 		start_rgno = (atomic_inc_return(&mp->m_rtgrotor) - 1) %
 				mp->m_sb.sb_rgcount;
 
-	rgno = start_rgno;
-	do {
+	for_each_rtgroup_wrap(mp, start_rgno, rgno, rtg) {
 		bool		rtlocked = false;
 
-		error = xfs_rtallocate_rtg(tp, rgno, bno_hint, minlen, maxlen,
+		error = xfs_rtallocate_rtg(tp, rtg, bno_hint, minlen, maxlen,
 				prod, wasdel, initial_user_data, &rtlocked,
 				bno, blen);
-		if (error != -ENOSPC)
+		if (error != -ENOSPC) {
+			xfs_rtgroup_rele(rtg);
 			return error;
+		}
 		ASSERT(!rtlocked);
 
-		if (++rgno == mp->m_sb.sb_rgcount)
-			rgno = 0;
 		bno_hint = NULLFSBLOCK;
-	} while (rgno != start_rgno);
+	}
 
 	return -ENOSPC;
 }
@@ -1853,9 +1849,18 @@ retry:
 				prod, ap->wasdel, initial_user_data,
 				&ap->blkno, &ap->length);
 	} else {
-		error = xfs_rtallocate_rtg(ap->tp, 0, bno_hint, raminlen, ralen,
-				prod, ap->wasdel, initial_user_data,
-				&rtlocked, &ap->blkno, &ap->length);
+		struct xfs_rtgroup	*rtg =
+				xfs_rtgroup_grab(ap->tp->t_mountp, 0);
+
+		if (!rtg)
+			error = -ENOSPC;
+		if (!error)
+			error = xfs_rtallocate_rtg(ap->tp, rtg, bno_hint,
+					raminlen, ralen, prod, ap->wasdel,
+					initial_user_data, &rtlocked,
+					&ap->blkno, &ap->length);
+		if (rtg)
+			xfs_rtgroup_rele(rtg);
 	}
 
 	if (error == -ENOSPC) {
