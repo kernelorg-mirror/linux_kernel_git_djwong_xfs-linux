@@ -735,6 +735,17 @@ xfs_qm_destroy_quotainfo(
 	mp->m_quotainfo = NULL;
 }
 
+static inline enum xfs_metafile_type
+xfs_qm_metafile_type(
+	unsigned int		flags)
+{
+	if (flags & XFS_QMOPT_UQUOTA)
+		return XFS_METAFILE_USRQUOTA;
+	else if (flags & XFS_QMOPT_GQUOTA)
+		return XFS_METAFILE_GRPQUOTA;
+	return XFS_METAFILE_PRJQUOTA;
+}
+
 /*
  * Create an inode and return with a reference already taken, but unlocked
  * This is how we create quota inodes
@@ -746,6 +757,7 @@ xfs_qm_qino_alloc(
 	unsigned int		flags)
 {
 	struct xfs_trans	*tp;
+	enum xfs_metafile_type	metafile_type = xfs_qm_metafile_type(flags);
 	int			error;
 	bool			need_alloc = true;
 
@@ -785,7 +797,7 @@ xfs_qm_qino_alloc(
 			if (error)
 				return error;
 
-			error = xfs_metafile_iget(tp, ino, S_IFREG, ipp);
+			error = xfs_metafile_iget(tp, ino, metafile_type, ipp);
 			xfs_trans_cancel(tp);
 			if (error)
 				return error;
@@ -1577,7 +1589,7 @@ xfs_qm_init_quotainos(
 		    mp->m_sb.sb_uquotino != NULLFSINO) {
 			ASSERT(mp->m_sb.sb_uquotino > 0);
 			error = xfs_metafile_iget(tp, mp->m_sb.sb_uquotino,
-					S_IFREG, &uip);
+					XFS_METAFILE_USRQUOTA, &uip);
 			if (error)
 				goto error_rele;
 		}
@@ -1585,7 +1597,7 @@ xfs_qm_init_quotainos(
 		    mp->m_sb.sb_gquotino != NULLFSINO) {
 			ASSERT(mp->m_sb.sb_gquotino > 0);
 			error = xfs_metafile_iget(tp, mp->m_sb.sb_gquotino,
-					S_IFREG, &gip);
+					XFS_METAFILE_GRPQUOTA, &gip);
 			if (error)
 				goto error_rele;
 		}
@@ -1593,7 +1605,7 @@ xfs_qm_init_quotainos(
 		    mp->m_sb.sb_pquotino != NULLFSINO) {
 			ASSERT(mp->m_sb.sb_pquotino > 0);
 			error = xfs_metafile_iget(tp, mp->m_sb.sb_pquotino,
-					S_IFREG, &pip);
+					XFS_METAFILE_PRJQUOTA, &pip);
 			if (error)
 				goto error_rele;
 		}

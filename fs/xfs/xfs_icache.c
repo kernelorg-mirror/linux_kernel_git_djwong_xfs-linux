@@ -813,19 +813,20 @@ out_error_or_again:
 }
 
 /*
- * Get a metadata inode.  The file type part of @mode must match the inode
- * exactly.  Caller must supply a transaction (even if empty) to avoid
- * livelocking if the inobt has a cycle.
+ * Get a metadata inode.  The metafile @type must match the inode exactly.
+ * Caller must supply a transaction (even if empty) to avoid livelocking if the
+ * inobt has a cycle.
  */
 int
 xfs_metafile_iget(
 	struct xfs_trans	*tp,
 	xfs_ino_t		ino,
-	umode_t			mode,
+	enum xfs_metafile_type	metafile_type,
 	struct xfs_inode	**ipp)
 {
 	struct xfs_mount	*mp = tp->t_mountp;
 	struct xfs_inode	*ip;
+	umode_t			mode;
 	int			error;
 
 	error = xfs_iget(mp, tp, ino, XFS_IGET_UNTRUSTED, 0, &ip);
@@ -836,6 +837,11 @@ xfs_metafile_iget(
 
 	if (VFS_I(ip)->i_nlink == 0)
 		goto bad_rele;
+
+	if (metafile_type == XFS_METAFILE_DIR)
+		mode = S_IFDIR;
+	else
+		mode = S_IFREG;
 	if (inode_wrong_type(VFS_I(ip), mode))
 		goto bad_rele;
 

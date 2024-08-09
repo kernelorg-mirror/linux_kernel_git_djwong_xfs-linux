@@ -8,7 +8,7 @@
 
 /* Code specific to kernel/userspace; must be provided externally. */
 
-int xfs_metafile_iget(struct xfs_trans *tp, xfs_ino_t ino, umode_t mode,
-		struct xfs_inode **ipp);
+int xfs_metafile_iget(struct xfs_trans *tp, xfs_ino_t ino,
+		enum xfs_metafile_type metafile_type, struct xfs_inode **ipp);
 
 #endif /* __XFS_METAFILE_H__ */

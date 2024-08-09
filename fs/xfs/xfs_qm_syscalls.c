@@ -55,11 +55,31 @@ xfs_qm_scall_quotaoff(
 STATIC int
 xfs_qm_scall_trunc_qfile(
 	struct xfs_mount	*mp,
-	xfs_ino_t		ino)
+	unsigned int		flags)
 {
 	struct xfs_inode	*ip;
 	struct xfs_trans	*tp;
+	xfs_ino_t		ino;
+	enum xfs_metafile_type	metafile_type;
 	int			error;
+
+	switch (flags) {
+	case XFS_QMOPT_UQUOTA:
+		ino = mp->m_sb.sb_uquotino;
+		metafile_type = XFS_METAFILE_USRQUOTA;
+		break;
+	case XFS_QMOPT_GQUOTA:
+		ino = mp->m_sb.sb_gquotino;
+		metafile_type = XFS_METAFILE_GRPQUOTA;
+		break;
+	case XFS_QMOPT_PQUOTA:
+		ino = mp->m_sb.sb_pquotino;
+		metafile_type = XFS_METAFILE_PRJQUOTA;
+		break;
+	default:
+		ASSERT(0);
+		return -EFSCORRUPTED;
+	}
 
 	if (ino == NULLFSINO)
 		return 0;
@@ -68,7 +88,7 @@ xfs_qm_scall_trunc_qfile(
 	if (error)
 		return error;
 
-	error = xfs_metafile_iget(tp, ino, S_IFREG, &ip);
+	error = xfs_metafile_iget(tp, ino, metafile_type, &ip);
 	xfs_trans_cancel(tp);
 	if (error)
 		return error;
@@ -120,17 +140,17 @@ xfs_qm_scall_trunc_qfiles(
 	}
 
 	if (flags & XFS_QMOPT_UQUOTA) {
-		error = xfs_qm_scall_trunc_qfile(mp, mp->m_sb.sb_uquotino);
+		error = xfs_qm_scall_trunc_qfile(mp, XFS_QMOPT_UQUOTA);
 		if (error)
 			return error;
 	}
 	if (flags & XFS_QMOPT_GQUOTA) {
-		error = xfs_qm_scall_trunc_qfile(mp, mp->m_sb.sb_gquotino);
+		error = xfs_qm_scall_trunc_qfile(mp, XFS_QMOPT_GQUOTA);
 		if (error)
 			return error;
 	}
 	if (flags & XFS_QMOPT_PQUOTA)
-		error = xfs_qm_scall_trunc_qfile(mp, mp->m_sb.sb_pquotino);
+		error = xfs_qm_scall_trunc_qfile(mp, XFS_QMOPT_PQUOTA);
 
 	return error;
 }
