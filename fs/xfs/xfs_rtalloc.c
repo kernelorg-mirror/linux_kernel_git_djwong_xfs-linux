@@ -1195,7 +1195,8 @@ xfs_rtmount_inodes(
 	if (error)
 		return error;
 
-	error = xfs_metafile_iget(tp, mp->m_sb.sb_rbmino, S_IFREG, &mp->m_rbmip);
+	error = xfs_metafile_iget(tp, mp->m_sb.sb_rbmino,
+			XFS_METAFILE_RTBITMAP, &mp->m_rbmip);
 	if (xfs_metadata_is_sick(error))
 		xfs_rt_mark_sick(mp, XFS_SICK_RT_BITMAP);
 	if (error)
@@ -1206,7 +1207,8 @@ xfs_rtmount_inodes(
 	if (error)
 		goto out_rele_bitmap;
 
-	error = xfs_metafile_iget(tp, mp->m_sb.sb_rsumino, S_IFREG, &mp->m_rsumip);
+	error = xfs_metafile_iget(tp, mp->m_sb.sb_rsumino,
+			XFS_METAFILE_RTSUMMARY, &mp->m_rsumip);
 	if (xfs_metadata_is_sick(error))
 		xfs_rt_mark_sick(mp, XFS_SICK_RT_SUMMARY);
 	if (error)

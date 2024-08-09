@@ -68,7 +68,7 @@ xfs_qm_scall_trunc_qfile(
 	if (error)
 		return error;
 
-	error = xfs_metafile_iget(tp, ino, S_IFREG, &ip);
+	error = xfs_metafile_iget(tp, ino, XFS_METAFILE_UNKNOWN, &ip);
 	xfs_trans_cancel(tp);
 	if (error)
 		return error;
