@@ -205,7 +205,11 @@ void
 xfs_metafile_resv_free(
 	struct xfs_inode	*ip)
 {
-	if (!ip)
+	/*
+	 * We can end up here for the rt bitmap/summary inodes that don't have
+	 * reservations.  Just exist early in that case.
+	 */
+	if (!ip || !ip->i_delayed_blks)
 		return;
 
 	ASSERT(xfs_is_metadir_inode(ip));
