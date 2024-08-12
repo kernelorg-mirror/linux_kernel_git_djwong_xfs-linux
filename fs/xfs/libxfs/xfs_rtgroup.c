@@ -33,6 +33,7 @@
 #include "xfs_rtbitmap.h"
 #include "xfs_metafile.h"
 #include "xfs_metadir.h"
+#include "xfs_rtrmap_btree.h"
 
 /*
  * Passive reference counting access wrappers to the rtgroup structures.  If
@@ -396,6 +397,7 @@ static const struct xfs_rtginode_ops xfs_rtginode_ops[XFS_RTG_MAX] = {
 		.metafile_type	= XFS_METAFILE_RTRMAP,
 		.fmt_mask	= 1U << XFS_DINODE_FMT_RMAP,
 		.enabled	= xfs_has_rtrmapbt,
+		.create		= xfs_rtrmapbt_create,
 	},
 };
 
