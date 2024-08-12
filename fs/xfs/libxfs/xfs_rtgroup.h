@@ -13,6 +13,7 @@ enum xfs_rtg_inodes {
 	XFS_RTG_BITMAP,		/* allocation bitmap */
 	XFS_RTG_SUMMARY,	/* allocation summary */
 	XFS_RTG_RMAP,		/* rmap btree inode */
+	XFS_RTG_REFCOUNT,	/* refcount btree inode */
 
 	XFS_RTG_MAX,
 };
