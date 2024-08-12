@@ -311,7 +311,14 @@ xfs_rtginode_ilock_print_fn(
 	const struct xfs_inode *ip =
 		container_of(m, struct xfs_inode, i_lock.dep_map);
 
-	printk(KERN_CONT " rgno=%u", ip->i_projid);
+	switch (ip->i_df.if_format) {
+	case XFS_DINODE_FMT_RMAP:
+		printk(KERN_CONT " rgno=%u rmapbt", ip->i_projid);
+		break;
+	default:
+		printk(KERN_CONT " rgno=%u", ip->i_projid);
+		break;
+	}
 }
 
 /*
@@ -343,6 +350,8 @@ struct xfs_rtginode_ops {
 
 	unsigned int		sick;	/* rtgroup sickness flag */
 
+	unsigned int		fmt_mask; /* all valid data fork formats */
+
 	/* Does the fs have this feature? */
 	bool			(*enabled)(struct xfs_mount *mp);
 
@@ -358,13 +367,23 @@ static const struct xfs_rtginode_ops xfs_rtginode_ops[XFS_RTG_MAX] = {
 		.name		= "bitmap",
 		.metafile_type	= XFS_METAFILE_RTBITMAP,
 		.sick		= XFS_SICK_RG_BITMAP,
+		.fmt_mask	= (1U << XFS_DINODE_FMT_EXTENTS) |
+				  (1U << XFS_DINODE_FMT_BTREE),
 		.create		= xfs_rtbitmap_create,
 	},
 	[XFS_RTG_SUMMARY] = {
 		.name		= "summary",
 		.metafile_type	= XFS_METAFILE_RTSUMMARY,
 		.sick		= XFS_SICK_RG_SUMMARY,
+		.fmt_mask	= (1U << XFS_DINODE_FMT_EXTENTS) |
+				  (1U << XFS_DINODE_FMT_BTREE),
 		.create		= xfs_rtsummary_create,
+	},
+	[XFS_RTG_RMAP] = {
+		.name		= "rmap",
+		.metafile_type	= XFS_METAFILE_RTRMAP,
+		.fmt_mask	= 1U << XFS_DINODE_FMT_RMAP,
+		.enabled	= xfs_has_rtrmapbt,
 	},
 };
 
@@ -457,6 +476,12 @@ xfs_rtginode_load(
 		if (xfs_metadata_is_sick(error))
 			xfs_rtginode_mark_sick(rtg, type);
 		return error;
+	}
+
+	if (XFS_IS_CORRUPT(mp, !((1U << ip->i_df.if_format) & ops->fmt_mask))) {
+		xfs_irele(ip);
+		xfs_rtgroup_mark_sick(rtg, ops->sick);
+		return -EFSCORRUPTED;
 	}
 
 	if (XFS_IS_CORRUPT(mp, ip->i_projid != rtg->rtg_rgno)) {
