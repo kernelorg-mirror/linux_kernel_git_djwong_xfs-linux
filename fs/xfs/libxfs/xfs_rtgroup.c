@@ -395,6 +395,7 @@ static const struct xfs_rtginode_ops xfs_rtginode_ops[XFS_RTG_MAX] = {
 	[XFS_RTG_RMAP] = {
 		.name		= "rmap",
 		.metafile_type	= XFS_METAFILE_RTRMAP,
+		.sick		= XFS_SICK_RG_RMAPBT,
 		.fmt_mask	= 1U << XFS_DINODE_FMT_RMAP,
 		.enabled	= xfs_has_rtrmapbt,
 		.create		= xfs_rtrmapbt_create,
