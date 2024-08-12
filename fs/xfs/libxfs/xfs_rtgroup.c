@@ -146,6 +146,7 @@ xfs_rtgroup_alloc(
 	spin_lock_init(&rtg->rtg_state_lock);
 	init_waitqueue_head(&rtg->rtg_active_wq);
 	xfs_defer_drain_init(&rtg->rtg_intents_drain);
+	xfs_hooks_init(&rtg->rtg_rmap_update_hooks);
 #endif /* __KERNEL__ */
 
 	/* Active ref owned by mount indicates rtgroup is online. */
