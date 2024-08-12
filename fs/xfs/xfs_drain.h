@@ -7,6 +7,7 @@
 #define XFS_DRAIN_H_
 
 struct xfs_perag;
+struct xfs_rtgroup;
 
 #ifdef CONFIG_XFS_DRAIN_INTENTS
 /*
@@ -25,8 +26,8 @@ struct xfs_defer_drain {
 void xfs_defer_drain_init(struct xfs_defer_drain *dr);
 void xfs_defer_drain_free(struct xfs_defer_drain *dr);
 
-void xfs_drain_wait_disable(void);
-void xfs_drain_wait_enable(void);
+void xfs_defer_drain_wait_disable(void);
+void xfs_defer_drain_wait_enable(void);
 
 /*
  * Deferred Work Intent Drains
@@ -60,6 +61,9 @@ void xfs_drain_wait_enable(void);
  * All functions that create work items must increment the intent counter as
  * soon as the item is added to the transaction and cannot drop the counter
  * until the item is finished or cancelled.
+ *
+ * The same principles apply to realtime groups because the rt metadata inode
+ * ILOCKs are not held across transaction rolls.
  */
 struct xfs_perag *xfs_perag_intent_get(struct xfs_mount *mp,
 		xfs_fsblock_t fsbno);
@@ -70,6 +74,7 @@ void xfs_perag_intent_rele(struct xfs_perag *pag);
 
 int xfs_perag_intent_drain(struct xfs_perag *pag);
 bool xfs_perag_intent_busy(struct xfs_perag *pag);
+
 #else
 struct xfs_defer_drain { /* empty */ };
 
@@ -84,5 +89,24 @@ static inline void xfs_perag_intent_hold(struct xfs_perag *pag) { }
 static inline void xfs_perag_intent_rele(struct xfs_perag *pag) { }
 
 #endif /* CONFIG_XFS_DRAIN_INTENTS */
+
+#if defined(CONFIG_XFS_DRAIN_INTENTS) && defined(CONFIG_XFS_RT)
+struct xfs_rtgroup *xfs_rtgroup_intent_get(struct xfs_mount *mp,
+		xfs_rtblock_t rtbno);
+void xfs_rtgroup_intent_put(struct xfs_rtgroup *rtg);
+
+void xfs_rtgroup_intent_hold(struct xfs_rtgroup *rtg);
+void xfs_rtgroup_intent_rele(struct xfs_rtgroup *rtg);
+
+int xfs_rtgroup_intent_drain(struct xfs_rtgroup *rtg);
+bool xfs_rtgroup_intent_busy(struct xfs_rtgroup *rtg);
+#else
+#define xfs_rtgroup_intent_get(mp, rtbno) \
+	xfs_rtgroup_get(mp, xfs_rtb_to_rgno((mp), (rtbno)))
+#define xfs_rtgroup_intent_put(rtg)		xfs_rtgroup_put(rtg)
+static inline void xfs_rtgroup_intent_hold(struct xfs_rtgroup *rtg) { }
+static inline void xfs_rtgroup_intent_rele(struct xfs_rtgroup *rtg) { }
+#endif /* CONFIG_XFS_DRAIN_INTENTS && CONFIG_XFS_RT */
+
 
 #endif /* XFS_DRAIN_H_ */

@@ -65,7 +65,9 @@ xchk_rgsuperblock(
 	error = xchk_rtgroup_init(sc, rgno, &sc->sr);
 	if (error)
 		return error;
-	xchk_rtgroup_lock(&sc->sr, XFS_RTGLOCK_BITMAP_SHARED);
+	error = xchk_rtgroup_lock(sc, &sc->sr, XFS_RTGLOCK_BITMAP_SHARED);
+	if (error)
+		return error;
 
 	/*
 	 * Since we already validated the rt superblock at mount time, we don't
