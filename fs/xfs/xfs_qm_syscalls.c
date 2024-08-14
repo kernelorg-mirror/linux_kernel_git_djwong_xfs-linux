@@ -18,6 +18,8 @@
 #include "xfs_quota.h"
 #include "xfs_qm.h"
 #include "xfs_icache.h"
+#include "xfs_da_format.h"
+#include "xfs_metafile.h"
 
 int
 xfs_qm_scall_quotaoff(
@@ -50,19 +52,40 @@ xfs_qm_scall_quotaoff(
 	return xfs_sync_sb(mp, false);
 }
 
+static inline xfs_ino_t
+xfs_qm_ino_from_type(
+	struct xfs_mount	*mp,
+	enum xfs_metafile_type	metafile_type)
+{
+	switch (metafile_type) {
+	case XFS_METAFILE_USRQUOTA:
+		return mp->m_sb.sb_uquotino;
+	case XFS_METAFILE_GRPQUOTA:
+		return mp->m_sb.sb_gquotino;
+	case XFS_METAFILE_PRJQUOTA:
+		return mp->m_sb.sb_pquotino;
+	default:
+		ASSERT(0);
+		break;
+	}
+
+	return NULLFSINO;
+}
+
 STATIC int
 xfs_qm_scall_trunc_qfile(
 	struct xfs_mount	*mp,
-	xfs_ino_t		ino)
+	enum xfs_metafile_type	metafile_type)
 {
 	struct xfs_inode	*ip;
 	struct xfs_trans	*tp;
+	xfs_ino_t		ino = xfs_qm_ino_from_type(mp, metafile_type);
 	int			error;
 
 	if (ino == NULLFSINO)
 		return 0;
 
-	error = xfs_iget(mp, NULL, ino, 0, 0, &ip);
+	error = xfs_metafile_iget(mp, ino, metafile_type, &ip);
 	if (error)
 		return error;
 
@@ -113,17 +136,17 @@ xfs_qm_scall_trunc_qfiles(
 	}
 
 	if (flags & XFS_QMOPT_UQUOTA) {
-		error = xfs_qm_scall_trunc_qfile(mp, mp->m_sb.sb_uquotino);
+		error = xfs_qm_scall_trunc_qfile(mp, XFS_METAFILE_USRQUOTA);
 		if (error)
 			return error;
 	}
 	if (flags & XFS_QMOPT_GQUOTA) {
-		error = xfs_qm_scall_trunc_qfile(mp, mp->m_sb.sb_gquotino);
+		error = xfs_qm_scall_trunc_qfile(mp, XFS_METAFILE_GRPQUOTA);
 		if (error)
 			return error;
 	}
 	if (flags & XFS_QMOPT_PQUOTA)
-		error = xfs_qm_scall_trunc_qfile(mp, mp->m_sb.sb_pquotino);
+		error = xfs_qm_scall_trunc_qfile(mp, XFS_METAFILE_PRJQUOTA);
 
 	return error;
 }
