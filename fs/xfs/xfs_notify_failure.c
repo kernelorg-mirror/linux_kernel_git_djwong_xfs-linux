@@ -19,6 +19,7 @@
 #include "xfs_rtalloc.h"
 #include "xfs_trans.h"
 #include "xfs_ag.h"
+#include "xfs_notify_failure.h"
 
 #include <linux/mm.h>
 #include <linux/dax.h>
@@ -256,54 +257,23 @@ out:
 }
 
 static int
-xfs_dax_notify_failure(
-	struct dax_device	*dax_dev,
+xfs_dax_translate_range(
+	struct xfs_buftarg	*btp,
 	u64			offset,
 	u64			len,
-	int			mf_flags)
+	xfs_daddr_t		*daddr,
+	uint64_t		*bbcount)
 {
-	struct xfs_mount	*mp = dax_holder(dax_dev);
 	u64			ddev_start;
 	u64			ddev_end;
 
-	if (!(mp->m_super->s_flags & SB_BORN)) {
-		xfs_warn(mp, "filesystem is not ready for notify_failure()!");
-		return -EIO;
-	}
-
-	if (mp->m_rtdev_targp && mp->m_rtdev_targp->bt_daxdev == dax_dev) {
-		xfs_debug(mp,
-			 "notify_failure() not supported on realtime device!");
-		return -EOPNOTSUPP;
-	}
-
-	if (mp->m_logdev_targp && mp->m_logdev_targp->bt_daxdev == dax_dev &&
-	    mp->m_logdev_targp != mp->m_ddev_targp) {
-		/*
-		 * In the pre-remove case the failure notification is attempting
-		 * to trigger a force unmount.  The expectation is that the
-		 * device is still present, but its removal is in progress and
-		 * can not be cancelled, proceed with accessing the log device.
-		 */
-		if (mf_flags & MF_MEM_PRE_REMOVE)
-			return 0;
-		xfs_err(mp, "ondisk log corrupt, shutting down fs!");
-		xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_ONDISK);
-		return -EFSCORRUPTED;
-	}
-
-	if (!xfs_has_rmapbt(mp)) {
-		xfs_debug(mp, "notify_failure() needs rmapbt enabled!");
-		return -EOPNOTSUPP;
-	}
-
-	ddev_start = mp->m_ddev_targp->bt_dax_part_off;
-	ddev_end = ddev_start + bdev_nr_bytes(mp->m_ddev_targp->bt_bdev) - 1;
+	ddev_start = btp->bt_dax_part_off;
+	ddev_end = ddev_start + bdev_nr_bytes(btp->bt_bdev) - 1;
 
 	/* Notify failure on the whole device. */
 	if (offset == 0 && len == U64_MAX) {
 		offset = ddev_start;
-		len = bdev_nr_bytes(mp->m_ddev_targp->bt_bdev);
+		len = bdev_nr_bytes(btp->bt_bdev);
 	}
 
 	/* Ignore the range out of filesystem area */
@@ -322,8 +292,135 @@ xfs_dax_notify_failure(
 	if (offset + len - 1 > ddev_end)
 		len = ddev_end - offset + 1;
 
-	return xfs_dax_notify_ddev_failure(mp, BTOBB(offset), BTOBB(len),
-			mf_flags);
+	*daddr = BTOBB(offset);
+	*bbcount = BTOBB(len);
+	return 0;
+}
+
+#ifdef CONFIG_XFS_LIVE_HOOKS
+DEFINE_STATIC_XFS_HOOK_SWITCH(xfs_media_error_hooks_switch);
+
+void
+xfs_media_error_hook_disable(void)
+{
+	xfs_hooks_switch_off(&xfs_media_error_hooks_switch);
+}
+
+void
+xfs_media_error_hook_enable(void)
+{
+	xfs_hooks_switch_on(&xfs_media_error_hooks_switch);
+}
+
+/* Call downstream hooks for a media error. */
+static inline void
+xfs_media_error_hook(
+	struct xfs_mount		*mp,
+	struct xfs_buftarg		*btp,
+	xfs_daddr_t			daddr,
+	uint64_t			bbcount,
+	int				mf_flags)
+{
+	if (xfs_hooks_switched_on(&xfs_media_error_hooks_switch)) {
+		struct xfs_media_error_params p = {
+			.btp		= btp,
+			.daddr		= daddr,
+			.bbcount	= bbcount,
+		};
+
+		xfs_hooks_call(&mp->m_media_error_hooks, 0, &p);
+	}
+}
+
+/* Call the specified function during a media error. */
+int
+xfs_media_error_hook_add(
+	struct xfs_mount		*mp,
+	struct xfs_media_error_hook	*hook)
+{
+	return xfs_hooks_add(&mp->m_media_error_hooks, &hook->error_hook);
+}
+
+/* Stop calling the specified function during a media error. */
+void
+xfs_media_error_hook_del(
+	struct xfs_mount		*mp,
+	struct xfs_media_error_hook	*hook)
+{
+	xfs_hooks_del(&mp->m_media_error_hooks, &hook->error_hook);
+}
+
+/* Configure media error hook functions. */
+void
+xfs_media_error_hook_setup(
+	struct xfs_media_error_hook	*hook,
+	notifier_fn_t			mod_fn)
+{
+	xfs_hook_setup(&hook->error_hook, mod_fn);
+}
+#else
+# define xfs_media_error_hook(...)		((void)0)
+#endif /* CONFIG_XFS_LIVE_HOOKS */
+
+static int
+xfs_dax_notify_failure(
+	struct dax_device	*dax_dev,
+	u64			offset,
+	u64			len,
+	int			mf_flags)
+{
+	struct xfs_mount	*mp = dax_holder(dax_dev);
+	struct xfs_buftarg	*btp;
+	xfs_daddr_t		daddr;
+	uint64_t		bbcount;
+	int			error;
+
+	if (!(mp->m_super->s_flags & SB_BORN)) {
+		xfs_warn(mp, "filesystem is not ready for notify_failure()!");
+		return -EIO;
+	}
+
+	if (mp->m_rtdev_targp && mp->m_rtdev_targp->bt_daxdev == dax_dev)
+		btp = mp->m_rtdev_targp;
+	else if (mp->m_logdev_targp != mp->m_ddev_targp &&
+		 mp->m_logdev_targp->bt_daxdev == dax_dev)
+		btp = mp->m_logdev_targp;
+	else
+		btp = mp->m_ddev_targp;
+
+	error = xfs_dax_translate_range(btp, offset, len, &daddr, &bbcount);
+	if (error)
+		return error;
+
+	xfs_media_error_hook(mp, btp, daddr, bbcount, mf_flags);
+
+	if (mp->m_rtdev_targp == btp) {
+		xfs_debug(mp,
+			 "notify_failure() not supported on realtime device!");
+		return -EOPNOTSUPP;
+	}
+
+	if (mp->m_logdev_targp != mp->m_ddev_targp &&
+	    mp->m_logdev_targp == btp) {
+		/*
+		 * In the pre-remove case the failure notification is attempting
+		 * to trigger a force unmount.  The expectation is that the
+		 * device is still present, but its removal is in progress and
+		 * can not be cancelled, proceed with accessing the log device.
+		 */
+		if (mf_flags & MF_MEM_PRE_REMOVE)
+			return 0;
+		xfs_err(mp, "ondisk log corrupt, shutting down fs!");
+		xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_ONDISK);
+		return -EFSCORRUPTED;
+	}
+
+	if (!xfs_has_rmapbt(mp)) {
+		xfs_debug(mp, "notify_failure() needs rmapbt enabled!");
+		return -EOPNOTSUPP;
+	}
+
+	return xfs_dax_notify_ddev_failure(mp, daddr, bbcount, mf_flags);
 }
 
 const struct dax_holder_operations xfs_dax_holder_operations = {
