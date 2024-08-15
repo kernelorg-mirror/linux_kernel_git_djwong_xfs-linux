@@ -1725,3 +1725,185 @@ out_trans_cancel:
 	xfs_trans_cancel(tp);
 	goto out_unlock_ilock;
 }
+
+#ifdef CONFIG_XFS_RT
+/*
+ * Decide if this is an unwritten extent that isn't aligned to an allocation
+ * unit boundary.
+ *
+ * If it is, shorten the mapping to the end of the allocation unit so that
+ * we're ready to convert all the mappings for this allocation unit to a zeroed
+ * written extent.  If not, return false.
+ */
+static inline bool
+xfs_want_convert_rtbigalloc_mapping(
+	struct xfs_mount	*mp,
+	struct xfs_bmbt_irec	*irec)
+{
+	xfs_fileoff_t		rext_next;
+	xfs_extlen_t		modoff, modcnt;
+
+	if (irec->br_state != XFS_EXT_UNWRITTEN)
+		return false;
+
+	modoff = xfs_rtb_to_rtxoff(mp, irec->br_startoff);
+	if (modoff == 0) {
+		xfs_rtbxlen_t	rexts;
+
+		rexts = xfs_rtb_to_rtx(mp, irec->br_blockcount);
+		modcnt = xfs_rtb_to_rtxoff(mp, irec->br_blockcount);
+		if (rexts > 0) {
+			/*
+			 * Unwritten mapping starts at an rt extent boundary
+			 * and is longer than one rt extent.  Round the length
+			 * down to the nearest extent but don't select it for
+			 * conversion.
+			 */
+			irec->br_blockcount -= modcnt;
+			modcnt = 0;
+		}
+
+		/* Unwritten mapping is perfectly aligned, do not convert. */
+		if (modcnt == 0)
+			return false;
+	}
+
+	/*
+	 * Unaligned and unwritten; trim to the current rt extent and select it
+	 * for conversion.
+	 */
+	rext_next = (irec->br_startoff - modoff) + mp->m_sb.sb_rextsize;
+	xfs_trim_extent(irec, irec->br_startoff, rext_next - irec->br_startoff);
+	return true;
+}
+
+/*
+ * Find an unwritten extent in the given file range, zero it, and convert the
+ * mapping to written.  Adjust the scan cursor on the way out.
+ */
+STATIC int
+xfs_convert_rtbigalloc_mapping(
+	struct xfs_inode	*ip,
+	xfs_fileoff_t		*offp,
+	xfs_fileoff_t		endoff)
+{
+	struct xfs_bmbt_irec	irec;
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_trans	*tp;
+	unsigned int		resblks;
+	int			nmap;
+	int			error;
+
+	resblks = XFS_DIOSTRAT_SPACE_RES(mp, 1);
+	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, 0, 0, &tp);
+	if (error)
+		return error;
+
+	xfs_ilock(ip, XFS_ILOCK_EXCL);
+	xfs_trans_ijoin(tp, ip, 0);
+
+	/*
+	 * Read the mapping.  If we find an unwritten extent that isn't aligned
+	 * to an allocation unit...
+	 */
+retry:
+	nmap = 1;
+	error = xfs_bmapi_read(ip, *offp, endoff - *offp, &irec, &nmap, 0);
+	if (error)
+		goto out_cancel;
+	ASSERT(nmap == 1);
+	ASSERT(irec.br_startoff == *offp);
+	if (!xfs_want_convert_rtbigalloc_mapping(mp, &irec)) {
+		*offp = irec.br_startoff + irec.br_blockcount;
+		if (*offp >= endoff)
+			goto out_cancel;
+		goto retry;
+	}
+
+	/*
+	 * ...then write zeroes to the space and change the mapping state to
+	 * written.  This consolidates the mappings for this allocation unit.
+	 */
+	nmap = 1;
+	error = xfs_bmapi_write(tp, ip, irec.br_startoff, irec.br_blockcount,
+			XFS_BMAPI_CONVERT | XFS_BMAPI_ZERO, 0, &irec, &nmap);
+	if (error)
+		goto out_cancel;
+	error = xfs_trans_commit(tp);
+	if (error)
+		goto out_unlock;
+
+	xfs_iunlock(ip, XFS_ILOCK_EXCL);
+
+	/*
+	 * If an unwritten mapping was returned, something is very wrong.
+	 * If no mapping was returned, then bmapi_write thought it performed
+	 * a short allocation, which should be impossible since we previously
+	 * queried the mapping and haven't cycled locks since then.  Either
+	 * way, fail the operation.
+	 */
+	if (nmap == 0 || irec.br_state != XFS_EXT_NORM) {
+		ASSERT(nmap != 0);
+		ASSERT(irec.br_state == XFS_EXT_NORM);
+		return -EIO;
+	}
+
+	/* Advance the cursor to the end of the mapping returned. */
+	*offp = irec.br_startoff + irec.br_blockcount;
+	return 0;
+
+out_cancel:
+	xfs_trans_cancel(tp);
+out_unlock:
+	xfs_iunlock(ip, XFS_ILOCK_EXCL);
+	return error;
+}
+
+/*
+ * Prepare a file with multi-fsblock allocation units for a remapping.
+ *
+ * File allocation units (AU) must be fully mapped to the data fork.  If the
+ * space in an AU have not been fully written, there can be multiple extent
+ * mappings (e.g. mixed written and unwritten blocks) to the AU.  If the log
+ * does not have a means to ensure that all remappings for a given AU will be
+ * completed even if the fs goes down, we must maintain the above constraint in
+ * another way.
+ *
+ * Convert the unwritten parts of an AU to written by writing zeroes to the
+ * storage and flipping the mapping.  Once this completes, there will be a
+ * single mapping for the entire AU, and we can proceed with the remapping
+ * operation.
+ *
+ * Callers must ensure that there are no dirty pages in the given range.
+ */
+int
+xfs_convert_rtbigalloc_file_space(
+	struct xfs_inode	*ip,
+	loff_t			pos,
+	uint64_t		len)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	xfs_fileoff_t		off;
+	xfs_fileoff_t		endoff;
+	int			error;
+
+	if (!xfs_inode_has_bigrtalloc(ip))
+		return 0;
+
+	off = xfs_rtb_rounddown_rtx(mp, XFS_B_TO_FSBT(mp, pos));
+	endoff = xfs_rtb_roundup_rtx(mp, XFS_B_TO_FSB(mp, pos + len));
+
+	trace_xfs_convert_rtbigalloc_file_space(ip, pos, len);
+
+	while (off < endoff) {
+		if (fatal_signal_pending(current))
+			return -EINTR;
+
+		error = xfs_convert_rtbigalloc_mapping(ip, &off, endoff);
+		if (error)
+			return error;
+	}
+
+	return 0;
+}
+#endif /* CONFIG_XFS_RT */
