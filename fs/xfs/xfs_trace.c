@@ -50,6 +50,7 @@
 #include "xfs_fsrefs.h"
 #include "xfs_health.h"
 #include "xfs_healthmon.h"
+#include "xfs_notify_failure.h"
 
 static inline void
 xfs_rmapbt_crack_agno_opdev(
