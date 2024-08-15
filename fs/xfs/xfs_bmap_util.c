@@ -527,7 +527,8 @@ xfs_can_free_eofblocks(
 	 * Only free real extents for inodes with persistent preallocations or
 	 * the append-only flag.
 	 */
-	if (ip->i_diflags & (XFS_DIFLAG_PREALLOC | XFS_DIFLAG_APPEND))
+	if (xfs_get_extsz_hint(ip) ||
+	    (ip->i_diflags & (XFS_DIFLAG_PREALLOC | XFS_DIFLAG_APPEND)))
 		if (ip->i_delayed_blks == 0)
 			return false;
 
