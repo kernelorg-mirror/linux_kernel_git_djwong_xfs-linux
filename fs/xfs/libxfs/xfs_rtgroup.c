@@ -137,6 +137,7 @@ xfs_rtgroup_alloc(
 	/* Place kernel structure only init below this point. */
 	spin_lock_init(&rtg->rtg_state_lock);
 	init_waitqueue_head(&rtg->rtg_active_wq);
+	xfs_defer_drain_init(&rtg->rtg_intents_drain);
 #endif /* __KERNEL__ */
 
 	/* Active ref owned by mount indicates rtgroup is online. */
@@ -160,6 +161,10 @@ xfs_rtgroup_free(
 		return;
 
 	XFS_IS_CORRUPT(mp, atomic_read(&rtg->rtg_ref) != 0);
+
+#ifdef __KERNEL__
+	xfs_defer_drain_free(&rtg->rtg_intents_drain);
+#endif
 
 	/* drop the mount's active reference */
 	xfs_rtgroup_rele(rtg);
