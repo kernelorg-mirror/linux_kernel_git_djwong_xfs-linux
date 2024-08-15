@@ -72,6 +72,17 @@ struct xfs_inodegc {
 	unsigned int		cpu;
 };
 
+struct xfs_timestats {
+#ifdef CONFIG_XFS_TIME_STATS
+	struct time_stats	ts_log_reserve;
+	struct time_stats	ts_log_regrant;
+	struct time_stats	ts_ilock;
+	struct time_stats	ts_buflock;
+	struct time_stats	ts_dqlock;
+	struct dentry		*ts_debugfs;
+#endif
+};
+
 /*
  * The struct xfsmount layout is optimised to separate read-mostly variables
  * from variables that are frequently modified. We put the read-mostly variables
@@ -269,6 +280,9 @@ typedef struct xfs_mount {
 
 	/* Hook to feed dirent updates to an active online repair. */
 	struct xfs_hooks	m_dir_update_hooks;
+
+	/* time stats for locking waits */
+	struct xfs_timestats	m_timestats;
 } xfs_mount_t;
 
 #define M_IGEO(mp)		(&(mp)->m_ino_geo)
