@@ -48,6 +48,7 @@
 #include "xfs_metafile.h"
 #include "xfs_metadir.h"
 #include "xfs_rtgroup.h"
+#include "xfs_fsrefs.h"
 
 static inline void
 xfs_rmapbt_crack_agno_opdev(
