@@ -1291,7 +1291,7 @@ xfs_growfs_rt(
 		goto out_unlock;
 	if (xfs_has_quota(mp))
 		goto out_unlock;
-	if (xfs_has_reflink(mp) && in->extsize != 1)
+	if (xfs_has_reflink(mp) && !is_power_of_2(mp->m_sb.sb_rextsize))
 		goto out_unlock;
 
 	error = xfs_sb_validate_fsb_count(&mp->m_sb, in->newblocks);
