@@ -268,6 +268,16 @@ xfs_iformat_data_fork(
 			return xfs_iformat_extents(ip, dip, XFS_DATA_FORK);
 		case XFS_DINODE_FMT_BTREE:
 			return xfs_iformat_btree(ip, dip, XFS_DATA_FORK);
+		case XFS_DINODE_FMT_RMAP:
+			/*
+			 * growfs must create the rtrmap inodes before adding a
+			 * realtime volume to the filesystem, so we cannot use
+			 * the rtrmapbt predicate here.
+			 */
+			if (!xfs_has_rmapbt(ip->i_mount))
+				return -EFSCORRUPTED;
+			ASSERT(0); /* to be implemented later */
+			return -EFSCORRUPTED;
 		default:
 			xfs_inode_verifier_error(ip, -EFSCORRUPTED, __func__,
 					dip, sizeof(*dip), __this_address);
@@ -649,6 +659,10 @@ xfs_iflush_fork(
 			xfs_dinode_put_rdev(dip,
 					linux_to_xfs_dev_t(VFS_I(ip)->i_rdev));
 		}
+		break;
+
+	case XFS_DINODE_FMT_RMAP:
+		ASSERT(0); /* to be implemented later */
 		break;
 
 	default:
