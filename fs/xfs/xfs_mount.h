@@ -13,6 +13,7 @@ struct xfs_ail;
 struct xfs_quotainfo;
 struct xfs_da_geometry;
 struct xfs_perag;
+struct xfs_rtgroup;
 
 /* dynamic preallocation free space thresholds, 5% down to 1% */
 enum {
