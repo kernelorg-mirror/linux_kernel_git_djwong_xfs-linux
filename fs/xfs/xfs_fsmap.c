@@ -25,6 +25,8 @@
 #include "xfs_alloc_btree.h"
 #include "xfs_rtbitmap.h"
 #include "xfs_ag.h"
+#include "xfs_rtgroup.h"
+#include "xfs_rtrmap_btree.h"
 
 /* Convert an xfs_fsmap to an fsmap. */
 static void
@@ -839,6 +841,210 @@ xfs_getfsmap_rtdev_rtbitmap(
 
 	return error;
 }
+
+static inline int
+xfs_getfsmap_rtgroup_helper(
+	struct xfs_getfsmap_info	*info,
+	struct xfs_trans		*tp,
+	struct xfs_rtgroup		*rtg,
+	xfs_agblock_t			startblock,
+	xfs_extlen_t			blockcount,
+	struct xfs_fsmap_irec		*frec)
+{
+	struct xfs_mount		*mp = rtg->rtg_mount;
+
+	/*
+	 * For an info->last query, we're looking for a gap between the last
+	 * mapping emitted and the high key specified by userspace.  If the
+	 * user's query spans less than 1 fsblock, then info->high and
+	 * info->low will have the same rm_startblock, which causes rec_daddr
+	 * and next_daddr to be the same.  Therefore, use the end_daddr that
+	 * we calculated from userspace's high key to synthesize the record.
+	 * Note that if the btree query found a mapping, there won't be a gap.
+	 */
+	if (info->last && info->end_daddr != XFS_BUF_DADDR_NULL)
+		frec->start_daddr = info->end_daddr;
+	else
+		frec->start_daddr = xfs_rtb_to_daddr(mp,
+					xfs_rgbno_to_rtb(rtg, startblock));
+
+	frec->len_daddr = XFS_FSB_TO_BB(mp, blockcount);
+	return xfs_getfsmap_helper(tp, info, frec);
+}
+
+/* Transform a realtime rmapbt record into a fsmap */
+STATIC int
+xfs_getfsmap_rtdev_rmapbt_helper(
+	struct xfs_btree_cur		*cur,
+	const struct xfs_rmap_irec	*rec,
+	void				*priv)
+{
+	struct xfs_fsmap_irec		frec = {
+		.owner			= rec->rm_owner,
+		.offset			= rec->rm_offset,
+		.rm_flags		= rec->rm_flags,
+		.rec_key		= rec->rm_startblock,
+	};
+	struct xfs_getfsmap_info	*info = priv;
+
+	return xfs_getfsmap_rtgroup_helper(info, cur->bc_tp, cur->bc_ino.rtg,
+			rec->rm_startblock, rec->rm_blockcount, &frec);
+}
+
+/* Actually query the rtrmap btree. */
+STATIC int
+xfs_getfsmap_rtdev_rmapbt_query(
+	struct xfs_trans		*tp,
+	struct xfs_getfsmap_info	*info,
+	struct xfs_btree_cur		**curpp)
+{
+	struct xfs_mount		*mp = tp->t_mountp;
+
+	/* Report any gap at the end of the last rtgroup. */
+	if (info->last)
+		return xfs_getfsmap_rtdev_rmapbt_helper(*curpp, &info->high,
+				info);
+
+	/* Query the rtrmapbt */
+	xfs_rtgroup_lock(info->rtg, XFS_RTGLOCK_RMAP);
+	*curpp = xfs_rtrmapbt_init_cursor(mp, tp, info->rtg,
+			info->rtg->rtg_inodes[XFS_RTGI_RMAP]);
+	return xfs_rmap_query_range(*curpp, &info->low, &info->high,
+			xfs_getfsmap_rtdev_rmapbt_helper, info);
+}
+
+/* Execute a getfsmap query against the realtime device rmapbt. */
+STATIC int
+xfs_getfsmap_rtdev_rmapbt(
+	struct xfs_trans		*tp,
+	const struct xfs_fsmap		*keys,
+	struct xfs_getfsmap_info	*info)
+{
+	struct xfs_mount		*mp = tp->t_mountp;
+	struct xfs_rtgroup		*rtg;
+	struct xfs_btree_cur		*bt_cur = NULL;
+	xfs_rtblock_t			start_rtb;
+	xfs_rtblock_t			end_rtb;
+	xfs_rgnumber_t			start_rg, end_rg;
+	uint64_t			eofs;
+	int				error = 0;
+
+	eofs = XFS_FSB_TO_BB(mp, mp->m_sb.sb_rblocks);
+	if (keys[0].fmr_physical >= eofs)
+		return 0;
+	start_rtb = xfs_daddr_to_rtb(mp, keys[0].fmr_physical);
+	end_rtb = xfs_daddr_to_rtb(mp, min(eofs - 1, keys[1].fmr_physical));
+
+	info->missing_owner = XFS_FMR_OWN_FREE;
+
+	/*
+	 * Convert the fsmap low/high keys to rtgroup based keys.  Initialize
+	 * low to the fsmap low key and max out the high key to the end
+	 * of the rtgroup.
+	 */
+	info->low.rm_offset = XFS_BB_TO_FSBT(mp, keys[0].fmr_offset);
+	error = xfs_fsmap_owner_to_rmap(&info->low, &keys[0]);
+	if (error)
+		return error;
+	info->low.rm_blockcount = XFS_BB_TO_FSBT(mp, keys[0].fmr_length);
+	xfs_getfsmap_set_irec_flags(&info->low, &keys[0]);
+
+	/* Adjust the low key if we are continuing from where we left off. */
+	if (info->low.rm_blockcount == 0) {
+		/* No previous record from which to continue */
+	} else if (rmap_not_shareable(mp, &info->low)) {
+		/* Last record seen was an unshareable extent */
+		info->low.rm_owner = 0;
+		info->low.rm_offset = 0;
+
+		start_rtb += info->low.rm_blockcount;
+		if (xfs_rtb_to_daddr(mp, start_rtb) >= eofs)
+			return 0;
+	} else {
+		/* Last record seen was a shareable file data extent */
+		info->low.rm_offset += info->low.rm_blockcount;
+	}
+	info->low.rm_startblock = xfs_rtb_to_rgbno(mp, start_rtb);
+
+	info->high.rm_startblock = -1U;
+	info->high.rm_owner = ULLONG_MAX;
+	info->high.rm_offset = ULLONG_MAX;
+	info->high.rm_blockcount = 0;
+	info->high.rm_flags = XFS_RMAP_KEY_FLAGS | XFS_RMAP_REC_FLAGS;
+
+	start_rg = xfs_rtb_to_rgno(mp, start_rtb);
+	end_rg = xfs_rtb_to_rgno(mp, end_rtb);
+
+	for_each_rtgroup_range(mp, start_rg, end_rg, rtg) {
+		/*
+		 * Set the rtgroup high key from the fsmap high key if this
+		 * is the last rtgroup that we're querying.
+		 */
+		info->rtg = rtg;
+		if (rtg->rtg_rgno == end_rg) {
+			info->high.rm_startblock =
+				xfs_rtb_to_rgbno(mp, end_rtb);
+			info->high.rm_offset =
+				XFS_BB_TO_FSBT(mp, keys[1].fmr_offset);
+			error = xfs_fsmap_owner_to_rmap(&info->high, &keys[1]);
+			if (error)
+				break;
+			xfs_getfsmap_set_irec_flags(&info->high, &keys[1]);
+		}
+
+		if (bt_cur) {
+			xfs_rtgroup_unlock(bt_cur->bc_ino.rtg,
+					XFS_RTGLOCK_RMAP);
+			xfs_btree_del_cursor(bt_cur, XFS_BTREE_NOERROR);
+			bt_cur = NULL;
+		}
+
+		trace_xfs_fsmap_low_group_key(mp, info->dev, rtg->rtg_rgno,
+				&info->low);
+		trace_xfs_fsmap_high_group_key(mp, info->dev, rtg->rtg_rgno,
+				&info->high);
+
+		error = xfs_getfsmap_rtdev_rmapbt_query(tp, info, &bt_cur);
+		if (error)
+			break;
+
+		/*
+		 * Set the rtgroup low key to the start of the rtgroup prior to
+		 * moving on to the next rtgroup.
+		 */
+		if (rtg->rtg_rgno == start_rg)
+			memset(&info->low, 0, sizeof(info->low));
+
+		/*
+		 * If this is the last rtgroup, report any gap at the end of it
+		 * before we drop the reference to the perag when the loop
+		 * terminates.
+		 */
+		if (rtg->rtg_rgno == end_rg) {
+			info->last = true;
+			error = xfs_getfsmap_rtdev_rmapbt_query(tp, info,
+					&bt_cur);
+			if (error)
+				break;
+		}
+		info->rtg = NULL;
+	}
+
+	if (bt_cur) {
+		xfs_rtgroup_unlock(bt_cur->bc_ino.rtg, XFS_RTGLOCK_RMAP);
+		xfs_btree_del_cursor(bt_cur, error < 0 ? XFS_BTREE_ERROR :
+							 XFS_BTREE_NOERROR);
+	}
+	if (info->rtg) {
+		xfs_rtgroup_rele(info->rtg);
+		info->rtg = NULL;
+	} else if (rtg) {
+		/* loop termination case */
+		xfs_rtgroup_rele(rtg);
+	}
+
+	return error;
+}
 #endif /* CONFIG_XFS_RT */
 
 /* Do we recognize the device? */
@@ -975,7 +1181,10 @@ xfs_getfsmap(
 	if (mp->m_rtdev_targp) {
 		handlers[2].nr_sectors = XFS_FSB_TO_BB(mp, mp->m_sb.sb_rblocks);
 		handlers[2].dev = new_encode_dev(mp->m_rtdev_targp->bt_dev);
-		handlers[2].fn = xfs_getfsmap_rtdev_rtbitmap;
+		if (use_rmap)
+			handlers[2].fn = xfs_getfsmap_rtdev_rmapbt;
+		else
+			handlers[2].fn = xfs_getfsmap_rtdev_rtbitmap;
 	}
 #endif /* CONFIG_XFS_RT */
 
