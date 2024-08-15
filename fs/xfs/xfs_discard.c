@@ -535,8 +535,8 @@ xfs_trim_gather_rtextent(
 		return -ECANCELED;
 	}
 
-	rbno = xfs_rtx_to_rtb(rtg->rtg_mount, rec->ar_startext);
-	rlen = xfs_rtx_to_rtb(rtg->rtg_mount, rec->ar_extcount);
+	rbno = xfs_rtx_to_rtb(rtg, rec->ar_startext);
+	rlen = xfs_rtxlen_to_extlen(rtg->rtg_mount, rec->ar_extcount);
 
 	/* Ignore too small. */
 	if (rlen < tr->minlen_fsb) {
