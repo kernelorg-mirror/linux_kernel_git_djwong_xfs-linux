@@ -1164,7 +1164,9 @@ xfs_filblks_t
 xfs_rtbitmap_blockcount(
 	struct xfs_mount	*mp)
 {
-	return xfs_rtbitmap_blockcount_len(mp, mp->m_sb.sb_rextents);
+	if (!xfs_has_rtgroups(mp))
+		return xfs_rtbitmap_blockcount_len(mp, mp->m_sb.sb_rextents);
+	return xfs_rtbitmap_blockcount_len(mp, mp->m_sb.sb_rgextents);
 }
 
 /*
@@ -1178,7 +1180,10 @@ xfs_rtsummary_blockcount(
 {
 	unsigned long long	rsumwords;
 
-	*rsumlevels = xfs_compute_rextslog(mp->m_sb.sb_rextents) + 1;
+	if (xfs_has_rtgroups(mp))
+		*rsumlevels = xfs_compute_rextslog(mp->m_sb.sb_rgextents) + 1;
+	else
+		*rsumlevels = xfs_compute_rextslog(mp->m_sb.sb_rextents) + 1;
 
 	rsumwords = xfs_rtbitmap_blockcount(mp) * (*rsumlevels);
 	return XFS_B_TO_FSB(mp, rsumwords << XFS_WORDLOG);
