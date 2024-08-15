@@ -828,9 +828,10 @@ struct xfs_scrub_vec_head {
 #define XFS_SCRUB_METAPATH_RTBITMAP	(2)  /* per-rtg bitmap */
 #define XFS_SCRUB_METAPATH_RTSUMMARY	(3)  /* per-rtg summary */
 #define XFS_SCRUB_METAPATH_RTRMAPBT	(4)  /* realtime reverse mapping */
+#define XFS_SCRUB_METAPATH_RTREFCOUNTBT	(5)  /* realtime refcount */
 
 /* Number of metapath sm_ino values */
-#define XFS_SCRUB_METAPATH_NR		(5)
+#define XFS_SCRUB_METAPATH_NR		(6)
 
 /*
  * ioctl limits
