@@ -525,6 +525,7 @@ xfs_bmbt_broot_move(
 	size_t			dst_bytes,
 	struct xfs_btree_block	*src_broot,
 	size_t			src_bytes,
+	unsigned int		level,
 	unsigned int		numrecs)
 {
 	struct xfs_mount	*mp = ip->i_mount;
@@ -532,6 +533,7 @@ xfs_bmbt_broot_move(
 	void			*sptr;
 
 	ASSERT(xfs_bmap_bmdr_space(src_broot) <= xfs_inode_fork_size(ip, whichfork));
+	ASSERT(level > 0);
 
 	/*
 	 * We always have to move the pointers because they are not butted
@@ -820,6 +822,6 @@ xfs_bmbt_iroot_alloc(
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_ifork	*ifp = xfs_ifork_ptr(ip, whichfork);
 
-	xfs_iroot_alloc(ip, whichfork, xfs_bmap_broot_space_calc(mp, 1));
+	xfs_iroot_alloc(ip, whichfork, xfs_bmap_broot_space_calc(mp, 1, 1));
 	xfs_bmbt_init_block(ip, ifp->if_broot, NULL, 1, 1);
 }

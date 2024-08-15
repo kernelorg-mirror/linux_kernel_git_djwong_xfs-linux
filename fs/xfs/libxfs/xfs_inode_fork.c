@@ -413,6 +413,7 @@ xfs_iroot_realloc(
 	struct xfs_btree_block		*new_broot;
 	size_t				new_size;
 	size_t				old_size = ifp->if_broot_bytes;
+	unsigned int			level;
 	int				cur_max;
 	int				new_max;
 
@@ -427,15 +428,16 @@ xfs_iroot_realloc(
 	if (old_size == 0) {
 		ASSERT(rec_diff > 0);
 
-		xfs_iroot_alloc(ip, whichfork, ops->size(mp, rec_diff));
+		xfs_iroot_alloc(ip, whichfork, ops->size(mp, 0, rec_diff));
 		return;
 	}
 
 	/* Compute the new and old record count and space requirements. */
-	cur_max = ops->maxrecs(mp, old_size, false);
+	level = be16_to_cpu(ifp->if_broot->bb_level);
+	cur_max = ops->maxrecs(mp, old_size, level == 0);
 	new_max = cur_max + rec_diff;
 	ASSERT(new_max >= 0);
-	new_size = ops->size(mp, new_max);
+	new_size = ops->size(mp, level, new_max);
 
 	if (rec_diff > 0) {
 		/*
@@ -447,7 +449,7 @@ xfs_iroot_realloc(
 					 GFP_KERNEL | __GFP_NOFAIL);
 		ifp->if_broot_bytes = new_size;
 		ops->move(ip, whichfork, ifp->if_broot, new_size,
-				ifp->if_broot, old_size, cur_max);
+				ifp->if_broot, old_size, level, cur_max);
 		return;
 	}
 
@@ -463,7 +465,7 @@ xfs_iroot_realloc(
 
 	new_broot = kmalloc(new_size, GFP_KERNEL | __GFP_NOFAIL);
 	ops->move(ip, whichfork, new_broot, new_size, ifp->if_broot,
-			ifp->if_broot_bytes, new_max);
+			ifp->if_broot_bytes, level, new_max);
 
 	kfree(ifp->if_broot);
 	ifp->if_broot = new_broot;
