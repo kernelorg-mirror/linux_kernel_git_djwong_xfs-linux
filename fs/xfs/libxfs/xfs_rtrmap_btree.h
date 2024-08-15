@@ -199,4 +199,7 @@ int xfs_rtrmapbt_create(struct xfs_rtgroup *rtg, struct xfs_inode *ip,
 int xfs_rtrmapbt_init_rtsb(struct xfs_mount *mp, struct xfs_rtgroup *rtg,
 		struct xfs_trans *tp);
 
+unsigned long long xfs_rtrmapbt_calc_size(struct xfs_mount *mp,
+		unsigned long long len);
+
 #endif	/* __XFS_RTRMAP_BTREE_H__ */
