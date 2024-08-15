@@ -20,6 +20,169 @@
 #include "xfs_quota_defs.h"
 #include "xfs_rtgroup.h"
 
+#ifdef CONFIG_XFS_LIVE_HOOKS
+/*
+ * Use a static key here to reduce the overhead of health updates.  If
+ * the compiler supports jump labels, the static branch will be replaced by a
+ * nop sled when there are no hook users.  Online fsck is currently the only
+ * caller, so this is a reasonable tradeoff.
+ *
+ * Note: Patching the kernel code requires taking the cpu hotplug lock.  Other
+ * parts of the kernel allocate memory with that lock held, which means that
+ * XFS callers cannot hold any locks that might be used by memory reclaim or
+ * writeback when calling the static_branch_{inc,dec} functions.
+ */
+DEFINE_STATIC_XFS_HOOK_SWITCH(xfs_health_hooks_switch);
+
+void
+xfs_health_hook_disable(void)
+{
+	xfs_hooks_switch_off(&xfs_health_hooks_switch);
+}
+
+void
+xfs_health_hook_enable(void)
+{
+	xfs_hooks_switch_on(&xfs_health_hooks_switch);
+}
+
+/* Call downstream hooks for a filesystem unmount health update. */
+static inline void
+xfs_health_unmount_hook(
+	struct xfs_mount		*mp)
+{
+	if (xfs_hooks_switched_on(&xfs_health_hooks_switch)) {
+		struct xfs_health_update_params	p = {
+			.domain		= XFS_HEALTHUP_FS,
+		};
+
+		xfs_hooks_call(&mp->m_health_update_hooks,
+				XFS_HEALTHUP_UNMOUNT, &p);
+	}
+}
+
+/* Call downstream hooks for a filesystem health update. */
+static inline void
+xfs_fs_health_update_hook(
+	struct xfs_mount		*mp,
+	enum xfs_health_update_type	op,
+	unsigned int			old_mask,
+	unsigned int			new_mask)
+{
+	if (xfs_hooks_switched_on(&xfs_health_hooks_switch)) {
+		struct xfs_health_update_params	p = {
+			.domain		= XFS_HEALTHUP_FS,
+			.old_mask	= old_mask,
+			.new_mask	= new_mask,
+		};
+
+		if (new_mask)
+			xfs_hooks_call(&mp->m_health_update_hooks, op, &p);
+	}
+}
+
+/* Call downstream hooks for a perag health update. */
+static inline void
+xfs_ag_health_update_hook(
+	struct xfs_perag		*pag,
+	enum xfs_health_update_type	op,
+	unsigned int			old_mask,
+	unsigned int			new_mask)
+{
+	if (xfs_hooks_switched_on(&xfs_health_hooks_switch)) {
+		struct xfs_health_update_params	p = {
+			.domain		= XFS_HEALTHUP_AG,
+			.old_mask	= old_mask,
+			.new_mask	= new_mask,
+			.group		= pag->pag_agno,
+		};
+		struct xfs_mount	*mp = pag->pag_mount;
+
+		if (new_mask)
+			xfs_hooks_call(&mp->m_health_update_hooks, op, &p);
+	}
+}
+
+/* Call downstream hooks for an inode health update. */
+static inline void
+xfs_inode_health_update_hook(
+	struct xfs_inode		*ip,
+	enum xfs_health_update_type	op,
+	unsigned int			old_mask,
+	unsigned int			new_mask)
+{
+	if (xfs_hooks_switched_on(&xfs_health_hooks_switch)) {
+		struct xfs_health_update_params	p = {
+			.domain		= XFS_HEALTHUP_INODE,
+			.old_mask	= old_mask,
+			.new_mask	= new_mask,
+			.ino		= ip->i_ino,
+			.gen		= VFS_I(ip)->i_generation,
+		};
+		struct xfs_mount	*mp = ip->i_mount;
+
+		if (new_mask)
+			xfs_hooks_call(&mp->m_health_update_hooks, op, &p);
+	}
+}
+
+/* Call downstream hooks for a realtime group health update. */
+static inline void
+xfs_rtgroup_health_update_hook(
+	struct xfs_rtgroup		*rtg,
+	enum xfs_health_update_type	op,
+	unsigned int			old_mask,
+	unsigned int			new_mask)
+{
+	if (xfs_hooks_switched_on(&xfs_health_hooks_switch)) {
+		struct xfs_health_update_params	p = {
+			.domain		= XFS_HEALTHUP_RTGROUP,
+			.old_mask	= old_mask,
+			.new_mask	= new_mask,
+			.group		= rtg->rtg_rgno,
+		};
+		struct xfs_mount	*mp = rtg->rtg_mount;
+
+		if (new_mask)
+			xfs_hooks_call(&mp->m_health_update_hooks, op, &p);
+	}
+}
+
+/* Call the specified function during a health update. */
+int
+xfs_health_hook_add(
+	struct xfs_mount	*mp,
+	struct xfs_health_hook	*hook)
+{
+	return xfs_hooks_add(&mp->m_health_update_hooks, &hook->health_hook);
+}
+
+/* Stop calling the specified function during a health update. */
+void
+xfs_health_hook_del(
+	struct xfs_mount	*mp,
+	struct xfs_health_hook	*hook)
+{
+	xfs_hooks_del(&mp->m_health_update_hooks, &hook->health_hook);
+}
+
+/* Configure health update hook functions. */
+void
+xfs_health_hook_setup(
+	struct xfs_health_hook	*hook,
+	notifier_fn_t		mod_fn)
+{
+	xfs_hook_setup(&hook->health_hook, mod_fn);
+}
+#else
+# define xfs_health_unmount_hook(...)			((void)0)
+# define xfs_fs_health_update_hook(a,b,o,n)		do {o = o;} while(0)
+# define xfs_rt_health_update_hook(a,b,o,n)		do {o = o;} while(0)
+# define xfs_ag_health_update_hook(a,b,o,n)		do {o = o;} while(0)
+# define xfs_inode_health_update_hook(a,b,o,n)		do {o = o;} while(0)
+# define xfs_rtgroup_health_update_hook(a,b,o,n)	do {o = o;} while(0)
+#endif /* CONFIG_XFS_LIVE_HOOKS */
+
 /*
  * Warn about metadata corruption that we detected but haven't fixed, and
  * make sure we're not sitting on anything that would get in the way of
@@ -37,8 +200,10 @@ xfs_health_unmount(
 	unsigned int		checked = 0;
 	bool			warn = false;
 
-	if (xfs_is_shutdown(mp))
+	if (xfs_is_shutdown(mp)) {
+		xfs_health_unmount_hook(mp);
 		return;
+	}
 
 	/* Measure AG corruption levels. */
 	for_each_perag(mp, agno, pag) {
@@ -94,6 +259,8 @@ xfs_health_unmount(
 		if (sick & XFS_SICK_FS_COUNTERS)
 			xfs_fs_mark_healthy(mp, XFS_SICK_FS_COUNTERS);
 	}
+
+	xfs_health_unmount_hook(mp);
 }
 
 /* Mark unhealthy per-fs metadata. */
@@ -102,12 +269,17 @@ xfs_fs_mark_sick(
 	struct xfs_mount	*mp,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_FS_ALL));
 	trace_xfs_fs_mark_sick(mp, mask);
 
 	spin_lock(&mp->m_sb_lock);
+	old_mask = mp->m_fs_sick;
 	mp->m_fs_sick |= mask;
 	spin_unlock(&mp->m_sb_lock);
+
+	xfs_fs_health_update_hook(mp, XFS_HEALTHUP_SICK, old_mask, mask);
 }
 
 /* Mark per-fs metadata as having been checked and found unhealthy by fsck. */
@@ -116,13 +288,18 @@ xfs_fs_mark_corrupt(
 	struct xfs_mount	*mp,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_FS_ALL));
 	trace_xfs_fs_mark_corrupt(mp, mask);
 
 	spin_lock(&mp->m_sb_lock);
+	old_mask = mp->m_fs_sick;
 	mp->m_fs_sick |= mask;
 	mp->m_fs_checked |= mask;
 	spin_unlock(&mp->m_sb_lock);
+
+	xfs_fs_health_update_hook(mp, XFS_HEALTHUP_CORRUPT, old_mask, mask);
 }
 
 /* Mark a per-fs metadata healed. */
@@ -131,15 +308,20 @@ xfs_fs_mark_healthy(
 	struct xfs_mount	*mp,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_FS_ALL));
 	trace_xfs_fs_mark_healthy(mp, mask);
 
 	spin_lock(&mp->m_sb_lock);
+	old_mask = mp->m_fs_sick;
 	mp->m_fs_sick &= ~mask;
 	if (!(mp->m_fs_sick & XFS_SICK_FS_PRIMARY))
 		mp->m_fs_sick &= ~XFS_SICK_FS_SECONDARY;
 	mp->m_fs_checked |= mask;
 	spin_unlock(&mp->m_sb_lock);
+
+	xfs_fs_health_update_hook(mp, XFS_HEALTHUP_HEALTHY, old_mask, mask);
 }
 
 /* Sample which per-fs metadata are unhealthy. */
@@ -178,12 +360,17 @@ xfs_ag_mark_sick(
 	struct xfs_perag	*pag,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_AG_ALL));
 	trace_xfs_ag_mark_sick(pag->pag_mount, pag->pag_agno, mask);
 
 	spin_lock(&pag->pag_state_lock);
+	old_mask = pag->pag_sick;
 	pag->pag_sick |= mask;
 	spin_unlock(&pag->pag_state_lock);
+
+	xfs_ag_health_update_hook(pag, XFS_HEALTHUP_SICK, old_mask, mask);
 }
 
 /* Mark per-ag metadata as having been checked and found unhealthy by fsck. */
@@ -192,13 +379,18 @@ xfs_ag_mark_corrupt(
 	struct xfs_perag	*pag,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_AG_ALL));
 	trace_xfs_ag_mark_corrupt(pag->pag_mount, pag->pag_agno, mask);
 
 	spin_lock(&pag->pag_state_lock);
+	old_mask = pag->pag_sick;
 	pag->pag_sick |= mask;
 	pag->pag_checked |= mask;
 	spin_unlock(&pag->pag_state_lock);
+
+	xfs_ag_health_update_hook(pag, XFS_HEALTHUP_CORRUPT, old_mask, mask);
 }
 
 /* Mark per-ag metadata ok. */
@@ -207,15 +399,20 @@ xfs_ag_mark_healthy(
 	struct xfs_perag	*pag,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_AG_ALL));
 	trace_xfs_ag_mark_healthy(pag->pag_mount, pag->pag_agno, mask);
 
 	spin_lock(&pag->pag_state_lock);
+	old_mask = pag->pag_sick;
 	pag->pag_sick &= ~mask;
 	if (!(pag->pag_sick & XFS_SICK_AG_PRIMARY))
 		pag->pag_sick &= ~XFS_SICK_AG_SECONDARY;
 	pag->pag_checked |= mask;
 	spin_unlock(&pag->pag_state_lock);
+
+	xfs_ag_health_update_hook(pag, XFS_HEALTHUP_HEALTHY, old_mask, mask);
 }
 
 /* Sample which per-ag metadata are unhealthy. */
@@ -254,12 +451,17 @@ xfs_rtgroup_mark_sick(
 	struct xfs_rtgroup	*rtg,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_RG_ALL));
 	trace_xfs_rtgroup_mark_sick(rtg, mask);
 
 	spin_lock(&rtg->rtg_state_lock);
+	old_mask = rtg->rtg_sick;
 	rtg->rtg_sick |= mask;
 	spin_unlock(&rtg->rtg_state_lock);
+
+	xfs_rtgroup_health_update_hook(rtg, XFS_HEALTHUP_SICK, old_mask, mask);
 }
 
 /* Mark rtgroup metadata as having been checked and found unhealthy by fsck. */
@@ -268,13 +470,19 @@ xfs_rtgroup_mark_corrupt(
 	struct xfs_rtgroup	*rtg,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_RG_ALL));
 	trace_xfs_rtgroup_mark_corrupt(rtg, mask);
 
 	spin_lock(&rtg->rtg_state_lock);
+	old_mask = rtg->rtg_sick;
 	rtg->rtg_sick |= mask;
 	rtg->rtg_checked |= mask;
 	spin_unlock(&rtg->rtg_state_lock);
+
+	xfs_rtgroup_health_update_hook(rtg, XFS_HEALTHUP_CORRUPT, old_mask,
+			mask);
 }
 
 /* Mark per-rtgroup metadata ok. */
@@ -283,15 +491,21 @@ xfs_rtgroup_mark_healthy(
 	struct xfs_rtgroup	*rtg,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_RG_ALL));
 	trace_xfs_rtgroup_mark_healthy(rtg, mask);
 
 	spin_lock(&rtg->rtg_state_lock);
+	old_mask = rtg->rtg_sick;
 	rtg->rtg_sick &= ~mask;
 	if (!(rtg->rtg_sick & XFS_SICK_RG_PRIMARY))
 		rtg->rtg_sick &= ~XFS_SICK_RG_SECONDARY;
 	rtg->rtg_checked |= mask;
 	spin_unlock(&rtg->rtg_state_lock);
+
+	xfs_rtgroup_health_update_hook(rtg, XFS_HEALTHUP_HEALTHY, old_mask,
+			mask);
 }
 
 /* Sample which per-rtgroup metadata are unhealthy. */
@@ -313,10 +527,13 @@ xfs_inode_mark_sick(
 	struct xfs_inode	*ip,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_INO_ALL));
 	trace_xfs_inode_mark_sick(ip, mask);
 
 	spin_lock(&ip->i_flags_lock);
+	old_mask = ip->i_sick;
 	ip->i_sick |= mask;
 	spin_unlock(&ip->i_flags_lock);
 
@@ -328,6 +545,8 @@ xfs_inode_mark_sick(
 	spin_lock(&VFS_I(ip)->i_lock);
 	VFS_I(ip)->i_state &= ~I_DONTCACHE;
 	spin_unlock(&VFS_I(ip)->i_lock);
+
+	xfs_inode_health_update_hook(ip, XFS_HEALTHUP_SICK, old_mask, mask);
 }
 
 /* Mark inode metadata as having been checked and found unhealthy by fsck. */
@@ -336,10 +555,13 @@ xfs_inode_mark_corrupt(
 	struct xfs_inode	*ip,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_INO_ALL));
 	trace_xfs_inode_mark_corrupt(ip, mask);
 
 	spin_lock(&ip->i_flags_lock);
+	old_mask = ip->i_sick;
 	ip->i_sick |= mask;
 	ip->i_checked |= mask;
 	spin_unlock(&ip->i_flags_lock);
@@ -352,6 +574,8 @@ xfs_inode_mark_corrupt(
 	spin_lock(&VFS_I(ip)->i_lock);
 	VFS_I(ip)->i_state &= ~I_DONTCACHE;
 	spin_unlock(&VFS_I(ip)->i_lock);
+
+	xfs_inode_health_update_hook(ip, XFS_HEALTHUP_CORRUPT, old_mask, mask);
 }
 
 /* Mark parts of an inode healed. */
@@ -360,15 +584,20 @@ xfs_inode_mark_healthy(
 	struct xfs_inode	*ip,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_INO_ALL));
 	trace_xfs_inode_mark_healthy(ip, mask);
 
 	spin_lock(&ip->i_flags_lock);
+	old_mask = ip->i_sick;
 	ip->i_sick &= ~mask;
 	if (!(ip->i_sick & XFS_SICK_INO_PRIMARY))
 		ip->i_sick &= ~XFS_SICK_INO_SECONDARY;
 	ip->i_checked |= mask;
 	spin_unlock(&ip->i_flags_lock);
+
+	xfs_inode_health_update_hook(ip, XFS_HEALTHUP_HEALTHY, old_mask, mask);
 }
 
 /* Sample which parts of an inode are unhealthy. */
