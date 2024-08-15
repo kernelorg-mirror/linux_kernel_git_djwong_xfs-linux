@@ -759,3 +759,16 @@ xfs_bmbt_destroy_cur_cache(void)
 	kmem_cache_destroy(xfs_bmbt_cur_cache);
 	xfs_bmbt_cur_cache = NULL;
 }
+
+/* Create an incore bmbt btree root block. */
+void
+xfs_bmbt_iroot_alloc(
+	struct xfs_inode	*ip,
+	int			whichfork)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_ifork	*ifp = xfs_ifork_ptr(ip, whichfork);
+
+	xfs_iroot_alloc(ip, whichfork, xfs_bmap_broot_space_calc(mp, 1));
+	xfs_bmbt_init_block(ip, ifp->if_broot, NULL, 1, 1);
+}
