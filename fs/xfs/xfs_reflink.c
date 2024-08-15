@@ -1509,6 +1509,13 @@ xfs_reflink_remap_blocks(
 	len = min_t(xfs_filblks_t, XFS_B_TO_FSB(mp, remap_len),
 			XFS_MAX_FILEOFF);
 
+	/*
+	 * Make sure the end is aligned with an allocation unit, even if it's
+	 * past EOF.
+	 */
+	if (xfs_inode_has_bigrtalloc(dest))
+		len = xfs_rtb_roundup_rtx(mp, len);
+
 	trace_xfs_reflink_remap_blocks(src, srcoff, len, dest, destoff);
 
 	while (len > 0) {
@@ -1583,6 +1590,57 @@ xfs_reflink_zero_posteof(
 	return xfs_zero_range(ip, isize, pos - isize, NULL);
 }
 
+#ifdef CONFIG_XFS_RT
+/*
+ * Adjust the length of the remap operation to end on an allocation unit (AU)
+ * boundary.
+ */
+STATIC int
+xfs_reflink_adjust_rtbigalloc_len(
+	struct xfs_inode	*src,
+	loff_t			pos_in,
+	struct xfs_inode	*dest,
+	loff_t			pos_out,
+	loff_t			*len,
+	unsigned int		remap_flags)
+{
+	unsigned int		alloc_unit = xfs_inode_alloc_unitsize(src);
+	uint32_t		mod;
+
+	div_u64_rem(*len, alloc_unit, &mod);
+
+	/*
+	 * We previously checked the AU alignment of both offsets, so we now
+	 * have to check the AU alignment of the length.  The VFS remap prep
+	 * function can change the length on us, so we can only make length
+	 * adjustments after that.  If the length is aligned to an AU, we're
+	 * good to go.
+	 *
+	 * Otherwise, the length is not aligned to an AU.  If the source file's
+	 * range ends at EOF, the VFS ensured that the dest file's range also
+	 * ends at EOF.  The actual remap function will round the (byte) length
+	 * up to the nearest AU, so we're ok here too.
+	 */
+	if (mod == 0 || pos_in + *len == i_size_read(VFS_I(src)))
+		return 0;
+
+	/*
+	 * Otherwise, the only thing we can do is round the request length down
+	 * to an AU boundary.  If the caller doesn't allow that, we cannot move
+	 * forward.
+	 */
+	if (!(remap_flags & REMAP_FILE_CAN_SHORTEN))
+		return -EINVAL;
+
+	/* Back off by a single extent. */
+	(*len) -= mod;
+	trace_xfs_reflink_adjust_rtbigalloc_len(src, pos_in, *len, dest, pos_out);
+	return 0;
+}
+#else
+# define xfs_reflink_adjust_rtbigalloc_len(...)		(0)
+#endif /* CONFIG_XFS_RT */
+
 /*
  * Prepare two files for range cloning.  Upon a successful return both inodes
  * will have the iolock and mmaplock held, the page cache of the out file will
@@ -1625,6 +1683,7 @@ xfs_reflink_remap_prep(
 	struct xfs_inode	*src = XFS_I(inode_in);
 	struct inode		*inode_out = file_inode(file_out);
 	struct xfs_inode	*dest = XFS_I(inode_out);
+	const struct iomap_ops	*dax_read_ops = NULL;
 	int			ret;
 
 	/* Lock both files against IO */
@@ -1642,14 +1701,24 @@ xfs_reflink_remap_prep(
 	if (IS_DAX(inode_in) != IS_DAX(inode_out))
 		goto out_unlock;
 
-	if (!IS_DAX(inode_in))
-		ret = generic_remap_file_range_prep(file_in, pos_in, file_out,
-				pos_out, len, remap_flags);
-	else
-		ret = dax_remap_file_range_prep(file_in, pos_in, file_out,
-				pos_out, len, remap_flags, &xfs_read_iomap_ops);
+	ASSERT(is_power_of_2(xfs_inode_alloc_unitsize(dest)));
+
+	if (IS_DAX(inode_in))
+		dax_read_ops = &xfs_read_iomap_ops;
+
+	ret = __generic_remap_file_range_prep(file_in, pos_in, file_out,
+			pos_out, len, remap_flags, dax_read_ops,
+			xfs_inode_alloc_unitsize(dest));
 	if (ret || *len == 0)
 		goto out_unlock;
+
+	/* Adjust the end to align to an allocation unit. */
+	if (xfs_inode_has_bigrtalloc(src)) {
+		ret = xfs_reflink_adjust_rtbigalloc_len(src, pos_in, dest,
+				pos_out, len, remap_flags);
+		if (ret || *len == 0)
+			goto out_unlock;
+	}
 
 	/* Attach dquots to dest inode before changing block map */
 	ret = xfs_qm_dqattach(dest);
