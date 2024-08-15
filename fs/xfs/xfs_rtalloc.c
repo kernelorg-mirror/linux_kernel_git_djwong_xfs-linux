@@ -813,6 +813,13 @@ xfs_growfs_rt_init_super(
 	mp->m_rtsb_bp = rtsb_bp;
 	error = xfs_bwrite(rtsb_bp);
 	xfs_buf_unlock(rtsb_bp);
+	if (error)
+		return error;
+
+	/* Initialize the rtrmap to reflect the rtsb. */
+	if (args->rtg->rtg_inodes[XFS_RTGI_RMAP] != NULL)
+		error = xfs_rtrmapbt_init_rtsb(nargs->mp, args->rtg, args->tp);
+
 	return error;
 }
 
@@ -860,8 +867,9 @@ xfs_growfs_rt_bmblock(
 		goto out_free;
 	nargs.tp = args.tp;
 
-	xfs_rtgroup_lock(args.rtg, XFS_RTGLOCK_BITMAP);
-	xfs_rtgroup_trans_join(args.tp, args.rtg, XFS_RTGLOCK_BITMAP);
+	xfs_rtgroup_lock(args.rtg, XFS_RTGLOCK_BITMAP | XFS_RTGLOCK_RMAP);
+	xfs_rtgroup_trans_join(args.tp, args.rtg,
+			XFS_RTGLOCK_BITMAP | XFS_RTGLOCK_RMAP);
 
 	/*
 	 * Update the bitmap inode's size ondisk and incore.  We need to update
