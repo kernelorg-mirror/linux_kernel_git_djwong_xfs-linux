@@ -987,6 +987,31 @@ out_rele:
 	return error;
 }
 
+static int
+xfs_growfs_check_rtgeom(
+	const struct xfs_mount	*mp,
+	xfs_rfsblock_t		rblocks,
+	xfs_extlen_t		rextsize)
+{
+	struct xfs_mount	*nmp;
+	int			error = 0;
+
+	nmp = xfs_growfs_rt_alloc_fake_mount(mp, rblocks, rextsize);
+	if (!nmp)
+		return -ENOMEM;
+
+	/*
+	 * New summary size can't be more than half the size of the log.  This
+	 * prevents us from getting a log overflow, since we'll log basically
+	 * the whole summary file at once.
+	 */
+	if (nmp->m_rsumblocks > (mp->m_sb.sb_logblocks >> 1))
+		error = -EINVAL;
+
+	kfree(nmp);
+	return error;
+}
+
 /*
  * Grow the realtime area of the filesystem.
  */
@@ -995,9 +1020,6 @@ xfs_growfs_rt(
 	xfs_mount_t	*mp,		/* mount point for filesystem */
 	xfs_growfs_rt_t	*in)		/* growfs rt input struct */
 {
-	xfs_rtxnum_t		nrextents;
-	xfs_extlen_t		nrbmblocks;
-	xfs_extlen_t		nrsumblocks;
 	struct xfs_buf		*bp;
 	int			error;
 
@@ -1041,20 +1063,13 @@ xfs_growfs_rt(
 	/*
 	 * Calculate new parameters.  These are the final values to be reached.
 	 */
-	nrextents = div_u64(in->newblocks, in->extsize);
-	if (nrextents == 0)
+	if (in->newblocks < in->extsize)
 		return -EINVAL;
-	nrbmblocks = xfs_rtbitmap_blockcount(mp, nrextents);
-	nrsumblocks = xfs_rtsummary_blockcount(mp,
-			xfs_compute_rextslog(nrextents) + 1, nrbmblocks);
 
-	/*
-	 * New summary size can't be more than half the size of
-	 * the log.  This prevents us from getting a log overflow,
-	 * since we'll log basically the whole summary file at once.
-	 */
-	if (nrsumblocks > (mp->m_sb.sb_logblocks >> 1))
-		return -EINVAL;
+	/* Make sure the new fs size won't cause problems with the log. */
+	error = xfs_growfs_check_rtgeom(mp, in->newblocks, in->extsize);
+	if (error)
+		return error;
 
 	error = xfs_growfs_rtg(mp, in->newblocks, in->extsize);
 	if (error)
