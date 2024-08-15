@@ -396,6 +396,7 @@ static const struct xfs_rtginode_ops xfs_rtginode_ops[XFS_RTGI_MAX] = {
 	[XFS_RTGI_RMAP] = {
 		.name		= "rmap",
 		.metafile_type	= XFS_METAFILE_RTRMAP,
+		.sick		= XFS_SICK_RG_RMAPBT,
 		.fmt_mask	= 1U << XFS_DINODE_FMT_RMAP,
 		/*
 		 * growfs must create the rtrmap inodes before adding a
