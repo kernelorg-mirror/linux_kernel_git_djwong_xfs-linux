@@ -1,6 +1,4 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-#include <linux/mean_and_variance.h>
-
 #ifndef MEAN_AND_VARIANCE_H_
 #define MEAN_AND_VARIANCE_H_
 
@@ -113,11 +111,11 @@ static inline u128_u u128_shl(u128_u i, s8 shift)
 {
 	u128_u r;
 
-	r.lo = i.lo << (shift & 63);
+	r.lo = i.lo << shift;
 	if (shift < 64)
-		r.hi = (i.hi << (shift & 63)) | (i.lo >> (-shift & 63));
+		r.hi = (i.hi << shift) | (i.lo >> (64 - shift));
 	else {
-		r.hi = i.lo << (-shift & 63);
+		r.hi = i.lo << (shift - 64);
 		r.lo = 0;
 	}
 	return r;
