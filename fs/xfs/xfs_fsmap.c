@@ -27,6 +27,7 @@
 #include "xfs_ag.h"
 #include "xfs_rtgroup.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_rtrefcount_btree.h"
 
 /* Convert an xfs_fsmap to an fsmap. */
 static void
@@ -218,14 +219,18 @@ xfs_getfsmap_is_shared(
 	*stat = false;
 	if (!xfs_has_reflink(mp))
 		return 0;
-	/* rt files will have no perag structure */
-	if (!info->pag)
+
+	if (info->rtg)
+		cur = xfs_rtrefcountbt_init_cursor(mp, tp, info->rtg,
+				info->rtg->rtg_inodes[XFS_RTGI_REFCOUNT]);
+	else if (info->pag)
+		cur = xfs_refcountbt_init_cursor(mp, tp, info->agf_bp,
+				info->pag);
+	else
 		return 0;
 
 	/* Are there any shared blocks here? */
 	flen = 0;
-	cur = xfs_refcountbt_init_cursor(mp, tp, info->agf_bp, info->pag);
-
 	error = xfs_refcount_find_shared(cur, frec->rec_key,
 			XFS_BB_TO_FSBT(mp, frec->len_daddr), &fbno, &flen,
 			false);
@@ -911,7 +916,7 @@ xfs_getfsmap_rtdev_rmapbt_query(
 				info);
 
 	/* Query the rtrmapbt */
-	xfs_rtgroup_lock(info->rtg, XFS_RTGLOCK_RMAP);
+	xfs_rtgroup_lock(info->rtg, XFS_RTGLOCK_RMAP | XFS_RTGLOCK_REFCOUNT);
 	*curpp = xfs_rtrmapbt_init_cursor(mp, tp, info->rtg,
 			info->rtg->rtg_inodes[XFS_RTGI_RMAP]);
 	return xfs_rmap_query_range(*curpp, &info->low, &info->high,
@@ -999,7 +1004,8 @@ xfs_getfsmap_rtdev_rmapbt(
 
 		if (bt_cur) {
 			xfs_rtgroup_unlock(bt_cur->bc_ino.rtg,
-					XFS_RTGLOCK_RMAP);
+					XFS_RTGLOCK_RMAP |
+					XFS_RTGLOCK_REFCOUNT);
 			xfs_btree_del_cursor(bt_cur, XFS_BTREE_NOERROR);
 			bt_cur = NULL;
 		}
@@ -1036,7 +1042,8 @@ xfs_getfsmap_rtdev_rmapbt(
 	}
 
 	if (bt_cur) {
-		xfs_rtgroup_unlock(bt_cur->bc_ino.rtg, XFS_RTGLOCK_RMAP);
+		xfs_rtgroup_unlock(bt_cur->bc_ino.rtg, XFS_RTGLOCK_RMAP |
+						       XFS_RTGLOCK_REFCOUNT);
 		xfs_btree_del_cursor(bt_cur, error < 0 ? XFS_BTREE_ERROR :
 							 XFS_BTREE_NOERROR);
 	}
