@@ -820,8 +820,9 @@ xfs_growfs_rt_bmblock(
 		goto out_free;
 	nargs.tp = args.tp;
 
-	xfs_rtgroup_lock(args.rtg, XFS_RTGLOCK_BITMAP);
-	xfs_rtgroup_trans_join(args.tp, args.rtg, XFS_RTGLOCK_BITMAP);
+	xfs_rtgroup_lock(args.rtg, XFS_RTGLOCK_BITMAP | XFS_RTGLOCK_RMAP);
+	xfs_rtgroup_trans_join(args.tp, args.rtg,
+			XFS_RTGLOCK_BITMAP | XFS_RTGLOCK_RMAP);
 
 	/*
 	 * Update the bitmap inode's size ondisk and incore.  We need to update
@@ -848,6 +849,19 @@ xfs_growfs_rt_bmblock(
 	if (mp->m_sb.sb_rbmblocks != nmp->m_sb.sb_rbmblocks ||
 	    mp->m_rsumlevels != nmp->m_rsumlevels) {
 		error = xfs_rtcopy_summary(&args, &nargs);
+		if (error)
+			goto out_cancel;
+	}
+
+	/*
+	 * Set up an rmap for the rt superblock if we're setting up the first
+	 * rtgroup for the first time.
+	 */
+	if (xfs_has_rtsb(nmp) &&
+	    args.rtg->rtg_inodes[XFS_RTGI_RMAP] != NULL &&
+	    args.rtg->rtg_rgno == 0 &&
+	    !mp->m_sb.sb_rblocks) {
+		error = xfs_rtrmapbt_init_rtsb(nmp, args.rtg, args.tp);
 		if (error)
 			goto out_cancel;
 	}
