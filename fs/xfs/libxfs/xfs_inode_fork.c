@@ -211,9 +211,7 @@ xfs_iformat_btree(
 		return -EFSCORRUPTED;
 	}
 
-	ifp->if_broot_bytes = size;
-	ifp->if_broot = kmalloc(size,
-				GFP_KERNEL | __GFP_NOLOCKDEP | __GFP_NOFAIL);
+	xfs_iroot_alloc(ip, whichfork, size);
 	ASSERT(ifp->if_broot != NULL);
 	/*
 	 * Copy and convert from the on-disk structure
@@ -362,6 +360,33 @@ xfs_iformat_attr_fork(
 	return error;
 }
 
+/* Allocate a new incore ifork btree root. */
+void
+xfs_iroot_alloc(
+	struct xfs_inode	*ip,
+	int			whichfork,
+	size_t			bytes)
+{
+	struct xfs_ifork	*ifp = xfs_ifork_ptr(ip, whichfork);
+
+	ifp->if_broot = kmalloc(bytes,
+				GFP_KERNEL | __GFP_NOLOCKDEP | __GFP_NOFAIL);
+	ifp->if_broot_bytes = bytes;
+}
+
+/* Free all the memory and state associated with an incore ifork btree root. */
+void
+xfs_iroot_free(
+	struct xfs_inode	*ip,
+	int			whichfork)
+{
+	struct xfs_ifork	*ifp = xfs_ifork_ptr(ip, whichfork);
+
+	ifp->if_broot_bytes = 0;
+	kfree(ifp->if_broot);
+	ifp->if_broot = NULL;
+}
+
 /*
  * Reallocate the space for if_broot based on the number of records
  * being added or deleted as indicated in rec_diff.  Move the records
@@ -410,9 +435,7 @@ xfs_iroot_realloc(
 		 */
 		if (ifp->if_broot_bytes == 0) {
 			new_size = xfs_bmap_broot_space_calc(mp, rec_diff);
-			ifp->if_broot = kmalloc(new_size,
-						GFP_KERNEL | __GFP_NOFAIL);
-			ifp->if_broot_bytes = (int)new_size;
+			xfs_iroot_alloc(ip, whichfork, new_size);
 			return;
 		}
 
@@ -450,9 +473,7 @@ xfs_iroot_realloc(
 
 	new_size = xfs_bmap_broot_space_calc(mp, new_max);
 	if (new_size == 0) {
-		kfree(ifp->if_broot);
-		ifp->if_broot = NULL;
-		ifp->if_broot_bytes = 0;
+		xfs_iroot_free(ip, whichfork);
 		return;
 	}
 
