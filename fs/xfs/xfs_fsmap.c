@@ -718,7 +718,7 @@ xfs_getfsmap_rtdev_rtbitmap_helper(
 	struct xfs_mount		*mp = rtg->rtg_mount;
 	struct xfs_getfsmap_info	*info = priv;
 	struct xfs_rmap_irec		irec = {
-		.rm_startblock	= xfs_rtx_to_rtb(mp, rec->ar_startext),
+		.rm_startblock	= xfs_rtx_to_rtb(rtg, rec->ar_startext),
 		.rm_blockcount	= xfs_rtxlen_to_extlen(mp, rec->ar_extcount),
 		.rm_owner	= XFS_RMAP_OWN_NULL, /* "free" */
 	};
