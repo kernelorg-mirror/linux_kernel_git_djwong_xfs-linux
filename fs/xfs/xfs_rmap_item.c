@@ -384,13 +384,12 @@ xfs_rmap_defer_add(
 	 * section updates.
 	 */
 	if (ri->ri_realtime) {
-		xfs_rgnumber_t	rgno;
-
-		rgno = xfs_rtb_to_rgno(mp, ri->ri_bmap.br_startblock);
-		ri->ri_rtg = xfs_rtgroup_get(mp, rgno);
+		ri->ri_rtg = xfs_rtgroup_intent_get(mp,
+						ri->ri_bmap.br_startblock);
 		xfs_defer_add(tp, &ri->ri_list, &xfs_rtrmap_update_defer_type);
 	} else {
-		ri->ri_pag = xfs_perag_intent_get(mp, ri->ri_bmap.br_startblock);
+		ri->ri_pag = xfs_perag_intent_get(mp,
+						ri->ri_bmap.br_startblock);
 		xfs_defer_add(tp, &ri->ri_list, &xfs_rmap_update_defer_type);
 	}
 }
@@ -539,10 +538,7 @@ xfs_rui_recover_work(
 			XFS_EXT_UNWRITTEN : XFS_EXT_NORM;
 	ri->ri_realtime = isrt;
 	if (isrt) {
-		xfs_rgnumber_t	rgno;
-
-		rgno = xfs_rtb_to_rgno(mp, map->me_startblock);
-		ri->ri_rtg = xfs_rtgroup_get(mp, rgno);
+		ri->ri_rtg = xfs_rtgroup_intent_get(mp, map->me_startblock);
 	} else {
 		ri->ri_pag = xfs_perag_intent_get(mp, map->me_startblock);
 	}
@@ -685,7 +681,7 @@ xfs_rtrmap_update_cancel_item(
 {
 	struct xfs_rmap_intent		*ri = ri_entry(item);
 
-	xfs_rtgroup_put(ri->ri_rtg);
+	xfs_rtgroup_intent_put(ri->ri_rtg);
 	kmem_cache_free(xfs_rmap_intent_cache, ri);
 }
 
