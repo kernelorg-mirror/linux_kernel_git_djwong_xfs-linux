@@ -48,6 +48,10 @@ xfs_growfs_rt(
 int xfs_rtalloc_reinit_frextents(struct xfs_mount *mp);
 int xfs_growfs_check_rtgeom(const struct xfs_mount *mp, xfs_rfsblock_t dblocks,
 		xfs_rfsblock_t rblocks, xfs_agblock_t rextsize);
+int xfs_rtallocate_find_freesp(struct xfs_trans *tp, struct xfs_rtgroup *rtg,
+		xfs_rtxnum_t *rtx, xfs_rtxnum_t end_rtx, xfs_rtxlen_t *len_rtx);
+int xfs_rtallocate_exact(struct xfs_trans *tp, struct xfs_rtgroup *rtg,
+		xfs_rtxnum_t rtx, xfs_rtxlen_t rtxlen);
 #else
 # define xfs_growfs_rt(mp,in)				(-ENOSYS)
 # define xfs_rtalloc_reinit_frextents(m)		(0)
@@ -67,6 +71,8 @@ xfs_rtmount_init(
 # define xfs_rtunmount_inodes(m)
 # define xfs_rt_resv_free(mp)				((void)0)
 # define xfs_rt_resv_init(mp)				(0)
+# define xfs_rtallocate_find_freesp(...)		(-EOPNOTSUPP)
+# define xfs_rtallocate_exact(...)			(-EOPNOTSUPP)
 
 static inline int
 xfs_growfs_check_rtgeom(const struct xfs_mount *mp,
