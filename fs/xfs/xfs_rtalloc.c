@@ -1982,3 +1982,87 @@ retry:
 	xfs_bmap_alloc_account(ap);
 	return 0;
 }
+
+/*
+ * Find the next free realtime extent starting at @rtx and going no higher than
+ * @end_rtx.  Set @rtx and @len_rtx to whatever free extents we find, or to
+ * @end_rtx if we find no space.
+ */
+int
+xfs_rtallocate_find_freesp(
+	struct xfs_trans	*tp,
+	struct xfs_rtgroup	*rtg,
+	xfs_rtxnum_t		*rtx,
+	xfs_rtxnum_t		end_rtx,
+	xfs_rtxlen_t		*len_rtx)
+{
+	struct xfs_mount	*mp = tp->t_mountp;
+	struct xfs_rtalloc_args	args = {
+		.rtg		= rtg,
+		.mp		= mp,
+		.tp		= tp,
+	};
+	const unsigned int	max_rtxlen =
+			xfs_blen_to_rtbxlen(mp, XFS_MAX_BMBT_EXTLEN);
+	int			error;
+
+	trace_xfs_rtallocate_find_freesp(rtg, *rtx, end_rtx - *rtx);
+
+	while (*rtx < end_rtx) {
+		xfs_rtblock_t	next_rtx;
+		int		is_free = 0;
+
+		if (fatal_signal_pending(current))
+			return -EINTR;
+
+		/* Is the first rtx in the range free? */
+		error = xfs_rtcheck_range(&args, *rtx, 1, 1, &next_rtx,
+				&is_free);
+		if (error)
+			return error;
+
+		/* Free or not, how many more rtx have the same status? */
+		error = xfs_rtfind_forw(&args, *rtx, end_rtx, &next_rtx);
+		if (error)
+			return error;
+
+		if (is_free) {
+			*len_rtx = min_t(xfs_rtxlen_t, max_rtxlen,
+					 next_rtx - *rtx + 1);
+
+			trace_xfs_rtallocate_find_freesp_done(rtg, *rtx,
+					*len_rtx);
+			return 0;
+		}
+
+		*rtx = next_rtx + 1;
+	}
+
+	return 0;
+}
+
+/* Allocate exactly this space from the rt device. */
+int
+xfs_rtallocate_exact(
+	struct xfs_trans	*tp,
+	struct xfs_rtgroup	*rtg,
+	xfs_rtxnum_t		rtx,
+	xfs_rtxlen_t		rtxlen)
+{
+	struct xfs_mount	*mp = tp->t_mountp;
+	struct xfs_rtalloc_args	args = {
+		.rtg		= rtg,
+		.mp		= mp,
+		.tp		= tp,
+	};
+	int			error;
+
+	trace_xfs_rtallocate_exact(rtg, rtx, rtxlen);
+
+	error = xfs_rtallocate_range(&args, rtx, rtxlen);
+	if (error)
+		return error;
+
+	xfs_trans_mod_sb(tp, XFS_TRANS_SB_FREXTENTS, -(long)rtxlen);
+	return 0;
+}
