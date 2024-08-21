@@ -834,9 +834,13 @@ struct xfs_scrub_vec_head {
 #define XFS_SCRUB_METAPATH_RTSUMMARY	(3)  /* per-rtg summary */
 #define XFS_SCRUB_METAPATH_RTRMAPBT	(4)  /* realtime reverse mapping */
 #define XFS_SCRUB_METAPATH_RTREFCOUNTBT	(5)  /* realtime refcount */
+#define XFS_SCRUB_METAPATH_QUOTADIR	(6)  /* quota metadir */
+#define XFS_SCRUB_METAPATH_USRQUOTA	(7)  /* user quota */
+#define XFS_SCRUB_METAPATH_GRPQUOTA	(8)  /* group quota */
+#define XFS_SCRUB_METAPATH_PRJQUOTA	(9)  /* project quota */
 
 /* Number of metapath sm_ino values */
-#define XFS_SCRUB_METAPATH_NR		(6)
+#define XFS_SCRUB_METAPATH_NR		(10)
 
 /*
  * ioctl limits
