@@ -25,17 +25,22 @@
  * writeback when calling the static_branch_{inc,dec} functions.
  */
 static DEFINE_STATIC_KEY_FALSE(xfs_defer_drain_waiter_gate);
+static DEFINE_MUTEX(xfs_defer_drain_waiter_gate_mutex);
 
 void
 xfs_defer_drain_wait_disable(void)
 {
+	mutex_lock(&xfs_defer_drain_waiter_gate_mutex);
 	static_branch_dec(&xfs_defer_drain_waiter_gate);
+	mutex_unlock(&xfs_defer_drain_waiter_gate_mutex);
 }
 
 void
 xfs_defer_drain_wait_enable(void)
 {
+	mutex_lock(&xfs_defer_drain_waiter_gate_mutex);
 	static_branch_inc(&xfs_defer_drain_waiter_gate);
+	mutex_unlock(&xfs_defer_drain_waiter_gate_mutex);
 }
 
 void
