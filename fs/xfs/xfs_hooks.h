@@ -24,9 +24,9 @@ struct xfs_hooks {
  * writeback when calling the static_branch_{inc,dec} functions.
  */
 # define DEFINE_STATIC_XFS_HOOK_SWITCH(name) \
-	static DEFINE_STATIC_KEY_FALSE(name)
-# define xfs_hooks_switch_on(name)	static_branch_inc(name)
-# define xfs_hooks_switch_off(name)	static_branch_dec(name)
+	static DEFINE_STATIC_KEY_FALSE(name); static DEFINE_MUTEX(name##_mutex)
+# define xfs_hooks_switch_on(name)	do { mutex_lock(name##_mutex); static_branch_inc(name); mutex_unlock(name##_mutex); } while (0)
+# define xfs_hooks_switch_off(name)	do { mutex_lock(name##_mutex); static_branch_dec(name); mutex_unlock(name##_mutex); } while (0)
 # define xfs_hooks_switched_on(name)	static_branch_unlikely(name)
 
 struct xfs_hook {
