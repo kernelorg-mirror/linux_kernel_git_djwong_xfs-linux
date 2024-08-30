@@ -3173,9 +3173,7 @@ xfs_btree_new_iroot(
 
 	xfs_btree_copy_ptrs(cur, pp, &nptr, 1);
 
-	xfs_iroot_realloc(cur->bc_ino.ip,
-			  1 - xfs_btree_get_numrecs(cblock),
-			  cur->bc_ino.whichfork);
+	xfs_iroot_realloc(cur->bc_ino.ip, xfs_btree_ifork_ptr(cur), 1);
 
 	xfs_btree_setbuf(cur, level, cbp);
 
@@ -3359,7 +3357,8 @@ xfs_btree_make_block_unfull(
 
 		if (numrecs < cur->bc_ops->get_dmaxrecs(cur, level)) {
 			/* A root block that can be made bigger. */
-			xfs_iroot_realloc(ip, 1, cur->bc_ino.whichfork);
+			xfs_iroot_realloc(ip, xfs_btree_ifork_ptr(cur),
+					numrecs + 1);
 			*stat = 1;
 		} else {
 			/* A root block that needs replacing */
@@ -3700,9 +3699,7 @@ STATIC int
 xfs_btree_kill_iroot(
 	struct xfs_btree_cur	*cur)
 {
-	int			whichfork = cur->bc_ino.whichfork;
 	struct xfs_inode	*ip = cur->bc_ino.ip;
-	struct xfs_ifork	*ifp = xfs_ifork_ptr(ip, whichfork);
 	struct xfs_btree_block	*block;
 	struct xfs_btree_block	*cblock;
 	union xfs_btree_key	*kp;
@@ -3711,7 +3708,6 @@ xfs_btree_kill_iroot(
 	union xfs_btree_ptr	*cpp;
 	struct xfs_buf		*cbp;
 	int			level;
-	int			index;
 	int			numrecs;
 	int			error;
 #ifdef DEBUG
@@ -3757,14 +3753,10 @@ xfs_btree_kill_iroot(
 	ASSERT(xfs_btree_ptr_is_null(cur, &ptr));
 #endif
 
-	index = numrecs - cur->bc_ops->get_maxrecs(cur, level);
-	if (index) {
-		xfs_iroot_realloc(cur->bc_ino.ip, index,
-				  cur->bc_ino.whichfork);
-		block = ifp->if_broot;
-	}
+	block = xfs_iroot_realloc(cur->bc_ino.ip, xfs_btree_ifork_ptr(cur),
+			numrecs);
 
-	be16_add_cpu(&block->bb_numrecs, index);
+	block->bb_numrecs = be16_to_cpu(numrecs);
 	ASSERT(block->bb_numrecs == cblock->bb_numrecs);
 
 	kp = xfs_btree_key_addr(cur, 1, block);
@@ -3944,10 +3936,11 @@ xfs_btree_delrec(
 	/*
 	 * We're at the root level.  First, shrink the root block in-memory.
 	 * Try to get rid of the next level down.  If we can't then there's
-	 * nothing left to do.
+	 * nothing left to do.  numrecs was decremented above.
 	 */
 	if (xfs_btree_at_iroot(cur, level)) {
-		xfs_iroot_realloc(cur->bc_ino.ip, -1, cur->bc_ino.whichfork);
+		xfs_iroot_realloc(cur->bc_ino.ip, xfs_btree_ifork_ptr(cur),
+				numrecs);
 
 		error = xfs_btree_kill_iroot(cur);
 		if (error)
