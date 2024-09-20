@@ -603,7 +603,7 @@ xrep_refc_build_new_tree(
 	 * to root the new btree while it's under construction and before we
 	 * attach it to the AG header.
 	 */
-	fsbno = XFS_AGB_TO_FSB(sc->mp, pag->pag_agno, xfs_refc_block(sc->mp));
+	fsbno = xfs_agbno_to_fsb(pag, xfs_refc_block(sc->mp));
 	xrep_newbt_init_ag(&rr->new_btree, sc, &XFS_RMAP_OINFO_REFC, fsbno,
 			XFS_AG_RESV_METADATA);
 	rr->new_btree.bload.get_records = xrep_refc_get_records;
