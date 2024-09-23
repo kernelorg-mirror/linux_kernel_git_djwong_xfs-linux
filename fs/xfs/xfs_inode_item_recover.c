@@ -175,7 +175,10 @@ xfs_log_dinode_to_disk(
 	to->di_mode = cpu_to_be16(from->di_mode);
 	to->di_version = from->di_version;
 	to->di_format = from->di_format;
-	to->di_onlink = 0;
+	if (from->di_flags2 & XFS_DIFLAG2_METADATA)
+		to->di_metatype = cpu_to_be16(from->di_metatype);
+	else
+		to->di_onlink = 0;
 	to->di_uid = cpu_to_be32(from->di_uid);
 	to->di_gid = cpu_to_be32(from->di_gid);
 	to->di_nlink = cpu_to_be32(from->di_nlink);
