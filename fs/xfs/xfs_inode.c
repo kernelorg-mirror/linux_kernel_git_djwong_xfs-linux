@@ -44,6 +44,7 @@
 #include "xfs_xattr.h"
 #include "xfs_inode_util.h"
 #include "xfs_metafile.h"
+#include "xfs_timestats.h"
 
 struct kmem_cache *xfs_inode_cache;
 
@@ -161,10 +162,17 @@ xfs_ilock(
 				 XFS_MMAPLOCK_DEP(lock_flags));
 	}
 
-	if (lock_flags & XFS_ILOCK_EXCL)
+	if (lock_flags & XFS_ILOCK_EXCL) {
+		DEFINE_XFS_TIMESTAT(start_time);
+
 		down_write_nested(&ip->i_lock, XFS_ILOCK_DEP(lock_flags));
-	else if (lock_flags & XFS_ILOCK_SHARED)
+		xfs_timestats_end(&ip->i_mount->m_timestats.ts_ilock, start_time);
+	} else if (lock_flags & XFS_ILOCK_SHARED) {
+		DEFINE_XFS_TIMESTAT(start_time);
+
 		down_read_nested(&ip->i_lock, XFS_ILOCK_DEP(lock_flags));
+		xfs_timestats_end(&ip->i_mount->m_timestats.ts_ilock, start_time);
+	}
 }
 
 /*
