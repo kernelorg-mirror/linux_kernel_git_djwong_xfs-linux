@@ -892,18 +892,13 @@ xfs_setattr_size(
 			error = xfs_file_unshare_at(ip, newsize);
 			if (error)
 				return error;
+
+			error = filemap_write_and_wait_range(inode->i_mapping,
+					newsize, newsize);
+			if (error)
+				return error;
 		}
 
-		/*
-		 * iomap won't detect a dirty page over an unwritten block (or a
-		 * cow block over a hole) and subsequently skips zeroing the
-		 * newly post-EOF portion of the page. Flush the new EOF to
-		 * convert the block before the pagecache truncate.
-		 */
-		error = filemap_write_and_wait_range(inode->i_mapping, newsize,
-						     newsize);
-		if (error)
-			return error;
 		error = xfs_truncate_page(ip, newsize, &did_zeroing);
 	}
 
