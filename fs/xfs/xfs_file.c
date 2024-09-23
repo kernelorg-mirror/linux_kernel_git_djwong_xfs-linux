@@ -1133,7 +1133,7 @@ xfs_falloc_zero_range(
 	loff_t			new_size = 0;
 	int			error;
 
-	trace_xfs_zero_file_space(XFS_I(inode));
+	trace_xfs_zero_file_space(XFS_I(inode), offset, len);
 
 	error = xfs_falloc_newsize(file, mode, offset, len, &new_size);
 	if (error)
