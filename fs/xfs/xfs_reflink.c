@@ -1822,3 +1822,25 @@ out:
 	trace_xfs_reflink_unshare_error(ip, error, _RET_IP_);
 	return error;
 }
+
+/* Can we use reflink given this file allocation unit size? */
+bool
+xfs_reflink_supports_alloc_unit(
+	struct xfs_mount	*mp,
+	unsigned int		alloc_unit_fsb)
+{
+	/* reflink on the realtime device requires rtgroups */
+	if (!xfs_has_rtgroups(mp))
+	       return false;
+
+	/*
+	 * Reflink doesn't support file allocation units larger than a single
+	 * block because we would have to perform CoW-around for unaligned
+	 * write requests to guarantee that we always remap entire allocation
+	 * units.
+	 */
+	if (alloc_unit_fsb != 1)
+		return false;
+
+	return true;
+}
