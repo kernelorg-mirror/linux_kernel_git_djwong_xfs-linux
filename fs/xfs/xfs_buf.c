@@ -23,6 +23,7 @@
 #include "xfs_ag.h"
 #include "xfs_buf_mem.h"
 #include "xfs_timestats.h"
+#include "xfs_notify_failure.h"
 
 struct kmem_cache *xfs_buf_cache;
 
