@@ -157,6 +157,18 @@ xfs_rtb_to_rtxoff(
 	return do_div(rtbno, mp->m_sb.sb_rextsize);
 }
 
+/* Return the offset of a file block offset within an rt extent. */
+static inline xfs_extlen_t
+xfs_fileoff_to_rtxoff(
+	struct xfs_mount	*mp,
+	xfs_fileoff_t		off)
+{
+	if (likely(mp->m_rtxblklog >= 0))
+		return off & mp->m_rtxblkmask;
+
+	return do_div(off, mp->m_sb.sb_rextsize);
+}
+
 /* Round this file block offset up to the nearest rt extent size. */
 static inline xfs_rtblock_t
 xfs_fileoff_roundup_rtx(
