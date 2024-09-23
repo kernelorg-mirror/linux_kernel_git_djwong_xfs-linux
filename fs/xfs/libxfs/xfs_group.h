@@ -72,4 +72,11 @@ int xfs_group_insert(struct xfs_mount *mp, struct xfs_group *xg,
 #define xfs_group_marked(_mp, _type, _mark) \
 	xa_marked(&(_mp)->m_groups[(_type)].xa, (_mark))
 
+xfs_fsblock_t xfs_gbno_to_fsb(struct xfs_group *xg, xfs_agblock_t gbno);
+xfs_daddr_t xfs_gbno_to_daddr(struct xfs_group *xg, xfs_agblock_t gbno);
+uint32_t xfs_fsb_to_gno(struct xfs_mount *mp, xfs_fsblock_t fsbno,
+		enum xfs_group_type type);
+struct xfs_group *xfs_group_get_by_fsb(struct xfs_mount *mp,
+		xfs_fsblock_t fsbno, enum xfs_group_type type);
+
 #endif /* __LIBXFS_GROUP_H */
