@@ -179,6 +179,10 @@ xfs_rtgroup_lock(
 	} else if (rtglock_flags & XFS_RTGLOCK_BITMAP_SHARED) {
 		xfs_ilock(rtg->rtg_inodes[XFS_RTGI_BITMAP], XFS_ILOCK_SHARED);
 	}
+
+	if ((rtglock_flags & XFS_RTGLOCK_RMAP) &&
+	    rtg->rtg_inodes[XFS_RTGI_RMAP] != NULL)
+		xfs_ilock(rtg->rtg_inodes[XFS_RTGI_RMAP], XFS_ILOCK_EXCL);
 }
 
 /* Unlock metadata inodes associated with this rt group. */
@@ -190,6 +194,9 @@ xfs_rtgroup_unlock(
 	ASSERT(!(rtglock_flags & ~XFS_RTGLOCK_ALL_FLAGS));
 	ASSERT(!(rtglock_flags & XFS_RTGLOCK_BITMAP_SHARED) ||
 	       !(rtglock_flags & XFS_RTGLOCK_BITMAP));
+
+	if ((rtglock_flags & XFS_RTGLOCK_RMAP) && rtg->rtg_inodes[XFS_RTGI_RMAP])
+		xfs_iunlock(rtg->rtg_inodes[XFS_RTGI_RMAP], XFS_ILOCK_EXCL);
 
 	if (rtglock_flags & XFS_RTGLOCK_BITMAP) {
 		xfs_iunlock(rtg->rtg_inodes[XFS_RTGI_SUMMARY], XFS_ILOCK_EXCL);
@@ -218,6 +225,11 @@ xfs_rtgroup_trans_join(
 		xfs_trans_ijoin(tp, rtg->rtg_inodes[XFS_RTGI_SUMMARY],
 				XFS_ILOCK_EXCL);
 	}
+
+	if ((rtglock_flags & XFS_RTGLOCK_RMAP) &&
+	    rtg->rtg_inodes[XFS_RTGI_RMAP] != NULL)
+		xfs_trans_ijoin(tp, rtg->rtg_inodes[XFS_RTGI_RMAP],
+				XFS_ILOCK_EXCL);
 }
 
 /* Retrieve rt group geometry. */
