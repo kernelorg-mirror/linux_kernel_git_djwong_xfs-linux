@@ -1284,9 +1284,9 @@ xfs_growfs_rt(
 
 	/* Unsupported realtime features. */
 	error = -EOPNOTSUPP;
-	if (xfs_has_quota(mp) && !xfs_has_rtgroups(mp))
+	if ((xfs_has_rmapbt(mp) || xfs_has_quota(mp)) && !xfs_has_rtgroups(mp))
 		goto out_unlock;
-	if (xfs_has_rmapbt(mp) || xfs_has_reflink(mp))
+	if (xfs_has_reflink(mp))
 		goto out_unlock;
 
 	error = xfs_sb_validate_fsb_count(&mp->m_sb, in->newblocks);
