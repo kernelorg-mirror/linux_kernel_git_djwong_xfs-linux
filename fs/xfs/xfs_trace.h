@@ -2593,7 +2593,7 @@ TRACE_EVENT(xfs_btree_alloc_block,
 			__entry->ino = cur->bc_ino.ip->i_ino;
 			break;
 		case XFS_BTREE_TYPE_AG:
-			__entry->agno = pag_agno(cur->bc_ag.pag);
+			__entry->agno = cur->bc_group->xg_index;
 			__entry->ino = 0;
 			break;
 		case XFS_BTREE_TYPE_MEM:
@@ -2849,7 +2849,7 @@ DECLARE_EVENT_CLASS(xfs_rmap_class,
 	),
 	TP_fast_assign(
 		__entry->dev = cur->bc_mp->m_super->s_dev;
-		__entry->agno = pag_agno(cur->bc_ag.pag);
+		__entry->agno = cur->bc_group->xg_index;
 		__entry->agbno = agbno;
 		__entry->len = len;
 		__entry->owner = oinfo->oi_owner;
@@ -2894,7 +2894,7 @@ DECLARE_EVENT_CLASS(xfs_btree_error_class,
 			__entry->ino = cur->bc_ino.ip->i_ino;
 			break;
 		case XFS_BTREE_TYPE_AG:
-			__entry->agno = pag_agno(cur->bc_ag.pag);
+			__entry->agno = cur->bc_group->xg_index;
 			__entry->ino = 0;
 			break;
 		case XFS_BTREE_TYPE_MEM:
@@ -2948,7 +2948,7 @@ TRACE_EVENT(xfs_rmap_convert_state,
 			__entry->ino = cur->bc_ino.ip->i_ino;
 			break;
 		case XFS_BTREE_TYPE_AG:
-			__entry->agno = pag_agno(cur->bc_ag.pag);
+			__entry->agno = cur->bc_group->xg_index;
 			__entry->ino = 0;
 			break;
 		case XFS_BTREE_TYPE_MEM:
@@ -2983,7 +2983,7 @@ DECLARE_EVENT_CLASS(xfs_rmapbt_class,
 	),
 	TP_fast_assign(
 		__entry->dev = cur->bc_mp->m_super->s_dev;
-		__entry->agno = pag_agno(cur->bc_ag.pag);
+		__entry->agno = cur->bc_group->xg_index;
 		__entry->agbno = agbno;
 		__entry->len = len;
 		__entry->owner = owner;
@@ -3227,7 +3227,7 @@ DECLARE_EVENT_CLASS(xfs_refcount_class,
 	),
 	TP_fast_assign(
 		__entry->dev = cur->bc_mp->m_super->s_dev;
-		__entry->agno = pag_agno(cur->bc_ag.pag);
+		__entry->agno = cur->bc_group->xg_index;
 		__entry->agbno = agbno;
 		__entry->len = len;
 	),
@@ -3258,7 +3258,7 @@ TRACE_EVENT(xfs_refcount_lookup,
 	),
 	TP_fast_assign(
 		__entry->dev = cur->bc_mp->m_super->s_dev;
-		__entry->agno = pag_agno(cur->bc_ag.pag);
+		__entry->agno = cur->bc_group->xg_index;
 		__entry->agbno = agbno;
 		__entry->dir = dir;
 	),
@@ -3284,7 +3284,7 @@ DECLARE_EVENT_CLASS(xfs_refcount_extent_class,
 	),
 	TP_fast_assign(
 		__entry->dev = cur->bc_mp->m_super->s_dev;
-		__entry->agno = pag_agno(cur->bc_ag.pag);
+		__entry->agno = cur->bc_group->xg_index;
 		__entry->domain = irec->rc_domain;
 		__entry->startblock = irec->rc_startblock;
 		__entry->blockcount = irec->rc_blockcount;
@@ -3320,7 +3320,7 @@ DECLARE_EVENT_CLASS(xfs_refcount_extent_at_class,
 	),
 	TP_fast_assign(
 		__entry->dev = cur->bc_mp->m_super->s_dev;
-		__entry->agno = pag_agno(cur->bc_ag.pag);
+		__entry->agno = cur->bc_group->xg_index;
 		__entry->domain = irec->rc_domain;
 		__entry->startblock = irec->rc_startblock;
 		__entry->blockcount = irec->rc_blockcount;
@@ -3362,7 +3362,7 @@ DECLARE_EVENT_CLASS(xfs_refcount_double_extent_class,
 	),
 	TP_fast_assign(
 		__entry->dev = cur->bc_mp->m_super->s_dev;
-		__entry->agno = pag_agno(cur->bc_ag.pag);
+		__entry->agno = cur->bc_group->xg_index;
 		__entry->i1_domain = i1->rc_domain;
 		__entry->i1_startblock = i1->rc_startblock;
 		__entry->i1_blockcount = i1->rc_blockcount;
@@ -3412,7 +3412,7 @@ DECLARE_EVENT_CLASS(xfs_refcount_double_extent_at_class,
 	),
 	TP_fast_assign(
 		__entry->dev = cur->bc_mp->m_super->s_dev;
-		__entry->agno = pag_agno(cur->bc_ag.pag);
+		__entry->agno = cur->bc_group->xg_index;
 		__entry->i1_domain = i1->rc_domain;
 		__entry->i1_startblock = i1->rc_startblock;
 		__entry->i1_blockcount = i1->rc_blockcount;
@@ -3467,7 +3467,7 @@ DECLARE_EVENT_CLASS(xfs_refcount_triple_extent_class,
 	),
 	TP_fast_assign(
 		__entry->dev = cur->bc_mp->m_super->s_dev;
-		__entry->agno = pag_agno(cur->bc_ag.pag);
+		__entry->agno = cur->bc_group->xg_index;
 		__entry->i1_domain = i1->rc_domain;
 		__entry->i1_startblock = i1->rc_startblock;
 		__entry->i1_blockcount = i1->rc_blockcount;
@@ -4357,7 +4357,7 @@ TRACE_EVENT(xfs_btree_commit_afakeroot,
 	TP_fast_assign(
 		__entry->dev = cur->bc_mp->m_super->s_dev;
 		__assign_str(name);
-		__entry->agno = pag_agno(cur->bc_ag.pag);
+		__entry->agno = cur->bc_group->xg_index;
 		__entry->agbno = cur->bc_ag.afake->af_root;
 		__entry->levels = cur->bc_ag.afake->af_levels;
 		__entry->blocks = cur->bc_ag.afake->af_blocks;
@@ -4472,7 +4472,7 @@ TRACE_EVENT(xfs_btree_bload_block,
 			__entry->agno = XFS_FSB_TO_AGNO(cur->bc_mp, fsb);
 			__entry->agbno = XFS_FSB_TO_AGBNO(cur->bc_mp, fsb);
 		} else {
-			__entry->agno = pag_agno(cur->bc_ag.pag);
+			__entry->agno = cur->bc_group->xg_index;
 			__entry->agbno = be32_to_cpu(ptr->s);
 		}
 		__entry->nr_records = nr_records;
