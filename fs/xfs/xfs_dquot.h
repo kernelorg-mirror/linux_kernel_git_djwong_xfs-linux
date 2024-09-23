@@ -126,10 +126,14 @@ static inline int xfs_dqlock_nowait(struct xfs_dquot *dqp)
 	return mutex_trylock(&dqp->q_qlock);
 }
 
+#ifdef CONFIG_XFS_TIME_STATS
+void xfs_dqlock(struct xfs_dquot *dqp);
+#else
 static inline void xfs_dqlock(struct xfs_dquot *dqp)
 {
 	mutex_lock(&dqp->q_qlock);
 }
+#endif
 
 static inline void xfs_dqunlock(struct xfs_dquot *dqp)
 {
