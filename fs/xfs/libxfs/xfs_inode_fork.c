@@ -275,8 +275,10 @@ xfs_iformat_data_fork(
 			 * realtime volume to the filesystem, so we cannot use
 			 * the rtrmapbt predicate here.
 			 */
-			if (!xfs_has_rmapbt(ip->i_mount))
+			if (!xfs_has_rmapbt(ip->i_mount)) {
+				xfs_inode_mark_sick(ip, XFS_SICK_INO_CORE);
 				return -EFSCORRUPTED;
+			}
 			return xfs_iformat_rtrmap(ip, dip);
 		default:
 			xfs_inode_verifier_error(ip, -EFSCORRUPTED, __func__,
