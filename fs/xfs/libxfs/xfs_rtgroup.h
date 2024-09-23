@@ -117,6 +117,40 @@ xfs_rtgroup_next(
 	return xfs_rtgroup_next_range(mp, rtg, 0, mp->m_sb.sb_rgcount - 1);
 }
 
+/*
+ * Check that [@rgbno,@len] is a valid extent range in @rtg.
+ *
+ * Must only be used for RTG-enabled file systems.
+ */
+static inline bool
+xfs_verify_rgbext(
+	struct xfs_rtgroup	*rtg,
+	xfs_rgblock_t		rgbno,
+	xfs_extlen_t		len)
+{
+	struct xfs_mount	*mp = rtg_mount(rtg);
+	xfs_rgblock_t		rg_end = rtg->rtg_extents * mp->m_sb.sb_rextsize;
+	xfs_rgblock_t		end;
+
+	if (rgbno >= rg_end)
+		return false;
+	if (check_add_overflow(rgbno, len - 1, &end))
+		return false;
+	if (end >= rg_end)
+		return false;
+
+	/*
+	 * Check that the extent does not overlap the superblock if there is
+	 * one in this RTG.
+	 */
+	if (xfs_has_rtsb(mp) && rtg_rgno(rtg) == 0) {
+		if (rgbno < mp->m_sb.sb_rextsize)
+			return false;
+	}
+
+	return true;
+}
+
 static inline xfs_rtblock_t
 xfs_rgno_start_rtb(
 	struct xfs_mount	*mp,
