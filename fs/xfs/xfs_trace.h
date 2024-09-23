@@ -104,6 +104,7 @@ struct xfs_metadir_update;
 struct xfs_rtgroup;
 struct xfs_fsrefs;
 struct xfs_fsrefs_irec;
+struct xfs_rtgroup;
 
 #define XFS_ATTR_FILTER_FLAGS \
 	{ XFS_ATTR_ROOT,	"ROOT" }, \
@@ -1633,6 +1634,9 @@ DEFINE_SIMPLE_IO_EVENT(xfs_free_file_space);
 DEFINE_SIMPLE_IO_EVENT(xfs_zero_file_space);
 DEFINE_SIMPLE_IO_EVENT(xfs_collapse_file_space);
 DEFINE_SIMPLE_IO_EVENT(xfs_insert_file_space);
+#ifdef CONFIG_XFS_RT
+DEFINE_SIMPLE_IO_EVENT(xfs_map_free_rt_space);
+#endif /* CONFIG_XFS_RT */
 DEFINE_SIMPLE_IO_EVENT(xfs_map_free_space);
 
 DECLARE_EVENT_CLASS(xfs_itrunc_class,
@@ -1752,6 +1756,9 @@ DEFINE_EVENT(xfs_map_free_extent_class, name, \
 	TP_PROTO(struct xfs_inode *ip, xfs_fileoff_t bno, xfs_extlen_t len), \
 	TP_ARGS(ip, bno, len))
 DEFINE_MAP_FREE_EXTENT_EVENT(xfs_map_free_ag_extent);
+#ifdef CONFIG_XFS_RT
+DEFINE_MAP_FREE_EXTENT_EVENT(xfs_map_free_rt_extent);
+#endif
 
 DECLARE_EVENT_CLASS(xfs_extent_busy_class,
 	TP_PROTO(const struct xfs_group *xg, xfs_agblock_t agbno,
@@ -1896,6 +1903,37 @@ TRACE_EVENT(xfs_rtalloc_extent_busy_trim,
 		  __entry->new_rtx,
 		  __entry->new_len)
 );
+
+DECLARE_EVENT_CLASS(xfs_rtextent_class,
+	TP_PROTO(struct xfs_rtgroup *rtg, xfs_rtxnum_t off_rtx,
+		 xfs_rtxlen_t len_rtx),
+	TP_ARGS(rtg, off_rtx, len_rtx),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_rgnumber_t, rgno)
+		__field(xfs_rtxnum_t, off_rtx)
+		__field(xfs_rtxlen_t, len_rtx)
+	),
+	TP_fast_assign(
+		__entry->dev = rtg_mount(rtg)->m_super->s_dev;
+		__entry->rgno = rtg_rgno(rtg);
+		__entry->off_rtx = off_rtx;
+		__entry->len_rtx = len_rtx;
+	),
+	TP_printk("dev %d:%d rgno 0x%x rtx 0x%llx rtxcount 0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->rgno,
+		  __entry->off_rtx,
+		  __entry->len_rtx)
+);
+#define DEFINE_RTEXTENT_EVENT(name) \
+DEFINE_EVENT(xfs_rtextent_class, name, \
+	TP_PROTO(struct xfs_rtgroup *rtg, xfs_rtxnum_t off_rtx, \
+		 xfs_rtxlen_t len_rtx), \
+	TP_ARGS(rtg, off_rtx, len_rtx))
+DEFINE_RTEXTENT_EVENT(xfs_rtallocate_exact);
+DEFINE_RTEXTENT_EVENT(xfs_rtallocate_find_freesp);
+DEFINE_RTEXTENT_EVENT(xfs_rtallocate_find_freesp_done);
 #endif /* CONFIG_XFS_RT */
 
 DECLARE_EVENT_CLASS(xfs_agf_class,
@@ -3895,6 +3933,9 @@ DEFINE_EVENT(xfs_inode_irec_class, name, \
 	TP_PROTO(struct xfs_inode *ip, struct xfs_bmbt_irec *irec), \
 	TP_ARGS(ip, irec))
 DEFINE_INODE_IREC_EVENT(xfs_map_free_ag_extent_done);
+#ifdef CONFIG_XFS_RT
+DEFINE_INODE_IREC_EVENT(xfs_map_free_rt_extent_done);
+#endif
 
 /* inode iomap invalidation events */
 DECLARE_EVENT_CLASS(xfs_wb_invalid_class,
