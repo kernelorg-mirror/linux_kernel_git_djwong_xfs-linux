@@ -1758,7 +1758,7 @@ xfs_fs_fill_super(
 	if (xfs_has_reflink(mp)) {
 		if (!xfs_reflink_supports_alloc_unit(mp, mp->m_sb.sb_rextsize)) {
 			xfs_alert(mp,
-	"reflink not compatible with realtime extent size %u!",
+	"reflink not compatible with non-power-of-2 realtime extent size %u!",
 					mp->m_sb.sb_rextsize);
 			error = -EINVAL;
 			goto out_filestream_unmount;
