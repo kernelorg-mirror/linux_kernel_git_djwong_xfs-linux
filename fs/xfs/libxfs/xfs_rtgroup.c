@@ -266,6 +266,9 @@ xfs_rtginode_ilock_print_fn(
 	case XFS_DINODE_FMT_RMAP:
 		printk(KERN_CONT " rgno=%u rmapbt", ip->i_projid);
 		break;
+	case XFS_DINODE_FMT_REFCOUNT:
+		printk(KERN_CONT " rgno=%u refcountbt", ip->i_projid);
+		break;
 	default:
 		printk(KERN_CONT " rgno=%u", ip->i_projid);
 		break;
@@ -342,6 +345,13 @@ static const struct xfs_rtginode_ops xfs_rtginode_ops[XFS_RTGI_MAX] = {
 		 */
 		.enabled	= xfs_has_rmapbt,
 		.create		= xfs_rtrmapbt_create,
+	},
+	[XFS_RTGI_REFCOUNT] = {
+		.name		= "refcount",
+		.metafile_type	= XFS_METAFILE_RTREFCOUNT,
+		.fmt_mask	= 1U << XFS_DINODE_FMT_REFCOUNT,
+		/* same comment about growfs and rmap inodes applies here */
+		.enabled	= xfs_has_reflink,
 	},
 };
 
