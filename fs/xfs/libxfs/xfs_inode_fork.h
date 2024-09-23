@@ -185,9 +185,6 @@ xfs_broot_free(struct xfs_ifork *ifp)
 	__xfs_broot_realloc(ifp, 0, 0);
 }
 
-struct xfs_btree_block *xfs_iroot_realloc(struct xfs_inode *ip,
-				struct xfs_ifork *ifp,
-				unsigned int new_numrecs);
 int		xfs_iread_extents(struct xfs_trans *, struct xfs_inode *, int);
 int		xfs_iextents_copy(struct xfs_inode *, struct xfs_bmbt_rec *,
 				  int);
