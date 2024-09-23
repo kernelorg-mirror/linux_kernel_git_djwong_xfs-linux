@@ -22,6 +22,7 @@
 #include "xfs_dir2.h"
 #include "xfs_parent.h"
 #include "xfs_icache.h"
+#include "xfs_timestats.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -685,7 +686,6 @@ xfs_scrub_metadata(
 	struct xchk_stats_run		run = { };
 	struct xfs_scrub		*sc;
 	struct xfs_mount		*mp = XFS_I(file_inode(file))->i_mount;
-	u64				check_start;
 	int				error = 0;
 
 	BUILD_BUG_ON(sizeof(meta_scrub_ops) !=
@@ -743,12 +743,12 @@ retry_op:
 		goto out_teardown;
 
 	/* Scrub for errors. */
-	check_start = xchk_stats_now();
+	run.scrub_start = xchk_stats_now();
 	if ((sc->flags & XREP_ALREADY_FIXED) && sc->ops->repair_eval != NULL)
 		error = sc->ops->repair_eval(sc);
 	else
 		error = sc->ops->scrub(sc);
-	run.scrub_ns += xchk_stats_elapsed_ns(check_start);
+	run.scrub_stop = xchk_stats_now();
 	if (error == -EDEADLOCK && !(sc->flags & XCHK_TRY_HARDER))
 		goto try_harder;
 	if (error == -ECHRNG && !(sc->flags & XCHK_NEED_DRAIN))
