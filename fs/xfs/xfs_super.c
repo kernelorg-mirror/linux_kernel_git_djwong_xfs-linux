@@ -2027,6 +2027,7 @@ xfs_init_fs_context(
 		return -ENOMEM;
 
 	spin_lock_init(&mp->m_sb_lock);
+
 	for (i = 0; i < XG_TYPE_MAX; i++)
 		xa_init(&mp->m_groups[i].xa);
 	mutex_init(&mp->m_growlock);
