@@ -50,6 +50,30 @@
 #include "xfs_metadir.h"
 #include "xfs_rtgroup.h"
 
+static inline void
+xfs_rmapbt_crack_agno_opdev(
+	struct xfs_btree_cur	*cur,
+	xfs_agnumber_t		*agno,
+	dev_t			*opdev)
+{
+	if (cur->bc_group)
+		*agno = cur->bc_group->xg_index;
+	else
+		*agno = 0;
+
+	switch (cur->bc_ops->type) {
+	case XFS_BTREE_TYPE_INODE:
+		*opdev = cur->bc_mp->m_rtdev_targp->bt_dev;
+		break;
+	case XFS_BTREE_TYPE_AG:
+		*opdev = cur->bc_mp->m_super->s_dev;
+		break;
+	case XFS_BTREE_TYPE_MEM:
+		*opdev = (dev_t)-1;
+		break;
+	}
+}
+
 /*
  * We include this last to have the helpers above available for the trace
  * event implementations.
