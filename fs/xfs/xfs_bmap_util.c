@@ -2217,3 +2217,205 @@ out:
 		return 0;
 	return error;
 }
+
+#ifdef CONFIG_XFS_RT
+/*
+ * Given a file and a free rt extent, map it into the file at the same offset
+ * if the file were a sparse image of the physical device.  Set @mval to
+ * whatever mapping we added to the file.
+ */
+STATIC int
+xfs_map_free_rtgroup_extent(
+	struct xfs_trans	*tp,
+	struct xfs_inode	*ip,
+	struct xfs_rtgroup	*rtg,
+	xfs_rtxnum_t		rtx,
+	xfs_rtxlen_t		rtxlen,
+	struct xfs_bmbt_irec	*mval)
+{
+	struct xfs_bmbt_irec	irec;
+	struct xfs_mount	*mp = ip->i_mount;
+	xfs_fsblock_t		fsbno = xfs_rtx_to_rtb(rtg, rtx);
+	xfs_fileoff_t		startoff = fsbno;
+	xfs_extlen_t		len = xfs_rtbxlen_to_blen(mp, rtxlen);
+	int			nimaps;
+	int			error;
+
+	ASSERT(XFS_IS_REALTIME_INODE(ip));
+
+	trace_xfs_map_free_rt_extent(ip, fsbno, len);
+
+	/* Make sure the entire range is a hole. */
+	nimaps = 1;
+	error = xfs_bmapi_read(ip, startoff, len, &irec, &nimaps, 0);
+	if (error)
+		return error;
+
+	if (irec.br_startoff != startoff ||
+	    irec.br_startblock != HOLESTARTBLOCK ||
+	    irec.br_blockcount < len)
+		return -EINVAL;
+
+	error = xfs_iext_count_extend(tp, ip, XFS_DATA_FORK,
+			XFS_IEXT_ADD_NOSPLIT_CNT);
+	if (error)
+		return error;
+
+	/*
+	 * Allocate the physical extent.  We should not have dropped the lock
+	 * since the scan of the free space metadata, so this should work,
+	 * though the length may be adjusted to play nicely with metadata space
+	 * reservations.
+	 */
+	error = xfs_rtallocate_exact(tp, rtg, rtx, rtxlen);
+	if (error)
+		return error;
+
+	/* Map extent into file, update quota. */
+	mval->br_blockcount = len;
+	mval->br_startblock = fsbno;
+	mval->br_startoff = startoff;
+	mval->br_state = XFS_EXT_UNWRITTEN;
+
+	trace_xfs_map_free_rt_extent_done(ip, mval);
+
+	xfs_bmap_map_extent(tp, ip, XFS_DATA_FORK, mval);
+	xfs_trans_mod_dquot_byino(tp, ip, XFS_TRANS_DQ_RTBCOUNT,
+			mval->br_blockcount);
+
+	return 0;
+}
+
+/* Find a free extent in this rtgroup and map it into the file. */
+STATIC int
+xfs_map_free_rt_extent(
+	struct xfs_inode	*ip,
+	struct xfs_rtgroup	*rtg,
+	xfs_rtxnum_t		*cursor,
+	xfs_rtxnum_t		end_rtx)
+{
+	struct xfs_bmbt_irec	irec;
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_trans	*tp;
+	loff_t			endpos;
+	xfs_rtxlen_t		len_rtx;
+	xfs_extlen_t		free_len;
+	int			error;
+
+	if (fatal_signal_pending(current))
+		return -EINTR;
+
+	error = xfs_trans_alloc_inode(ip, &M_RES(mp)->tr_write, 0, 0, false,
+			&tp);
+	if (error)
+		return error;
+
+	xfs_rtgroup_lock(rtg, XFS_RTGLOCK_BITMAP);
+
+	error = xfs_rtallocate_find_freesp(tp, rtg, cursor, end_rtx, &len_rtx);
+	if (error)
+		goto out_rtglock;
+
+	/*
+	 * If off_rtx is beyond the end of the rt device or is past what the
+	 * user asked for, bail out.
+	 */
+	if (*cursor >= end_rtx)
+		goto out_rtglock;
+
+	free_len = xfs_rtxlen_to_extlen(mp, len_rtx);
+	error = xfs_map_free_reserve_more(tp, ip, &free_len);
+	if (error)
+		goto out_rtglock;
+
+	error = xfs_map_free_rtgroup_extent(tp, ip, rtg, *cursor, len_rtx,
+			&irec);
+	if (error == -EAGAIN) {
+		/*
+		 * The allocator was busy and told us to try again.  The
+		 * transaction could be dirty due to a nrext64 upgrade, so
+		 * commit the transaction and try again without advancing
+		 * the cursor.
+		 *
+		 * XXX do we fail to unlock something here?
+		 */
+		xfs_rtgroup_unlock(rtg, XFS_RTGLOCK_BITMAP);
+		error = xfs_trans_commit(tp);
+		xfs_iunlock(ip, XFS_ILOCK_EXCL);
+		return error;
+	}
+	if (error)
+		goto out_cancel;
+
+	/* Update isize if needed. */
+	endpos = XFS_FSB_TO_B(mp, irec.br_startoff + irec.br_blockcount);
+	if (endpos > i_size_read(VFS_I(ip))) {
+		i_size_write(VFS_I(ip), endpos);
+		ip->i_disk_size = endpos;
+		xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
+	}
+
+	error = xfs_trans_commit(tp);
+	xfs_iunlock(ip, XFS_ILOCK_EXCL);
+	if (error)
+		return error;
+
+	ASSERT(xfs_blen_to_rtxoff(mp, irec.br_blockcount) == 0);
+	*cursor += xfs_extlen_to_rtxlen(mp, irec.br_blockcount);
+	return 0;
+out_rtglock:
+	xfs_rtgroup_unlock(rtg, XFS_RTGLOCK_BITMAP);
+out_cancel:
+	xfs_trans_cancel(tp);
+	xfs_iunlock(ip, XFS_ILOCK_EXCL);
+	return error;
+}
+
+/*
+ * Allocate all free physical space between off and len and map it to this
+ * regular realtime file.
+ */
+int
+xfs_map_free_rt_space(
+	struct xfs_inode	*ip,
+	xfs_off_t		off,
+	xfs_off_t		len)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_rtgroup	*rtg = NULL;
+	xfs_daddr_t		off_daddr = BTOBB(off);
+	xfs_daddr_t		end_daddr = BTOBBT(off + len);
+	xfs_rtblock_t		off_rtb = xfs_daddr_to_rtb(mp, off_daddr);
+	xfs_rtblock_t		end_rtb = xfs_daddr_to_rtb(mp, end_daddr);
+	xfs_rgnumber_t		off_rgno = xfs_rtb_to_rgno(mp, off_rtb);
+	xfs_rgnumber_t		end_rgno = xfs_rtb_to_rgno(mp, end_rtb);
+	int			error = 0;
+
+	trace_xfs_map_free_rt_space(ip, off, len);
+
+	while ((rtg = xfs_rtgroup_next_range(mp, rtg, off_rgno,
+					     mp->m_sb.sb_rgcount))) {
+		xfs_rtxnum_t	off_rtx = 0;
+		xfs_rtxnum_t	end_rtx = rtg->rtg_extents;
+
+		if (rtg_rgno(rtg) == off_rgno)
+			off_rtx = xfs_rtb_to_rtx(mp, off_rtb);
+		if (rtg_rgno(rtg) == end_rgno)
+			end_rtx = min(end_rtx, xfs_rtb_to_rtx(mp, end_rtb));
+
+		while (off_rtx < end_rtx) {
+			error = xfs_map_free_rt_extent(ip, rtg, &off_rtx,
+					end_rtx);
+			if (error)
+				goto out;
+		}
+	}
+
+out:
+	if (rtg)
+		xfs_rtgroup_rele(rtg);
+	if (error == -ENOSPC)
+		return 0;
+	return error;
+}
+#endif
