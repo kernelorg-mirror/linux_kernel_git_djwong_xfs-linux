@@ -994,6 +994,7 @@ xfs_growfs_rt_bmblock(
 	 */
 	mp->m_features |= XFS_FEAT_REALTIME;
 	xfs_rtrmapbt_compute_maxlevels(mp);
+	xfs_rtrefcountbt_compute_maxlevels(mp);
 
 	kfree(nmp);
 	return 0;
@@ -1176,6 +1177,7 @@ xfs_growfs_check_rtgeom(
 	nmp->m_sb.sb_dblocks = dblocks;
 
 	xfs_rtrmapbt_compute_maxlevels(nmp);
+	xfs_rtrefcountbt_compute_maxlevels(nmp);
 	xfs_trans_resv_calc(nmp, M_RES(nmp));
 
 	/*
