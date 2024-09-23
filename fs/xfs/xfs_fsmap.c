@@ -723,9 +723,9 @@ xfs_getfsmap_rtdev_rtbitmap_helper(
 	struct xfs_mount		*mp = rtg_mount(rtg);
 	struct xfs_getfsmap_info	*info = priv;
 	xfs_rtblock_t			start_rtb =
-				xfs_rtx_to_rtb(mp, rec->ar_startext);
+				xfs_rtx_to_rtb(rtg, rec->ar_startext);
 	uint64_t			rtbcount =
-				xfs_rtx_to_rtb(mp, rec->ar_extcount);
+				xfs_rtbxlen_to_blen(mp, rec->ar_extcount);
 
 	/*
 	 * For an info->last query, we're looking for a gap between the last
