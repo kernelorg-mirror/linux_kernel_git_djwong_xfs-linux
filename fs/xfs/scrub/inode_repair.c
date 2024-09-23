@@ -526,8 +526,12 @@ xrep_dinode_nlinks(
 		return;
 	}
 
-	if (!(dip->di_flags2 & cpu_to_be64(XFS_DIFLAG2_METADATA)))
+	if (dip->di_flags2 & cpu_to_be64(XFS_DIFLAG2_METADATA)) {
+		if (be16_to_cpu(dip->di_metatype) >= XFS_METAFILE_MAX)
+			dip->di_metatype = cpu_to_be16(XFS_METAFILE_UNKNOWN);
+	} else {
 		dip->di_onlink = 0;
+	}
 }
 
 /* Fix any conflicting flags that the verifiers complain about. */
