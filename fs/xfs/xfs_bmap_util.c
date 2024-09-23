@@ -30,6 +30,10 @@
 #include "xfs_reflink.h"
 #include "xfs_rtbitmap.h"
 #include "xfs_rtgroup.h"
+#include "xfs_health.h"
+#include "xfs_alloc_btree.h"
+#include "xfs_rmap.h"
+#include "xfs_ag.h"
 
 /* Kernel only BMAP related definitions and functions */
 
@@ -1914,3 +1918,302 @@ xfs_convert_rtbigalloc_file_space(
 	return 0;
 }
 #endif /* CONFIG_XFS_RT */
+
+/*
+ * Reserve space and quota to this transaction to map in as much free space
+ * as we can.  Callers should set @len to the amount of space desired; this
+ * function will shorten that quantity if it can't get space.
+ */
+STATIC int
+xfs_map_free_reserve_more(
+	struct xfs_trans	*tp,
+	struct xfs_inode	*ip,
+	xfs_extlen_t		*len)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	unsigned int		dblocks;
+	unsigned int		rblocks;
+	unsigned int		min_len;
+	bool			isrt = XFS_IS_REALTIME_INODE(ip);
+	int			error;
+
+	if (*len > XFS_MAX_BMBT_EXTLEN)
+		*len = XFS_MAX_BMBT_EXTLEN;
+	min_len = isrt ? mp->m_sb.sb_rextsize : 1;
+
+again:
+	if (isrt) {
+		dblocks = XFS_EXTENTADD_SPACE_RES(mp, XFS_DATA_FORK);
+		rblocks = *len;
+	} else {
+		dblocks = XFS_DIOSTRAT_SPACE_RES(mp, *len);
+		rblocks = 0;
+	}
+	error = xfs_trans_reserve_more_inode(tp, ip, dblocks, rblocks, false);
+	if (error == -ENOSPC && *len > min_len) {
+		*len >>= 1;
+		goto again;
+	}
+	if (error) {
+		trace_xfs_map_free_reserve_more_fail(ip, error, _RET_IP_);
+		return error;
+	}
+
+	return 0;
+}
+
+static inline xfs_fileoff_t
+xfs_fsblock_to_fileoff(
+	struct xfs_mount	*mp,
+	xfs_fsblock_t		fsbno)
+{
+	xfs_daddr_t		daddr = XFS_FSB_TO_DADDR(mp, fsbno);
+
+	return XFS_B_TO_FSB(mp, BBTOB(daddr));
+}
+
+/*
+ * Given a file and a free physical extent, map it into the file at the same
+ * offset if the file were a sparse image of the physical device.  Set @mval to
+ * whatever mapping we added to the file.
+ */
+STATIC int
+xfs_map_free_ag_extent(
+	struct xfs_trans	*tp,
+	struct xfs_inode	*ip,
+	struct xfs_perag	*pag,
+	xfs_agblock_t		agbno,
+	xfs_extlen_t		len,
+	struct xfs_bmbt_irec	*mval)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_alloc_arg	args = {
+		.mp		= mp,
+		.tp		= tp,
+		.pag		= pag,
+		.oinfo		= XFS_RMAP_OINFO_SKIP_UPDATE,
+		.resv		= XFS_AG_RESV_NONE,
+		.prod		= 1,
+		.datatype	= XFS_ALLOC_USERDATA,
+		.maxlen		= len,
+		.minlen		= 1,
+	};
+	struct xfs_bmbt_irec	irec;
+	xfs_fsblock_t		fsbno = xfs_gbno_to_fsb(&pag->pag_group, agbno);
+	xfs_fileoff_t		startoff = xfs_fsblock_to_fileoff(mp, fsbno);
+	int			nimaps;
+	int			error;
+
+	ASSERT(!XFS_IS_REALTIME_INODE(ip));
+
+	trace_xfs_map_free_ag_extent(ip, fsbno, len);
+
+	/* Make sure the entire range is a hole. */
+	nimaps = 1;
+	error = xfs_bmapi_read(ip, startoff, len, &irec, &nimaps, 0);
+	if (error)
+		return error;
+
+	if (irec.br_startoff != startoff ||
+	    irec.br_startblock != HOLESTARTBLOCK ||
+	    irec.br_blockcount < len)
+		return -EINVAL;
+
+	error = xfs_iext_count_extend(tp, ip, XFS_DATA_FORK,
+			XFS_IEXT_ADD_NOSPLIT_CNT);
+	if (error)
+		return error;
+
+	/*
+	 * Allocate the physical extent.  We should not have dropped the lock
+	 * since the scan of the free space metadata, so this should work,
+	 * though the length may be adjusted to play nicely with metadata space
+	 * reservations.
+	 */
+	error = xfs_alloc_vextent_exact_bno(&args, fsbno);
+	if (error)
+		return error;
+	if (args.fsbno == NULLFSBLOCK) {
+		/*
+		 * We were promised the space, but failed to get it.  This
+		 * could be because the space is reserved for metadata
+		 * expansion, or it could be because the AGFL fixup grabbed the
+		 * first block we wanted.  Either way, if the transaction is
+		 * dirty we must commit it and tell the caller to try again.
+		 */
+		if (tp->t_flags & XFS_TRANS_DIRTY)
+			return -EAGAIN;
+		return -ENOSPC;
+	}
+	if (args.fsbno != fsbno) {
+		ASSERT(0);
+		xfs_bmap_mark_sick(ip, XFS_DATA_FORK);
+		return -EFSCORRUPTED;
+	}
+
+	/* Map extent into file, update quota. */
+	mval->br_blockcount = args.len;
+	mval->br_startblock = fsbno;
+	mval->br_startoff = startoff;
+	mval->br_state = XFS_EXT_UNWRITTEN;
+
+	trace_xfs_map_free_ag_extent_done(ip, mval);
+
+	xfs_bmap_map_extent(tp, ip, XFS_DATA_FORK, mval);
+	xfs_trans_mod_dquot_byino(tp, ip, XFS_TRANS_DQ_BCOUNT,
+			mval->br_blockcount);
+
+	return 0;
+}
+
+/* Find a free extent in this AG and map it into the file. */
+STATIC int
+xfs_map_free_extent(
+	struct xfs_inode	*ip,
+	struct xfs_perag	*pag,
+	xfs_agblock_t		*cursor,
+	xfs_agblock_t		end_agbno,
+	xfs_agblock_t		*last_enospc_agbno)
+{
+	struct xfs_bmbt_irec	irec;
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_trans	*tp;
+	loff_t			endpos;
+	xfs_extlen_t		free_len, map_len;
+	int			error;
+
+	if (fatal_signal_pending(current))
+		return -EINTR;
+
+	error = xfs_trans_alloc_inode(ip, &M_RES(mp)->tr_write, 0, 0, false,
+			&tp);
+	if (error)
+		return error;
+
+	error = xfs_alloc_find_freesp(tp, pag, cursor, end_agbno, &free_len);
+	if (error)
+		goto out_cancel;
+
+	/* Bail out if the cursor is beyond what we asked for. */
+	if (*cursor >= end_agbno)
+		goto out_cancel;
+
+	error = xfs_map_free_reserve_more(tp, ip, &free_len);
+	if (error)
+		goto out_cancel;
+
+	map_len = free_len;
+	do {
+		error = xfs_map_free_ag_extent(tp, ip, pag, *cursor, map_len,
+				&irec);
+		if (error == -EAGAIN) {
+			/* Failed to map space but were told to try again. */
+			error = xfs_trans_commit(tp);
+			goto out;
+		}
+		if (error != -ENOSPC)
+			break;
+		/*
+		 * If we can't get the space, try asking for successively less
+		 * space in case we're bumping up against per-AG metadata
+		 * reservation limits.
+		 */
+		map_len >>= 1;
+	} while (map_len > 0);
+	if (error == -ENOSPC) {
+		if (*last_enospc_agbno != *cursor) {
+			/*
+			 * However, backing off on the size of the mapping
+			 * request might not work if an AGFL fixup allocated
+			 * the block at *cursor.  The first time this happens,
+			 * remember that we ran out of space here, and try
+			 * again.
+			 */
+			*last_enospc_agbno = *cursor;
+		} else {
+			/*
+			 * If we hit this a second time on the same extent,
+			 * then it's likely that we're bumping up against
+			 * per-AG space reservation limits.  Skip to the next
+			 * extent.
+			 */
+			*cursor += free_len;
+		}
+		error = 0;
+		goto out_cancel;
+	}
+	if (error)
+		goto out_cancel;
+
+	/* Update isize if needed. */
+	endpos = XFS_FSB_TO_B(mp, irec.br_startoff + irec.br_blockcount);
+	if (endpos > i_size_read(VFS_I(ip))) {
+		i_size_write(VFS_I(ip), endpos);
+		ip->i_disk_size = endpos;
+		xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
+	}
+
+	error = xfs_trans_commit(tp);
+	xfs_iunlock(ip, XFS_ILOCK_EXCL);
+	if (error)
+		return error;
+
+	*cursor += irec.br_blockcount;
+	return 0;
+out_cancel:
+	xfs_trans_cancel(tp);
+out:
+	xfs_iunlock(ip, XFS_ILOCK_EXCL);
+	return error;
+}
+
+/*
+ * Allocate all free physical space between off and len and map it to this
+ * regular non-realtime file.
+ */
+int
+xfs_map_free_space(
+	struct xfs_inode	*ip,
+	xfs_off_t		off,
+	xfs_off_t		len)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_perag	*pag = NULL;
+	xfs_daddr_t		off_daddr = BTOBB(off);
+	xfs_daddr_t		end_daddr = BTOBBT(off + len);
+	xfs_fsblock_t		off_fsb = XFS_DADDR_TO_FSB(mp, off_daddr);
+	xfs_fsblock_t		end_fsb = XFS_DADDR_TO_FSB(mp, end_daddr);
+	xfs_agnumber_t		off_agno = XFS_FSB_TO_AGNO(mp, off_fsb);
+	xfs_agnumber_t		end_agno = XFS_FSB_TO_AGNO(mp, end_fsb);
+	int			error = 0;
+
+	trace_xfs_map_free_space(ip, off, len);
+
+	while ((pag = xfs_perag_next_range(mp, pag, off_agno,
+					   mp->m_sb.sb_agcount - 1))) {
+		xfs_agblock_t	off_agbno = 0;
+		xfs_agblock_t	end_agbno;
+		xfs_agblock_t	last_enospc_agbno = NULLAGBLOCK;
+
+		end_agbno = xfs_ag_block_count(mp, pag_agno(pag));
+
+		if (pag_agno(pag) == off_agno)
+			off_agbno = XFS_FSB_TO_AGBNO(mp, off_fsb);
+		if (pag_agno(pag) == end_agno)
+			end_agbno = XFS_FSB_TO_AGBNO(mp, end_fsb);
+
+		while (off_agbno < end_agbno) {
+			error = xfs_map_free_extent(ip, pag, &off_agbno,
+					end_agbno, &last_enospc_agbno);
+			if (error)
+				goto out;
+		}
+	}
+
+out:
+	if (pag)
+		xfs_perag_rele(pag);
+	if (error == -ENOSPC)
+		return 0;
+	return error;
+}
