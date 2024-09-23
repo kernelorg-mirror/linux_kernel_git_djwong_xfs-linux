@@ -381,7 +381,7 @@ xfs_refcount_finish_one_cleanup(
 		return;
 	agbp = rcur->bc_ag.agbp;
 	xfs_btree_del_cursor(rcur, error);
-	if (error)
+	if (error && agbp)
 		xfs_trans_brelse(tp, agbp);
 }
 
