@@ -3087,6 +3087,7 @@ DECLARE_EVENT_CLASS(xfs_bmap_deferred_class,
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(dev_t, opdev)
+		__field(enum xfs_group_type, type)
 		__field(xfs_agnumber_t, agno)
 		__field(xfs_ino_t, ino)
 		__field(xfs_agblock_t, agbno)
@@ -3099,20 +3100,30 @@ DECLARE_EVENT_CLASS(xfs_bmap_deferred_class,
 	),
 	TP_fast_assign(
 		struct xfs_inode	*ip = bi->bi_owner;
+		bool			isrt = xfs_ifork_is_realtime(ip,
+							bi->bi_whichfork);
 
 		__entry->dev = ip->i_mount->m_super->s_dev;
-		if (xfs_ifork_is_realtime(ip, bi->bi_whichfork)) {
+		if (bi->bi_group) {
+			__entry->type = bi->bi_group->xg_type;
+			__entry->agno = bi->bi_group->xg_index;
+			if (isrt) {
+				__entry->agbno = xfs_rtb_to_rgbno(ip->i_mount,
+							bi->bi_bmap.br_startblock);
+				__entry->opdev = ip->i_mount->m_rtdev_targp->bt_dev;
+			} else {
+				__entry->agbno = XFS_FSB_TO_AGBNO(ip->i_mount,
+							bi->bi_bmap.br_startblock);
+				__entry->opdev = __entry->dev;
+			}
+			__entry->rtbno = 0;
+		} else if (isrt) {
+			__entry->type = XG_TYPE_MAX;
 			__entry->agno = 0;
 			__entry->agbno = 0;
 			__entry->rtbno = bi->bi_bmap.br_startblock;
 			__entry->opdev = ip->i_mount->m_rtdev_targp->bt_dev;
 		} else {
-			__entry->agno = XFS_FSB_TO_AGNO(ip->i_mount,
-						bi->bi_bmap.br_startblock);
-			__entry->agbno = XFS_FSB_TO_AGBNO(ip->i_mount,
-						bi->bi_bmap.br_startblock);
-			__entry->rtbno = 0;
-			__entry->opdev = __entry->dev;
 		}
 		__entry->ino = ip->i_ino;
 		__entry->whichfork = bi->bi_whichfork;
@@ -3121,11 +3132,12 @@ DECLARE_EVENT_CLASS(xfs_bmap_deferred_class,
 		__entry->l_state = bi->bi_bmap.br_state;
 		__entry->op = bi->bi_type;
 	),
-	TP_printk("dev %d:%d op %s opdev %d:%d ino 0x%llx agno 0x%x agbno 0x%x rtbno 0x%llx %s fileoff 0x%llx fsbcount 0x%llx state %d",
+	TP_printk("dev %d:%d op %s opdev %d:%d ino 0x%llx %sno 0x%x gbno 0x%x rtbno 0x%llx %s fileoff 0x%llx fsbcount 0x%llx state %d",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __print_symbolic(__entry->op, XFS_BMAP_INTENT_STRINGS),
 		  MAJOR(__entry->opdev), MINOR(__entry->opdev),
 		  __entry->ino,
+		  __print_symbolic(__entry->type, XG_TYPE_STRINGS),
 		  __entry->agno,
 		  __entry->agbno,
 		  __entry->rtbno,
