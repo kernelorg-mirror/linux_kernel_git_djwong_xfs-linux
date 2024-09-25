@@ -274,8 +274,13 @@ xchk_superblock(
 		if (!!(sb->sb_features2 & cpu_to_be32(~v2_ok)))
 			xchk_block_set_corrupt(sc, bp);
 
-		if (sb->sb_features2 != sb->sb_bad_features2)
-			xchk_block_set_preen(sc, bp);
+		if (xfs_has_metadir(mp)) {
+			if (sb->sb_metadirpad)
+				xchk_block_set_preen(sc, bp);
+		} else {
+			if (sb->sb_features2 != sb->sb_bad_features2)
+				xchk_block_set_preen(sc, bp);
+		}
 	}
 
 	/* Check sb_features2 flags that are set at mkfs time. */
