@@ -401,6 +401,15 @@ xfs_validate_sb_common(
 				return -EINVAL;
 			}
 		}
+
+		if (sbp->sb_features_incompat & XFS_SB_FEAT_INCOMPAT_METADIR) {
+			if (sbp->sb_metadirpad) {
+				xfs_warn(mp,
+"Metadir superblock padding field (%d) must be zero.",
+						sbp->sb_metadirpad);
+				return -EINVAL;
+			}
+		}
 	} else if (sbp->sb_qflags & (XFS_PQUOTA_ENFD | XFS_GQUOTA_ENFD |
 				XFS_PQUOTA_CHKD | XFS_GQUOTA_CHKD)) {
 			xfs_notice(mp,
@@ -668,7 +677,6 @@ __xfs_sb_from_disk(
 	to->sb_logsectsize = be16_to_cpu(from->sb_logsectsize);
 	to->sb_logsunit = be32_to_cpu(from->sb_logsunit);
 	to->sb_features2 = be32_to_cpu(from->sb_features2);
-	to->sb_bad_features2 = be32_to_cpu(from->sb_bad_features2);
 	to->sb_features_compat = be32_to_cpu(from->sb_features_compat);
 	to->sb_features_ro_compat = be32_to_cpu(from->sb_features_ro_compat);
 	to->sb_features_incompat = be32_to_cpu(from->sb_features_incompat);
@@ -692,10 +700,13 @@ __xfs_sb_from_disk(
 	if (convert_xquota)
 		xfs_sb_quota_from_disk(to);
 
-	if (to->sb_features_incompat & XFS_SB_FEAT_INCOMPAT_METADIR)
+	if (to->sb_features_incompat & XFS_SB_FEAT_INCOMPAT_METADIR) {
 		to->sb_metadirino = be64_to_cpu(from->sb_metadirino);
-	else
+		to->sb_metadirpad = be32_to_cpu(from->sb_metadirpad);
+	} else {
 		to->sb_metadirino = NULLFSINO;
+		to->sb_bad_features2 = be32_to_cpu(from->sb_bad_features2);
+	}
 }
 
 void
@@ -825,9 +836,11 @@ xfs_sb_to_disk(
 	 * Hence we enforce that here rather than having to remember to do it
 	 * everywhere else that updates features2.
 	 */
-	from->sb_bad_features2 = from->sb_features2;
 	to->sb_features2 = cpu_to_be32(from->sb_features2);
-	to->sb_bad_features2 = cpu_to_be32(from->sb_bad_features2);
+	if (!xfs_sb_version_hasmetadir(from)) {
+		from->sb_bad_features2 = from->sb_features2;
+		to->sb_bad_features2 = cpu_to_be32(from->sb_bad_features2);
+	}
 
 	if (!xfs_sb_is_v5(from))
 		return;
@@ -844,8 +857,10 @@ xfs_sb_to_disk(
 	if (from->sb_features_incompat & XFS_SB_FEAT_INCOMPAT_META_UUID)
 		uuid_copy(&to->sb_meta_uuid, &from->sb_meta_uuid);
 
-	if (from->sb_features_incompat & XFS_SB_FEAT_INCOMPAT_METADIR)
+	if (from->sb_features_incompat & XFS_SB_FEAT_INCOMPAT_METADIR) {
 		to->sb_metadirino = cpu_to_be64(from->sb_metadirino);
+		to->sb_metadirpad = 0;
+	}
 }
 
 /*

@@ -148,16 +148,25 @@ typedef struct xfs_sb {
 	uint32_t	sb_logsunit;	/* stripe unit size for the log */
 	uint32_t	sb_features2;	/* additional feature bits */
 
-	/*
-	 * bad features2 field as a result of failing to pad the sb structure to
-	 * 64 bits. Some machines will be using this field for features2 bits.
-	 * Easiest just to mark it bad and not use it for anything else.
-	 *
-	 * This is not kept up to date in memory; it is always overwritten by
-	 * the value in sb_features2 when formatting the incore superblock to
-	 * the disk buffer.
-	 */
-	uint32_t	sb_bad_features2;
+	union {
+		/*
+		 * bad features2 field as a result of failing to pad the sb
+		 * structure to 64 bits. Some machines will be using this field
+		 * for features2 bits.  Easiest just to mark it bad and not use
+		 * it for anything else.
+		 *
+		 * This is not kept up to date in memory; it is always
+		 * overwritten by the value in sb_features2 when formatting the
+		 * incore superblock to the disk buffer.
+		 */
+		uint32_t	sb_bad_features2;
+
+		/*
+		 * Metadir filesystems define this field to be zero since they
+		 * have never had this 64-bit alignment problem.
+		 */
+		uint32_t	sb_metadirpad;
+	} __packed;
 
 	/* version 5 superblock fields start here */
 
@@ -238,13 +247,22 @@ struct xfs_dsb {
 	__be16		sb_logsectsize;	/* sector size for the log, bytes */
 	__be32		sb_logsunit;	/* stripe unit size for the log */
 	__be32		sb_features2;	/* additional feature bits */
-	/*
-	 * bad features2 field as a result of failing to pad the sb
-	 * structure to 64 bits. Some machines will be using this field
-	 * for features2 bits. Easiest just to mark it bad and not use
-	 * it for anything else.
-	 */
-	__be32		sb_bad_features2;
+
+	union {
+		/*
+		 * bad features2 field as a result of failing to pad the sb
+		 * structure to 64 bits. Some machines will be using this field
+		 * for features2 bits. Easiest just to mark it bad and not use
+		 * it for anything else.
+		 */
+		__be32		sb_bad_features2;
+
+		/*
+		 * Metadir filesystems define this field to be zero since they
+		 * have never had this 64-bit alignment problem.
+		 */
+		__be32		sb_metadirpad;
+	} __packed;
 
 	/* version 5 superblock fields start here */
 
@@ -285,15 +303,6 @@ struct xfs_dsb {
 static inline bool xfs_sb_is_v5(const struct xfs_sb *sbp)
 {
 	return XFS_SB_VERSION_NUM(sbp) == XFS_SB_VERSION_5;
-}
-
-/*
- * Detect a mismatched features2 field.  Older kernels read/wrote
- * this into the wrong slot, so to be safe we keep them in sync.
- */
-static inline bool xfs_sb_has_mismatched_features2(const struct xfs_sb *sbp)
-{
-	return sbp->sb_bad_features2 != sbp->sb_features2;
 }
 
 static inline bool xfs_sb_version_hasmorebits(const struct xfs_sb *sbp)
@@ -435,6 +444,18 @@ static inline bool xfs_sb_version_hasmetadir(const struct xfs_sb *sbp)
 {
 	return xfs_sb_is_v5(sbp) &&
 	       (sbp->sb_features_incompat & XFS_SB_FEAT_INCOMPAT_METADIR);
+}
+
+/*
+ * Detect a mismatched features2 field.  Older kernels read/wrote
+ * this into the wrong slot, so to be safe we keep them in sync.
+ * Newer metadir filesystems have never had this bug, so the field is always
+ * zero.
+ */
+static inline bool xfs_sb_has_mismatched_features2(const struct xfs_sb *sbp)
+{
+	return !xfs_sb_version_hasmetadir(sbp) &&
+		sbp->sb_bad_features2 != sbp->sb_features2;
 }
 
 static inline bool
