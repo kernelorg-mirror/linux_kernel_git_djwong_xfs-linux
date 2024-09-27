@@ -143,16 +143,16 @@ xrep_rtrefc_check_ext(
 	struct xfs_scrub		*sc,
 	const struct xfs_refcount_irec	*rec)
 {
-	xfs_rtxnum_t			end;
+	xfs_rgblock_t			last;
 
 	if (xfs_rtrefcount_check_irec(sc->sr.rtg, rec) != NULL)
 		return -EFSCORRUPTED;
 
-	if (xfs_rtb_to_rtxoff(sc->mp, rec->rc_startblock) != 0)
+	if (xfs_rgbno_to_rtxoff(sc->mp, rec->rc_startblock) != 0)
 		return -EFSCORRUPTED;
 
-	end = rec->rc_startblock + rec->rc_blockcount - 1;
-	if (xfs_rtb_to_rtxoff(sc->mp, end) != sc->mp->m_sb.sb_rextsize - 1)
+	last = rec->rc_startblock + rec->rc_blockcount - 1;
+	if (xfs_rgbno_to_rtxoff(sc->mp, last) != sc->mp->m_sb.sb_rextsize - 1)
 		return -EFSCORRUPTED;
 
 	/* Make sure this isn't free space or misaligned. */

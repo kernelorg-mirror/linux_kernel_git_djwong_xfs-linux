@@ -577,7 +577,7 @@ xfs_fsrefs_rtdev_fill_refcount_gap(
 	 * fsrefcount record emitted and the end of the query range.
 	 */
 	high.ar_startext = min(high.ar_startext, rtg->rtg_extents);
-	rec_daddr = XFS_FSB_TO_BB(mp, xfs_rtx_to_rtb(rtg, high.ar_startext));
+	rec_daddr = xfs_rtb_to_daddr(mp, xfs_rtx_to_rtb(rtg, high.ar_startext));
 	if (info->next_daddr > rec_daddr)
 		return 0;
 
@@ -618,9 +618,10 @@ xfs_fsrefs_rtdev_refcountbt_helper(
 
 	/* Report the refcount record from the refcount btree. */
 	rec_rtbno = xfs_rgbno_to_rtb(rtg, rec->rc_startblock);
-	frec.start_daddr = XFS_FSB_TO_BB(mp, rec_rtbno);
+	frec.start_daddr = xfs_rtb_to_daddr(mp, rec_rtbno);
 	frec.len_daddr = XFS_FSB_TO_BB(mp, rec->rc_blockcount);
-	info->next_daddr = XFS_FSB_TO_BB(mp, rec_rtbno + rec->rc_blockcount);
+	info->next_daddr = xfs_rtb_to_daddr(mp,
+					rec_rtbno + rec->rc_blockcount);
 	return xfs_fsrefs_helper(cur->bc_tp, info, &frec);
 }
 

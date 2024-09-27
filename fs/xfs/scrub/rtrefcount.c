@@ -473,10 +473,10 @@ xchk_rtrefcountbt_rec(
 	}
 
 	/* We can only share full rt extents. */
-	mod = xfs_rtb_to_rtxoff(mp, irec.rc_startblock);
+	mod = xfs_rgbno_to_rtxoff(mp, irec.rc_startblock);
 	if (mod)
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
-	mod = xfs_rtb_to_rtxoff(mp, irec.rc_blockcount);
+	mod = xfs_extlen_to_rtxmod(mp, irec.rc_blockcount);
 	if (mod)
 		xchk_btree_set_corrupt(bs->sc, bs->cur, 0);
 

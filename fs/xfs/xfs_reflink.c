@@ -315,11 +315,11 @@ xfs_reflink_convert_cow_locked(
 	if (xfs_inode_needs_cow_around(ip)) {
 		xfs_fileoff_t	new_off;
 
-		new_off = xfs_rtb_rounddown_rtx(mp, offset_fsb);
+		new_off = xfs_fileoff_rounddown_rtx(mp, offset_fsb);
 		count_fsb += offset_fsb - new_off;
 		offset_fsb = new_off;
 
-		count_fsb = xfs_rtb_roundup_rtx(mp, count_fsb);
+		count_fsb = xfs_blen_roundup_rtx(mp, count_fsb);
 	}
 
 	if (!xfs_iext_lookup_extent(ip, ip->i_cowfp, offset_fsb, &icur, &got))
@@ -654,8 +654,8 @@ xfs_reflink_cancel_cow_blocks(
 	 * realtime extent size, since we can only free full extents.
 	 */
 	if (xfs_inode_needs_cow_around(ip)) {
-		offset_fsb = xfs_rtb_roundup_rtx(mp, offset_fsb);
-		end_fsb = xfs_rtb_rounddown_rtx(mp, end_fsb);
+		offset_fsb = xfs_fileoff_roundup_rtx(mp, offset_fsb);
+		end_fsb = xfs_fileoff_rounddown_rtx(mp, end_fsb);
 	}
 
 	if (!xfs_inode_has_cow_data(ip))
@@ -966,8 +966,8 @@ xfs_reflink_end_cow(
 	 * have set us up to swap only full rt extents.
 	 */
 	if (xfs_inode_needs_cow_around(ip)) {
-		offset_fsb = xfs_rtb_rounddown_rtx(mp, offset_fsb);
-		end_fsb = xfs_rtb_roundup_rtx(mp, end_fsb);
+		offset_fsb = xfs_fileoff_rounddown_rtx(mp, offset_fsb);
+		end_fsb = xfs_fileoff_roundup_rtx(mp, end_fsb);
 	}
 
 	/*
@@ -1511,7 +1511,7 @@ xfs_reflink_remap_blocks(
 	 * past EOF.
 	 */
 	if (xfs_inode_has_bigrtalloc(dest))
-		len = xfs_rtb_roundup_rtx(mp, len);
+		len = xfs_blen_roundup_rtx(mp, len);
 
 	trace_xfs_reflink_remap_blocks(src, srcoff, len, dest, destoff);
 

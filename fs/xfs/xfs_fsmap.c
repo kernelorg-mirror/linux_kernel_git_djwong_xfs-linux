@@ -740,7 +740,7 @@ xfs_getfsmap_rtdev_rtbitmap_helper(
 	if (info->last && info->end_daddr != XFS_BUF_DADDR_NULL) {
 		frec.start_daddr = info->end_daddr;
 	} else {
-		frec.start_daddr = XFS_FSB_TO_BB(mp, start_rtb);
+		frec.start_daddr = xfs_rtb_to_daddr(mp, start_rtb);
 	}
 
 	frec.len_daddr = XFS_FSB_TO_BB(mp, rtbcount);
@@ -772,7 +772,7 @@ xfs_getfsmap_rtdev_rtbitmap(
 	start_rtbno = xfs_daddr_to_rtb(mp,
 			keys[0].fmr_physical + keys[0].fmr_length);
 	if (keys[0].fmr_length > 0) {
-		info->low_daddr = XFS_FSB_TO_BB(mp, start_rtbno);
+		info->low_daddr = xfs_rtb_to_daddr(mp, start_rtbno);
 		if (info->low_daddr >= eofs)
 			return 0;
 	}

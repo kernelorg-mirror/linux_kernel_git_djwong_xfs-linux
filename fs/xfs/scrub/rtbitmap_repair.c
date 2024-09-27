@@ -211,12 +211,12 @@ xrep_rtbitmap_mark_free(
 	 * aligned to an rtextent boundary on both ends.
 	 */
 	startrtx = xfs_rgbno_to_rtx(mp, rtb->next_rgbno);
-	mod = xfs_rtb_to_rtxoff(mp, rtb->next_rgbno);
+	mod = xfs_rgbno_to_rtxoff(mp, rtb->next_rgbno);
 	if (mod)
 		return -EFSCORRUPTED;
 
 	nextrtx = xfs_rgbno_to_rtx(mp, rgbno - 1) + 1;
-	mod = xfs_rtb_to_rtxoff(mp, rgbno - 1);
+	mod = xfs_rgbno_to_rtxoff(mp, rgbno - 1);
 	if (mod != mp->m_sb.sb_rextsize - 1)
 		return -EFSCORRUPTED;
 

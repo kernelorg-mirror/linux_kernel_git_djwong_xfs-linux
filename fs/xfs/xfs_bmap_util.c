@@ -45,7 +45,7 @@ xfs_daddr_t
 xfs_fsb_to_db(struct xfs_inode *ip, xfs_fsblock_t fsb)
 {
 	if (XFS_IS_REALTIME_INODE(ip))
-		return XFS_FSB_TO_BB(ip->i_mount, fsb);
+		return xfs_rtb_to_daddr(ip->i_mount, fsb);
 	return XFS_FSB_TO_DADDR(ip->i_mount, fsb);
 }
 
@@ -541,7 +541,7 @@ xfs_can_free_eofblocks(
 	 */
 	end_fsb = XFS_B_TO_FSB(mp, (xfs_ufsize_t)XFS_ISIZE(ip));
 	if (xfs_inode_has_bigrtalloc(ip))
-		end_fsb = xfs_rtb_roundup_rtx(mp, end_fsb);
+		end_fsb = xfs_fileoff_roundup_rtx(mp, end_fsb);
 	last_fsb = XFS_B_TO_FSB(mp, mp->m_super->s_maxbytes);
 	if (last_fsb <= end_fsb)
 		return false;
@@ -853,8 +853,8 @@ xfs_free_file_space(
 
 	/* We can only free complete realtime extents. */
 	if (xfs_inode_has_bigrtalloc(ip)) {
-		startoffset_fsb = xfs_rtb_roundup_rtx(mp, startoffset_fsb);
-		endoffset_fsb = xfs_rtb_rounddown_rtx(mp, endoffset_fsb);
+		startoffset_fsb = xfs_fileoff_roundup_rtx(mp, startoffset_fsb);
+		endoffset_fsb = xfs_fileoff_rounddown_rtx(mp, endoffset_fsb);
 	}
 
 	/*
@@ -1746,12 +1746,12 @@ xfs_want_convert_rtbigalloc_mapping(
 	if (irec->br_state != XFS_EXT_UNWRITTEN)
 		return false;
 
-	modoff = xfs_rtb_to_rtxoff(mp, irec->br_startoff);
+	modoff = xfs_fileoff_to_rtxoff(mp, irec->br_startoff);
 	if (modoff == 0) {
 		xfs_rtbxlen_t	rexts;
 
-		rexts = xfs_rtb_to_rtx(mp, irec->br_blockcount);
-		modcnt = xfs_rtb_to_rtxoff(mp, irec->br_blockcount);
+		rexts = xfs_blen_to_rtbxlen(mp, irec->br_blockcount);
+		modcnt = xfs_blen_to_rtxoff(mp, irec->br_blockcount);
 		if (rexts > 0) {
 			/*
 			 * Unwritten mapping starts at an rt extent boundary
@@ -1890,8 +1890,8 @@ xfs_convert_rtbigalloc_file_space(
 	if (!xfs_inode_has_bigrtalloc(ip))
 		return 0;
 
-	off = xfs_rtb_rounddown_rtx(mp, XFS_B_TO_FSBT(mp, pos));
-	endoff = xfs_rtb_roundup_rtx(mp, XFS_B_TO_FSB(mp, pos + len));
+	off = xfs_fileoff_rounddown_rtx(mp, XFS_B_TO_FSBT(mp, pos));
+	endoff = xfs_fileoff_roundup_rtx(mp, XFS_B_TO_FSB(mp, pos + len));
 
 	trace_xfs_convert_rtbigalloc_file_space(ip, pos, len);
 
@@ -2337,7 +2337,7 @@ xfs_map_free_rt_extent(
 	if (error)
 		return error;
 
-	ASSERT(xfs_rtb_to_rtxoff(mp, irec.br_blockcount) == 0);
+	ASSERT(xfs_blen_to_rtxoff(mp, irec.br_blockcount) == 0);
 	*cursor += xfs_extlen_to_rtxlen(mp, irec.br_blockcount);
 	return 0;
 out_rtglock:
