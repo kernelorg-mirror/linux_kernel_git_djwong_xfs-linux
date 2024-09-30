@@ -280,7 +280,9 @@ xchk_superblock(
 			xchk_block_set_corrupt(sc, bp);
 
 		if (xfs_has_metadir(mp)) {
-			if (sb->sb_metadirpad)
+			if (sb->sb_rgblklog != mp->m_sb.sb_rgblklog)
+				xchk_block_set_corrupt(sc, bp);
+			if (sb->sb_metadirpad0 || sb->sb_metadirpad1)
 				xchk_block_set_preen(sc, bp);
 		} else {
 			if (sb->sb_features2 != sb->sb_bad_features2)

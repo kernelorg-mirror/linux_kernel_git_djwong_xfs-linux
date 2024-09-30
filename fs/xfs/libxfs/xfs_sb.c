@@ -366,12 +366,23 @@ xfs_validate_sb_write(
 	return 0;
 }
 
+int
+xfs_compute_rgblklog(
+	xfs_rtxlen_t	rgextents,
+	xfs_rgblock_t	rextsize)
+{
+	uint64_t	rgblocks = (uint64_t)rgextents * rextsize;
+
+	return xfs_highbit64(rgblocks - 1) + 1;
+}
+
 static int
 xfs_validate_sb_rtgroups(
 	struct xfs_mount	*mp,
 	struct xfs_sb		*sbp)
 {
 	uint64_t		groups;
+	int			rgblklog;
 
 	if (sbp->sb_rextsize == 0) {
 		xfs_warn(mp,
@@ -413,6 +424,14 @@ xfs_validate_sb_rtgroups(
 	if (!(sbp->sb_features_incompat & XFS_SB_FEAT_INCOMPAT_EXCHRANGE)) {
 		xfs_warn(mp,
 "Realtime groups feature requires exchange-range support.");
+		return -EINVAL;
+	}
+
+	rgblklog = xfs_compute_rgblklog(sbp->sb_rgextents, sbp->sb_rextsize);
+	if (sbp->sb_rgblklog != rgblklog) {
+		xfs_warn(mp,
+"Realtime group log (%d) does not match expected value (%d).",
+				sbp->sb_rgblklog, rgblklog);
 		return -EINVAL;
 	}
 
@@ -482,10 +501,9 @@ xfs_validate_sb_common(
 		}
 
 		if (sbp->sb_features_incompat & XFS_SB_FEAT_INCOMPAT_METADIR) {
-			if (sbp->sb_metadirpad) {
+			if (sbp->sb_metadirpad0 || sbp->sb_metadirpad1) {
 				xfs_warn(mp,
-"Metadir superblock padding field (%d) must be zero.",
-						sbp->sb_metadirpad);
+"Metadir superblock padding fields must be zero.");
 				return -EINVAL;
 			}
 
@@ -792,7 +810,9 @@ __xfs_sb_from_disk(
 
 	if (to->sb_features_incompat & XFS_SB_FEAT_INCOMPAT_METADIR) {
 		to->sb_metadirino = be64_to_cpu(from->sb_metadirino);
-		to->sb_metadirpad = be32_to_cpu(from->sb_metadirpad);
+		to->sb_rgblklog = from->sb_rgblklog;
+		to->sb_metadirpad0 = from->sb_metadirpad0;
+		to->sb_metadirpad1 = be16_to_cpu(from->sb_metadirpad1);
 		to->sb_rgcount = be32_to_cpu(from->sb_rgcount);
 		to->sb_rgextents = be32_to_cpu(from->sb_rgextents);
 		to->sb_rbmino = NULLFSINO;
@@ -962,7 +982,9 @@ xfs_sb_to_disk(
 
 	if (from->sb_features_incompat & XFS_SB_FEAT_INCOMPAT_METADIR) {
 		to->sb_metadirino = cpu_to_be64(from->sb_metadirino);
-		to->sb_metadirpad = 0;
+		to->sb_rgblklog = from->sb_rgblklog;
+		to->sb_metadirpad0 = 0;
+		to->sb_metadirpad1 = 0;
 		to->sb_rgcount = cpu_to_be32(from->sb_rgcount);
 		to->sb_rgextents = cpu_to_be32(from->sb_rgextents);
 		to->sb_rbmino = cpu_to_be64(0);
@@ -1097,17 +1119,37 @@ const struct xfs_buf_ops xfs_sb_quiet_buf_ops = {
 	.verify_write = xfs_sb_write_verify,
 };
 
+/* Compute cached rt geometry from the incore sb. */
 void
-xfs_mount_sb_set_rextsize(
+xfs_sb_mount_rextsize(
 	struct xfs_mount	*mp,
 	struct xfs_sb		*sbp)
 {
 	mp->m_rtxblklog = log2_if_power2(sbp->sb_rextsize);
 	mp->m_rtxblkmask = mask64_if_power2(sbp->sb_rextsize);
 
-	mp->m_rgblocks = sbp->sb_rgextents * sbp->sb_rextsize;
-	mp->m_rgblklog = log2_if_power2(mp->m_rgblocks);
-	mp->m_rgblkmask = mask64_if_power2(mp->m_rgblocks);
+	if (xfs_sb_version_hasmetadir(sbp)) {
+		mp->m_rgblocks = sbp->sb_rgextents * sbp->sb_rextsize;
+		mp->m_rgblkmask = (1ULL << sbp->sb_rgblklog) - 1;
+	} else {
+		mp->m_rgblocks = 0;
+		mp->m_rgblkmask = 0;
+	}
+}
+
+/* Update incore sb rt extent size, then recompute the cached rt geometry. */
+void
+xfs_mount_sb_set_rextsize(
+	struct xfs_mount	*mp,
+	struct xfs_sb		*sbp,
+	xfs_agblock_t		rextsize)
+{
+	sbp->sb_rextsize = rextsize;
+	if (xfs_sb_version_hasmetadir(sbp))
+		sbp->sb_rgblklog = xfs_compute_rgblklog(sbp->sb_rgextents,
+							rextsize);
+
+	xfs_sb_mount_rextsize(mp, sbp);
 }
 
 /*
@@ -1134,7 +1176,7 @@ xfs_sb_mount_common(
 	mp->m_blockmask = sbp->sb_blocksize - 1;
 	mp->m_blockwsize = xfs_rtbmblock_size(sbp) >> XFS_WORDLOG;
 	mp->m_rtx_per_rbmblock = mp->m_blockwsize << XFS_NBWORDLOG;
-	xfs_mount_sb_set_rextsize(mp, sbp);
+	xfs_sb_mount_rextsize(mp, sbp);
 
 	mp->m_alloc_mxr[0] = xfs_allocbt_maxrecs(mp, sbp->sb_blocksize, true);
 	mp->m_alloc_mxr[1] = xfs_allocbt_maxrecs(mp, sbp->sb_blocksize, false);
