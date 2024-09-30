@@ -122,9 +122,9 @@ xfs_rgno_start_rtb(
 	struct xfs_mount	*mp,
 	xfs_rgnumber_t		rgno)
 {
-	if (mp->m_rgblklog >= 0)
-		return ((xfs_rtblock_t)rgno << mp->m_rgblklog);
-	return ((xfs_rtblock_t)rgno * mp->m_rgblocks);
+	if (!xfs_has_rtgroups(mp))
+		return 0;
+	return ((xfs_rtblock_t)rgno << mp->m_sb.sb_rgblklog);
 }
 
 static inline xfs_rtblock_t
@@ -152,10 +152,7 @@ xfs_rtb_to_rgno(
 	if (!xfs_has_rtgroups(mp))
 		return 0;
 
-	if (mp->m_rgblklog >= 0)
-		return rtbno >> mp->m_rgblklog;
-
-	return div_u64(rtbno, mp->m_rgblocks);
+	return rtbno >> mp->m_sb.sb_rgblklog;
 }
 
 static inline uint64_t
@@ -163,16 +160,10 @@ __xfs_rtb_to_rgbno(
 	struct xfs_mount	*mp,
 	xfs_rtblock_t		rtbno)
 {
-	uint32_t		rem;
-
 	if (!xfs_has_rtgroups(mp))
 		return rtbno;
 
-	if (mp->m_rgblklog >= 0)
-		return rtbno & mp->m_rgblkmask;
-
-	div_u64_rem(rtbno, mp->m_rgblocks, &rem);
-	return rem;
+	return rtbno & mp->m_rgblkmask;
 }
 
 static inline xfs_rgblock_t
@@ -183,12 +174,39 @@ xfs_rtb_to_rgbno(
 	return __xfs_rtb_to_rgbno(mp, rtbno);
 }
 
+/*
+ * Note: takes a uint64_t for bno because the rgbno component can overflow
+ * xfs_rgblock_t on non-rtgroups file systems.
+ */
+static inline xfs_daddr_t
+xfs_rgbno_to_daddr(
+	struct xfs_mount	*mp,
+	xfs_rgnumber_t		rgno,
+	uint64_t		rgbno)
+{
+	uint64_t		r = (xfs_rtblock_t)rgno * mp->m_rgblocks;
+
+	return XFS_FSB_TO_BB(mp, r + rgbno);
+}
+
 static inline xfs_daddr_t
 xfs_rtb_to_daddr(
 	struct xfs_mount	*mp,
 	xfs_rtblock_t		rtbno)
 {
-	return rtbno << mp->m_blkbb_log;
+	return xfs_rgbno_to_daddr(mp, xfs_rtb_to_rgno(mp, rtbno),
+				    __xfs_rtb_to_rgbno(mp, rtbno));
+}
+
+static inline xfs_rgnumber_t
+xfs_daddr_to_rgno(
+	struct xfs_mount	*mp,
+	xfs_daddr_t		daddr)
+{
+	if (!xfs_has_rtgroups(mp))
+		return 0;
+
+	return div_u64(XFS_BB_TO_FSBT(mp, daddr), mp->m_rgblocks);
 }
 
 static inline xfs_rtblock_t
@@ -196,7 +214,17 @@ xfs_daddr_to_rtb(
 	struct xfs_mount	*mp,
 	xfs_daddr_t		daddr)
 {
-	return daddr >> mp->m_blkbb_log;
+	xfs_rfsblock_t		bno = XFS_BB_TO_FSBT(mp, daddr);
+
+	if (xfs_has_rtgroups(mp)) {
+		uint32_t	rem;
+
+		div_u64_rem(bno, mp->m_rgblocks, &rem);
+		return __xfs_rgbno_to_rtb(mp, xfs_daddr_to_rgno(mp, daddr),
+				rem);
+	}
+
+	return bno;
 }
 
 #ifdef CONFIG_XFS_RT
