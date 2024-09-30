@@ -122,9 +122,9 @@ xfs_rgno_start_rtb(
 	struct xfs_mount	*mp,
 	xfs_rgnumber_t		rgno)
 {
-	if (mp->m_rgblklog >= 0)
-		return ((xfs_rtblock_t)rgno << mp->m_rgblklog);
-	return ((xfs_rtblock_t)rgno * mp->m_rgblocks);
+	if (!xfs_has_rtgroups(mp))
+		return 0;
+	return ((xfs_rtblock_t)rgno << mp->m_sb.sb_rgblklog);
 }
 
 static inline xfs_rtblock_t
@@ -152,10 +152,7 @@ xfs_rtb_to_rgno(
 	if (!xfs_has_rtgroups(mp))
 		return 0;
 
-	if (mp->m_rgblklog >= 0)
-		return rtbno >> mp->m_rgblklog;
-
-	return div_u64(rtbno, mp->m_rgblocks);
+	return rtbno >> mp->m_sb.sb_rgblklog;
 }
 
 static inline uint64_t
@@ -163,16 +160,10 @@ __xfs_rtb_to_rgbno(
 	struct xfs_mount	*mp,
 	xfs_rtblock_t		rtbno)
 {
-	uint32_t		rem;
-
 	if (!xfs_has_rtgroups(mp))
 		return rtbno;
 
-	if (mp->m_rgblklog >= 0)
-		return rtbno & mp->m_rgblkmask;
-
-	div_u64_rem(rtbno, mp->m_rgblocks, &rem);
-	return rem;
+	return rtbno & mp->m_rgblkmask;
 }
 
 static inline xfs_rgblock_t
@@ -188,7 +179,10 @@ xfs_rtb_to_daddr(
 	struct xfs_mount	*mp,
 	xfs_rtblock_t		rtbno)
 {
-	return rtbno << mp->m_blkbb_log;
+	xfs_rgnumber_t		rgno = xfs_rtb_to_rgno(mp, rtbno);
+	uint64_t		start_bno = (xfs_rtblock_t)rgno * mp->m_rgblocks;
+
+	return XFS_FSB_TO_BB(mp, start_bno + (rtbno & mp->m_rgblkmask));
 }
 
 static inline xfs_rtblock_t
@@ -196,7 +190,17 @@ xfs_daddr_to_rtb(
 	struct xfs_mount	*mp,
 	xfs_daddr_t		daddr)
 {
-	return daddr >> mp->m_blkbb_log;
+	xfs_rfsblock_t		bno = XFS_BB_TO_FSBT(mp, daddr);
+
+	if (xfs_has_rtgroups(mp)) {
+		xfs_rgnumber_t	rgno;
+		uint32_t	rgbno;
+
+		rgno = div_u64_rem(bno, mp->m_rgblocks, &rgbno);
+		return ((xfs_rtblock_t)rgno << mp->m_sb.sb_rgblklog) + rgbno;
+	}
+
+	return bno;
 }
 
 #ifdef CONFIG_XFS_RT
