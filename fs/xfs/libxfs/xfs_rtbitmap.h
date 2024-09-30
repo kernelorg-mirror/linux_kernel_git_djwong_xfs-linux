@@ -141,10 +141,12 @@ xfs_rtb_to_rtxoff(
 	struct xfs_mount	*mp,
 	xfs_rtblock_t		rtbno)
 {
-	if (likely(mp->m_rtxblklog >= 0))
-		return rtbno & mp->m_rtxblkmask;
+	uint64_t		__rgbno = __xfs_rtb_to_rgbno(mp, rtbno);
 
-	return do_div(rtbno, mp->m_sb.sb_rextsize);
+	if (likely(mp->m_rtxblklog >= 0))
+		return __rgbno & mp->m_rtxblkmask;
+
+	return do_div(__rgbno, mp->m_sb.sb_rextsize);
 }
 
 /* Round this file block offset up to the nearest rt extent size. */
