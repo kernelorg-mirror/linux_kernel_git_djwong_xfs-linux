@@ -165,7 +165,11 @@ typedef struct xfs_sb {
 		 * Metadir filesystems define this field to be zero since they
 		 * have never had this 64-bit alignment problem.
 		 */
-		uint32_t	sb_metadirpad;
+		struct {
+			uint8_t	sb_rgblklog;    /* rt group number shift */
+			uint8_t	sb_metadirpad0; /* zeroes */
+			uint16_t sb_metadirpad1; /* zeroes */
+		};
 	} __packed;
 
 	/* version 5 superblock fields start here */
@@ -261,10 +265,14 @@ struct xfs_dsb {
 		__be32		sb_bad_features2;
 
 		/*
-		 * Metadir filesystems define this field to be zero since they
-		 * have never had this 64-bit alignment problem.
+		 * Metadir filesystems use this space since they have never had
+		 * this 64-bit alignment problem.
 		 */
-		__be32		sb_metadirpad;
+		struct {
+			__u8	sb_rgblklog;    /* rt group number shift */
+			__u8	sb_metadirpad0; /* zeroes */
+			__u16	sb_metadirpad1; /* zeroes */
+		};
 	} __packed;
 
 	/* version 5 superblock fields start here */
