@@ -141,10 +141,12 @@ xfs_rtb_to_rtxoff(
 	struct xfs_mount	*mp,
 	xfs_rtblock_t		rtbno)
 {
-	if (likely(mp->m_rtxblklog >= 0))
-		return rtbno & mp->m_rtxblkmask;
+	uint64_t		__rgbno = __xfs_rtb_to_rgbno(mp, rtbno);
 
-	return do_div(rtbno, mp->m_sb.sb_rextsize);
+	if (likely(mp->m_rtxblklog >= 0))
+		return __rgbno & mp->m_rtxblkmask;
+
+	return do_div(__rgbno, mp->m_sb.sb_rextsize);
 }
 
 /* Round this rtblock up to the nearest rt extent size. */
@@ -153,7 +155,12 @@ xfs_rtb_roundup_rtx(
 	struct xfs_mount	*mp,
 	xfs_rtblock_t		rtbno)
 {
-	return roundup_64(rtbno, mp->m_sb.sb_rextsize);
+	uint64_t		old_rgbno = __xfs_rtb_to_rgbno(mp, rtbno);
+	uint64_t		new_rgbno;
+	xfs_rgnumber_t		rgno = xfs_rtb_to_rgno(mp, rtbno);
+
+	new_rgbno = roundup_64(old_rgbno, mp->m_sb.sb_rextsize);
+	return __xfs_rgbno_to_rtb(mp, rgno, new_rgbno);
 }
 
 /* Round this rtblock down to the nearest rt extent size. */
@@ -162,7 +169,12 @@ xfs_rtb_rounddown_rtx(
 	struct xfs_mount	*mp,
 	xfs_rtblock_t		rtbno)
 {
-	return rounddown_64(rtbno, mp->m_sb.sb_rextsize);
+	uint64_t		old_rgbno = __xfs_rtb_to_rgbno(mp, rtbno);
+	uint64_t		new_rgbno;
+	xfs_rgnumber_t		rgno = xfs_rtb_to_rgno(mp, rtbno);
+
+	new_rgbno = rounddown_64(old_rgbno, mp->m_sb.sb_rextsize);
+	return __xfs_rgbno_to_rtb(mp, rgno, new_rgbno);
 }
 
 /* Round this file block offset up to the nearest rt extent size. */
