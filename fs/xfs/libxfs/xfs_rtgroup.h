@@ -150,6 +150,19 @@ xfs_rtbno_is_group_start(
 	return (rtbno & mp->m_groups[XG_TYPE_RTG].blkmask) == 0;
 }
 
+/* Convert an rtgroups rt extent number into an rgbno. */
+static inline xfs_rgblock_t
+xfs_rtx_to_rgbno(
+	struct xfs_rtgroup	*rtg,
+	xfs_rtxnum_t		rtx)
+{
+	struct xfs_mount	*mp = rtg_mount(rtg);
+
+	if (likely(mp->m_rtxblklog >= 0))
+		return rtx << mp->m_rtxblklog;
+	return rtx * mp->m_sb.sb_rextsize;
+}
+
 /*
  * Note: takes a uint64_t for bno because the rgbno component can overflow
  * xfs_rgblock_t on non-rtgroups file systems.
