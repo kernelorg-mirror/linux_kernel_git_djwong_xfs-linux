@@ -2776,12 +2776,8 @@ DECLARE_EVENT_CLASS(xfs_free_extent_deferred_class,
 		__entry->dev = mp->m_super->s_dev;
 		__entry->type = free->xefi_group->xg_type;
 		__entry->agno = free->xefi_group->xg_index;
-		if (free->xefi_group->xg_type == XG_TYPE_RTG)
-			__entry->agbno = xfs_rtb_to_rgbno(mp,
-						free->xefi_startblock);
-		else
-			__entry->agbno = XFS_FSB_TO_AGBNO(mp,
-						free->xefi_startblock);
+		__entry->agbno = xfs_fsb_to_gbno(mp, free->xefi_startblock,
+						free->xefi_group->xg_type);
 		__entry->len = free->xefi_blockcount;
 		__entry->flags = free->xefi_flags;
 	),
@@ -3114,15 +3110,13 @@ DECLARE_EVENT_CLASS(xfs_bmap_deferred_class,
 		if (bi->bi_group) {
 			__entry->type = bi->bi_group->xg_type;
 			__entry->agno = bi->bi_group->xg_index;
-			if (isrt) {
-				__entry->agbno = xfs_rtb_to_rgbno(ip->i_mount,
-							bi->bi_bmap.br_startblock);
+			__entry->agbno = xfs_fsb_to_gbno(ip->i_mount,
+						bi->bi_bmap.br_startblock,
+						bi->bi_group->xg_type);
+			if (isrt)
 				__entry->opdev = ip->i_mount->m_rtdev_targp->bt_dev;
-			} else {
-				__entry->agbno = XFS_FSB_TO_AGBNO(ip->i_mount,
-							bi->bi_bmap.br_startblock);
+			else
 				__entry->opdev = __entry->dev;
-			}
 			__entry->rtbno = 0;
 		} else if (isrt) {
 			__entry->type = XG_TYPE_MAX;
