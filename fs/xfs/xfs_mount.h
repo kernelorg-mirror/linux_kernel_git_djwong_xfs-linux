@@ -73,6 +73,9 @@ struct xfs_inodegc {
 
 struct xfs_groups {
 	struct xarray		xa;
+	uint64_t		blkmask;/* bitmask of group blkno */
+	uint32_t		blocks;	/* size of group in fsblocks */
+	uint8_t			blklog; /* log2 of blocks (rounded up) */
 };
 
 /*
@@ -147,14 +150,12 @@ typedef struct xfs_mount {
 	int			m_logbsize;	/* size of each log buffer */
 	unsigned int		m_rsumlevels;	/* rt summary levels */
 	xfs_filblks_t		m_rsumblocks;	/* size of rt summary, FSBs */
-	uint32_t		m_rgblocks;	/* size of rtgroup in rtblocks */
 	int			m_fixedfsid[2];	/* unchanged for life of FS */
 	uint			m_qflags;	/* quota status flags */
 	uint64_t		m_features;	/* active filesystem features */
 	uint64_t		m_low_space[XFS_LOWSP_MAX];
 	uint64_t		m_low_rtexts[XFS_LOWSP_MAX];
 	uint64_t		m_rtxblkmask;	/* rt extent block mask */
-	uint64_t		m_rgblkmask;	/* rt group block mask */
 	struct xfs_ino_geometry	m_ino_geo;	/* inode geometry */
 	struct xfs_trans_resv	m_resv;		/* precomputed res values */
 						/* low free space thresholds */
