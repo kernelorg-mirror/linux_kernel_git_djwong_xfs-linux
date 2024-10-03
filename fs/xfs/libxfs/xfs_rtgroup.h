@@ -141,6 +141,15 @@ xfs_rtb_to_rgbno(
 	return xfs_fsb_to_gbno(mp, rtbno, XG_TYPE_RTG);
 }
 
+/* Is rtbno the start of a RT group? */
+static inline bool
+xfs_rtbno_is_group_start(
+	struct xfs_mount	*mp,
+	xfs_rtblock_t		rtbno)
+{
+	return (rtbno & mp->m_groups[XG_TYPE_RTG].blkmask) == 0;
+}
+
 static inline xfs_daddr_t
 xfs_rtb_to_daddr(
 	struct xfs_mount	*mp,
