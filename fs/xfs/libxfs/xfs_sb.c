@@ -1129,11 +1129,15 @@ xfs_sb_mount_rextsize(
 	mp->m_rtxblkmask = mask64_if_power2(sbp->sb_rextsize);
 
 	if (xfs_sb_version_hasmetadir(sbp)) {
-		mp->m_rgblocks = sbp->sb_rgextents * sbp->sb_rextsize;
-		mp->m_rgblkmask = (1ULL << sbp->sb_rgblklog) - 1;
+		mp->m_groups[XG_TYPE_RTG].blocks =
+				sbp->sb_rgextents * sbp->sb_rextsize;
+		mp->m_groups[XG_TYPE_RTG].blklog = mp->m_sb.sb_rgblklog;
+		mp->m_groups[XG_TYPE_RTG].blkmask =
+			xfs_mask32lo(mp->m_sb.sb_rgblklog);
 	} else {
-		mp->m_rgblocks = 0;
-		mp->m_rgblkmask = 0;
+		mp->m_groups[XG_TYPE_RTG].blocks = 0;
+		mp->m_groups[XG_TYPE_RTG].blklog = 0;
+		mp->m_groups[XG_TYPE_RTG].blkmask = (uint64_t)-1;
 	}
 }
 
@@ -1176,6 +1180,9 @@ xfs_sb_mount_common(
 	mp->m_blockmask = sbp->sb_blocksize - 1;
 	mp->m_blockwsize = xfs_rtbmblock_size(sbp) >> XFS_WORDLOG;
 	mp->m_rtx_per_rbmblock = mp->m_blockwsize << XFS_NBWORDLOG;
+	mp->m_groups[XG_TYPE_AG].blocks = mp->m_sb.sb_agblocks;
+	mp->m_groups[XG_TYPE_AG].blklog = mp->m_sb.sb_agblklog;
+	mp->m_groups[XG_TYPE_AG].blkmask = xfs_mask32lo(mp->m_sb.sb_agblklog);
 	xfs_sb_mount_rextsize(mp, sbp);
 
 	mp->m_alloc_mxr[0] = xfs_allocbt_maxrecs(mp, sbp->sb_blocksize, true);
