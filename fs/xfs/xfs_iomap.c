@@ -133,8 +133,7 @@ xfs_bmbt_to_iomap(
 		 * single RTG.
 		 */
 		if (XFS_IS_REALTIME_INODE(ip) && xfs_has_rtgroups(mp) &&
-		    xfs_rtb_to_rtx(mp, imap->br_startblock) == 0 &&
-		    xfs_rtb_to_rtxoff(mp, imap->br_startblock) == 0)
+		    xfs_rtbno_is_group_start(mp, imap->br_startblock))
 			iomap->flags |= IOMAP_F_BOUNDARY;
 	}
 	iomap->offset = XFS_FSB_TO_B(mp, imap->br_startoff);

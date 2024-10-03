@@ -141,6 +141,15 @@ xfs_rtb_to_rgbno(
 	return xfs_fsb_to_gbno(mp, rtbno, XG_TYPE_RTG);
 }
 
+/* Is rtbno the start of a RT group? */
+static inline bool
+xfs_rtbno_is_group_start(
+	struct xfs_mount	*mp,
+	xfs_rtblock_t		rtbno)
+{
+	return (rtbno & mp->m_groups[XG_TYPE_RTG].blkmask) == 0;
+}
+
 /*
  * Note: takes a uint64_t for bno because the rgbno component can overflow
  * xfs_rgblock_t on non-rtgroups file systems.
