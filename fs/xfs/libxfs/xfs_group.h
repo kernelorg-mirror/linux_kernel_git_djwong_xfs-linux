@@ -119,4 +119,13 @@ xfs_fsb_to_gno(
 	return fsbno >> mp->m_groups[type].blklog;
 }
 
+static inline xfs_agblock_t
+xfs_fsb_to_gbno(
+	struct xfs_mount	*mp,
+	xfs_fsblock_t		fsbno,
+	enum xfs_group_type	type)
+{
+	return fsbno & mp->m_groups[type].blkmask;
+}
+
 #endif /* __LIBXFS_GROUP_H */
