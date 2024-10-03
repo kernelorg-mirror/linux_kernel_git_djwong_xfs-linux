@@ -133,17 +133,6 @@ xfs_rtb_to_rgno(
 	return xfs_fsb_to_gno(mp, rtbno, XG_TYPE_RTG);
 }
 
-static inline uint64_t
-__xfs_rtb_to_rgbno(
-	struct xfs_mount	*mp,
-	xfs_rtblock_t		rtbno)
-{
-	if (!xfs_has_rtgroups(mp))
-		return rtbno;
-
-	return rtbno & mp->m_groups[XG_TYPE_RTG].blkmask;
-}
-
 static inline xfs_rgblock_t
 xfs_rtb_to_rgbno(
 	struct xfs_mount	*mp,
@@ -174,7 +163,7 @@ xfs_rtb_to_daddr(
 	xfs_rtblock_t		rtbno)
 {
 	return xfs_rgbno_to_daddr(mp, xfs_rtb_to_rgno(mp, rtbno),
-				    __xfs_rtb_to_rgbno(mp, rtbno));
+			rtbno & mp->m_groups[XG_TYPE_RTG].blkmask);
 }
 
 static inline xfs_rgnumber_t
