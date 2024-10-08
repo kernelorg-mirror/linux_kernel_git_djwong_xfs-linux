@@ -220,9 +220,10 @@ xfs_perag_alloc(
 	/*
 	 * Pre-calculated geometry
 	 */
-	pag->block_count = __xfs_ag_block_count(mp, index, agcount, dblocks);
-	pag->min_block = XFS_AGFL_BLOCK(mp) + 1;
-	__xfs_agino_range(mp, pag->block_count, &pag->agino_min,
+	pag->pag_group.xg_block_count = __xfs_ag_block_count(mp, index, agcount,
+			dblocks);
+	pag->pag_group.xg_min_gbno = XFS_AGFL_BLOCK(mp) + 1;
+	__xfs_agino_range(mp, pag->pag_group.xg_block_count, &pag->agino_min,
 			&pag->agino_max);
 
 	error = xfs_group_insert(mp, &pag->pag_group, index, XG_TYPE_AG);
@@ -831,8 +832,8 @@ xfs_ag_shrink_space(
 	}
 
 	/* Update perag geometry */
-	pag->block_count -= delta;
-	__xfs_agino_range(mp, pag->block_count, &pag->agino_min,
+	pag->pag_group.xg_block_count -= delta;
+	__xfs_agino_range(mp, pag->pag_group.xg_block_count, &pag->agino_min,
 			&pag->agino_max);
 
 	xfs_ialloc_log_agi(*tpp, agibp, XFS_AGI_LENGTH);
@@ -903,8 +904,8 @@ xfs_ag_extend_space(
 		return error;
 
 	/* Update perag geometry */
-	pag->block_count = be32_to_cpu(agf->agf_length);
-	__xfs_agino_range(mp, pag->block_count, &pag->agino_min,
+	pag->pag_group.xg_block_count = be32_to_cpu(agf->agf_length);
+	__xfs_agino_range(mp, pag->pag_group.xg_block_count, &pag->agino_min,
 			&pag->agino_max);
 	return 0;
 }

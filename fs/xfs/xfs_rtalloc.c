@@ -878,7 +878,7 @@ xfs_growfs_rt_bmblock(
 	if (!nmp)
 		return -ENOMEM;
 
-	rtg->rtg_extents = xfs_rtgroup_extents(nmp, rtg_rgno(rtg));
+	xfs_rtgroup_calc_geometry(nmp, rtg, rtg_rgno(rtg));
 
 	/*
 	 * Recompute the growfsrt reservation from the new rsumsize, so that the
@@ -1137,7 +1137,7 @@ out_error:
 	/*
 	 * Reset rtg_extents to the old value if adding more blocks failed.
 	 */
-	rtg->rtg_extents = xfs_rtgroup_extents(rtg_mount(rtg), rtg_rgno(rtg));
+	xfs_rtgroup_calc_geometry(rtg_mount(rtg), rtg, rtg_rgno(rtg));
 	if (old_rsum_cache) {
 		kvfree(rtg->rtg_rsum_cache);
 		rtg->rtg_rsum_cache = old_rsum_cache;
@@ -1514,8 +1514,6 @@ xfs_rtmount_rtg(
 	struct xfs_rtgroup	*rtg)
 {
 	int			error, i;
-
-	rtg->rtg_extents = xfs_rtgroup_extents(mp, rtg_rgno(rtg));
 
 	for (i = 0; i < XFS_RTGI_MAX; i++) {
 		error = xfs_rtginode_load(rtg, i, tp);
