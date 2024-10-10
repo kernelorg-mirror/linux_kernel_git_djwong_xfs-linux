@@ -118,30 +118,11 @@ xfs_rtgroup_next(
 }
 
 static inline xfs_rtblock_t
-xfs_rgno_start_rtb(
-	struct xfs_mount	*mp,
-	xfs_rgnumber_t		rgno)
-{
-	if (!xfs_has_rtgroups(mp))
-		return 0;
-	return ((xfs_rtblock_t)rgno << mp->m_sb.sb_rgblklog);
-}
-
-static inline xfs_rtblock_t
-__xfs_rgbno_to_rtb(
-	struct xfs_mount	*mp,
-	xfs_rgnumber_t		rgno,
-	xfs_rgblock_t		rgbno)
-{
-	return xfs_rgno_start_rtb(mp, rgno) + rgbno;
-}
-
-static inline xfs_rtblock_t
 xfs_rgbno_to_rtb(
 	struct xfs_rtgroup	*rtg,
 	xfs_rgblock_t		rgbno)
 {
-	return __xfs_rgbno_to_rtb(rtg_mount(rtg), rtg_rgno(rtg), rgbno);
+	return xfs_gbno_to_fsb(&rtg->rtg_group, rgbno);
 }
 
 static inline xfs_rgnumber_t
@@ -149,21 +130,7 @@ xfs_rtb_to_rgno(
 	struct xfs_mount	*mp,
 	xfs_rtblock_t		rtbno)
 {
-	if (!xfs_has_rtgroups(mp))
-		return 0;
-
-	return rtbno >> mp->m_sb.sb_rgblklog;
-}
-
-static inline uint64_t
-__xfs_rtb_to_rgbno(
-	struct xfs_mount	*mp,
-	xfs_rtblock_t		rtbno)
-{
-	if (!xfs_has_rtgroups(mp))
-		return rtbno;
-
-	return rtbno & mp->m_rgblkmask;
+	return xfs_fsb_to_gno(mp, rtbno, XG_TYPE_RTG);
 }
 
 static inline xfs_rgblock_t
@@ -171,7 +138,7 @@ xfs_rtb_to_rgbno(
 	struct xfs_mount	*mp,
 	xfs_rtblock_t		rtbno)
 {
-	return __xfs_rtb_to_rgbno(mp, rtbno);
+	return xfs_fsb_to_gbno(mp, rtbno, XG_TYPE_RTG);
 }
 
 static inline xfs_daddr_t
@@ -179,10 +146,11 @@ xfs_rtb_to_daddr(
 	struct xfs_mount	*mp,
 	xfs_rtblock_t		rtbno)
 {
+	struct xfs_groups	*g = &mp->m_groups[XG_TYPE_RTG];
 	xfs_rgnumber_t		rgno = xfs_rtb_to_rgno(mp, rtbno);
-	uint64_t		start_bno = (xfs_rtblock_t)rgno * mp->m_rgblocks;
+	uint64_t		start_bno = (xfs_rtblock_t)rgno * g->blocks;
 
-	return XFS_FSB_TO_BB(mp, start_bno + (rtbno & mp->m_rgblkmask));
+	return XFS_FSB_TO_BB(mp, start_bno + (rtbno & g->blkmask));
 }
 
 static inline xfs_rtblock_t
@@ -193,11 +161,12 @@ xfs_daddr_to_rtb(
 	xfs_rfsblock_t		bno = XFS_BB_TO_FSBT(mp, daddr);
 
 	if (xfs_has_rtgroups(mp)) {
+		struct xfs_groups *g = &mp->m_groups[XG_TYPE_RTG];
 		xfs_rgnumber_t	rgno;
 		uint32_t	rgbno;
 
-		rgno = div_u64_rem(bno, mp->m_rgblocks, &rgbno);
-		return ((xfs_rtblock_t)rgno << mp->m_sb.sb_rgblklog) + rgbno;
+		rgno = div_u64_rem(bno, g->blocks, &rgbno);
+		return ((xfs_rtblock_t)rgno << g->blklog) + rgbno;
 	}
 
 	return bno;

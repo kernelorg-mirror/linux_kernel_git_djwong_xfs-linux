@@ -2776,12 +2776,8 @@ DECLARE_EVENT_CLASS(xfs_free_extent_deferred_class,
 		__entry->dev = mp->m_super->s_dev;
 		__entry->type = free->xefi_group->xg_type;
 		__entry->agno = free->xefi_group->xg_index;
-		if (free->xefi_group->xg_type == XG_TYPE_RTG)
-			__entry->agbno = xfs_rtb_to_rgbno(mp,
-						free->xefi_startblock);
-		else
-			__entry->agbno = XFS_FSB_TO_AGBNO(mp,
-						free->xefi_startblock);
+		__entry->agbno = xfs_fsb_to_gbno(mp, free->xefi_startblock,
+						free->xefi_group->xg_type);
 		__entry->len = free->xefi_blockcount;
 		__entry->flags = free->xefi_flags;
 	),
@@ -3110,24 +3106,17 @@ DECLARE_EVENT_CLASS(xfs_bmap_deferred_class,
 		__entry->dev = mp->m_super->s_dev;
 		__entry->type = bi->bi_group->xg_type;
 		__entry->agno = bi->bi_group->xg_index;
-		switch (__entry->type) {
-		case XG_TYPE_RTG:
+		if (bi->bi_group->xg_type == XG_TYPE_RTG &&
+		    !xfs_has_rtgroups(mp)) {
 			/*
-			 * Use the 64-bit version of xfs_rtb_to_rgbno because
-			 * legacy rt filesystems can have group block numbers
-			 * that exceed the size of an xfs_rgblock_t.
+			 * Legacy rt filesystems have linear block numbers
+			 * that can overflow a 32-bit block number.
 			 */
-			__entry->gbno = __xfs_rtb_to_rgbno(mp,
-						bi->bi_bmap.br_startblock);
-			break;
-		case XG_TYPE_AG:
-			__entry->gbno = XFS_FSB_TO_AGBNO(mp,
-						bi->bi_bmap.br_startblock);
-			break;
-		default:
-			/* should never happen */
-			__entry->gbno = -1ULL;
-			break;
+			__entry->gbno = bi->bi_bmap.br_startblock;
+		} else {
+			__entry->gbno = xfs_fsb_to_gbno(mp,
+						bi->bi_bmap.br_startblock,
+						bi->bi_group->xg_type);
 		}
 		__entry->ino = ip->i_ino;
 		__entry->whichfork = bi->bi_whichfork;

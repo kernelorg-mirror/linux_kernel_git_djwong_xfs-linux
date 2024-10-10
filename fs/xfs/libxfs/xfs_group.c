@@ -12,8 +12,6 @@
 #include "xfs_trace.h"
 #include "xfs_extent_busy.h"
 #include "xfs_group.h"
-#include "xfs_ag.h"
-#include "xfs_rtgroup.h"
 
 /*
  * Groups can have passive and active references.
@@ -215,38 +213,6 @@ out_drain:
 	kfree(xg->xg_busy_extents);
 #endif
 	return error;
-}
-
-xfs_fsblock_t
-xfs_gbno_to_fsb(
-	struct xfs_group	*xg,
-	xfs_agblock_t		gbno)
-{
-	if (xg->xg_type == XG_TYPE_RTG)
-		return xfs_rgbno_to_rtb(to_rtg(xg), gbno);
-	return xfs_agbno_to_fsb(to_perag(xg), gbno);
-}
-
-xfs_daddr_t
-xfs_gbno_to_daddr(
-	struct xfs_group	*xg,
-	xfs_agblock_t		gbno)
-{
-	if (xg->xg_type == XG_TYPE_RTG)
-		return xfs_rtb_to_daddr(xg->xg_mount,
-			xfs_rgbno_to_rtb(to_rtg(xg), gbno));
-	return xfs_agbno_to_daddr(to_perag(xg), gbno);
-}
-
-uint32_t
-xfs_fsb_to_gno(
-	struct xfs_mount	*mp,
-	xfs_fsblock_t		fsbno,
-	enum xfs_group_type	type)
-{
-	if (type == XG_TYPE_RTG)
-		return xfs_rtb_to_rgno(mp, fsbno);
-	return XFS_FSB_TO_AGNO(mp, fsbno);
 }
 
 struct xfs_group *
