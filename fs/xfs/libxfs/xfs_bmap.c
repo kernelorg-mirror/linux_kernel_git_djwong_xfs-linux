@@ -41,6 +41,7 @@
 #include "xfs_symlink_remote.h"
 #include "xfs_inode_util.h"
 #include "xfs_rtgroup.h"
+#include "xfs_rtalloc.h"
 
 struct kmem_cache		*xfs_bmap_intent_cache;
 
