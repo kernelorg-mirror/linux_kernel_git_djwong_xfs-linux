@@ -20,6 +20,7 @@
 #include "xfs_sysfs.h"
 #include "xfs_sb.h"
 #include "xfs_health.h"
+#include "xfs_timestats.h"
 
 struct kmem_cache	*xfs_log_ticket_cache;
 
@@ -362,6 +363,7 @@ xfs_log_regrant(
 	struct xlog_ticket	*tic)
 {
 	struct xlog		*log = mp->m_log;
+	DECLARE_XFS_TIMESTAT(start_time);
 	int			need_bytes;
 	int			error = 0;
 
@@ -383,12 +385,15 @@ xfs_log_regrant(
 
 	trace_xfs_log_regrant(log, tic);
 
+	xfs_timestats_start(&start_time);
 	error = xlog_grant_head_check(log, &log->l_write_head, tic,
 				      &need_bytes);
 	if (error)
 		goto out_error;
 
 	xlog_grant_add_space(&log->l_write_head, need_bytes);
+	xfs_timestats_end(&mp->m_timestats.ts_log_regrant, start_time);
+
 	trace_xfs_log_regrant_exit(log, tic);
 	return 0;
 
@@ -421,6 +426,7 @@ xfs_log_reserve(
 {
 	struct xlog		*log = mp->m_log;
 	struct xlog_ticket	*tic;
+	DECLARE_XFS_TIMESTAT(start_time);
 	int			need_bytes;
 	int			error = 0;
 
@@ -433,6 +439,8 @@ xfs_log_reserve(
 	tic = xlog_ticket_alloc(log, unit_bytes, cnt, permanent);
 	*ticp = tic;
 	trace_xfs_log_reserve(log, tic);
+
+	xfs_timestats_start(&start_time);
 	error = xlog_grant_head_check(log, &log->l_reserve_head, tic,
 				      &need_bytes);
 	if (error)
@@ -440,6 +448,8 @@ xfs_log_reserve(
 
 	xlog_grant_add_space(&log->l_reserve_head, need_bytes);
 	xlog_grant_add_space(&log->l_write_head, need_bytes);
+	xfs_timestats_end(&mp->m_timestats.ts_log_reserve, start_time);
+
 	trace_xfs_log_reserve_exit(log, tic);
 	return 0;
 
