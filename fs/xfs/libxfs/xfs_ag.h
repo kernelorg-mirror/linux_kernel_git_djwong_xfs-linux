@@ -120,6 +120,7 @@ static inline xfs_agnumber_t pag_agno(const struct xfs_perag *pag)
 #define XFS_AGSTATE_PREFERS_METADATA	2
 #define XFS_AGSTATE_ALLOWS_INODES	3
 #define XFS_AGSTATE_AGFL_NEEDS_RESET	4
+#define XFS_AGSTATE_NOALLOC		5
 
 #define __XFS_AG_OPSTATE(name, NAME) \
 static inline bool xfs_perag_ ## name (struct xfs_perag *pag) \
@@ -132,6 +133,7 @@ __XFS_AG_OPSTATE(initialised_agi, AGI_INIT)
 __XFS_AG_OPSTATE(prefers_metadata, PREFERS_METADATA)
 __XFS_AG_OPSTATE(allows_inodes, ALLOWS_INODES)
 __XFS_AG_OPSTATE(agfl_needs_reset, AGFL_NEEDS_RESET)
+__XFS_AG_OPSTATE(prohibits_alloc, NOALLOC)
 
 int xfs_initialize_perag(struct xfs_mount *mp, xfs_agnumber_t old_agcount,
 		xfs_agnumber_t agcount, xfs_rfsblock_t dcount,
@@ -162,6 +164,7 @@ xfs_perag_put(
 {
 	xfs_group_put(pag_group(pag));
 }
+
 
 /* Active AG references */
 static inline struct xfs_perag *
@@ -206,6 +209,11 @@ xfs_perag_next(
 {
 	return xfs_perag_next_from(mp, pag, 0);
 }
+
+/* Enable or disable allocation from an AG */
+xfs_extlen_t xfs_ag_fdblocks(struct xfs_perag *pag);
+int xfs_ag_set_noalloc(struct xfs_perag *pag);
+void xfs_ag_clear_noalloc(struct xfs_perag *pag);
 
 /*
  * Per-ag geometry infomation and validation
