@@ -288,6 +288,14 @@ static void iomap_adjust_read_range(struct inode *inode, struct folio *folio,
 	*lenp = plen;
 }
 
+static inline void iomap_mapping_ioerror(struct address_space *mapping,
+		int direction, loff_t pos, u64 len, int error)
+{
+	if (mapping && mapping->a_ops->ioerror)
+		mapping->a_ops->ioerror(mapping, direction, pos, len,
+				error);
+}
+
 static void iomap_finish_folio_read(struct folio *folio, size_t off,
 		size_t len, int error)
 {
@@ -305,6 +313,10 @@ static void iomap_finish_folio_read(struct folio *folio, size_t off,
 		finished = !ifs->read_bytes_pending;
 		spin_unlock_irqrestore(&ifs->state_lock, flags);
 	}
+
+	if (error)
+		iomap_mapping_ioerror(folio->mapping, READ,
+				folio_pos(folio) + off, len, error);
 
 	if (finished)
 		folio_end_read(folio, uptodate);
@@ -674,11 +686,16 @@ static int iomap_read_folio_sync(loff_t block_start, struct folio *folio,
 {
 	struct bio_vec bvec;
 	struct bio bio;
+	int ret;
 
 	bio_init(&bio, iomap->bdev, &bvec, 1, REQ_OP_READ);
 	bio.bi_iter.bi_sector = iomap_sector(iomap, block_start);
 	bio_add_folio_nofail(&bio, folio, plen, poff);
-	return submit_bio_wait(&bio);
+	ret = submit_bio_wait(&bio);
+	if (ret)
+		iomap_mapping_ioerror(folio->mapping, READ,
+				folio_pos(folio) + poff, plen, ret);
+	return ret;
 }
 
 static int __iomap_write_begin(const struct iomap_iter *iter, loff_t pos,
@@ -1610,6 +1627,11 @@ iomap_finish_ioend(struct iomap_ioend *ioend, int error)
 
 	/* walk all folios in bio, ending page IO on them */
 	bio_for_each_folio_all(fi, bio) {
+		if (error)
+			iomap_mapping_ioerror(inode->i_mapping, WRITE,
+					folio_pos(fi.folio) + fi.offset,
+					fi.length, error);
+
 		iomap_finish_folio_write(inode, fi.folio, fi.length);
 		folio_count++;
 	}
@@ -2017,6 +2039,8 @@ static int iomap_writepage_map(struct iomap_writepage_ctx *wpc,
 
 	if (count)
 		wpc->nr_folios++;
+	if (error && !count)
+		iomap_mapping_ioerror(inode->i_mapping, WRITE, pos, 0, error);
 
 	/*
 	 * We can have dirty bits set past end of file in page_mkwrite path
