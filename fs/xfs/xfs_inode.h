@@ -126,6 +126,24 @@ xfs_ifork_ptr(
 	}
 }
 
+static inline int
+xfs_ifork_which(
+	struct xfs_inode	*ip,
+	struct xfs_ifork	*ifp)
+{
+	ASSERT(ifp != NULL);
+
+	if (ifp == &ip->i_df)
+		return XFS_DATA_FORK;
+	if (ifp == &ip->i_af)
+		return XFS_ATTR_FORK;
+	if (ifp == ip->i_cowfp)
+		return XFS_COW_FORK;
+
+	ASSERT(0);
+	return -2; /* unknown */
+}
+
 static inline unsigned int xfs_inode_fork_boff(struct xfs_inode *ip)
 {
 	return ip->i_forkoff << 3;
