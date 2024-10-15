@@ -479,6 +479,12 @@ __XFS_HAS_FEAT(nouuid, NOUUID)
 #define XFS_OPSTATE_UNSET_LOG_INCOMPAT	11
 /* Filesystem can use logged extended attributes */
 #define XFS_OPSTATE_USE_LARP		12
+/* Kernel has logged a warning about blocksize > pagesize on this fs. */
+#define XFS_OPSTATE_WARNED_LBS		13
+/* Kernel has logged a warning about exchange-range being used on this fs. */
+#define XFS_OPSTATE_WARNED_EXCHRANGE	14
+/* Kernel has logged a warning about parent pointers being used on this fs. */
+#define XFS_OPSTATE_WARNED_PPTR		15
 
 #define __XFS_IS_OPSTATE(name, NAME) \
 static inline bool xfs_is_ ## name (struct xfs_mount *mp) \
