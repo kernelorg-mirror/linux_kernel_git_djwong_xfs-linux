@@ -853,7 +853,7 @@ xfs_trans_metafile_iget(
 	int			error;
 
 	error = xfs_iget(mp, tp, ino, XFS_IGET_UNTRUSTED, 0, &ip);
-	if (error == -EFSCORRUPTED)
+	if (error == -EFSCORRUPTED || error == -EINVAL)
 		goto whine;
 	if (error)
 		return error;
