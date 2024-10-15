@@ -5,6 +5,7 @@ config XFS_FS
 	select EXPORTFS
 	select LIBCRC32C
 	select FS_IOMAP
+	select TIME_STATS if XFS_TIME_STATS
 	help
 	  XFS is a high performance journaling filesystem which originated
 	  on the SGI IRIX platform.  It is completely multi-threaded, can
@@ -119,6 +120,13 @@ config XFS_RT
 	  See the xfs man page in section 5 for additional information.
 
 	  If unsure, say N.
+
+config XFS_TIME_STATS
+	bool "Collect time statistics for XFS filesystems"
+	depends on XFS_FS
+	default n
+	help
+	  Collects time statistics on various operations in the filesystem.
 
 config XFS_DRAIN_INTENTS
 	bool
