@@ -708,6 +708,11 @@ xlog_recover_do_primary_sb_buffer(
 
 	xlog_recover_do_reg_buffer(mp, item, bp, buf_f, current_lsn);
 
+	if (orig_agcount == 0) {
+		xfs_alert(mp, "Trying to grow file system without AGs");
+		return -EFSCORRUPTED;
+	}
+
 	/*
 	 * Update the in-core super block from the freshly recovered on-disk one.
 	 */
@@ -717,6 +722,14 @@ xlog_recover_do_primary_sb_buffer(
 		xfs_alert(mp, "Shrinking AG count in log recovery not supported");
 		return -EFSCORRUPTED;
 	}
+
+	/*
+	 * If the last AG was grown or shrunk, we also need to update the
+	 * length in the in-core perag structure and values depending on it.
+	 */
+	error = xfs_update_last_ag_size(mp, orig_agcount);
+	if (error)
+		return error;
 
 	/*
 	 * Initialize the new perags, and also update various block and inode
