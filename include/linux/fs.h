@@ -45,6 +45,9 @@
 #include <linux/slab.h>
 #include <linux/maple_tree.h>
 #include <linux/rw_hint.h>
+#ifdef CONFIG_FS_TIME_STATS
+# include <linux/time_stats.h>
+#endif
 
 #include <asm/byteorder.h>
 #include <uapi/linux/fs.h>
@@ -784,6 +787,22 @@ static inline void inode_fake_hash(struct inode *inode)
 	hlist_add_fake(&inode->i_hash);
 }
 
+#ifdef CONFIG_FS_TIME_STATS
+# define DECLARE_FS_TIMESTAT(name)	u64 name
+# define DEFINE_FS_TIMESTAT(name)	u64 name = local_clock()
+# define fs_timestats_start(b)		do { *(b) = local_clock(); } while (0)
+static inline void inode_timestats_end(struct inode *inode, u64 start_time);
+static inline void filemap_timestats_end(struct address_space *a, u64 start_time);
+#else
+# define DECLARE_FS_TIMESTAT(name)
+# define DEFINE_FS_TIMESTAT(name)
+# define fs_timestats_start(t)		((void)0)
+# define inode_timestats_end(i, t)	((void)0)
+# define filemap_timestats_end(a, t)	((void)0)
+
+#endif /* CONFIG_VFS_TIME_STATS */
+
+
 /*
  * inode->i_mutex nesting subclasses for the lock validator:
  *
@@ -812,7 +831,9 @@ enum inode_i_mutex_lock_class
 
 static inline void inode_lock(struct inode *inode)
 {
+	DEFINE_FS_TIMESTAT(start_time);
 	down_write(&inode->i_rwsem);
+	inode_timestats_end(inode, start_time);
 }
 
 static inline void inode_unlock(struct inode *inode)
@@ -822,7 +843,9 @@ static inline void inode_unlock(struct inode *inode)
 
 static inline void inode_lock_shared(struct inode *inode)
 {
+	DEFINE_FS_TIMESTAT(start_time);
 	down_read(&inode->i_rwsem);
+	inode_timestats_end(inode, start_time);
 }
 
 static inline void inode_unlock_shared(struct inode *inode)
@@ -847,17 +870,23 @@ static inline int inode_is_locked(struct inode *inode)
 
 static inline void inode_lock_nested(struct inode *inode, unsigned subclass)
 {
+	DEFINE_FS_TIMESTAT(start_time);
 	down_write_nested(&inode->i_rwsem, subclass);
+	inode_timestats_end(inode, start_time);
 }
 
 static inline void inode_lock_shared_nested(struct inode *inode, unsigned subclass)
 {
+	DEFINE_FS_TIMESTAT(start_time);
 	down_read_nested(&inode->i_rwsem, subclass);
+	inode_timestats_end(inode, start_time);
 }
 
 static inline void filemap_invalidate_lock(struct address_space *mapping)
 {
+	DEFINE_FS_TIMESTAT(start_time);
 	down_write(&mapping->invalidate_lock);
+	filemap_timestats_end(mapping, start_time);
 }
 
 static inline void filemap_invalidate_unlock(struct address_space *mapping)
@@ -867,7 +896,9 @@ static inline void filemap_invalidate_unlock(struct address_space *mapping)
 
 static inline void filemap_invalidate_lock_shared(struct address_space *mapping)
 {
+	DEFINE_FS_TIMESTAT(start_time);
 	down_read(&mapping->invalidate_lock);
+	filemap_timestats_end(mapping, start_time);
 }
 
 static inline int filemap_invalidate_trylock_shared(
@@ -1390,7 +1421,27 @@ struct super_block {
 
 	spinlock_t		s_inode_wblist_lock;
 	struct list_head	s_inodes_wb;	/* writeback inodes */
+#ifdef CONFIG_FS_TIME_STATS
+	struct time_stats	s_ts_inode_lock;
+	struct time_stats	s_ts_filemap_lock;
+#endif
 } __randomize_layout;
+
+#ifdef CONFIG_FS_TIME_STATS
+static inline void inode_timestats_end(struct inode *inode, u64 start_time)
+{
+	time_stats_update(&inode->i_sb->s_ts_inode_lock, start_time);
+}
+
+static inline void filemap_timestats_end(struct address_space *mapping,
+					 u64 start_time)
+{
+	struct inode *inode = mapping->host;
+
+	if (inode)
+		time_stats_update(&inode->i_sb->s_ts_filemap_lock, start_time);
+}
+#endif /* CONFIG_FS_TIME_STATS */
 
 static inline struct user_namespace *i_user_ns(const struct inode *inode)
 {

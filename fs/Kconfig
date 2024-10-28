@@ -30,6 +30,13 @@ config LEGACY_DIRECT_IO
 	depends on BUFFER_HEAD
 	bool
 
+config FS_TIME_STATS
+	bool "Collect time statistics for all filesystems"
+	select TIME_STATS
+	default n
+	help
+	  Collects time statistics on inode and mapping locks in all filesystems.
+
 if BLOCK
 
 source "fs/ext2/Kconfig"

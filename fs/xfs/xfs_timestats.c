@@ -122,6 +122,13 @@ xfs_timestats_destroy(
 		debugfs_create_file("blocked::" #name ".json", 0444, (p), \
 				&(ts)->ts_##name, &xfs_timestats_json_fops); \
 	} while (0)
+#define Y(p, mp, name) \
+	do { \
+		debugfs_create_file("blocked::" #name ".txt", 0444, (p), \
+				&(mp)->m_super->s_ts_##name, &xfs_timestats_fops); \
+		debugfs_create_file("blocked::" #name ".json", 0444, (p), \
+				&(mp)->m_super->s_ts_##name, &xfs_timestats_json_fops); \
+	} while (0)
 void
 xfs_timestats_export(
 	struct xfs_mount	*mp)
@@ -142,7 +149,10 @@ xfs_timestats_export(
 	X(parent, ts, ilock);
 	X(parent, ts, buflock);
 	X(parent, ts, dqlock);
+	Y(parent, mp, inode_lock);
+	Y(parent, mp, filemap_lock);
 }
+#undef Y
 #undef X
 
 /* Delete debugfs entries for timestats */

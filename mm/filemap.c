@@ -1025,10 +1025,16 @@ void filemap_invalidate_lock_two(struct address_space *mapping1,
 {
 	if (mapping1 > mapping2)
 		swap(mapping1, mapping2);
-	if (mapping1)
+	if (mapping1) {
+		DEFINE_FS_TIMESTAT(start_time);
 		down_write(&mapping1->invalidate_lock);
-	if (mapping2 && mapping1 != mapping2)
+		filemap_timestats_end(mapping1, start_time);
+	}
+	if (mapping2 && mapping1 != mapping2) {
+		DEFINE_FS_TIMESTAT(start_time);
 		down_write_nested(&mapping2->invalidate_lock, 1);
+		filemap_timestats_end(mapping2, start_time);
+	}
 }
 EXPORT_SYMBOL(filemap_invalidate_lock_two);
 
