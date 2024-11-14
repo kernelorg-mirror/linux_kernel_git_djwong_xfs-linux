@@ -1271,6 +1271,9 @@ retry:
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
 	xfs_trans_ijoin(tp, ip, XFS_ILOCK_EXCL);
 
+	if (xfs_is_metadir_inode(ip))
+		goto out;
+
 	error = xfs_qm_dqattach_locked(ip, false);
 	if (error) {
 		/* Caller should have allocated the dquots! */
@@ -1339,6 +1342,7 @@ retry:
 			goto out_cancel;
 	}
 
+out:
 	*tpp = tp;
 	return 0;
 
