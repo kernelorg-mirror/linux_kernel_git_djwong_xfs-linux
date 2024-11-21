@@ -273,6 +273,9 @@ xfs_iformat_data_fork(
 			switch (ip->i_metatype) {
 			case XFS_METAFILE_RTRMAP:
 				return xfs_iformat_rtrmap(ip, dip);
+			case XFS_METAFILE_RTREFCOUNT:
+				ASSERT(0); /* to be implemented later */
+				return -EFSCORRUPTED;
 			default:
 				break;
 			}
@@ -620,6 +623,9 @@ xfs_iflush_fork(
 		switch (ip->i_metatype) {
 		case XFS_METAFILE_RTRMAP:
 			xfs_iflush_rtrmap(ip, dip);
+			break;
+		case XFS_METAFILE_RTREFCOUNT:
+			ASSERT(0); /* to be implemented later */
 			break;
 		default:
 			ASSERT(0);
