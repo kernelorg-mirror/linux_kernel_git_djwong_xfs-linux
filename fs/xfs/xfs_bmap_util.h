@@ -85,8 +85,10 @@ int	xfs_flush_unmap_range(struct xfs_inode *ip, xfs_off_t offset,
 #ifdef CONFIG_XFS_RT
 int xfs_convert_rtbigalloc_file_space(struct xfs_inode *ip, loff_t pos,
 		uint64_t len);
+int xfs_map_free_rt_space(struct xfs_inode *ip, xfs_off_t off, xfs_off_t len);
 #else
 # define xfs_convert_rtbigalloc_file_space(ip, pos, len)	(-EOPNOTSUPP)
+# define xfs_map_free_rt_space(ip, off, len)			(-EOPNOTSUPP)
 #endif
 
 #endif	/* __XFS_BMAP_UTIL_H__ */
