@@ -587,12 +587,14 @@ static const struct iomap_writeback_ops xfs_zoned_writeback_ops = {
 
 STATIC int
 xfs_vm_writepages(
-	struct address_space	*mapping,
-	struct writeback_control *wbc)
+	struct address_space		*mapping,
+	struct writeback_control	*wbc)
 {
-	struct xfs_inode	*ip = XFS_I(mapping->host);
-	struct xfs_writepage_ctx wpc = { };
-	int			error;
+	struct xfs_inode		*ip = XFS_I(mapping->host);
+	struct xfs_writepage_ctx	wpc = { };
+	int				error;
+
+	trace_xfs_vm_writepages(ip, wbc);
 
 	xfs_iflags_clear(ip, XFS_ITRUNCATED);
 	if (xfs_is_zoned_inode(ip)) {
@@ -609,10 +611,12 @@ xfs_vm_writepages(
 
 STATIC int
 xfs_dax_writepages(
-	struct address_space	*mapping,
-	struct writeback_control *wbc)
+	struct address_space		*mapping,
+	struct writeback_control	*wbc)
 {
-	struct xfs_inode	*ip = XFS_I(mapping->host);
+	struct xfs_inode		*ip = XFS_I(mapping->host);
+
+	trace_xfs_dax_writepages(ip, wbc);
 
 	xfs_iflags_clear(ip, XFS_ITRUNCATED);
 	return dax_writeback_mapping_range(mapping,
