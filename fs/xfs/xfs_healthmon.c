@@ -22,6 +22,7 @@
 #include "xfs_healthmon.h"
 #include "xfs_fsops.h"
 #include "xfs_notify_failure.h"
+#include "xfs_file.h"
 
 #include <linux/anon_inodes.h>
 #include <linux/eventpoll.h>
@@ -72,6 +73,7 @@ struct xfs_healthmon {
 	struct xfs_shutdown_hook	shook;
 	struct xfs_health_hook		hhook;
 	struct xfs_media_error_hook	mhook;
+	struct xfs_file_ioerror_hook	fhook;
 
 	/* filesystem mount, or NULL if we've unmounted */
 	struct xfs_mount		*mp;
@@ -478,6 +480,73 @@ out_unlock:
 }
 #endif
 
+/* Add a file io error event to the reporting queue. */
+STATIC int
+xfs_healthmon_file_ioerror_hook(
+	struct notifier_block		*nb,
+	unsigned long			action,
+	void				*data)
+{
+	struct xfs_healthmon		*hm;
+	struct xfs_healthmon_event	*event;
+	struct xfs_file_ioerror_params	*p = data;
+	enum xfs_healthmon_type		type = 0;
+	int				error;
+
+	hm = container_of(nb, struct xfs_healthmon, fhook.ioerror_hook.nb);
+
+	switch (action) {
+	case XFS_FILE_IOERROR_BUFFERED_READ:
+	case XFS_FILE_IOERROR_BUFFERED_WRITE:
+	case XFS_FILE_IOERROR_DIRECT_READ:
+	case XFS_FILE_IOERROR_DIRECT_WRITE:
+		break;
+	default:
+		ASSERT(0);
+		return NOTIFY_DONE;
+	}
+
+	mutex_lock(&hm->lock);
+
+	trace_xfs_healthmon_file_ioerror_hook(hm->mp, action, p, hm->events,
+			hm->lost_prev_event);
+
+	error = xfs_healthmon_start_live_update(hm);
+	if (error)
+		goto out_unlock;
+
+	switch (action) {
+	case XFS_FILE_IOERROR_BUFFERED_READ:
+		type = XFS_HEALTHMON_BUFREAD;
+		break;
+	case XFS_FILE_IOERROR_BUFFERED_WRITE:
+		type = XFS_HEALTHMON_BUFWRITE;
+		break;
+	case XFS_FILE_IOERROR_DIRECT_READ:
+		type = XFS_HEALTHMON_DIOREAD;
+		break;
+	case XFS_FILE_IOERROR_DIRECT_WRITE:
+		type = XFS_HEALTHMON_DIOWRITE;
+		break;
+	}
+
+	event = xfs_healthmon_alloc(hm, type, XFS_HEALTHMON_FILERANGE);
+	if (!event)
+		goto out_unlock;
+
+	event->fino = p->ino;
+	event->fgen = p->gen;
+	event->fpos = p->pos;
+	event->flen = p->len;
+	error = xfs_healthmon_push(hm, event);
+	if (error)
+		kfree(event);
+
+out_unlock:
+	mutex_unlock(&hm->lock);
+	return NOTIFY_DONE;
+}
+
 /* Render the health update type as a string. */
 STATIC const char *
 xfs_healthmon_typestring(
@@ -491,6 +560,10 @@ xfs_healthmon_typestring(
 		[XFS_HEALTHMON_CORRUPT]		= "corrupt",
 		[XFS_HEALTHMON_HEALTHY]		= "healthy",
 		[XFS_HEALTHMON_MEDIA_ERROR]	= "media",
+		[XFS_HEALTHMON_BUFREAD]		= "readahead",
+		[XFS_HEALTHMON_BUFWRITE]	= "writeback",
+		[XFS_HEALTHMON_DIOREAD]		= "dioread",
+		[XFS_HEALTHMON_DIOWRITE]	= "diowrite",
 	};
 
 	if (event->type >= ARRAY_SIZE(type_strings))
@@ -513,6 +586,7 @@ xfs_healthmon_domstring(
 		[XFS_HEALTHMON_DATADEV]		= "datadev",
 		[XFS_HEALTHMON_LOGDEV]		= "logdev",
 		[XFS_HEALTHMON_RTDEV]		= "rtdev",
+		[XFS_HEALTHMON_FILERANGE]	= "filerange",
 	};
 
 	if (event->domain >= ARRAY_SIZE(dom_strings))
@@ -741,6 +815,33 @@ xfs_healthmon_format_media_error(
 			event->bbcount);
 }
 
+/* Render file range events as a string set */
+static int
+xfs_healthmon_format_filerange(
+	struct seq_buf			*outbuf,
+	const struct xfs_healthmon_event *event)
+{
+	ssize_t				ret;
+
+	ret = seq_buf_printf(outbuf, "  \"inumber\":    %llu,\n",
+			event->fino);
+	if (ret < 0)
+		return ret;
+
+	ret = seq_buf_printf(outbuf, "  \"generation\": %u,\n",
+			event->fgen);
+	if (ret < 0)
+		return ret;
+
+	ret = seq_buf_printf(outbuf, "  \"pos\":        %llu,\n",
+			event->fpos);
+	if (ret < 0)
+		return ret;
+
+	return seq_buf_printf(outbuf, "  \"length\":     %llu,\n",
+			event->flen);
+}
+
 static inline void
 xfs_healthmon_reset_outbuf(
 	struct xfs_healthmon		*hm)
@@ -810,6 +911,9 @@ xfs_healthmon_format(
 	case XFS_HEALTHMON_LOGDEV:
 	case XFS_HEALTHMON_RTDEV:
 		ret = xfs_healthmon_format_media_error(outbuf, event);
+		break;
+	case XFS_HEALTHMON_FILERANGE:
+		ret = xfs_healthmon_format_filerange(outbuf, event);
 		break;
 	}
 	if (ret < 0)
@@ -1071,6 +1175,7 @@ xfs_healthmon_detach_hooks(
 	 * through the health monitoring subsystem from xfs_fs_put_super, so
 	 * it is now time to detach the hooks.
 	 */
+	xfs_file_ioerror_hook_del(hm->mp, &hm->fhook);
 	xfs_media_error_hook_del(hm->mp, &hm->mhook);
 	xfs_shutdown_hook_del(hm->mp, &hm->shook);
 	xfs_health_hook_del(hm->mp, &hm->hhook);
@@ -1093,6 +1198,7 @@ xfs_healthmon_release(
 	wake_up_all(&hm->wait);
 
 	iterate_supers_type(hm->fstyp, xfs_healthmon_detach_hooks, hm);
+	xfs_file_ioerror_hook_disable();
 	xfs_media_error_hook_disable();
 	xfs_shutdown_hook_disable();
 	xfs_health_hook_disable();
@@ -1176,6 +1282,7 @@ xfs_ioc_health_monitor(
 	xfs_health_hook_enable();
 	xfs_shutdown_hook_enable();
 	xfs_media_error_hook_enable();
+	xfs_file_ioerror_hook_enable();
 
 	/* Attach specific event hooks to this monitor. */
 	xfs_health_hook_setup(&hm->hhook, xfs_healthmon_metadata_hook);
@@ -1193,11 +1300,17 @@ xfs_ioc_health_monitor(
 	if (ret)
 		goto out_shutdownhook;
 
+	xfs_file_ioerror_hook_setup(&hm->fhook,
+			xfs_healthmon_file_ioerror_hook);
+	ret = xfs_file_ioerror_hook_add(mp, &hm->fhook);
+	if (ret)
+		goto out_mediahook;
+
 	/* Set up VFS file and file descriptor. */
 	name = kasprintf(GFP_KERNEL, "XFS (%s): healthmon", mp->m_super->s_id);
 	if (!name) {
 		ret = -ENOMEM;
-		goto out_mediahook;
+		goto out_ioerrhook;
 	}
 
 	fd = anon_inode_getfd(name, &xfs_healthmon_fops, hm,
@@ -1205,13 +1318,15 @@ xfs_ioc_health_monitor(
 	kvfree(name);
 	if (fd < 0) {
 		ret = fd;
-		goto out_mediahook;
+		goto out_ioerrhook;
 	}
 
 	trace_xfs_healthmon_create(mp, hmo.flags, hmo.format);
 
 	return fd;
 
+out_ioerrhook:
+	xfs_file_ioerror_hook_del(mp, &hm->fhook);
 out_mediahook:
 	xfs_media_error_hook_del(mp, &hm->mhook);
 out_shutdownhook:
@@ -1219,6 +1334,7 @@ out_shutdownhook:
 out_healthhook:
 	xfs_health_hook_del(mp, &hm->hhook);
 out_hooks:
+	xfs_file_ioerror_hook_disable();
 	xfs_media_error_hook_disable();
 	xfs_health_hook_disable();
 	xfs_shutdown_hook_disable();
