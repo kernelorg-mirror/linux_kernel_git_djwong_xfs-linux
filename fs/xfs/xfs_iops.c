@@ -29,6 +29,7 @@
 #include "xfs_xattr.h"
 #include "xfs_file.h"
 #include "xfs_bmap.h"
+#include "xfs_reflink.h"
 
 #include <linux/posix_acl.h>
 #include <linux/security.h>
@@ -886,10 +887,38 @@ xfs_setattr_size(
 	 * truncate.
 	 */
 	if (newsize > oldsize) {
+		/*
+		 * Extending the file size, so COW around the allocation unit
+		 * containing EOF before we zero the new range of the file.
+		 */
+		if (xfs_truncate_needs_cow_around(ip, oldsize)) {
+			error = xfs_file_unshare_at(ip, oldsize);
+			if (error)
+				return error;
+		}
+
 		trace_xfs_zero_eof(ip, oldsize, newsize - oldsize);
 		error = xfs_zero_range(ip, oldsize, newsize - oldsize,
 				&did_zeroing);
 	} else {
+		/*
+		 * We're reducing the size of the file, so COW around the new
+		 * EOF allocation unit before truncation zeroes the part of the
+		 * EOF block after the new EOF.  Flush the dirty pages to disk
+		 * before we start truncating the pagecache because truncation
+		 * zeroing doesn't preflush written mappings.
+		 */
+		if (xfs_truncate_needs_cow_around(ip, newsize)) {
+			error = xfs_file_unshare_at(ip, newsize);
+			if (error)
+				return error;
+
+			error = filemap_write_and_wait_range(inode->i_mapping,
+					newsize, newsize);
+			if (error)
+				return error;
+		}
+
 		error = xfs_truncate_page(ip, newsize, &did_zeroing);
 	}
 
