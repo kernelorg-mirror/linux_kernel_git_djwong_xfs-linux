@@ -1845,7 +1845,7 @@ xfs_fs_fill_super(
 		if (xfs_has_realtime(mp) &&
 		    !xfs_reflink_supports_rextsize(mp, mp->m_sb.sb_rextsize)) {
 			xfs_alert(mp,
-	"reflink not compatible with realtime extent size %u!",
+	"reflink not compatible with non-power-of-2 realtime extent size %u!",
 					mp->m_sb.sb_rextsize);
 			error = -EINVAL;
 			goto out_filestream_unmount;
@@ -1858,7 +1858,14 @@ xfs_fs_fill_super(
 			goto out_filestream_unmount;
 		}
 
-		if (xfs_globals.always_cow) {
+		/*
+		 * always-cow mode is not supported on filesystems with rt
+		 * extent sizes larger than a single block because we'd have
+		 * to perform write-around for unaligned writes because remap
+		 * requests must be aligned to an rt extent.
+		 */
+		if (xfs_globals.always_cow &&
+		    (!xfs_has_realtime(mp) || mp->m_sb.sb_rextsize == 1)) {
 			xfs_info(mp, "using DEBUG-only always_cow mode.");
 			mp->m_always_cow = true;
 		}
