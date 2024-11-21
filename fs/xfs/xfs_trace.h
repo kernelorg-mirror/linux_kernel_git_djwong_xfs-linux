@@ -107,6 +107,7 @@ struct xfs_fsrefs_irec;
 struct xfs_rtgroup;
 struct xfs_healthmon_event;
 struct xfs_health_update_params;
+struct xfs_media_error_params;
 
 #define XFS_ATTR_FILTER_FLAGS \
 	{ XFS_ATTR_ROOT,	"ROOT" }, \
@@ -6244,6 +6245,56 @@ TRACE_EVENT(xfs_healthmon_metadata_hook,
 		  __entry->events,
 		  __entry->lost_prev)
 );
+
+#if defined(CONFIG_XFS_LIVE_HOOKS) && defined(CONFIG_MEMORY_FAILURE) && defined(CONFIG_FS_DAX)
+TRACE_EVENT(xfs_healthmon_media_error_hook,
+	TP_PROTO(const struct xfs_media_error_params *p,
+		 unsigned int events, bool lost_prev),
+	TP_ARGS(p, events, lost_prev),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(dev_t, error_dev)
+		__field(uint64_t, daddr)
+		__field(uint64_t, bbcount)
+		__field(int, pre_remove)
+		__field(unsigned int, events)
+		__field(bool, lost_prev)
+	),
+	TP_fast_assign(
+		struct xfs_mount	*mp = p->mp;
+		struct xfs_buftarg	*btp = NULL;
+
+		switch (p->fdev) {
+		case XFS_FAILED_DATADEV:
+			btp = mp->m_ddev_targp;
+			break;
+		case XFS_FAILED_LOGDEV:
+			btp = mp->m_logdev_targp;
+			break;
+		case XFS_FAILED_RTDEV:
+			btp = mp->m_rtdev_targp;
+			break;
+		}
+
+		__entry->dev = mp->m_super->s_dev;
+		if (btp)
+			__entry->error_dev = btp->bt_dev;
+		__entry->daddr = p->daddr;
+		__entry->bbcount = p->bbcount;
+		__entry->pre_remove = p->pre_remove;
+		__entry->events = events;
+		__entry->lost_prev = lost_prev;
+	),
+	TP_printk("dev %d:%d error_dev %d:%d daddr 0x%llx bbcount 0x%llx pre_remove? %d events %u lost_prev? %d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  MAJOR(__entry->error_dev), MINOR(__entry->error_dev),
+		  __entry->daddr,
+		  __entry->bbcount,
+		  __entry->pre_remove,
+		  __entry->events,
+		  __entry->lost_prev)
+);
+#endif
 #endif /* CONFIG_XFS_HEALTH_MONITOR */
 
 #endif /* _TRACE_XFS_H */
