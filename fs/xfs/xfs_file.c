@@ -1580,11 +1580,10 @@ xfs_file_map_freesp(
 	if (error)
 		goto out_unlock;
 
-	if (XFS_IS_REALTIME_INODE(ip)) {
-		error = -EOPNOTSUPP;
-		goto out_unlock;
-	}
-	device_size = XFS_FSB_TO_B(mp, mp->m_sb.sb_dblocks);
+	if (XFS_IS_REALTIME_INODE(ip))
+		device_size = XFS_FSB_TO_B(mp, mp->m_sb.sb_rblocks);
+	else
+		device_size = XFS_FSB_TO_B(mp, mp->m_sb.sb_dblocks);
 
 	/*
 	 * Bail out now if we aren't allowed to make the file size the
@@ -1597,7 +1596,10 @@ xfs_file_map_freesp(
 			goto out_unlock;
 	}
 
-	error = xfs_map_free_space(ip, mf->offset, mf->len);
+	if (XFS_IS_REALTIME_INODE(ip))
+		error = xfs_map_free_rt_space(ip, mf->offset, mf->len);
+	else
+		error = xfs_map_free_space(ip, mf->offset, mf->len);
 	if (error) {
 		if (error == -ECANCELED)
 			error = 0;
