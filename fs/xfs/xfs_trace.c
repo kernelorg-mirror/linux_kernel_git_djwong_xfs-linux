@@ -51,6 +51,7 @@
 #include "xfs_rtgroup.h"
 #include "xfs_zone_alloc.h"
 #include "xfs_zone_priv.h"
+#include "xfs_fsrefs.h"
 
 /*
  * We include this last to have the helpers above available for the trace
