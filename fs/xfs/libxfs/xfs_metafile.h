@@ -6,6 +6,23 @@
 #ifndef __XFS_METAFILE_H__
 #define __XFS_METAFILE_H__
 
+static inline const char *
+xfs_metafile_type_str(enum xfs_metafile_type metatype)
+{
+	static const struct {
+		enum xfs_metafile_type	mtype;
+		const char		*name;
+	} strings[] = { XFS_METAFILE_TYPE_STR };
+	unsigned int	i;
+
+	for (i = 0; i < ARRAY_SIZE(strings); i++) {
+		if (strings[i].mtype == metatype)
+			return strings[i].name;
+	}
+
+	return NULL;
+}
+
 /* All metadata files must have these flags set. */
 #define XFS_METAFILE_DIFLAGS	(XFS_DIFLAG_IMMUTABLE | \
 				 XFS_DIFLAG_SYNC | \
