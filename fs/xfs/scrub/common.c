@@ -819,7 +819,7 @@ xchk_rtgroup_btcur_free(
  * Unlock the realtime group.  This must be done /after/ committing (or
  * cancelling) the scrub transaction.
  */
-static void
+void
 xchk_rtgroup_unlock(
 	struct xchk_rt		*sr)
 {
@@ -904,7 +904,10 @@ int
 xchk_setup_rt(
 	struct xfs_scrub	*sc)
 {
-	return xchk_trans_alloc(sc, 0);
+	uint			resblks;
+
+	resblks = xrep_calc_rtgroup_resblks(sc);
+	return xchk_trans_alloc(sc, resblks);
 }
 
 /* Set us up with AG headers and btree cursors. */
