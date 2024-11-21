@@ -656,7 +656,7 @@ xfs_alloc_file_space(
 	if (xfs_is_always_cow_inode(ip))
 		return 0;
 
-	trace_xfs_alloc_file_space(ip);
+	trace_xfs_alloc_file_space(ip, offset, len);
 
 	if (xfs_is_shutdown(mp))
 		return -EIO;
@@ -842,7 +842,7 @@ xfs_free_file_space(
 	xfs_fileoff_t		endoffset_fsb;
 	int			done = 0, error;
 
-	trace_xfs_free_file_space(ip);
+	trace_xfs_free_file_space(ip, offset, len);
 
 	error = xfs_qm_dqattach(ip);
 	if (error)
@@ -989,7 +989,7 @@ xfs_collapse_file_space(
 
 	xfs_assert_ilocked(ip, XFS_IOLOCK_EXCL | XFS_MMAPLOCK_EXCL);
 
-	trace_xfs_collapse_file_space(ip);
+	trace_xfs_collapse_file_space(ip, offset, len);
 
 	error = xfs_free_file_space(ip, offset, len);
 	if (error)
@@ -1058,7 +1058,7 @@ xfs_insert_file_space(
 
 	xfs_assert_ilocked(ip, XFS_IOLOCK_EXCL | XFS_MMAPLOCK_EXCL);
 
-	trace_xfs_insert_file_space(ip);
+	trace_xfs_insert_file_space(ip, offset, len);
 
 	error = xfs_bmap_can_insert_extents(ip, stop_fsb, shift_fsb);
 	if (error)
