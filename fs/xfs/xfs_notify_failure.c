@@ -27,11 +27,72 @@
 #include <linux/dax.h>
 #include <linux/fs.h>
 
-enum xfs_failed_device {
-	XFS_FAILED_DATADEV,
-	XFS_FAILED_LOGDEV,
-	XFS_FAILED_RTDEV,
-};
+#ifdef CONFIG_XFS_LIVE_HOOKS
+DEFINE_STATIC_XFS_HOOK_SWITCH(xfs_media_error_hooks_switch);
+
+void
+xfs_media_error_hook_disable(void)
+{
+	xfs_hooks_switch_off(&xfs_media_error_hooks_switch);
+}
+
+void
+xfs_media_error_hook_enable(void)
+{
+	xfs_hooks_switch_on(&xfs_media_error_hooks_switch);
+}
+
+/* Call downstream hooks for a media error. */
+static inline void
+xfs_media_error_hook(
+	struct xfs_mount		*mp,
+	enum xfs_failed_device		fdev,
+	xfs_daddr_t			daddr,
+	uint64_t			bbcount,
+	bool				pre_remove)
+{
+	if (xfs_hooks_switched_on(&xfs_media_error_hooks_switch)) {
+		struct xfs_media_error_params p = {
+			.mp		= mp,
+			.fdev		= fdev,
+			.daddr		= daddr,
+			.bbcount	= bbcount,
+			.pre_remove	= pre_remove,
+		};
+
+		xfs_hooks_call(&mp->m_media_error_hooks, 0, &p);
+	}
+}
+
+/* Call the specified function during a media error. */
+int
+xfs_media_error_hook_add(
+	struct xfs_mount		*mp,
+	struct xfs_media_error_hook	*hook)
+{
+	return xfs_hooks_add(&mp->m_media_error_hooks, &hook->error_hook);
+}
+
+/* Stop calling the specified function during a media error. */
+void
+xfs_media_error_hook_del(
+	struct xfs_mount		*mp,
+	struct xfs_media_error_hook	*hook)
+{
+	xfs_hooks_del(&mp->m_media_error_hooks, &hook->error_hook);
+}
+
+/* Configure media error hook functions. */
+void
+xfs_media_error_hook_setup(
+	struct xfs_media_error_hook	*hook,
+	notifier_fn_t			mod_fn)
+{
+	xfs_hook_setup(&hook->error_hook, mod_fn);
+}
+#else
+# define xfs_media_error_hook(...)		((void)0)
+#endif /* CONFIG_XFS_LIVE_HOOKS */
 
 struct xfs_failure_info {
 	xfs_agblock_t		startblock;
@@ -445,6 +506,9 @@ xfs_dax_notify_failure(
 			&daddr, &bbcount);
 	if (error)
 		return error;
+
+	xfs_media_error_hook(mp, fdev, daddr, bbcount,
+			mf_flags & MF_MEM_PRE_REMOVE);
 
 	if (fdev == XFS_FAILED_LOGDEV) {
 		/*
