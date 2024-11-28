@@ -20,6 +20,8 @@
 #include "xfs_trans.h"
 #include "xfs_ag.h"
 #include "xfs_notify_failure.h"
+#include "xfs_rtgroup.h"
+#include "xfs_rtrmap_btree.h"
 
 #include <linux/mm.h>
 #include <linux/dax.h>
@@ -262,6 +264,109 @@ out:
 	return error;
 }
 
+#ifdef CONFIG_XFS_RT
+static int
+xfs_dax_notify_rtdev_failure(
+	struct xfs_mount	*mp,
+	xfs_daddr_t		daddr,
+	xfs_daddr_t		bblen,
+	int			mf_flags)
+{
+	struct xfs_failure_info	notify = { .mf_flags = mf_flags };
+	struct xfs_trans	*tp = NULL;
+	struct xfs_btree_cur	*cur = NULL;
+	int			error = 0;
+	bool			kernel_frozen = false;
+	xfs_rtblock_t		rtbno = xfs_daddr_to_rtb(mp, daddr);
+	xfs_rtblock_t		end_rtbno = xfs_daddr_to_rtb(mp,
+							     daddr + bblen - 1);
+	xfs_rgnumber_t		rgno = xfs_rtb_to_rgno(mp, rtbno);
+	xfs_rgnumber_t		end_rgno = xfs_rtb_to_rgno(mp, end_rtbno);
+	xfs_rgblock_t		start_rgbno = xfs_rtb_to_rgbno(mp, rtbno);
+
+	if (mf_flags & MF_MEM_PRE_REMOVE) {
+		xfs_info(mp, "Device is about to be removed!");
+		/*
+		 * Freeze fs to prevent new mappings from being created.
+		 * - Keep going on if others already hold the kernel forzen.
+		 * - Keep going on if other errors too because this device is
+		 *   starting to fail.
+		 * - If kernel frozen state is hold successfully here, thaw it
+		 *   here as well at the end.
+		 */
+		kernel_frozen = xfs_dax_notify_failure_freeze(mp) == 0;
+	}
+
+	error = xfs_trans_alloc_empty(mp, &tp);
+	if (error)
+		goto out;
+
+	for (; rgno <= end_rgno; rgno++) {
+		struct xfs_rmap_irec	ri_low = {
+			.rm_startblock	= start_rgbno,
+		};
+		struct xfs_rmap_irec	ri_high;
+		struct xfs_rtgroup	*rtg;
+		xfs_rgblock_t		range_rgend;
+
+		rtg = xfs_rtgroup_get(mp, rgno);
+		if (!rtg)
+			break;
+
+		xfs_rtgroup_lock(rtg, XFS_RTGLOCK_RMAP);
+		cur = xfs_rtrmapbt_init_cursor(tp, rtg);
+
+		/*
+		 * Set the rmap range from ri_low to ri_high, which represents
+		 * a [start, end] where we looking for the files or metadata.
+		 */
+		memset(&ri_high, 0xFF, sizeof(ri_high));
+		if (rgno == end_rgno)
+			ri_high.rm_startblock = xfs_rtb_to_rgbno(mp, end_rtbno);
+
+		range_rgend = min(rtg->rtg_group.xg_block_count - 1,
+				ri_high.rm_startblock);
+		notify.startblock = ri_low.rm_startblock;
+		notify.blockcount = range_rgend + 1 - ri_low.rm_startblock;
+
+		error = xfs_rmap_query_range(cur, &ri_low, &ri_high,
+				xfs_dax_failure_fn, &notify);
+		xfs_btree_del_cursor(cur, error);
+		xfs_rtgroup_unlock(rtg, XFS_RTGLOCK_RMAP);
+		xfs_rtgroup_put(rtg);
+		if (error)
+			break;
+
+		start_rgbno = 0;
+	}
+
+	xfs_trans_cancel(tp);
+
+	/*
+	 * Shutdown fs from a force umount in pre-remove case which won't fail,
+	 * so errors can be ignored.  Otherwise, shutdown the filesystem with
+	 * CORRUPT flag if error occured or notify.want_shutdown was set during
+	 * RMAP querying.
+	 */
+	if (mf_flags & MF_MEM_PRE_REMOVE)
+		xfs_force_shutdown(mp, SHUTDOWN_FORCE_UMOUNT);
+	else if (error || notify.want_shutdown) {
+		xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_ONDISK);
+		if (!error)
+			error = -EFSCORRUPTED;
+	}
+
+out:
+	/* Thaw the fs if it has been frozen before. */
+	if (mf_flags & MF_MEM_PRE_REMOVE)
+		xfs_dax_notify_failure_thaw(mp, kernel_frozen);
+
+	return error;
+}
+#else
+# define xfs_dax_notify_rtdev_failure(...)	(-ENOSYS)
+#endif
+
 static int
 xfs_dax_translate_range(
 	struct xfs_mount	*mp,
@@ -341,12 +446,6 @@ xfs_dax_notify_failure(
 	if (error)
 		return error;
 
-	if (fdev == XFS_FAILED_RTDEV) {
-		xfs_debug(mp,
-			 "notify_failure() not supported on realtime device!");
-		return -EOPNOTSUPP;
-	}
-
 	if (fdev == XFS_FAILED_LOGDEV) {
 		/*
 		 * In the pre-remove case the failure notification is attempting
@@ -366,6 +465,9 @@ xfs_dax_notify_failure(
 		return -EOPNOTSUPP;
 	}
 
+	if (fdev == XFS_FAILED_RTDEV)
+		return xfs_dax_notify_rtdev_failure(mp, daddr, bbcount,
+				mf_flags);
 	return xfs_dax_notify_ddev_failure(mp, daddr, bbcount, mf_flags);
 }
 
