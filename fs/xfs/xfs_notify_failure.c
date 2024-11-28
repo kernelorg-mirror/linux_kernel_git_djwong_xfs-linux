@@ -19,10 +19,17 @@
 #include "xfs_rtalloc.h"
 #include "xfs_trans.h"
 #include "xfs_ag.h"
+#include "xfs_notify_failure.h"
 
 #include <linux/mm.h>
 #include <linux/dax.h>
 #include <linux/fs.h>
+
+enum xfs_failed_device {
+	XFS_FAILED_DATADEV,
+	XFS_FAILED_LOGDEV,
+	XFS_FAILED_RTDEV,
+};
 
 struct xfs_failure_info {
 	xfs_agblock_t		startblock;
@@ -256,54 +263,38 @@ out:
 }
 
 static int
-xfs_dax_notify_failure(
+xfs_dax_translate_range(
+	struct xfs_mount	*mp,
 	struct dax_device	*dax_dev,
 	u64			offset,
 	u64			len,
-	int			mf_flags)
+	enum xfs_failed_device	*fdev,
+	xfs_daddr_t		*daddr,
+	uint64_t		*bbcount)
 {
-	struct xfs_mount	*mp = dax_holder(dax_dev);
+	struct xfs_buftarg	*btp;
 	u64			ddev_start;
 	u64			ddev_end;
 
-	if (!(mp->m_super->s_flags & SB_BORN)) {
-		xfs_warn(mp, "filesystem is not ready for notify_failure()!");
-		return -EIO;
-	}
-
 	if (mp->m_rtdev_targp && mp->m_rtdev_targp->bt_daxdev == dax_dev) {
-		xfs_debug(mp,
-			 "notify_failure() not supported on realtime device!");
-		return -EOPNOTSUPP;
+		*fdev = XFS_FAILED_RTDEV;
+		btp = mp->m_rtdev_targp;
+	} else if (mp->m_logdev_targp != mp->m_ddev_targp &&
+		   mp->m_logdev_targp->bt_daxdev == dax_dev) {
+		*fdev = XFS_FAILED_LOGDEV;
+		btp = mp->m_logdev_targp;
+	} else {
+		*fdev = XFS_FAILED_DATADEV;
+		btp = mp->m_ddev_targp;
 	}
 
-	if (mp->m_logdev_targp && mp->m_logdev_targp->bt_daxdev == dax_dev &&
-	    mp->m_logdev_targp != mp->m_ddev_targp) {
-		/*
-		 * In the pre-remove case the failure notification is attempting
-		 * to trigger a force unmount.  The expectation is that the
-		 * device is still present, but its removal is in progress and
-		 * can not be cancelled, proceed with accessing the log device.
-		 */
-		if (mf_flags & MF_MEM_PRE_REMOVE)
-			return 0;
-		xfs_err(mp, "ondisk log corrupt, shutting down fs!");
-		xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_ONDISK);
-		return -EFSCORRUPTED;
-	}
-
-	if (!xfs_has_rmapbt(mp)) {
-		xfs_debug(mp, "notify_failure() needs rmapbt enabled!");
-		return -EOPNOTSUPP;
-	}
-
-	ddev_start = mp->m_ddev_targp->bt_dax_part_off;
-	ddev_end = ddev_start + bdev_nr_bytes(mp->m_ddev_targp->bt_bdev) - 1;
+	ddev_start = btp->bt_dax_part_off;
+	ddev_end = ddev_start + bdev_nr_bytes(btp->bt_bdev) - 1;
 
 	/* Notify failure on the whole device. */
 	if (offset == 0 && len == U64_MAX) {
 		offset = ddev_start;
-		len = bdev_nr_bytes(mp->m_ddev_targp->bt_bdev);
+		len = bdev_nr_bytes(btp->bt_bdev);
 	}
 
 	/* Ignore the range out of filesystem area */
@@ -322,8 +313,60 @@ xfs_dax_notify_failure(
 	if (offset + len - 1 > ddev_end)
 		len = ddev_end - offset + 1;
 
-	return xfs_dax_notify_ddev_failure(mp, BTOBB(offset), BTOBB(len),
-			mf_flags);
+	*daddr = BTOBB(offset);
+	*bbcount = BTOBB(len);
+	return 0;
+}
+
+static int
+xfs_dax_notify_failure(
+	struct dax_device	*dax_dev,
+	u64			offset,
+	u64			len,
+	int			mf_flags)
+{
+	struct xfs_mount	*mp = dax_holder(dax_dev);
+	enum xfs_failed_device	fdev;
+	xfs_daddr_t		daddr;
+	uint64_t		bbcount;
+	int			error;
+
+	if (!(mp->m_super->s_flags & SB_BORN)) {
+		xfs_warn(mp, "filesystem is not ready for notify_failure()!");
+		return -EIO;
+	}
+
+	error = xfs_dax_translate_range(mp, dax_dev, offset, len, &fdev,
+			&daddr, &bbcount);
+	if (error)
+		return error;
+
+	if (fdev == XFS_FAILED_RTDEV) {
+		xfs_debug(mp,
+			 "notify_failure() not supported on realtime device!");
+		return -EOPNOTSUPP;
+	}
+
+	if (fdev == XFS_FAILED_LOGDEV) {
+		/*
+		 * In the pre-remove case the failure notification is attempting
+		 * to trigger a force unmount.  The expectation is that the
+		 * device is still present, but its removal is in progress and
+		 * can not be cancelled, proceed with accessing the log device.
+		 */
+		if (mf_flags & MF_MEM_PRE_REMOVE)
+			return 0;
+		xfs_err(mp, "ondisk log corrupt, shutting down fs!");
+		xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_ONDISK);
+		return -EFSCORRUPTED;
+	}
+
+	if (!xfs_has_rmapbt(mp)) {
+		xfs_debug(mp, "notify_failure() needs rmapbt enabled!");
+		return -EOPNOTSUPP;
+	}
+
+	return xfs_dax_notify_ddev_failure(mp, daddr, bbcount, mf_flags);
 }
 
 const struct dax_holder_operations xfs_dax_holder_operations = {
