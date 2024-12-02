@@ -204,6 +204,9 @@ xrep_tempfile_adjust_directory_tree(
 
 	if (!sc->ip || !xfs_is_metadir_inode(sc->ip))
 		return 0;
+	if (!S_ISDIR(VFS_I(sc->tempip)->i_mode) &&
+	    !S_ISREG(VFS_I(sc->tempip)->i_mode))
+		return 0;
 
 	xfs_ilock(sc->tempip, XFS_IOLOCK_EXCL);
 	sc->temp_ilock_flags |= XFS_IOLOCK_EXCL;
