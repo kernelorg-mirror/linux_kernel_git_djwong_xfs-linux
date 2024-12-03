@@ -313,7 +313,11 @@ bool iomap_dirty_folio(struct address_space *mapping, struct folio *folio);
 int iomap_file_unshare(struct inode *inode, loff_t pos, loff_t len,
 		const struct iomap_ops *ops);
 int iomap_zero_range(struct inode *inode, loff_t pos, loff_t len,
-		bool *did_zero, const struct iomap_ops *ops, void *private);
+		bool *did_zero, const struct iomap_ops *ops, void *private,
+		unsigned zeroing_flags);
+/* ignore written mappings allowed beyond EOF */
+#define IOMAP_ZERO_MAPPED_BEYOND_EOF	(1U << 0)
+
 int iomap_truncate_page(struct inode *inode, loff_t pos, bool *did_zero,
 		const struct iomap_ops *ops, void *private);
 vm_fault_t iomap_page_mkwrite(struct vm_fault *vmf, const struct iomap_ops *ops,

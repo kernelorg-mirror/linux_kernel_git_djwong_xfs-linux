@@ -2003,14 +2003,40 @@ xfs_zero_range(
 	bool			*did_zero)
 {
 	struct inode		*inode = VFS_I(ip);
+	unsigned int		zeroing_flags = 0;
 
 	xfs_assert_ilocked(ip, XFS_IOLOCK_EXCL | XFS_MMAPLOCK_EXCL);
 
 	if (IS_DAX(inode))
 		return dax_zero_range(inode, pos, len, did_zero,
 				      &xfs_dax_write_iomap_ops);
+
+	/*
+	 * Files with allocation units larger than the fsblock size can share
+	 * zeroed written blocks beyond EOF if the EOF is in the middle of an
+	 * allocation unit because it keeps the refcounting code simple.  We
+	 * therefore permit zeroing of pagecache for these post-EOF written
+	 * extents so that the blocks in the CoW staging extent beyond EOF are
+	 * all initialized to zero.
+	 *
+	 * Alternate designs could be: (a) don't allow sharing of an allocation
+	 * unit that spans EOF because of the unwritten blocks; (b) rewrite the
+	 * reflink code to allow shared unwritten extents in this one corner
+	 * case; or (c) insert zeroed pages into the pagecache to get around
+	 * the checks in iomap_zero_range.
+	 *
+	 * However, this design (allow zeroing of pagecache beyond EOF) was
+	 * chosen because it most closely resembles what we do for allocation
+	 * unit == 1 fsblock.  Note that for these files, we force writeback
+	 * of post-EOF folios to ensure that CoW always happens in units of
+	 * allocation units.
+	 */
+	if (xfs_inode_has_bigrtalloc(ip) && xfs_has_reflink(ip->i_mount))
+		zeroing_flags |= IOMAP_ZERO_MAPPED_BEYOND_EOF;
+
 	return iomap_zero_range(inode, pos, len, did_zero,
-				&xfs_buffered_write_iomap_ops, ac);
+				&xfs_buffered_write_iomap_ops, ac,
+				zeroing_flags);
 }
 
 int
