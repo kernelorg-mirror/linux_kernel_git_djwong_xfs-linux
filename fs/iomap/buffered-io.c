@@ -1350,7 +1350,8 @@ static inline int iomap_zero_iter_flush_and_stale(struct iomap_iter *i)
 	return filemap_write_and_wait_range(mapping, i->pos, end);
 }
 
-static loff_t iomap_zero_iter(struct iomap_iter *iter, bool *did_zero)
+static loff_t iomap_zero_iter(struct iomap_iter *iter, bool *did_zero,
+		unsigned zeroing_flags)
 {
 	loff_t pos = iter->pos;
 	loff_t length = iomap_length(iter);
@@ -1362,6 +1363,18 @@ static loff_t iomap_zero_iter(struct iomap_iter *iter, bool *did_zero)
 		size_t offset;
 		size_t bytes = min_t(u64, SIZE_MAX, length);
 		bool ret;
+
+		/*
+		 * If we've gone past EOF and have a written mapping, and the
+		 * filesystem supports written mappings past EOF, skip the rest
+		 * of the range.  We can't write that back anyway.
+		 */
+		if (pos > iter->inode->i_size &&
+		    (zeroing_flags & IOMAP_ZERO_MAPPED_BEYOND_EOF)) {
+			written += length;
+			length = 0;
+			break;
+		}
 
 		status = iomap_write_begin(iter, pos, bytes, &folio);
 		if (status)
@@ -1395,7 +1408,7 @@ static loff_t iomap_zero_iter(struct iomap_iter *iter, bool *did_zero)
 
 int
 iomap_zero_range(struct inode *inode, loff_t pos, loff_t len, bool *did_zero,
-		const struct iomap_ops *ops)
+		const struct iomap_ops *ops, unsigned zeroing_flags)
 {
 	struct iomap_iter iter = {
 		.inode		= inode,
@@ -1424,7 +1437,8 @@ iomap_zero_range(struct inode *inode, loff_t pos, loff_t len, bool *did_zero,
 	    filemap_range_needs_writeback(mapping, pos, pos + plen - 1)) {
 		iter.len = plen;
 		while ((ret = iomap_iter(&iter, ops)) > 0)
-			iter.processed = iomap_zero_iter(&iter, did_zero);
+			iter.processed = iomap_zero_iter(&iter, did_zero,
+							 zeroing_flags);
 
 		iter.len = len - (iter.pos - pos);
 		if (ret || !iter.len)
@@ -1453,7 +1467,8 @@ iomap_zero_range(struct inode *inode, loff_t pos, loff_t len, bool *did_zero,
 			continue;
 		}
 
-		iter.processed = iomap_zero_iter(&iter, did_zero);
+		iter.processed = iomap_zero_iter(&iter, did_zero,
+						 zeroing_flags);
 	}
 	return ret;
 }
@@ -1469,7 +1484,7 @@ iomap_truncate_page(struct inode *inode, loff_t pos, bool *did_zero,
 	/* Block boundary? Nothing to do */
 	if (!off)
 		return 0;
-	return iomap_zero_range(inode, pos, blocksize - off, did_zero, ops);
+	return iomap_zero_range(inode, pos, blocksize - off, did_zero, ops, 0);
 }
 EXPORT_SYMBOL_GPL(iomap_truncate_page);
 
