@@ -46,6 +46,7 @@
 #include "xfs_exchmaps_item.h"
 #include "xfs_parent.h"
 #include "xfs_rtalloc.h"
+#include "xfs_zone_alloc.h"
 #include "scrub/stats.h"
 #include "scrub/rcbag_btree.h"
 
@@ -1943,6 +1944,9 @@ xfs_remount_rw(
 	/* Re-enable the background inode inactivation worker. */
 	xfs_inodegc_start(mp);
 
+	/* Restart zone reclaim */
+	xfs_zone_gc_start(mp);
+
 	return 0;
 }
 
@@ -1986,6 +1990,9 @@ xfs_remount_ro(
 	 * we send inodes straight to reclaim, so no inodes will be queued.
 	 */
 	xfs_inodegc_stop(mp);
+
+	/* Stop zone reclaim */
+	xfs_zone_gc_stop(mp);
 
 	/* Free the per-AG metadata reservation pool. */
 	xfs_fs_unreserve_ag_blocks(mp);

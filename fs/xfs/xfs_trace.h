@@ -290,8 +290,12 @@ DECLARE_EVENT_CLASS(xfs_zone_class,
 DEFINE_EVENT(xfs_zone_class, name,			\
 	TP_PROTO(struct xfs_rtgroup *rtg),		\
 	TP_ARGS(rtg))
+DEFINE_ZONE_EVENT(xfs_zone_emptied);
 DEFINE_ZONE_EVENT(xfs_zone_full);
 DEFINE_ZONE_EVENT(xfs_zone_activate);
+DEFINE_ZONE_EVENT(xfs_zone_reset);
+DEFINE_ZONE_EVENT(xfs_zone_reclaim);
+DEFINE_ZONE_EVENT(xfs_gc_zone_activate);
 
 TRACE_EVENT(xfs_zone_free_blocks,
 	TP_PROTO(struct xfs_rtgroup *rtg, xfs_rgblock_t rgbno,
