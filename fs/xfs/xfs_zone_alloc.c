@@ -382,6 +382,7 @@ static struct xfs_open_zone *
 xfs_init_open_zone(
 	struct xfs_rtgroup	*rtg,
 	xfs_rgblock_t		write_pointer,
+	enum rw_hint		write_hint,
 	bool			is_gc)
 {
 	struct xfs_open_zone	*oz;
@@ -392,6 +393,7 @@ xfs_init_open_zone(
 	oz->oz_rtg = rtg;
 	oz->oz_write_pointer = write_pointer;
 	oz->oz_written = write_pointer;
+	oz->oz_write_hint = write_hint;
 	oz->oz_is_gc = is_gc;
 
 	/*
@@ -411,6 +413,7 @@ xfs_init_open_zone(
 struct xfs_open_zone *
 xfs_open_zone(
 	struct xfs_mount	*mp,
+	enum rw_hint		write_hint,
 	bool			is_gc)
 {
 	struct xfs_zone_info	*zi = mp->m_zone_info;
@@ -426,7 +429,7 @@ xfs_open_zone(
 	xfs_group_clear_mark(xg, XFS_RTG_FREE);
 	atomic_dec(&zi->zi_nr_free_zones);
 	zi->zi_free_zone_cursor = xg->xg_gno;
-	return xfs_init_open_zone(to_rtg(xg), 0, is_gc);
+	return xfs_init_open_zone(to_rtg(xg), 0, write_hint, is_gc);
 }
 
 /*
@@ -438,7 +441,8 @@ xfs_open_zone(
  */
 static struct xfs_open_zone *
 xfs_activate_zone(
-	struct xfs_mount	*mp)
+	struct xfs_mount	*mp,
+	enum rw_hint		write_hint)
 {
 	struct xfs_zone_info	*zi = mp->m_zone_info;
 	struct xfs_open_zone	*oz;
@@ -447,7 +451,7 @@ xfs_activate_zone(
 	    XFS_GC_ZONES - XFS_OPEN_GC_ZONES)
 		return NULL;
 
-	oz = xfs_open_zone(mp, false);
+	oz = xfs_open_zone(mp, write_hint, false);
 	if (!oz)
 		return NULL;
 
@@ -464,15 +468,77 @@ xfs_activate_zone(
 	return oz;
 }
 
+/*
+ * For data with short or medium lifetime, try to colocated it into an
+ * already open zone with a matching temperature.
+ */
+static bool
+xfs_colocate_eagerly(
+	enum rw_hint		file_hint)
+{
+	switch (file_hint) {
+	case WRITE_LIFE_MEDIUM:
+	case WRITE_LIFE_SHORT:
+	case WRITE_LIFE_NONE:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool
+xfs_good_hint_match(
+	struct xfs_open_zone	*oz,
+	enum rw_hint		file_hint)
+{
+	switch (oz->oz_write_hint) {
+	case WRITE_LIFE_LONG:
+	case WRITE_LIFE_EXTREME:
+		/* colocate long and extreme */
+		if (file_hint == WRITE_LIFE_LONG ||
+		    file_hint == WRITE_LIFE_EXTREME)
+			return true;
+		break;
+	case WRITE_LIFE_MEDIUM:
+		/* colocate medium with medium */
+		if (file_hint == WRITE_LIFE_MEDIUM)
+			return true;
+		break;
+	case WRITE_LIFE_SHORT:
+	case WRITE_LIFE_NONE:
+	case WRITE_LIFE_NOT_SET:
+		/* colocate short and none */
+		if (file_hint <= WRITE_LIFE_SHORT)
+			return true;
+		break;
+	}
+	return false;
+}
+
 static bool
 xfs_try_use_zone(
 	struct xfs_zone_info	*zi,
-	struct xfs_open_zone	*oz)
+	enum rw_hint		file_hint,
+	struct xfs_open_zone	*oz,
+	bool			lowspace)
 {
 	if (oz->oz_write_pointer == rtg_blocks(oz->oz_rtg))
 		return false;
+	if (!lowspace && !xfs_good_hint_match(oz, file_hint))
+		return false;
 	if (!atomic_inc_not_zero(&oz->oz_ref))
 		return false;
+
+	/*
+	 * If we have a hint set for the data, use that for the zone even if
+	 * some data was written already without any hint set, but don't change
+	 * the temperature after that as that would make little sense without
+	 * tracking per-temperature class written block counts, which is
+	 * probably overkill anyway.
+	 */
+	if (file_hint != WRITE_LIFE_NOT_SET &&
+	    oz->oz_write_hint == WRITE_LIFE_NOT_SET)
+		oz->oz_write_hint = file_hint;
 
 	/*
 	 * If we couldn't match by inode or life time we just pick the first
@@ -488,26 +554,36 @@ xfs_try_use_zone(
 
 static struct xfs_open_zone *
 xfs_select_open_zone_lru(
-	struct xfs_zone_info	*zi)
+	struct xfs_zone_info	*zi,
+	enum rw_hint		file_hint,
+	bool			lowspace)
 {
 	struct xfs_open_zone	*oz;
 
 	list_for_each_entry(oz, &zi->zi_open_zones, oz_entry)
-		if (xfs_try_use_zone(zi, oz))
+		if (xfs_try_use_zone(zi, file_hint, oz, lowspace))
 			return oz;
 	return NULL;
 }
 
 static struct xfs_open_zone *
 xfs_select_open_zone_mru(
-	struct xfs_zone_info	*zi)
+	struct xfs_zone_info	*zi,
+	enum rw_hint		file_hint)
 {
 	struct xfs_open_zone	*oz;
 
 	list_for_each_entry_reverse(oz, &zi->zi_open_zones, oz_entry)
-		if (xfs_try_use_zone(zi, oz))
+		if (xfs_try_use_zone(zi, file_hint, oz, false))
 			return oz;
 	return NULL;
+}
+
+static inline enum rw_hint xfs_inode_write_hint(struct xfs_inode *ip)
+{
+	if (xfs_has_nolifetime(ip->i_mount))
+		return WRITE_LIFE_NOT_SET;
+	return VFS_I(ip)->i_write_hint;
 }
 
 /*
@@ -539,10 +615,19 @@ xfs_select_zone_nowait(
 {
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_zone_info	*zi = mp->m_zone_info;
+	enum rw_hint		write_hint = xfs_inode_write_hint(ip);
 	struct xfs_open_zone	*oz = NULL;
 
-	if (xfs_zoned_pack_tight(ip))
-		oz = xfs_select_open_zone_mru(zi);
+	/*
+	 * Try to fill up open zones with matching temperature if available.  It
+	 * is better to try to co-locate data when this is favorable, so we can
+	 * activate empty zones when it is statistically better to separate
+	 * data.
+	 */
+	if (xfs_colocate_eagerly(write_hint))
+		oz = xfs_select_open_zone_lru(zi, write_hint, false);
+	else if (xfs_zoned_pack_tight(ip))
+		oz = xfs_select_open_zone_mru(zi, write_hint);
 	if (oz)
 		return oz;
 
@@ -550,12 +635,26 @@ xfs_select_zone_nowait(
 	 * If we are below the open limit try to activate a zone.
 	 */
 	if (zi->zi_nr_open_zones < mp->m_max_open_zones - XFS_OPEN_GC_ZONES) {
-		oz = xfs_activate_zone(mp);
+		oz = xfs_activate_zone(mp, write_hint);
 		if (oz)
 			return oz;
 	}
 
-	return xfs_select_open_zone_lru(zi);
+	/*
+	 * Try to colocate cold data with other cold data if we failed to open a
+	 * new zone for it.
+	 */
+	if (write_hint != WRITE_LIFE_NOT_SET &&
+	    !xfs_colocate_eagerly(write_hint)) {
+		oz = xfs_select_open_zone_lru(zi, write_hint, false);
+		if (oz)
+			return oz;
+	}
+
+	oz = xfs_select_open_zone_lru(zi, WRITE_LIFE_NOT_SET, false);
+	if (oz)
+		return oz;
+	return xfs_select_open_zone_lru(zi, WRITE_LIFE_NOT_SET, true);
 }
 
 static struct xfs_open_zone *
@@ -816,7 +915,8 @@ xfs_init_zone(
 		struct xfs_open_zone *oz;
 
 		atomic_inc(&rtg_group(rtg)->xg_active_ref);
-		oz = xfs_init_open_zone(rtg, write_pointer, false);
+		oz = xfs_init_open_zone(rtg, write_pointer, WRITE_LIFE_NOT_SET,
+				false);
 		list_add_tail(&oz->oz_entry, &zi->zi_open_zones);
 		zi->zi_nr_open_zones++;
 
