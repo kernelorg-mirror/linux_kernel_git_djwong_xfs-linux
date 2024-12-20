@@ -36,10 +36,42 @@ xfs_open_zone_put(
 }
 
 static void
+xfs_zone_emptied(
+	struct xfs_rtgroup	*rtg)
+{
+	struct xfs_mount	*mp = rtg_mount(rtg);
+	struct xfs_zone_info	*zi = mp->m_zone_info;
+
+	trace_xfs_zone_emptied(rtg);
+
+	/*
+	 * This can be called from log recovery, where the zone_info structure
+	 * hasn't been allocated yet.  But we'll look for empty zones when
+	 * setting it up, so don't need to track the empty zone here in that
+	 * case.
+	 */
+	if (!zi)
+		return;
+
+	xfs_group_clear_mark(&rtg->rtg_group, XFS_RTG_RECLAIMABLE);
+
+	spin_lock(&zi->zi_reset_list_lock);
+	rtg_group(rtg)->xg_next_reset = zi->zi_reset_list;
+	zi->zi_reset_list = rtg_group(rtg);
+	spin_unlock(&zi->zi_reset_list_lock);
+
+	wake_up_process(zi->zi_gc_thread);
+}
+
+static void
 xfs_zone_mark_reclaimable(
 	struct xfs_rtgroup	*rtg)
 {
+	struct xfs_mount	*mp = rtg_mount(rtg);
+
 	xfs_group_set_mark(&rtg->rtg_group, XFS_RTG_RECLAIMABLE);
+	if (xfs_zoned_need_gc(mp))
+		wake_up_process(mp->m_zone_info->zi_gc_thread);
 }
 
 static void
@@ -279,9 +311,12 @@ xfs_zone_free_blocks(
 	if (!READ_ONCE(rtg->rtg_open_zone)) {
 		/*
 		 * If the zone is not open, mark it reclaimable when the first
-		 * block is freed.
+		 * block is freed. As an optimization kick off a zone reset if
+		 * the usage counter hits zero.
 		 */
-		if (rmapip->i_used_blocks + len == rtg_blocks(rtg))
+		if (rmapip->i_used_blocks == 0)
+			xfs_zone_emptied(rtg);
+		else if (rmapip->i_used_blocks + len == rtg_blocks(rtg))
 			xfs_zone_mark_reclaimable(rtg);
 	}
 	xfs_add_frextents(mp, len);
@@ -419,6 +454,8 @@ xfs_activate_zone(
 	atomic_inc(&oz->oz_ref);
 	zi->zi_nr_open_zones++;
 	list_add_tail(&oz->oz_entry, &zi->zi_open_zones);
+	if (xfs_zoned_need_gc(mp))
+		wake_up_process(zi->zi_gc_thread);
 
 	/* XXX: this is a little verbose, but let's keep it for now */
 	xfs_info(mp, "using zone %u (%u)",
@@ -730,6 +767,7 @@ xfs_init_zone(
 	struct xfs_zone_info	*zi = mp->m_zone_info;
 	uint64_t		used = rtg_rmap(rtg)->i_used_blocks;
 	xfs_rgblock_t		write_pointer, highest_rgbno;
+	int			error;
 
 	if (zone && !xfs_zone_validate(zone, rtg, &write_pointer))
 		return -EFSCORRUPTED;
@@ -754,6 +792,18 @@ xfs_init_zone(
 		else
 			write_pointer = highest_rgbno + 1;
 		xfs_rtgroup_unlock(rtg, XFS_RTGLOCK_RMAP);
+	}
+
+	/*
+	 * If there are no used blocks, but the zone is not in empty state yet
+	 * we lost power before the zoned reset.  In that case finish the work
+	 * here.
+	 */
+	if (write_pointer == rtg_blocks(rtg) && used == 0) {
+		error = xfs_zone_gc_reset_sync(rtg);
+		if (error)
+			return error;
+		write_pointer = 0;
 	}
 
 	if (write_pointer == 0) {
@@ -963,6 +1013,9 @@ xfs_mount_zones(
 	xfs_set_freecounter(mp, XC_FREE_RTEXTENTS,
 		iz.available + iz.reclaimable);
 
+	error = xfs_zone_gc_mount(mp);
+	if (error)
+		goto out_free_open_zones;
 	return 0;
 
 out_free_open_zones:
@@ -975,6 +1028,7 @@ void
 xfs_unmount_zones(
 	struct xfs_mount	*mp)
 {
+	xfs_zone_gc_unmount(mp);
 	xfs_free_open_zones(mp->m_zone_info);
 	kfree(mp->m_zone_info);
 }
