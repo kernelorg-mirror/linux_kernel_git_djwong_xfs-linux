@@ -855,10 +855,8 @@ xfs_statfs_rt(
 	struct xfs_mount	*mp,
 	struct kstatfs		*st)
 {
-	int64_t			freertx =
-		percpu_counter_sum_positive(&mp->m_frextents);
-
-	st->f_bfree = xfs_rtbxlen_to_blen(mp, freertx);
+	st->f_bfree = xfs_rtbxlen_to_blen(mp,
+			percpu_counter_sum_positive(&mp->m_frextents));
 	st->f_blocks = mp->m_sb.sb_rblocks;
 }
 
