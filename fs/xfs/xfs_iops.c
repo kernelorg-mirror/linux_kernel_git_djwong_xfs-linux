@@ -582,7 +582,20 @@ xfs_report_dioalign(
 
 	stat->result_mask |= STATX_DIOALIGN;
 	stat->dio_mem_align = bdev_dma_alignment(bdev) + 1;
-	stat->dio_offset_align = bdev_logical_block_size(bdev);
+
+	/*
+	 * On COW inodes we are forced to always rewrite an entire file system
+	 * block or RT extent.
+	 *
+	 * Because applications assume they can do sector sized direct writes
+	 * on XFS we provide an emulation by doing a read-modify-write cycle
+	 * through the cache, but that is highly inefficient.  Thus report the
+	 * natively supported size here.
+	 */
+	if (xfs_is_cow_inode(ip))
+		stat->dio_offset_align = xfs_inode_alloc_unitsize(ip);
+	else
+		stat->dio_offset_align = bdev_logical_block_size(bdev);
 }
 
 static void
