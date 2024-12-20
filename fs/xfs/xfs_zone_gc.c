@@ -22,6 +22,34 @@
 #include "xfs_trace.h"
 
 /*
+ * Implement Garbage Collection (GC) of partially used zoned.
+ *
+ * To support the purely sequential writes in each zone, zoned XFS needs to be
+ * able to move data remaining in a zone out of it to reset the zone to prepare
+ * for writing to it again.
+ *
+ * This is done by the GC thread implemented in this file.  To support that a
+ * number of zones (XFS_GC_ZONES) is reserved from the user visible capacity to
+ * write the garbage collected data into.
+ *
+ * Whenever the available space is below the chosen threshold, the GC thread
+ * looks for potential non-empty but not fully used zones that are worth
+ * reclaiming.  Once found the rmap for the victim zone is queried, and after
+ * a bit of sorting to reduce fragmentation, the still live extents are read
+ * into memory and written to the GC target zone, and the bmap btree of the
+ * files is updated to point to the new location.  To avoid taking the IOLOCK
+ * and MMAPLOCK for the entire GC process and thus affecting the latency of
+ * user reads and writes to the files, the GC writes are speculative and the
+ * I/O completion checks that no other writes happened for the affected regions
+ * before remapping.
+ *
+ * Once a zone does not contain any valid data, be that through GC or user
+ * block removal, it is queued for for a zone reset.  The reset operation
+ * carefully ensures that the RT device cache is flushed and all transactions
+ * referencing the rmap have been committed to disk.
+ */
+
+/*
  * Size of each GC scratch pad.  This is also the upper bound for each
  * GC I/O, which helps to keep latency down.
  */
@@ -783,6 +811,10 @@ xfs_zone_gc_finish_chunk(
 	/*
 	 * Cycle through the iolock and wait for direct I/O and layouts to
 	 * ensure no one is reading from the old mapping before it goes away.
+	 *
+	 * Note that xfs_zoned_end_io() below checks that not other writer
+	 * raced with us to update the mapping by checking that the old
+	 * startblock didn't change.
 	 */
 	xfs_ilock(ip, iolock);
 	error = xfs_break_layouts(VFS_I(ip), &iolock, BREAK_UNMAP);
