@@ -366,12 +366,15 @@ xfs_growfs_log(
 int
 xfs_reserve_blocks(
 	struct xfs_mount	*mp,
+	enum xfs_free_counter	ctr,
 	uint64_t		request)
 {
 	int64_t			lcounter, delta;
 	int64_t			fdblks_delta = 0;
 	int64_t			free;
 	int			error = 0;
+
+	ASSERT(ctr < XC_FREE_NR);
 
 	/*
 	 * With per-cpu counters, this becomes an interesting problem. we need
@@ -391,16 +394,16 @@ xfs_reserve_blocks(
 	 * counters directly since we shouldn't have any problems unreserving
 	 * space.
 	 */
-	if (mp->m_resblks > request) {
-		lcounter = mp->m_resblks_avail - request;
+	if (mp->m_resblks[ctr].total > request) {
+		lcounter = mp->m_resblks[ctr].avail - request;
 		if (lcounter > 0) {		/* release unused blocks */
 			fdblks_delta = lcounter;
-			mp->m_resblks_avail -= lcounter;
+			mp->m_resblks[ctr].avail -= lcounter;
 		}
-		mp->m_resblks = request;
+		mp->m_resblks[ctr].total = request;
 		if (fdblks_delta) {
 			spin_unlock(&mp->m_sb_lock);
-			xfs_add_fdblocks(mp, fdblks_delta);
+			xfs_add_freecounter(mp, ctr, fdblks_delta);
 			spin_lock(&mp->m_sb_lock);
 		}
 
@@ -409,7 +412,7 @@ xfs_reserve_blocks(
 
 	/*
 	 * If the request is larger than the current reservation, reserve the
-	 * blocks before we update the reserve counters. Sample m_fdblocks and
+	 * blocks before we update the reserve counters. Sample m_free and
 	 * perform a partial reservation if the request exceeds free space.
 	 *
 	 * The code below estimates how many blocks it can request from
@@ -419,10 +422,10 @@ xfs_reserve_blocks(
 	 * space to fill it because mod_fdblocks will refill an undersized
 	 * reserve when it can.
 	 */
-	free = percpu_counter_sum(&mp->m_fdblocks) -
-						xfs_fdblocks_unavailable(mp);
-	delta = request - mp->m_resblks;
-	mp->m_resblks = request;
+	free = xfs_sum_freecounter_raw(mp, ctr) -
+		xfs_freecounter_unavailable(mp, ctr);
+	delta = request - mp->m_resblks[ctr].total;
+	mp->m_resblks[ctr].total = request;
 	if (delta > 0 && free > 0) {
 		/*
 		 * We'll either succeed in getting space from the free block
@@ -436,9 +439,9 @@ xfs_reserve_blocks(
 		 */
 		fdblks_delta = min(free, delta);
 		spin_unlock(&mp->m_sb_lock);
-		error = xfs_dec_fdblocks(mp, fdblks_delta, 0);
+		error = xfs_dec_freecounter(mp, ctr, fdblks_delta, 0);
 		if (!error)
-			xfs_add_fdblocks(mp, fdblks_delta);
+			xfs_add_freecounter(mp, ctr, fdblks_delta);
 		spin_lock(&mp->m_sb_lock);
 	}
 out:
