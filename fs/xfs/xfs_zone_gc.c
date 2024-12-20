@@ -533,7 +533,7 @@ xfs_zone_gc_select_target(
 	if (!xfs_group_marked(mp, XG_TYPE_RTG, XFS_RTG_FREE))
 		oz = xfs_zone_gc_steal_open(zi);
 	else
-		oz = xfs_open_zone(mp, true);
+		oz = xfs_open_zone(mp, WRITE_LIFE_NOT_SET, true);
 	spin_unlock(&zi->zi_zone_list_lock);
 
 	if (oz)
