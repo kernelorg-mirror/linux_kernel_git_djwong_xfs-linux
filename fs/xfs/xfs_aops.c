@@ -137,7 +137,9 @@ xfs_end_ioend(
 	else if (ioend->io_flags & IOMAP_IOEND_UNWRITTEN)
 		error = xfs_iomap_write_unwritten(ip, offset, size, false);
 
-	if (!error && xfs_ioend_is_append(ioend))
+	if (!error &&
+	    !(ioend->io_flags & IOMAP_IOEND_DIRECT) &&
+	    xfs_ioend_is_append(ioend))
 		error = xfs_setfilesize(ip, ioend->io_offset, ioend->io_size);
 done:
 	iomap_finish_ioends(ioend, error);
@@ -182,7 +184,7 @@ xfs_end_io(
 	}
 }
 
-static void
+void
 xfs_end_bio(
 	struct bio		*bio)
 {
