@@ -122,6 +122,16 @@ enum xfs_free_counter {
 	 * Number of free RT extents on the RT device.
 	 */
 	XC_FREE_RTEXTENTS,
+
+	/*
+	 * Number of available for use RT extents.
+	 *
+	 * This counter only exists for zoned RT device and indicates the number
+	 * of RT extents that can be directly used by writes.  XC_FREE_RTEXTENTS
+	 * also includes blocks that have been written previously and freed, but
+	 * sit in a rtgroup that still needs a zone reset.
+	 */
+	XC_FREE_RTAVAILABLE,
 	XC_FREE_NR,
 };
 
@@ -218,6 +228,7 @@ typedef struct xfs_mount {
 	bool			m_fail_unmount;
 	bool			m_finobt_nores; /* no per-AG finobt resv. */
 	bool			m_update_sb;	/* sb needs update in mount */
+	unsigned int		m_max_open_zones;
 
 	/*
 	 * Bitsets of per-fs metadata that have been checked and/or are sick.
@@ -270,6 +281,7 @@ typedef struct xfs_mount {
 		uint64_t	save;		/* reserved blks @ remount,ro */
 	} m_resblks[XC_FREE_NR];
 	struct delayed_work	m_reclaim_work;	/* background inode reclaim */
+	struct xfs_zone_info	*m_zone_info;	/* zone allocator information */
 	struct dentry		*m_debugfs;	/* debugfs parent */
 	struct xfs_kobj		m_kobj;
 	struct xfs_kobj		m_error_kobj;
