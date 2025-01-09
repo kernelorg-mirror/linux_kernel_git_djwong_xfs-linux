@@ -947,7 +947,7 @@ xfs_restore_resvblks(
 			resblks = mp->m_resblks[i].save;
 			mp->m_resblks[i].save = 0;
 		} else
-			resblks = xfs_default_resblks(mp);
+			resblks = xfs_default_resblks(mp, i);
 		xfs_reserve_blocks(mp, i, resblks);
 	}
 }
