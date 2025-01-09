@@ -78,6 +78,26 @@ xfs_setfilesize(
 	return xfs_trans_commit(tp);
 }
 
+static void
+xfs_ioend_put_open_zones(
+	struct iomap_ioend	*ioend)
+{
+	struct iomap_ioend *tmp;
+
+	/*
+	 * Put the open zone for all ioends merged into this one (if any).
+	 */
+	list_for_each_entry(tmp, &ioend->io_list, io_list)
+		xfs_open_zone_put(tmp->io_private);
+
+	/*
+	 * The main ioend might not have an open zone if the submission failed
+	 * before xfs_zone_alloc_and_submit got called.
+	 */
+	if (ioend->io_private)
+		xfs_open_zone_put(ioend->io_private);
+}
+
 /*
  * IO write completion.
  */
@@ -131,7 +151,7 @@ xfs_end_ioend(
 	 */
 	if (is_zoned)
 		error = xfs_zoned_end_io(ip, offset, size, ioend->io_sector,
-				NULLFSBLOCK);
+				ioend->io_private, NULLFSBLOCK);
 	else if (ioend->io_flags & IOMAP_IOEND_SHARED)
 		error = xfs_reflink_end_cow(ip, offset, size);
 	else if (ioend->io_flags & IOMAP_IOEND_UNWRITTEN)
@@ -142,6 +162,8 @@ xfs_end_ioend(
 	    xfs_ioend_is_append(ioend))
 		error = xfs_setfilesize(ip, ioend->io_offset, ioend->io_size);
 done:
+	if (is_zoned)
+		xfs_ioend_put_open_zones(ioend);
 	iomap_finish_ioends(ioend, error);
 	memalloc_nofs_restore(nofs_flag);
 }

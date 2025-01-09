@@ -111,6 +111,9 @@ struct xfs_gc_bio {
 	/* Are we writing to a sequential write required zone? */
 	bool				is_seq;
 
+	/* Open Zone being written to */
+	struct xfs_open_zone		*oz;
+
 	/* Bio used for reads and writes, including the bvec used by it */
 	struct bio_vec			bv;
 	struct bio			bio;	/* must be last */
@@ -615,7 +618,7 @@ xfs_zone_gc_end_io(
 	wake_up_process(data->mp->m_zone_info->zi_gc_thread);
 }
 
-static bool
+static struct xfs_open_zone *
 xfs_zone_gc_alloc_blocks(
 	struct xfs_zone_gc_data	*data,
 	xfs_extlen_t		*count_fsb,
@@ -627,7 +630,7 @@ xfs_zone_gc_alloc_blocks(
 
 	oz = xfs_zone_gc_ensure_target(mp);
 	if (!oz)
-		return false;
+		return NULL;
 
 	*count_fsb = min(*count_fsb,
 		XFS_B_TO_FSB(mp, xfs_zone_gc_scratch_available(data)));
@@ -650,14 +653,15 @@ xfs_zone_gc_alloc_blocks(
 	spin_unlock(&mp->m_sb_lock);
 
 	if (!*count_fsb)
-		return false;
+		return NULL;
 
 	*daddr = xfs_gbno_to_daddr(&oz->oz_rtg->rtg_group, 0);
 	*is_seq = bdev_zone_is_seq(mp->m_rtdev_targp->bt_bdev, *daddr);
 	if (!*is_seq)
 		*daddr += XFS_FSB_TO_BB(mp, oz->oz_write_pointer);
 	oz->oz_write_pointer += *count_fsb;
-	return true;
+	atomic_inc(&oz->oz_ref);
+	return oz;
 }
 
 static bool
@@ -667,6 +671,7 @@ xfs_zone_gc_start_chunk(
 	struct xfs_zone_gc_iter	*iter = &data->iter;
 	struct xfs_mount	*mp = data->mp;
 	struct block_device	*bdev = mp->m_rtdev_targp->bt_bdev;
+	struct xfs_open_zone	*oz;
 	struct xfs_rmap_irec	irec;
 	struct xfs_gc_bio	*chunk;
 	struct xfs_inode	*ip;
@@ -679,8 +684,9 @@ xfs_zone_gc_start_chunk(
 
 	if (!xfs_zone_gc_iter_next(mp, iter, &irec, &ip))
 		return false;
-	if (!xfs_zone_gc_alloc_blocks(data, &irec.rm_blockcount, &daddr,
-			&is_seq)) {
+	oz = xfs_zone_gc_alloc_blocks(data, &irec.rm_blockcount, &daddr,
+			&is_seq);
+	if (!oz) {
 		xfs_irele(ip);
 		return false;
 	}
@@ -697,6 +703,7 @@ xfs_zone_gc_start_chunk(
 	chunk->is_seq = is_seq;
 	chunk->scratch = &data->scratch[data->scratch_idx];
 	chunk->data = data;
+	chunk->oz = oz;
 
 	bio->bi_iter.bi_sector = xfs_rtb_to_daddr(mp, chunk->old_startblock);
 	bio->bi_end_io = xfs_zone_gc_end_io;
@@ -720,6 +727,7 @@ xfs_zone_gc_free_chunk(
 	struct xfs_gc_bio	*chunk)
 {
 	list_del(&chunk->entry);
+	xfs_open_zone_put(chunk->oz);
 	xfs_irele(chunk->ip);
 	bio_put(&chunk->bio);
 }
@@ -771,6 +779,8 @@ xfs_zone_gc_split_write(
 	split_chunk->len = split_len;
 	split_chunk->old_startblock = chunk->old_startblock;
 	split_chunk->new_daddr = chunk->new_daddr;
+	split_chunk->oz = chunk->oz;
+	atomic_inc(&chunk->oz->oz_ref);
 
 	chunk->offset += split_len;
 	chunk->len -= split_len;
@@ -851,7 +861,7 @@ xfs_zone_gc_finish_chunk(
 	if (chunk->is_seq)
 		chunk->new_daddr = chunk->bio.bi_iter.bi_sector;
 	error = xfs_zoned_end_io(ip, chunk->offset, chunk->len,
-			chunk->new_daddr, chunk->old_startblock);
+			chunk->new_daddr, chunk->oz, chunk->old_startblock);
 free:
 	if (error)
 		xfs_force_shutdown(mp, SHUTDOWN_META_IO_ERROR);

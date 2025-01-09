@@ -163,40 +163,21 @@ xfs_open_zone_mark_full(
 		xfs_zone_account_reclaimable(rtg, rtg_blocks(rtg) - used);
 }
 
-static int
+static void
 xfs_zone_record_blocks(
 	struct xfs_trans	*tp,
 	xfs_fsblock_t		fsbno,
 	xfs_filblks_t		len,
+	struct xfs_open_zone	*oz,
 	bool			used)
 {
 	struct xfs_mount	*mp = tp->t_mountp;
-	xfs_rgblock_t		rgbno = xfs_rtb_to_rgbno(mp, fsbno);
-	struct xfs_inode	*rmapip;
-	struct xfs_open_zone	*oz;
-	struct xfs_rtgroup	*rtg;
-	int			error = 0;
+	struct xfs_rtgroup	*rtg = oz->oz_rtg;
+	struct xfs_inode	*rmapip = rtg_rmap(rtg);
 
-	rtg = xfs_rtgroup_get(mp, xfs_rtb_to_rgno(mp, fsbno));
-	if (XFS_IS_CORRUPT(mp, !rtg))
-		return -EIO;
-	rmapip = rtg_rmap(rtg);
+	trace_xfs_zone_record_blocks(oz, xfs_rtb_to_rgbno(mp, fsbno), len);
 
 	xfs_rtgroup_lock(rtg, XFS_RTGLOCK_RMAP);
-
-	/*
-	 * There is a reference on the oz until all blocks were written, and it
-	 * is only dropped below with the rmapip ILOCK held.  Thus we don't need
-	 * to grab an extra reference here.
-	 */
-	oz = READ_ONCE(rtg->rtg_open_zone);
-	if (XFS_IS_CORRUPT(mp, !oz)) {
-		xfs_rtgroup_unlock(rtg, XFS_RTGLOCK_RMAP);
-		error = -EIO;
-		goto out_put;
-	}
-
-	trace_xfs_zone_record_blocks(oz, rgbno, len);
 	xfs_rtgroup_trans_join(tp, rtg, XFS_RTGLOCK_RMAP);
 	if (used) {
 		rmapip->i_used_blocks += len;
@@ -204,14 +185,10 @@ xfs_zone_record_blocks(
 	} else {
 		xfs_add_frextents(mp, len);
 	}
-
 	oz->oz_written += len;
 	if (oz->oz_written == rtg_blocks(rtg))
 		xfs_open_zone_mark_full(oz);
 	xfs_trans_log_inode(tp, rmapip, XFS_ILOG_CORE);
-out_put:
-	xfs_rtgroup_put(rtg);
-	return error;
 }
 
 static int
@@ -219,6 +196,7 @@ xfs_zoned_map_extent(
 	struct xfs_trans	*tp,
 	struct xfs_inode	*ip,
 	struct xfs_bmbt_irec	*new,
+	struct xfs_open_zone	*oz,
 	xfs_fsblock_t		old_startblock)
 {
 	struct xfs_bmbt_irec	data;
@@ -272,10 +250,8 @@ xfs_zoned_map_extent(
 		}
 	}
 
-	error = xfs_zone_record_blocks(tp, new->br_startblock,
-			new->br_blockcount, true);
-	if (error)
-		return error;
+	xfs_zone_record_blocks(tp, new->br_startblock, new->br_blockcount, oz,
+			true);
 
 	/* Map the new blocks into the data fork. */
 	xfs_bmap_map_extent(tp, ip, XFS_DATA_FORK, new);
@@ -283,8 +259,9 @@ xfs_zoned_map_extent(
 
 skip:
 	trace_xfs_reflink_cow_remap_skip(ip, new);
-	return xfs_zone_record_blocks(tp, new->br_startblock,
-			new->br_blockcount, false);
+	xfs_zone_record_blocks(tp, new->br_startblock, new->br_blockcount, oz,
+			false);
+	return 0;
 }
 
 int
@@ -293,6 +270,7 @@ xfs_zoned_end_io(
 	xfs_off_t		offset,
 	xfs_off_t		count,
 	xfs_daddr_t		daddr,
+	struct xfs_open_zone	*oz,
 	xfs_fsblock_t		old_startblock)
 {
 	struct xfs_mount	*mp = ip->i_mount;
@@ -320,7 +298,7 @@ xfs_zoned_end_io(
 		xfs_ilock(ip, XFS_ILOCK_EXCL);
 		xfs_trans_ijoin(tp, ip, 0);
 
-		error = xfs_zoned_map_extent(tp, ip, &new, old_startblock);
+		error = xfs_zoned_map_extent(tp, ip, &new, oz, old_startblock);
 		if (error)
 			xfs_trans_cancel(tp);
 		else
@@ -801,9 +779,12 @@ xfs_mark_rtg_boundary(
 static void
 xfs_submit_zoned_bio(
 	struct iomap_ioend	*ioend,
+	struct xfs_open_zone	*oz,
 	bool			is_seq)
 {
 	ioend->io_bio.bi_iter.bi_sector = ioend->io_sector;
+	ioend->io_private = oz;
+	atomic_inc(&oz->oz_ref); /* for xfs_zoned_end_io */
 
 	if (is_seq) {
 		ioend->io_bio.bi_opf &= ~REQ_OP_WRITE;
@@ -856,14 +837,14 @@ select_zone:
 		if (IS_ERR(split))
 			goto out_split_error;
 		alloc_len -= split->io_bio.bi_iter.bi_size;
-		xfs_submit_zoned_bio(split, is_seq);
+		xfs_submit_zoned_bio(split, *oz, is_seq);
 		if (!alloc_len) {
 			xfs_open_zone_put(*oz);
 			goto select_zone;
 		}
 	}
 
-	xfs_submit_zoned_bio(ioend, is_seq);
+	xfs_submit_zoned_bio(ioend, *oz, is_seq);
 	return;
 
 out_split_error:

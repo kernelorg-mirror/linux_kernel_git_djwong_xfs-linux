@@ -34,7 +34,8 @@ void xfs_zone_alloc_and_submit(struct iomap_ioend *ioend,
 int xfs_zone_free_blocks(struct xfs_trans *tp, struct xfs_rtgroup *rtg,
 		xfs_fsblock_t fsbno, xfs_filblks_t len);
 int xfs_zoned_end_io(struct xfs_inode *ip, xfs_off_t offset, xfs_off_t count,
-		xfs_daddr_t daddr, xfs_fsblock_t old_startblock);
+		xfs_daddr_t daddr, struct xfs_open_zone *oz,
+		xfs_fsblock_t old_startblock);
 void xfs_open_zone_put(struct xfs_open_zone *oz);
 
 void xfs_zoned_wake_all(struct xfs_mount *mp);
