@@ -837,8 +837,8 @@ xfs_rtrmapbt_calc_reserves(
 		return 0;
 
 	/* Reserve 1% of the rtgroup or enough for 1 block per record. */
-	return max_t(xfs_filblks_t, blocks / 100,
-			xfs_rtrmapbt_max_size(mp, blocks));
+	return max_t(xfs_filblks_t, blocks / 1000,
+			xfs_rtrmapbt_max_size(mp, blocks) / 8);
 }
 
 /* Convert on-disk form of btree root to in-memory form. */
