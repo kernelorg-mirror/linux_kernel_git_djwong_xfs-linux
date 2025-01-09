@@ -105,6 +105,19 @@ struct xfs_groups {
 	uint64_t		blkmask;
 };
 
+enum xfs_free_counter {
+	/*
+	 * Number of free blocks on the data device.
+	 */
+	XC_FREE_BLOCKS,
+
+	/*
+	 * Number of free RT extents on the RT device.
+	 */
+	XC_FREE_RTEXTENTS,
+	XC_FREE_NR,
+};
+
 /*
  * The struct xfsmount layout is optimised to separate read-mostly variables
  * from variables that are frequently modified. We put the read-mostly variables
@@ -222,8 +235,7 @@ typedef struct xfs_mount {
 	spinlock_t ____cacheline_aligned m_sb_lock; /* sb counter lock */
 	struct percpu_counter	m_icount;	/* allocated inodes counter */
 	struct percpu_counter	m_ifree;	/* free inodes counter */
-	struct percpu_counter	m_fdblocks;	/* free block counter */
-	struct percpu_counter	m_frextents;	/* free rt extent counter */
+	struct percpu_counter	m_free[XC_FREE_NR];
 
 	/*
 	 * Count of data device blocks reserved for delayed allocations,
@@ -245,9 +257,11 @@ typedef struct xfs_mount {
 	atomic64_t		m_allocbt_blks;
 
 	struct xfs_groups	m_groups[XG_TYPE_MAX];
-	uint64_t		m_resblks;	/* total reserved blocks */
-	uint64_t		m_resblks_avail;/* available reserved blocks */
-	uint64_t		m_resblks_save;	/* reserved blks @ remount,ro */
+	struct {
+		uint64_t	total;		/* total reserved blocks */
+		uint64_t	avail;		/* available reserved blocks */
+		uint64_t	save;		/* reserved blks @ remount,ro */
+	} m_resblks[XC_FREE_NR];
 	struct delayed_work	m_reclaim_work;	/* background inode reclaim */
 	struct dentry		*m_debugfs;	/* debugfs parent */
 	struct xfs_kobj		m_kobj;
@@ -646,45 +660,74 @@ extern void	xfs_unmountfs(xfs_mount_t *);
  */
 #define XFS_FDBLOCKS_BATCH	1024
 
+uint64_t xfs_freecounter_unavailable(struct xfs_mount *mp,
+		enum xfs_free_counter ctr);
+
 /*
- * Estimate the amount of free space that is not available to userspace and is
- * not explicitly reserved from the incore fdblocks.  This includes:
- *
- * - The minimum number of blocks needed to support splitting a bmap btree
- * - The blocks currently in use by the freespace btrees because they record
- *   the actual blocks that will fill per-AG metadata space reservations
+ * Sum up the freecount, but never return negative values.
  */
-static inline uint64_t
-xfs_fdblocks_unavailable(
-	struct xfs_mount	*mp)
+static inline s64 xfs_sum_freecounter(struct xfs_mount *mp,
+		enum xfs_free_counter ctr)
 {
-	return mp->m_alloc_set_aside + atomic64_read(&mp->m_allocbt_blks);
+	return percpu_counter_sum_positive(&mp->m_free[ctr]);
 }
 
-int xfs_dec_freecounter(struct xfs_mount *mp, struct percpu_counter *counter,
+/*
+ * Same as above, but does return negative values.  Mostly useful for
+ * special cases like repair and tracing.
+ */
+static inline s64 xfs_sum_freecounter_raw(struct xfs_mount *mp,
+		enum xfs_free_counter ctr)
+{
+	return percpu_counter_sum(&mp->m_free[ctr]);
+}
+
+/*
+ * This just provides and estimate without the cpu-local updates, use
+ * xfs_sum_freecounter for the exact value.
+ */
+static inline s64 xfs_estimate_freecounter(struct xfs_mount *mp,
+		enum xfs_free_counter ctr)
+{
+	return percpu_counter_read_positive(&mp->m_free[ctr]);
+}
+
+static inline int xfs_compare_freecounter(struct xfs_mount *mp,
+		enum xfs_free_counter ctr, s64 rhs, s32 batch)
+{
+	return __percpu_counter_compare(&mp->m_free[ctr], rhs, batch);
+}
+
+static inline void xfs_set_freecounter(struct xfs_mount *mp,
+		enum xfs_free_counter ctr, uint64_t val)
+{
+	percpu_counter_set(&mp->m_free[ctr], val);
+}
+
+int xfs_dec_freecounter(struct xfs_mount *mp, enum xfs_free_counter ctr,
 		uint64_t delta, bool rsvd);
-void xfs_add_freecounter(struct xfs_mount *mp, struct percpu_counter *counter,
+void xfs_add_freecounter(struct xfs_mount *mp, enum xfs_free_counter ctr,
 		uint64_t delta);
 
 static inline int xfs_dec_fdblocks(struct xfs_mount *mp, uint64_t delta,
 		bool reserved)
 {
-	return xfs_dec_freecounter(mp, &mp->m_fdblocks, delta, reserved);
+	return xfs_dec_freecounter(mp, XC_FREE_BLOCKS, delta, reserved);
 }
 
 static inline void xfs_add_fdblocks(struct xfs_mount *mp, uint64_t delta)
 {
-	xfs_add_freecounter(mp, &mp->m_fdblocks, delta);
+	xfs_add_freecounter(mp, XC_FREE_BLOCKS, delta);
 }
 
 static inline int xfs_dec_frextents(struct xfs_mount *mp, uint64_t delta)
 {
-	return xfs_dec_freecounter(mp, &mp->m_frextents, delta, false);
+	return xfs_dec_freecounter(mp, XC_FREE_RTEXTENTS, delta, false);
 }
 
 static inline void xfs_add_frextents(struct xfs_mount *mp, uint64_t delta)
 {
-	xfs_add_freecounter(mp, &mp->m_frextents, delta);
+	xfs_add_freecounter(mp, XC_FREE_RTEXTENTS, delta);
 }
 
 extern int	xfs_readsb(xfs_mount_t *, int);
