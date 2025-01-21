@@ -2084,6 +2084,7 @@ xfs_init_fs_context(
 	xfs_hooks_init(&mp->m_shutdown_hooks);
 	xfs_hooks_init(&mp->m_health_update_hooks);
 	xfs_hooks_init(&mp->m_media_error_hooks);
+	xfs_hooks_init(&mp->m_file_ioerror_hooks);
 
 	fc->s_fs_info = mp;
 	fc->ops = &xfs_context_ops;
