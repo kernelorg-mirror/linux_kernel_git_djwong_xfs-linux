@@ -42,6 +42,10 @@
  * the end of the filesystem mount.
  */
 
+/* Allow this many events to build up in memory per healthmon fd. */
+#define XFS_HEALTHMON_MAX_EVENTS \
+		(32768 / sizeof(struct xfs_healthmon_event))
+
 /* Grab a reference to the healthmon object for a given mount, if any. */
 struct xfs_healthmon *
 xfs_healthmon_get(
@@ -67,6 +71,340 @@ xfs_healthmon_put(
 		wake_up_var(&hm->ref);
 }
 
+static inline void xfs_healthmon_bump_events(struct xfs_healthmon *hm)
+{
+	hm->events++;
+	hm->total_events++;
+}
+
+static inline void xfs_healthmon_bump_lost(struct xfs_healthmon *hm)
+{
+	hm->lost_prev_event++;
+	hm->total_lost++;
+}
+
+/* Remove an event from the head of the list. */
+static inline int
+xfs_healthmon_free_head(
+	struct xfs_healthmon		*hm,
+	struct xfs_healthmon_event	*event)
+{
+	struct xfs_healthmon_event	*head;
+
+	mutex_lock(&hm->lock);
+	head = hm->first_event;
+	if (head != event) {
+		ASSERT(hm->first_event == event);
+		mutex_unlock(&hm->lock);
+		return -EFSCORRUPTED;
+	}
+
+	if (hm->last_event == head)
+		hm->last_event = NULL;
+	hm->first_event = head->next;
+	hm->events--;
+	mutex_unlock(&hm->lock);
+
+	trace_xfs_healthmon_pop(hm, head);
+	kfree(event);
+	return 0;
+}
+
+/* Figure out if we can merge two events together. */
+static bool
+xfs_healthmon_merge_events(
+	struct xfs_healthmon_event		*existing,
+	const struct xfs_healthmon_event	*new)
+{
+	if (!existing)
+		return false;
+
+	/* type and domain must match to merge events */
+	if (existing->type != new->type ||
+	    existing->domain != new->domain)
+		return false;
+
+	switch (existing->type) {
+	case XFS_HEALTHMON_RUNNING:
+		/* should only ever be one of these events anyway */
+		return false;
+
+	case XFS_HEALTHMON_LOST:
+		existing->lostcount += new->lostcount;
+		return true;
+	}
+
+	return false;
+}
+
+/* Push an event onto the end of the queue. */
+static inline void
+__xfs_healthmon_append(
+	struct xfs_healthmon		*hm,
+	struct xfs_healthmon_event	*event)
+{
+	struct timespec64		now;
+
+	ktime_get_coarse_real_ts64(&now);
+	event->time_ns = (now.tv_sec * NSEC_PER_SEC) + now.tv_nsec;
+
+	if (!hm->first_event)
+		hm->first_event = event;
+	if (hm->last_event)
+		hm->last_event->next = event;
+	hm->last_event = event;
+	event->next = NULL;
+	xfs_healthmon_bump_events(hm);
+	wake_up(&hm->wait);
+
+	trace_xfs_healthmon_push(hm, event);
+}
+
+/* Make a stack event dynamic so we can put it on the list. */
+static inline struct xfs_healthmon_event *
+xfs_healthmon_event_dup(
+	const struct xfs_healthmon_event	*event)
+{
+	return kmemdup(event, sizeof(struct xfs_healthmon_event), GFP_NOFS);
+}
+
+/* Deal with any previously lost events */
+static int
+xfs_healthmon_clear_lost_prev(
+	struct xfs_healthmon		*hm)
+{
+	struct xfs_healthmon_event	lost_event = {
+		.type			= XFS_HEALTHMON_LOST,
+		.domain			= XFS_HEALTHMON_MOUNT,
+		.lostcount		= hm->lost_prev_event,
+	};
+	struct xfs_healthmon_event	*event;
+
+	if (xfs_healthmon_merge_events(hm->last_event, &lost_event)) {
+		trace_xfs_healthmon_merge(hm, hm->last_event);
+		wake_up(&hm->wait);
+		goto cleared;
+	}
+
+	if (hm->events >= XFS_HEALTHMON_MAX_EVENTS)
+		return -ENOMEM;
+
+	event = xfs_healthmon_event_dup(&lost_event);
+	if (!event)
+		return -ENOMEM;
+
+	__xfs_healthmon_append(hm, event);
+cleared:
+	hm->lost_prev_event = 0;
+	return 0;
+}
+
+/*
+ * Push an event onto the end of the list after dealing with lost events and
+ * possibly full queues.
+ */
+static int
+xfs_healthmon_append(
+	struct xfs_healthmon			*hm,
+	const struct xfs_healthmon_event	*template)
+{
+	struct xfs_healthmon_event		*event;
+	int					error;
+
+	/*
+	 * Filesystem already detached; do nothing.  Note that if we race with
+	 * hm->mp being set to NULL, we'll queue the event but never send it.
+	 */
+	if (!hm->mp)
+		return -ESHUTDOWN;
+
+	/* Report previously lost events before we do anything else */
+	if (hm->lost_prev_event) {
+		error = xfs_healthmon_clear_lost_prev(hm);
+		if (error)
+			return error;
+	}
+
+	/* Try to merge with the newest event */
+	if (xfs_healthmon_merge_events(hm->last_event, template)) {
+		trace_xfs_healthmon_merge(hm, hm->last_event);
+		wake_up(&hm->wait);
+		return 0;
+	}
+
+	/* Already at capacity means we lose the event */
+	if (hm->events >= XFS_HEALTHMON_MAX_EVENTS)
+		goto lost;
+
+	/* No memory means we lose the event */
+	event = xfs_healthmon_event_dup(template);
+	if (!event)
+		goto lost;
+
+	__xfs_healthmon_append(hm, event);
+	return 0;
+lost:
+	trace_xfs_healthmon_lost_event(hm);
+
+	xfs_healthmon_bump_lost(hm);
+	return -ENOMEM;
+}
+
+static inline void
+xfs_healthmon_reset_outbuf(
+	struct xfs_healthmon		*hm)
+{
+	hm->buftail = 0;
+	hm->bufhead = 0;
+}
+
+static const unsigned int domain_map[] = {
+	[XFS_HEALTHMON_MOUNT]		= XFS_HEALTH_MONITOR_DOMAIN_MOUNT,
+};
+
+static const unsigned int type_map[] = {
+	[XFS_HEALTHMON_RUNNING]		= XFS_HEALTH_MONITOR_TYPE_RUNNING,
+	[XFS_HEALTHMON_LOST]		= XFS_HEALTH_MONITOR_TYPE_LOST,
+};
+
+/* Copy an event into the output buffer if there's room and advance the head. */
+static inline bool
+xfs_healthmon_putbuf(
+	struct xfs_healthmon			*hm,
+	const struct xfs_health_monitor_event	*hme)
+{
+	if (hm->bufhead + sizeof(*hme) > hm->bufsize)
+		return false;
+
+	memcpy(hm->buffer + hm->bufhead, hme, sizeof(*hme));
+	hm->bufhead += sizeof(*hme);
+	return true;
+}
+
+/* Render event as a V0 structure */
+STATIC int
+xfs_healthmon_format_v0(
+	struct xfs_healthmon		*hm,
+	const struct xfs_healthmon_event *event)
+{
+	struct xfs_health_monitor_event	hme = {
+		.time_ns		= event->time_ns,
+	};
+
+	trace_xfs_healthmon_format(hm, event);
+
+	if (event->domain < 0 || event->domain >= ARRAY_SIZE(domain_map) ||
+	    event->type < 0   || event->type >= ARRAY_SIZE(type_map))
+		return -EFSCORRUPTED;
+
+	hme.domain = domain_map[event->domain];
+	hme.type = type_map[event->type];
+
+	/* fill in the event-specific details */
+	switch (event->domain) {
+	case XFS_HEALTHMON_MOUNT:
+		switch (event->type) {
+		case XFS_HEALTHMON_LOST:
+			hme.e.lost.count = event->lostcount;
+			break;
+		default:
+			break;
+		}
+		break;
+	default:
+		break;
+	}
+
+	if (!xfs_healthmon_putbuf(hm, &hme)) {
+		/*
+		 * We overflowed the buffer and could not format the event.
+		 * Tell the caller not to delete the event.
+		 */
+		trace_xfs_healthmon_format_overflow(hm, event);
+		return -1;
+	}
+
+	return 0;
+}
+
+/* How many bytes are waiting in the outbuf to be copied? */
+static inline size_t
+xfs_healthmon_outbuf_bytes(
+	struct xfs_healthmon	*hm)
+{
+	if (hm->bufhead > hm->buftail)
+		return hm->bufhead - hm->buftail;
+	return 0;
+}
+
+/*
+ * Do we have something for userspace to read?  This can mean unmount events,
+ * events pending in the queue, or pending bytes in the outbuf.
+ */
+static inline bool
+xfs_healthmon_has_eventdata(
+	struct xfs_healthmon	*hm)
+{
+	/*
+	 * If we've detached from the xfs_mount, we want reads to return 0
+	 * bytes even if there are no events, because userspace interprets that
+	 * as EOF.
+	 */
+	if (!hm->mp)
+		return true;
+
+	/*
+	 * Either there are events waiting to be formatted into the buffer, or
+	 * there's unread bytes in the buffer.
+	 */
+	return hm->events > 0 || xfs_healthmon_outbuf_bytes(hm) > 0;
+}
+
+/* Try to copy the rest of the outbuf to the iov iter. */
+STATIC ssize_t
+xfs_healthmon_copybuf(
+	struct xfs_healthmon	*hm,
+	struct iov_iter		*to)
+{
+	size_t			to_copy;
+	size_t			w = 0;
+
+	trace_xfs_healthmon_copybuf(hm, to);
+
+	to_copy = xfs_healthmon_outbuf_bytes(hm);
+	if (to_copy) {
+		w = copy_to_iter(hm->buffer + hm->buftail, to_copy, to);
+		if (!w)
+			return -EFAULT;
+
+		hm->buftail += w;
+	}
+
+	/*
+	 * Nothing left to copy?  Reset the seqbuf pointers and outbuf to the
+	 * start since there's no live data in the buffer.
+	 */
+	if (xfs_healthmon_outbuf_bytes(hm) == 0)
+		xfs_healthmon_reset_outbuf(hm);
+	return w;
+}
+
+/*
+ * See if there's an event waiting for us.  If the fs is no longer mounted,
+ * don't bother sending any more events.
+ */
+static inline struct xfs_healthmon_event *
+xfs_healthmon_peek(
+	struct xfs_healthmon	*hm)
+{
+	struct xfs_healthmon_event *event;
+
+	mutex_lock(&hm->lock);
+	event = hm->first_event;
+	mutex_unlock(&hm->lock);
+
+	return event;
+}
 
 /*
  * Convey queued event data to userspace.  First copy any remaining bytes in
@@ -77,7 +415,124 @@ xfs_healthmon_read_iter(
 	struct kiocb		*iocb,
 	struct iov_iter		*to)
 {
-	return -EIO;
+	struct file		*file = iocb->ki_filp;
+	struct inode		*inode = file_inode(file);
+	struct xfs_healthmon	*hm = file->private_data;
+	struct xfs_healthmon_event *event;
+	size_t			copied = 0;
+	ssize_t			ret = 0;
+
+	/* Wait for data to become available */
+	if (!(file->f_flags & O_NONBLOCK)) {
+		ret = wait_event_interruptible(hm->wait,
+				xfs_healthmon_has_eventdata(hm));
+		if (ret)
+			return ret;
+	} else if (!xfs_healthmon_has_eventdata(hm)) {
+		return -EAGAIN;
+	}
+
+	/* Allocate formatting buffer up to 64k if necessary */
+	if (hm->bufsize == 0) {
+		void		*outbuf;
+		size_t		bufsize = min(65536, max(PAGE_SIZE,
+							 iov_iter_count(to)));
+
+		outbuf = kzalloc(bufsize, GFP_KERNEL);
+		if (!outbuf) {
+			bufsize = PAGE_SIZE;
+			outbuf = kzalloc(bufsize, GFP_KERNEL);
+			if (!outbuf)
+				return -ENOMEM;
+		}
+
+		inode_lock(inode);
+		if (hm->bufsize == 0) {
+			hm->buffer = outbuf;
+			hm->bufsize = bufsize;
+			hm->bufhead = 0;
+			hm->buftail = 0;
+		} else {
+			kfree(outbuf);
+		}
+	} else {
+		inode_lock(inode);
+	}
+
+	trace_xfs_healthmon_read_start(hm);
+
+	/*
+	 * If there's anything left in the seqbuf, copy that before formatting
+	 * more events.
+	 */
+	ret = xfs_healthmon_copybuf(hm, to);
+	if (ret < 0)
+		goto out_unlock;
+	copied += ret;
+
+	while (iov_iter_count(to) > 0) {
+		/* Format the next events into the outbuf until it's full. */
+		while ((event = xfs_healthmon_peek(hm)) != NULL) {
+			switch (hm->format) {
+			case XFS_HEALTH_MONITOR_FMT_V0:
+				ret = xfs_healthmon_format_v0(hm, event);
+				break;
+			default:
+				ret = -EINVAL;
+				goto out_unlock;
+			}
+			if (ret < 0)
+				break;
+			ret = xfs_healthmon_free_head(hm, event);
+			if (ret)
+				goto out_unlock;
+		}
+
+		/* Copy it to userspace */
+		ret = xfs_healthmon_copybuf(hm, to);
+		if (ret <= 0)
+			break;
+
+		copied += ret;
+	}
+
+out_unlock:
+	trace_xfs_healthmon_read_finish(hm);
+	inode_unlock(inode);
+	return copied ?: ret;
+}
+
+/* Poll for available events. */
+STATIC __poll_t
+xfs_healthmon_poll(
+	struct file			*file,
+	struct poll_table_struct	*wait)
+{
+	struct xfs_healthmon		*hm = file->private_data;
+	__poll_t			mask = 0;
+
+	poll_wait(file, &hm->wait, wait);
+
+	if (xfs_healthmon_has_eventdata(hm))
+		mask |= EPOLLIN;
+	return mask;
+}
+
+/* Free all events */
+STATIC void
+xfs_healthmon_free_events(
+	struct xfs_healthmon		*hm)
+{
+	struct xfs_healthmon_event	*event, *next;
+
+	event = hm->first_event;
+	while (event != NULL) {
+		trace_xfs_healthmon_drop(hm, event);
+		next = event->next;
+		kfree(event);
+		event = next;
+	}
+	hm->first_event = hm->last_event = NULL;
 }
 
 /* Detach a xfs mount from a specific healthmon instance. */
@@ -91,6 +546,8 @@ __xfs_healthmon_detach(
 	ASSERT(hm == old);
 
 	if (old) {
+		trace_xfs_healthmon_detach(old);
+
 		xfs_healthmon_put(old);
 		old->mp = NULL;
 	}
@@ -138,8 +595,16 @@ xfs_healthmon_release(
 {
 	struct xfs_healthmon	*hm = file->private_data;
 
+	trace_xfs_healthmon_release(hm);
+
 	/* Stabilize the superblock and detach the healthmon */
 	iterate_supers_type(hm->fstyp, xfs_healthmon_detach_sb, hm);
+
+	/*
+	 * Wake up any readers that might be left.  There shouldn't be any
+	 * because the only users of the waiter are read and poll.
+	 */
+	wake_up_all(&hm->wait);
 
 	/*
 	 * Drop the file's ref to the healthmon object, then wait for the
@@ -148,6 +613,10 @@ xfs_healthmon_release(
 	 */
 	atomic_dec(&hm->ref);
 	wait_var_event(&hm->ref, !atomic_read(&hm->ref));
+
+	mutex_destroy(&hm->lock);
+	xfs_healthmon_free_events(hm);
+	kfree(hm->buffer);
 	kfree_rcu_mightsleep(hm);
 
 	return 0;
@@ -173,9 +642,9 @@ static inline bool
 xfs_healthmon_validate(
 	const struct xfs_health_monitor	*hmo)
 {
-	if (hmo->flags)
+	if (hmo->flags & ~XFS_HEALTH_MONITOR_ALL)
 		return false;
-	if (hmo->format)
+	if (hmo->format != XFS_HEALTH_MONITOR_FMT_V0)
 		return false;
 	if (memchr_inv(&hmo->pad1, 0, sizeof(hmo->pad1)))
 		return false;
@@ -186,6 +655,17 @@ xfs_healthmon_validate(
 
 /* Emit some data about the health monitoring fd. */
 #ifdef CONFIG_PROC_FS
+static const char *
+xfs_healthmon_format_string(const struct xfs_healthmon *hm)
+{
+	switch (hm->format) {
+	case XFS_HEALTH_MONITOR_FMT_V0:
+		return "v0";
+	}
+
+	return "";
+}
+
 static void
 xfs_healthmon_show_fdinfo(
 	struct seq_file		*m,
@@ -193,9 +673,14 @@ xfs_healthmon_show_fdinfo(
 {
 	struct xfs_healthmon	*hm = file->private_data;
 
-	seq_printf(m, "state:\t%s\ndev:\t%d:%d\n",
+	mutex_lock(&hm->lock);
+	seq_printf(m, "state:\t%s\ndev:\t%d:%d\nformat:\t%s\nevents:\t%llu\nlost:\t%llu\n",
 			hm->mp ? "alive" : "dead",
-			MAJOR(hm->dev), MINOR(hm->dev));
+			MAJOR(hm->dev), MINOR(hm->dev),
+			xfs_healthmon_format_string(hm),
+			hm->total_events,
+			hm->total_lost);
+	mutex_unlock(&hm->lock);
 }
 #endif
 
@@ -205,6 +690,7 @@ static const struct file_operations xfs_healthmon_fops = {
 	.show_fdinfo	= xfs_healthmon_show_fdinfo,
 #endif
 	.read_iter	= xfs_healthmon_read_iter,
+	.poll		= xfs_healthmon_poll,
 	.release	= xfs_healthmon_release,
 };
 
@@ -217,6 +703,10 @@ xfs_ioc_health_monitor(
 	struct file			*file,
 	struct xfs_health_monitor __user *arg)
 {
+	struct xfs_healthmon_event	running_event = {
+		.type			= XFS_HEALTHMON_RUNNING,
+		.domain			= XFS_HEALTHMON_MOUNT,
+	};
 	struct xfs_health_monitor	hmo;
 	struct xfs_healthmon		*hm;
 	struct xfs_inode		*ip = XFS_I(file_inode(file));
@@ -245,6 +735,13 @@ xfs_ioc_health_monitor(
 	hm->dev = mp->m_super->s_dev;
 	hm->fstyp = mp->m_super->s_type;
 	atomic_set(&hm->ref, 1);
+	hm->format = hmo.format;
+
+	mutex_init(&hm->lock);
+	init_waitqueue_head(&hm->wait);
+
+	if (hmo.flags & XFS_HEALTH_MONITOR_VERBOSE)
+		hm->verbose = true;
 
 	/*
 	 * Try to attach this health monitor to the xfs_mount.  The monitor is
@@ -252,7 +749,12 @@ xfs_ioc_health_monitor(
 	 */
 	ret = xfs_healthmon_attach(mp, hm);
 	if (ret)
-		goto out_hm;
+		goto out_mutex;
+
+	/* Queue up the first event that lets the client know we're running. */
+	ret = xfs_healthmon_append(hm, &running_event);
+	if (ret)
+		goto out_mp;
 
 	/*
 	 * Create the anonymous file.  If it succeeds, the file owns hm and
@@ -266,12 +768,16 @@ xfs_ioc_health_monitor(
 		goto out_mp;
 	}
 
+	trace_xfs_healthmon_create(mp->m_super->s_dev, hmo.flags, hmo.format);
+
 	return fd;
 
 out_mp:
 	__xfs_healthmon_detach(mp, hm);
-out_hm:
+out_mutex:
 	ASSERT(atomic_read(&hm->ref) == 1);
+	mutex_destroy(&hm->lock);
+	xfs_healthmon_free_events(hm);
 	kfree_rcu_mightsleep(hm);
 	return ret;
 }
