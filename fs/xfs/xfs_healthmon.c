@@ -22,6 +22,7 @@
 #include "xfs_healthmon.h"
 #include "xfs_fsops.h"
 #include "xfs_notify_failure.h"
+#include "xfs_file.h"
 
 #include <linux/anon_inodes.h>
 #include <linux/eventpoll.h>
@@ -69,6 +70,7 @@ struct xfs_healthmon {
 	struct xfs_shutdown_hook	shook;
 	struct xfs_health_hook		hhook;
 	struct xfs_media_error_hook	mhook;
+	struct xfs_file_ioerror_hook	fhook;
 
 	/* filesystem mount, or NULL if we've unmounted */
 	struct xfs_mount		*mp;
@@ -208,6 +210,27 @@ xfs_healthmon_merge_events(
 		if (new->daddr + new->bbcount == existing->daddr) {
 			existing->daddr = new->daddr;
 			existing->bbcount += new->bbcount;
+			return true;
+		}
+		return false;
+
+	case XFS_HEALTHMON_BUFREAD:
+	case XFS_HEALTHMON_BUFWRITE:
+	case XFS_HEALTHMON_DIOREAD:
+	case XFS_HEALTHMON_DIOWRITE:
+	case XFS_HEALTHMON_DATALOST:
+		/* logically adjacent file ranges can merge */
+		if (existing->fino != new->fino || existing->fgen != new->fgen)
+			return false;
+
+		if (existing->fpos + existing->flen == new->fpos) {
+			existing->flen += new->flen;
+			return true;
+		}
+
+		if (new->fpos + new->flen == existing->fpos) {
+			existing->fpos = new->fpos;
+			existing->flen += new->flen;
 			return true;
 		}
 		return false;
@@ -604,6 +627,58 @@ xfs_healthmon_media_error_hook(
 }
 #endif
 
+static inline enum xfs_healthmon_type file_ioerr_type(unsigned long action)
+{
+	switch (action) {
+	case XFS_FILE_IOERROR_BUFFERED_READ:
+		return XFS_HEALTHMON_BUFREAD;
+	case XFS_FILE_IOERROR_BUFFERED_WRITE:
+		return XFS_HEALTHMON_BUFWRITE;
+	case XFS_FILE_IOERROR_DIRECT_READ:
+		return XFS_HEALTHMON_DIOREAD;
+	case XFS_FILE_IOERROR_DIRECT_WRITE:
+		return XFS_HEALTHMON_DIOWRITE;
+	case XFS_FILE_IOERROR_DATA_LOST:
+		return XFS_HEALTHMON_DATALOST;
+	}
+
+	ASSERT(0);
+	return -1;
+}
+
+/* Add a file io error event to the reporting queue. */
+STATIC int
+xfs_healthmon_file_ioerror_hook(
+	struct notifier_block		*nb,
+	unsigned long			action,
+	void				*data)
+{
+	struct xfs_file_ioerror_params	*p = data;
+	struct xfs_healthmon_event	event = {
+		.type			= file_ioerr_type(action),
+		.domain			= XFS_HEALTHMON_FILERANGE,
+		.fino			= p->ino,
+		.fgen			= p->gen,
+		.fpos			= p->pos,
+		.flen			= p->len,
+	};
+	struct xfs_healthmon		*hm =
+		container_of(nb, struct xfs_healthmon, fhook.ioerror_hook.nb);
+
+	if (event.type == -1)
+		return NOTIFY_DONE;
+
+	mutex_lock(&hm->lock);
+
+	trace_xfs_healthmon_file_ioerror_hook(hm->mp, action, p, hm->events,
+			hm->lost_prev_event);
+
+	xfs_healthmon_append(hm, &event);
+
+	mutex_unlock(&hm->lock);
+	return NOTIFY_DONE;
+}
+
 static inline void
 xfs_healthmon_reset_outbuf(
 	struct xfs_healthmon		*hm)
@@ -659,6 +734,7 @@ static const unsigned int domain_map[] = {
 	[XFS_HEALTHMON_DATADEV]		= XFS_HEALTH_MONITOR_DOMAIN_DATADEV,
 	[XFS_HEALTHMON_RTDEV]		= XFS_HEALTH_MONITOR_DOMAIN_RTDEV,
 	[XFS_HEALTHMON_LOGDEV]		= XFS_HEALTH_MONITOR_DOMAIN_LOGDEV,
+	[XFS_HEALTHMON_FILERANGE]	= XFS_HEALTH_MONITOR_DOMAIN_FILERANGE,
 };
 
 static const unsigned int type_map[] = {
@@ -670,6 +746,11 @@ static const unsigned int type_map[] = {
 	[XFS_HEALTHMON_UNMOUNT]		= XFS_HEALTH_MONITOR_TYPE_UNMOUNT,
 	[XFS_HEALTHMON_SHUTDOWN]	= XFS_HEALTH_MONITOR_TYPE_SHUTDOWN,
 	[XFS_HEALTHMON_MEDIA_ERROR]	= XFS_HEALTH_MONITOR_TYPE_MEDIA_ERROR,
+	[XFS_HEALTHMON_BUFREAD]		= XFS_HEALTH_MONITOR_TYPE_BUFREAD,
+	[XFS_HEALTHMON_BUFWRITE]	= XFS_HEALTH_MONITOR_TYPE_BUFWRITE,
+	[XFS_HEALTHMON_DIOREAD]		= XFS_HEALTH_MONITOR_TYPE_DIOREAD,
+	[XFS_HEALTHMON_DIOWRITE]	= XFS_HEALTH_MONITOR_TYPE_DIOWRITE,
+	[XFS_HEALTHMON_DATALOST]	= XFS_HEALTH_MONITOR_TYPE_DATALOST,
 };
 
 /* Copy an event into the output buffer if there's room and advance the head. */
@@ -740,6 +821,12 @@ xfs_healthmon_format_v0(
 	case XFS_HEALTHMON_RTDEV:
 		hme.e.media.daddr = event->daddr;
 		hme.e.media.bbcount = event->bbcount;
+		break;
+	case XFS_HEALTHMON_FILERANGE:
+		hme.e.filerange.ino = event->fino;
+		hme.e.filerange.gen = event->fgen;
+		hme.e.filerange.pos = event->fpos;
+		hme.e.filerange.len = event->flen;
 		break;
 	default:
 		break;
@@ -1007,6 +1094,7 @@ xfs_healthmon_detach_hooks(
 	 * through the health monitoring subsystem from xfs_fs_put_super, so
 	 * it is now time to detach the hooks.
 	 */
+	xfs_file_ioerror_hook_del(hm->mp, &hm->fhook);
 	xfs_media_error_hook_del(hm->mp, &hm->mhook);
 	xfs_shutdown_hook_del(hm->mp, &hm->shook);
 	xfs_health_hook_del(hm->mp, &hm->hhook);
@@ -1167,10 +1255,16 @@ xfs_ioc_health_monitor(
 	if (ret)
 		goto out_shutdownhook;
 
+	xfs_file_ioerror_hook_setup(&hm->fhook,
+			xfs_healthmon_file_ioerror_hook);
+	ret = xfs_file_ioerror_hook_add(mp, &hm->fhook);
+	if (ret)
+		goto out_mediahook;
+
 	/* Queue up the first event that lets the client know we're running. */
 	ret = xfs_healthmon_append(hm, &running_event);
 	if (ret)
-		goto out_mediahook;
+		goto out_ioerrhook;
 
 	/*
 	 * Create the anonymous file.  If it succeeds, the file owns hm and
@@ -1180,13 +1274,15 @@ xfs_ioc_health_monitor(
 			O_CLOEXEC | O_RDONLY);
 	if (fd < 0) {
 		ret = fd;
-		goto out_mediahook;
+		goto out_ioerrhook;
 	}
 
 	trace_xfs_healthmon_create(mp, hmo.flags, hmo.format);
 
 	return fd;
 
+out_ioerrhook:
+	xfs_file_ioerror_hook_del(mp, &hm->fhook);
 out_mediahook:
 	xfs_media_error_hook_del(mp, &hm->mhook);
 out_shutdownhook:
