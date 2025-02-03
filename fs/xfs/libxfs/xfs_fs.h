@@ -1220,6 +1220,7 @@ struct xfs_media_error_report {
 				_IOW ('X', 69, struct xfs_health_file_on_monitored_fs)
 #define XFS_IOC_REPORT_MEDIA_ERROR \
 				_IOW ('X', 70, struct xfs_media_error_report)
+#define XFS_IOC_ADDFEATURE	_IOW ('X', 71, __u64)
 
 /*
  * ioctl commands that replace IRIX syssgi()'s
