@@ -501,6 +501,9 @@ xchk_iscan_iget(
 	mutex_lock(&iscan->lock);
 	iscan->__batch_ino = ino - 1;
 	iscan->__skipped_inomask = 0;
+	iscan->__grabbed_inomask = 0;
+	iscan->__visited_inomask = 0;
+	iscan->__iterated_inomask = 0;
 	mutex_unlock(&iscan->lock);
 
 	for (i = 1; i < nr_inodes; i++, ino++, allocmask >>= 1) {
@@ -523,6 +526,7 @@ xchk_iscan_iget(
 
 		mutex_lock(&iscan->lock);
 		iscan->cursor_ino = ino;
+		iscan->__grabbed_inomask |= (1ULL << i);
 		mutex_unlock(&iscan->lock);
 		idx++;
 	}
@@ -637,6 +641,7 @@ xchk_iscan_iter(
 foundit:
 	/* Give the caller our reference. */
 	*ipp = iscan->__inodes[i];
+	iscan->__iterated_inomask |= (1ULL << i);
 	iscan->__inodes[i] = NULL;
 	return 1;
 }
@@ -718,6 +723,21 @@ xchk_iscan_start(
 	trace_xchk_iscan_start(iscan, start_ino);
 }
 
+static inline int
+iscan_offset(
+	const struct xchk_iscan	*iscan,
+	xfs_ino_t		ino)
+{
+	if (iscan->__batch_ino == NULLFSINO)
+		return -1;
+	if (ino < iscan->__batch_ino)
+		return -1;
+	if (ino >= iscan->__batch_ino + XFS_INODES_PER_CHUNK)
+		return -1;
+
+	return ino - iscan->__batch_ino;
+}
+
 /*
  * Mark this inode as having been visited.  Callers must hold a sufficiently
  * exclusive lock on the inode to prevent concurrent modifications.
@@ -727,7 +747,12 @@ xchk_iscan_mark_visited(
 	struct xchk_iscan	*iscan,
 	struct xfs_inode	*ip)
 {
+	int			i;
+
 	mutex_lock(&iscan->lock);
+	i = iscan_offset(iscan, ip->i_ino);
+	if (i >= 0)
+		iscan->__visited_inomask |= (1ULL << i);
 	iscan->__visited_ino = ip->i_ino;
 	trace_xchk_iscan_visit(iscan);
 	mutex_unlock(&iscan->lock);
