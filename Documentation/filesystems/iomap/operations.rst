@@ -230,6 +230,9 @@ the fsblock size.
 ``->iomap_begin``.
 Callers typically hold ``i_rwsem`` and ``invalidate_lock`` in exclusive
 mode before calling this function.
+The ``IOMAP_ZERO_ALLOW_BEYOND_EOF`` flag enables zeroing pagecache
+beyond EOF, for filesystems that can handle writeback and i_size updates
+correctly.
 
 Unsharing Reflinked File Data
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
