@@ -1204,6 +1204,7 @@ struct xfs_media_error {
 #define XFS_IOC_RTGROUP_GEOMETRY _IOWR('X', 65, struct xfs_rtgroup_geometry)
 #define XFS_IOC_HEALTH_MONITOR	_IOW ('X', 68, struct xfs_health_monitor)
 #define XFS_IOC_MEDIA_ERROR	_IOW ('X', 69, struct xfs_media_error)
+#define XFS_IOC_ADDFEATURE	_IOW ('X', 70, __u64)
 
 /*
  * ioctl commands that replace IRIX syssgi()'s
