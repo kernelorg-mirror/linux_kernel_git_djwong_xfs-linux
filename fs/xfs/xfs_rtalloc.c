@@ -1363,6 +1363,10 @@ xfs_growfs_rt(
 	if (!error && old_rextsize != in->extsize)
 		error = xfs_growfs_rt_fixup_extsize(mp);
 
+	/* see comment in xfs_fs_fill_super */
+	if (mp->m_always_cow && in->extsize > 1)
+		mp->m_always_cow = false;
+
 	/*
 	 * Update secondary superblocks now the physical grow has completed.
 	 *
