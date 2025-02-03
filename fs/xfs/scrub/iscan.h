@@ -53,6 +53,9 @@ struct xchk_iscan {
 	 */
 	xfs_ino_t		__batch_ino;
 	xfs_inofree_t		__skipped_inomask;
+	xfs_inofree_t		__grabbed_inomask;
+	xfs_inofree_t		__iterated_inomask;
+	xfs_inofree_t		__visited_inomask;
 	struct xfs_inode	*__inodes[XFS_INODES_PER_CHUNK];
 };
 

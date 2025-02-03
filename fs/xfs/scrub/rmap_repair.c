@@ -1632,6 +1632,10 @@ xrep_rmapbt_live_update(
 	error = __xfs_rmap_finish_intent(mcur, action, p->startblock,
 			p->blockcount, &p->oinfo, p->unwritten);
 	xfs_btree_del_cursor(mcur, error);
+	if (error) {
+		xfs_err(mp, "agno 0x%x startblock 0x%x fsbcount 0x%x owner 0x%llx offset 0x%llx oflags 0x%x unwritten? %d err %d", pag_agno(rr->sc->sa.pag), p->startblock, p->blockcount, p->oinfo.oi_owner, p->oinfo.oi_offset, p->oinfo.oi_flags, p->unwritten, error);
+		xfs_err(mp, "agno 0x%x iscan start 0x%llx cursor 0x%llx skip 0x%llx visited 0x%llx opstate 0x%lx batch 0x%llx skipped_mask 0x%llx grabbed_mask 0x%llx iterated_mask 0x%llx visited_mask 0x%llx", pag_agno(rr->sc->sa.pag), rr->iscan.scan_start_ino, rr->iscan.cursor_ino, rr->iscan.skip_ino, rr->iscan.__visited_ino, rr->iscan.__opstate, rr->iscan.__batch_ino, rr->iscan.__skipped_inomask, rr->iscan.__grabbed_inomask, rr->iscan.__iterated_inomask, rr->iscan.__visited_inomask);
+	}
 	if (error)
 		goto out_cancel;
 

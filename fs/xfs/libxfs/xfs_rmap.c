@@ -766,6 +766,8 @@ xfs_rmap_unmap(
 			   ltrec.rm_startblock > bno ||
 			   ltrec.rm_startblock + ltrec.rm_blockcount <
 			   bno + len)) {
+		xfs_err(mp, "ltrec agbno 0x%x fsbcount 0x%x owner 0x%llx offset 0x%llx flags 0x%x", ltrec.rm_startblock, ltrec.rm_blockcount, ltrec.rm_owner, ltrec.rm_offset, ltrec.rm_flags);
+		xfs_err(mp, "query agbno 0x%x fsbcount 0x%x owner 0x%llx offset 0x%llx flags 0x%x", bno, len, owner, offset, flags);
 		xfs_btree_mark_sick(cur);
 		error = -EFSCORRUPTED;
 		goto out_error;
