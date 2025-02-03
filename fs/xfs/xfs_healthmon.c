@@ -581,7 +581,6 @@ xfs_healthmon_shutdown_hook(
 	return NOTIFY_DONE;
 }
 
-#if defined(CONFIG_MEMORY_FAILURE) && defined(CONFIG_FS_DAX)
 static inline enum xfs_healthmon_domain
 media_error_domain(
 	const struct xfs_media_error_params	*p)
@@ -626,7 +625,6 @@ xfs_healthmon_media_error_hook(
 	mutex_unlock(&hm->lock);
 	return NOTIFY_DONE;
 }
-#endif
 
 static inline enum xfs_healthmon_type file_ioerr_type(unsigned long action)
 {
