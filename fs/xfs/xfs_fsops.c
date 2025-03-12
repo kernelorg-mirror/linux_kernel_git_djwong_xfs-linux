@@ -537,6 +537,21 @@ xfs_shutdown_hook_setup(
 # define xfs_shutdown_hook(...)		((void)0)
 #endif /* CONFIG_XFS_LIVE_HOOKS */
 
+static void
+xfs_send_shutdown_uevent(
+	struct xfs_mount	*mp)
+{
+	char			sid[256] = "";
+	char			*env[] = {
+		"TYPE=shutdown",
+		sid,
+		NULL,
+	};
+
+	snprintf(sid, sizeof(sid), "SID=%s", mp->m_super->s_id);
+	kobject_uevent_env(&mp->m_kobj.kobject, KOBJ_OFFLINE, env);
+}
+
 /*
  * Force a shutdown of the filesystem instantly while keeping the filesystem
  * consistent. We don't do an unmount here; just shutdown the shop, make sure
@@ -587,6 +602,7 @@ xfs_do_force_shutdown(
 	}
 
 	trace_xfs_force_shutdown(mp, tag, flags, fname, lnnum);
+	xfs_send_shutdown_uevent(mp);
 
 	xfs_alert_tag(mp, tag,
 "%s (0x%x) detected at %pS (%s:%d).  Shutting down filesystem.",
