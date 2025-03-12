@@ -101,4 +101,6 @@ extern struct workqueue_struct *xfs_discard_wq;
 
 struct dentry *xfs_debugfs_mkdir(const char *name, struct dentry *parent);
 
+void xfs_send_shutdown_uevent(struct xfs_mount *mp);
+
 #endif	/* __XFS_SUPER_H__ */

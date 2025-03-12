@@ -533,6 +533,7 @@ xfs_do_force_shutdown(
 	}
 
 	trace_xfs_force_shutdown(mp, tag, flags, fname, lnnum);
+	xfs_send_shutdown_uevent(mp);
 
 	xfs_alert_tag(mp, tag,
 "%s (0x%x) detected at %pS (%s:%d).  Shutting down filesystem.",
