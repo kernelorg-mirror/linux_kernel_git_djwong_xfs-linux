@@ -2000,6 +2000,35 @@ DEFINE_REPAIR_EXTENT_EVENT(xreap_agextent_binval);
 DEFINE_REPAIR_EXTENT_EVENT(xreap_bmapi_binval);
 DEFINE_REPAIR_EXTENT_EVENT(xrep_agfl_insert);
 
+DECLARE_EVENT_CLASS(xrep_reap_max_deferred_reaps_class,
+	TP_PROTO(const struct xfs_trans *tp, unsigned int per_intent_size,
+		 unsigned int max_deferred_reaps),
+	TP_ARGS(tp, per_intent_size, max_deferred_reaps),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned int, log_res)
+		__field(unsigned int, per_intent_size)
+		__field(unsigned int, max_deferred_reaps)
+	),
+	TP_fast_assign(
+		__entry->dev = tp->t_mountp->m_super->s_dev;
+		__entry->log_res = tp->t_log_res;
+		__entry->per_intent_size = per_intent_size;
+		__entry->max_deferred_reaps = max_deferred_reaps;
+	),
+	TP_printk("dev %d:%d logres %u per_intent_size %u max_deferred_reaps %u",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->log_res,
+		  __entry->per_intent_size,
+		  __entry->max_deferred_reaps)
+);
+#define DEFINE_REPAIR_REAP_MAX_DEFER_CHAIN_EVENT(name) \
+DEFINE_EVENT(xrep_reap_max_deferred_reaps_class, name, \
+	TP_PROTO(const struct xfs_trans *tp, unsigned int per_intent_size, \
+		 unsigned int max_deferred_reaps), \
+	TP_ARGS(tp, per_intent_size, max_deferred_reaps))
+DEFINE_REPAIR_REAP_MAX_DEFER_CHAIN_EVENT(xreap_agextent_max_deferred_reaps);
+
 DECLARE_EVENT_CLASS(xrep_reap_find_class,
 	TP_PROTO(const struct xfs_group *xg, xfs_agblock_t agbno,
 		 xfs_extlen_t len, bool crosslinked),

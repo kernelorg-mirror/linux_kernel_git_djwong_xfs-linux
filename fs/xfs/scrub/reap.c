@@ -36,6 +36,9 @@
 #include "xfs_metafile.h"
 #include "xfs_rtgroup.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_extfree_item.h"
+#include "xfs_rmap_item.h"
+#include "xfs_refcount_item.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -106,6 +109,9 @@ struct xreap_state {
 
 	/* Number of deferred reaps queued during the whole reap sequence. */
 	unsigned long long		total_deferred;
+
+	/* Maximum number of intents we can reap in a single transaction. */
+	unsigned int			max_deferred_reaps;
 };
 
 /* Put a block back on the AGFL. */
@@ -165,8 +171,8 @@ static inline bool xreap_dirty(const struct xreap_state *rs)
 
 /*
  * Decide if we want to roll the transaction after reaping an extent.  We don't
- * want to overrun the transaction reservation, so we prohibit more than
- * 128 EFIs per transaction.  For the same reason, we limit the number
+ * want to overrun the transaction reservation, so we restrict the number of
+ * log intent reaps per transaction.  For the same reason, we limit the number
  * of buffer invalidations to 2048.
  */
 static inline bool xreap_want_roll(const struct xreap_state *rs)
@@ -188,13 +194,11 @@ static inline void xreap_reset(struct xreap_state *rs)
 	rs->force_roll = false;
 }
 
-#define XREAP_MAX_DEFER_CHAIN		(2048)
-
 /*
  * Decide if we want to finish the deferred ops that are attached to the scrub
  * transaction.  We don't want to queue huge chains of deferred ops because
  * that can consume a lot of log space and kernel memory.  Hence we trigger a
- * xfs_defer_finish if there are more than 2048 deferred reap operations or the
+ * xfs_defer_finish if there are too many deferred reap operations or the
  * caller did some real work.
  */
 static inline bool
@@ -202,7 +206,7 @@ xreap_want_defer_finish(const struct xreap_state *rs)
 {
 	if (rs->force_roll)
 		return true;
-	if (rs->total_deferred > XREAP_MAX_DEFER_CHAIN)
+	if (rs->total_deferred > rs->max_deferred_reaps)
 		return true;
 	return false;
 }
@@ -496,6 +500,37 @@ xreap_agextent_iter(
 }
 
 /*
+ * Compute the worst case log overhead of the intent items needed to reap a
+ * single per-AG space extent.
+ */
+STATIC unsigned int
+xreap_agextent_max_deferred_reaps(
+	struct xfs_scrub	*sc)
+{
+	const unsigned int	efi = xfs_efi_item_overhead(1);
+	const unsigned int	rui = xfs_rui_item_overhead(1);
+
+	/* unmapping crosslinked metadata blocks */
+	const unsigned int	t1 = rui;
+
+	/* freeing metadata blocks */
+	const unsigned int	t2 = rui + efi;
+
+	/* worst case of all four possible scenarios */
+	const unsigned int	per_intent = max(t1, t2);
+
+	/*
+	 * tr_itruncate has enough logres to unmap two file extents; use only
+	 * half the log reservation for intent items so there's space to do
+	 * actual work and requeue intent items.
+	 */
+	const unsigned int	ret = sc->tp->t_log_res / (2 * per_intent);
+
+	trace_xreap_agextent_max_deferred_reaps(sc->tp, per_intent, ret);
+	return max(1, ret);
+}
+
+/*
  * Break an AG metadata extent into sub-extents by fate (crosslinked, not
  * crosslinked), and dispose of each sub-extent separately.
  */
@@ -556,6 +591,7 @@ xrep_reap_agblocks(
 		.sc			= sc,
 		.oinfo			= oinfo,
 		.resv			= type,
+		.max_deferred_reaps	= xreap_agextent_max_deferred_reaps(sc),
 	};
 	int				error;
 
@@ -668,6 +704,7 @@ xrep_reap_fsblocks(
 		.sc			= sc,
 		.oinfo			= oinfo,
 		.resv			= XFS_AG_RESV_NONE,
+		.max_deferred_reaps	= xreap_agextent_max_deferred_reaps(sc),
 	};
 	int				error;
 
@@ -922,6 +959,7 @@ xrep_reap_metadir_fsblocks(
 		.sc			= sc,
 		.oinfo			= &oinfo,
 		.resv			= XFS_AG_RESV_NONE,
+		.max_deferred_reaps	= xreap_agextent_max_deferred_reaps(sc),
 	};
 	int				error;
 
