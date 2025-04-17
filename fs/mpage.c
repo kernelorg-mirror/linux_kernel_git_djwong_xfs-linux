@@ -154,6 +154,7 @@ static struct bio *do_mpage_readpage(struct mpage_readpage_args *args)
 	struct inode *inode = folio->mapping->host;
 	const unsigned blkbits = inode->i_blkbits;
 	const unsigned blocks_per_folio = folio_size(folio) >> blkbits;
+const unsigned fsize = folio_size(folio);
 	const unsigned blocksize = 1 << blkbits;
 	struct buffer_head *map_bh = &args->map_bh;
 	sector_t block_in_file;
@@ -284,6 +285,10 @@ static struct bio *do_mpage_readpage(struct mpage_readpage_args *args)
 
 alloc_new:
 	if (args->bio == NULL) {
+		if (bdev == NULL) {
+			printk(KERN_EMERG "FARK bio_alloc with NULL bdev?! blkbits %u fsize %u blocks_per_folio %u", blkbits, fsize, blocks_per_folio);
+			goto confused;
+		}
 		args->bio = bio_alloc(bdev, bio_max_segs(args->nr_pages), opf,
 				      gfp);
 		if (args->bio == NULL)
