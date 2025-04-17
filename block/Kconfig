@@ -36,6 +36,12 @@ config BLOCK_LEGACY_AUTOLOAD
 	  created on demand, but scripts that manually create device nodes and
 	  then call losetup might rely on this behavior.
 
+config BLOCK_LBS
+	bool "Large sector size support"
+	default n
+	help
+	  Enable sector sizes larger than the base page size.
+
 config BLK_RQ_ALLOC_TIME
 	bool
 
