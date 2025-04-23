@@ -1082,6 +1082,13 @@ xfs_mountfs(
 		xfs_zone_gc_start(mp);
 	}
 
+	/* Configure hardware atomic write geometry */
+	xfs_buftarg_config_atomic_writes(mp->m_ddev_targp);
+	if (mp->m_logdev_targp && mp->m_logdev_targp != mp->m_ddev_targp)
+		xfs_buftarg_config_atomic_writes(mp->m_logdev_targp);
+	if (mp->m_rtdev_targp && mp->m_rtdev_targp != mp->m_ddev_targp)
+		xfs_buftarg_config_atomic_writes(mp->m_rtdev_targp);
+
 	return 0;
 
  out_agresv:
