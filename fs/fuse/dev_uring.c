@@ -12,7 +12,12 @@
 #include <linux/fs.h>
 #include <linux/io_uring/cmd.h>
 
-static bool __read_mostly enable_uring;
+static bool __read_mostly enable_uring =
+#if IS_ENABLED(CONFIG_FUSE_IO_URING_BY_DEFAULT)
+	true;
+#else
+	false;
+#endif
 module_param(enable_uring, bool, 0644);
 MODULE_PARM_DESC(enable_uring,
 		 "Enable userspace communication through io-uring");
