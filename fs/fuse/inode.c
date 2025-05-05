@@ -199,6 +199,8 @@ static void fuse_evict_inode(struct inode *inode)
 		WARN_ON(!list_empty(&fi->write_files));
 		WARN_ON(!list_empty(&fi->queued_writes));
 	}
+
+	fuse_iomap_evict_inode(inode);
 }
 
 static int fuse_reconfigure(struct fs_context *fsc)
