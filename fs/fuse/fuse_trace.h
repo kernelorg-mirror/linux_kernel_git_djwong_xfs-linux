@@ -60,6 +60,7 @@
 	EM( FUSE_STATX,			"FUSE_STATX")		\
 	EM( FUSE_IOMAP_BEGIN,		"FUSE_IOMAP_BEGIN")	\
 	EM( FUSE_IOMAP_END,		"FUSE_IOMAP_END")	\
+	EM( FUSE_IOMAP_IOEND,		"FUSE_IOMAP_IOEND")	\
 	EMe(CUSE_INIT,			"CUSE_INIT")
 
 /*
@@ -160,6 +161,17 @@ TRACE_EVENT(fuse_request_end,
 	{ FUSE_IOMAP_TYPE_MAPPED,		"mapped" }, \
 	{ FUSE_IOMAP_TYPE_UNWRITTEN,		"unwritten" }, \
 	{ FUSE_IOMAP_TYPE_INLINE,		"inline" }
+
+#define FUSE_IOMAP_IOEND_STRINGS \
+	{ FUSE_IOMAP_IOEND_SHARED,		"shared" }, \
+	{ FUSE_IOMAP_IOEND_UNWRITTEN,		"unwritten" }, \
+	{ FUSE_IOMAP_IOEND_BOUNDARY,		"boundary" }, \
+	{ FUSE_IOMAP_IOEND_DIRECT,		"direct" }, \
+	{ FUSE_IOMAP_IOEND_APPEND,		"append" }
+
+#define IOMAP_DIOEND_STRINGS \
+	{ IOMAP_DIO_UNWRITTEN,			"unwritten" }, \
+	{ IOMAP_DIO_COW,			"cow" }
 
 TRACE_EVENT(fuse_iomap_begin,
 	TP_PROTO(const struct inode *inode, loff_t pos, loff_t count,
@@ -381,6 +393,79 @@ TRACE_EVENT(fuse_iomap_end_error,
 		  __entry->error)
 );
 
+TRACE_EVENT(fuse_iomap_ioend,
+	TP_PROTO(const struct inode *inode,
+		 const struct fuse_iomap_ioend_in *inarg),
+
+	TP_ARGS(inode, inarg),
+
+	TP_STRUCT__entry(
+		__field(dev_t,		connection)
+		__field(unsigned,	ioendflags)
+		__field(int,		error)
+		__field(uint64_t,	ino)
+		__field(loff_t,		pos)
+		__field(uint64_t,	new_addr)
+		__field(size_t,		written)
+	),
+
+	TP_fast_assign(
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->ioendflags	=	inarg->ioendflags;
+		__entry->error		=	inarg->error;
+		__entry->pos		=	inarg->pos;
+		__entry->new_addr	=	inarg->new_addr;
+		__entry->written	=	inarg->written;
+	),
+
+	TP_printk("connection %u ino %llu ioendflags (%s) pos 0x%llx written %zd error %d new_addr 0x%llx",
+		  __entry->connection, __entry->ino,
+		  __print_flags(__entry->ioendflags, "|", FUSE_IOMAP_IOEND_STRINGS),
+		  __entry->pos, __entry->written, __entry->error,
+		  __entry->new_addr)
+);
+
+TRACE_EVENT(fuse_iomap_ioend_error,
+	TP_PROTO(const struct inode *inode,
+		 const struct fuse_iomap_ioend_in *inarg,
+		 int error),
+
+	TP_ARGS(inode, inarg, error),
+
+	TP_STRUCT__entry(
+		__field(dev_t,		connection)
+		__field(unsigned,	ioendflags)
+		__field(int,		error)
+		__field(uint64_t,	ino)
+		__field(loff_t,		pos)
+		__field(uint64_t,	new_addr)
+		__field(size_t,		written)
+	),
+
+	TP_fast_assign(
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->ioendflags	=	inarg->ioendflags;
+		__entry->error		=	error;
+		__entry->pos		=	inarg->pos;
+		__entry->new_addr	=	inarg->new_addr;
+		__entry->written	=	inarg->written;
+	),
+
+	TP_printk("connection %u ino %llu ioendflags (%s) pos 0x%llx written %zd error %d new_addr 0x%llx",
+		  __entry->connection, __entry->ino,
+		  __print_flags(__entry->ioendflags, "|", FUSE_IOMAP_IOEND_STRINGS),
+		  __entry->pos, __entry->written, __entry->error,
+		  __entry->new_addr)
+);
+
 TRACE_EVENT(fuse_iomap_dev_class,
 	TP_PROTO(const struct fuse_conn *fc, unsigned int idx,
 		 const struct file *file),
@@ -472,6 +557,107 @@ TRACE_EVENT(fuse_iomap_lseek,
 	TP_printk("connection %u ino %llu offset 0x%llx whence %d",
 		  __entry->connection, __entry->ino, __entry->offset,
 		  __entry->whence)
+);
+
+DECLARE_EVENT_CLASS(fuse_iomap_file_io_class,
+	TP_PROTO(const struct kiocb *iocb, const struct iov_iter *iter),
+	TP_ARGS(iocb, iter),
+	TP_STRUCT__entry(
+		__field(dev_t, connection)
+		__field(uint64_t, ino)
+		__field(loff_t, size)
+		__field(loff_t, offset)
+		__field(size_t, count)
+	),
+	TP_fast_assign(
+		const struct inode *inode = file_inode(iocb->ki_filp);
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->size		=	i_size_read(inode);
+		__entry->offset		=	iocb->ki_pos;
+		__entry->count		=	iov_iter_count(iter);
+	),
+	TP_printk("connection %u ino %llu disize 0x%llx pos 0x%llx bytecount 0x%zx",
+		  __entry->connection, __entry->ino, __entry->size,
+		  __entry->offset, __entry->count)
+)
+#define DEFINE_FUSE_IOMAP_FILE_IO_EVENT(name)		\
+DEFINE_EVENT(fuse_iomap_file_io_class, name,		\
+	TP_PROTO(const struct kiocb *iocb, const struct iov_iter *iter), \
+	TP_ARGS(iocb, iter))
+DEFINE_FUSE_IOMAP_FILE_IO_EVENT(fuse_iomap_direct_read);
+DEFINE_FUSE_IOMAP_FILE_IO_EVENT(fuse_iomap_direct_write);
+
+DECLARE_EVENT_CLASS(fuse_iomap_file_ioend_class,
+	TP_PROTO(const struct kiocb *iocb, const struct iov_iter *iter,
+		 ssize_t ret),
+	TP_ARGS(iocb, iter, ret),
+	TP_STRUCT__entry(
+		__field(dev_t, connection)
+		__field(uint64_t, ino)
+		__field(loff_t, size)
+		__field(loff_t, offset)
+		__field(size_t, count)
+		__field(ssize_t, ret)
+	),
+	TP_fast_assign(
+		const struct inode *inode = file_inode(iocb->ki_filp);
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->size		=	i_size_read(inode);
+		__entry->offset		=	iocb->ki_pos;
+		__entry->count		=	iov_iter_count(iter);
+		__entry->ret		=	ret;
+	),
+	TP_printk("connection %u ino %llu disize 0x%llx pos 0x%llx bytecount 0x%zx ret 0x%zx",
+		  __entry->connection, __entry->ino, __entry->size,
+		  __entry->offset, __entry->count, __entry->ret)
+)
+#define DEFINE_FUSE_IOMAP_FILE_IOEND_EVENT(name)	\
+DEFINE_EVENT(fuse_iomap_file_ioend_class, name,		\
+	TP_PROTO(const struct kiocb *iocb, const struct iov_iter *iter, \
+		 ssize_t ret), \
+	TP_ARGS(iocb, iter, ret))
+DEFINE_FUSE_IOMAP_FILE_IOEND_EVENT(fuse_iomap_direct_read_end);
+DEFINE_FUSE_IOMAP_FILE_IOEND_EVENT(fuse_iomap_direct_write_end);
+
+TRACE_EVENT(fuse_iomap_dio_write_end_io,
+	TP_PROTO(const struct inode *inode, loff_t pos, ssize_t written,
+		 int error, unsigned flags),
+
+	TP_ARGS(inode, pos, written, error, flags),
+
+	TP_STRUCT__entry(
+		__field(dev_t,		connection)
+		__field(unsigned,	dioendflags)
+		__field(int,		error)
+		__field(uint64_t,	ino)
+		__field(loff_t,		pos)
+		__field(size_t,		written)
+	),
+
+	TP_fast_assign(
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->dioendflags	=	flags;
+		__entry->error		=	error;
+		__entry->pos		=	pos;
+		__entry->written	=	written;
+	),
+
+	TP_printk("connection %u ino %llu dioendflags (%s) pos 0x%llx written %zd error %d",
+		  __entry->connection, __entry->ino,
+		  __print_flags(__entry->dioendflags, "|", IOMAP_DIOEND_STRINGS),
+		  __entry->pos, __entry->written, __entry->error)
 );
 #endif /* CONFIG_FUSE_IOMAP */
 

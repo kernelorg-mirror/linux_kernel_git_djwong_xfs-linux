@@ -904,6 +904,9 @@ struct fuse_conn {
 	/* Use fs/iomap for FIEMAP and SEEK_{DATA,HOLE} file operations */
 	unsigned int iomap:1;
 
+	/* Use fs/iomap for direct I/O operations */
+	unsigned int iomap_directio:1;
+
 	/* Use io_uring for communication */
 	unsigned int io_uring;
 
@@ -1631,6 +1634,22 @@ int fuse_iomap_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 		      u64 start, u64 length);
 loff_t fuse_iomap_lseek(struct file *file, loff_t offset, int whence);
 sector_t fuse_iomap_bmap(struct address_space *mapping, sector_t block);
+
+void fuse_iomap_open(struct inode *inode, struct file *file);
+
+static inline bool fuse_has_iomap_direct_io(const struct inode *inode)
+{
+	return get_fuse_conn_c(inode)->iomap_directio;
+}
+
+static inline bool fuse_want_iomap_direct_io(const struct kiocb *iocb)
+{
+	return (iocb->ki_flags & IOCB_DIRECT) &&
+		fuse_has_iomap_direct_io(file_inode(iocb->ki_filp));
+}
+
+ssize_t fuse_iomap_direct_read(struct kiocb *iocb, struct iov_iter *to);
+ssize_t fuse_iomap_direct_write(struct kiocb *iocb, struct iov_iter *from);
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
@@ -1640,6 +1659,11 @@ sector_t fuse_iomap_bmap(struct address_space *mapping, sector_t block);
 # define fuse_iomap_fiemap			NULL
 # define fuse_iomap_lseek(...)			(-ENOSYS)
 # define fuse_iomap_bmap(...)			(-ENOSYS)
+# define fuse_iomap_open(...)			((void)0)
+# define fuse_has_iomap_direct_io(...)		(false)
+# define fuse_want_iomap_direct_io(...)		(false)
+# define fuse_iomap_direct_read(...)		(-ENOSYS)
+# define fuse_iomap_direct_write(...)		(-ENOSYS)
 #endif
 
 #endif /* _FS_FUSE_I_H */

@@ -1443,6 +1443,8 @@ static void process_init_reply(struct fuse_mount *fm, struct fuse_args *args,
 
 			if ((flags & FUSE_IOMAP) && fuse_iomap_enabled())
 				fc->iomap = 1;
+			if ((flags & FUSE_IOMAP_DIRECTIO) && fc->iomap)
+				fc->iomap_directio = 1;
 		} else {
 			ra_pages = fc->max_read / PAGE_SIZE;
 			fc->no_lock = 1;
@@ -1515,7 +1517,7 @@ void fuse_send_init(struct fuse_mount *fm)
 	if (fuse_uring_enabled())
 		flags |= FUSE_OVER_IO_URING;
 	if (fuse_iomap_enabled())
-		flags |= FUSE_IOMAP;
+		flags |= FUSE_IOMAP | FUSE_IOMAP_DIRECTIO;
 
 	ia->in.flags = flags;
 	ia->in.flags2 = flags >> 32;
