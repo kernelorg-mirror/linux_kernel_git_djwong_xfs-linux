@@ -69,6 +69,38 @@ config FUSE_PASSTHROUGH
 config FUSE_BACKING
 	bool
 
+config FUSE_IOMAP
+	bool "FUSE file IO over iomap"
+	default n
+	depends on FUSE_FS
+	depends on BLOCK
+	select FS_IOMAP
+	help
+	  Enable fuse servers to operate the regular file I/O path through
+	  the fs-iomap library in the kernel.  This enables higher performance
+	  userspace filesystems by keeping the performance critical parts in
+	  the kernel while delegating the difficult metadata parsing parts to
+	  an easily-contained userspace program.
+
+	  This feature is considered EXPERIMENTAL.  Use with caution!
+
+	  If unsure, say N.
+
+config FUSE_IOMAP_BY_DEFAULT
+	bool "FUSE file I/O over iomap by default"
+	default n
+	depends on FUSE_IOMAP
+	help
+	  Enable sending FUSE file I/O over iomap by default.
+
+config FUSE_IOMAP_DEBUG
+	bool "Debug FUSE file IO over iomap"
+	default n
+	depends on FUSE_IOMAP
+	help
+	  Enable debugging assertions for the fuse iomap code paths and logging
+	  of bad iomap file mapping data being sent to the kernel.
+
 config FUSE_IO_URING
 	bool "FUSE communication over io-uring"
 	default y
