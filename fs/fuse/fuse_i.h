@@ -938,6 +938,9 @@ struct fuse_conn {
 	/* Is synchronous FUSE_INIT allowed? */
 	unsigned int sync_init:1;
 
+	/* Enable fs/iomap for file operations */
+	unsigned int iomap:1;
+
 	/* Use io_uring for communication */
 	unsigned int io_uring;
 
@@ -1054,12 +1057,17 @@ static inline struct fuse_mount *get_fuse_mount_super(struct super_block *sb)
 	return sb->s_fs_info;
 }
 
+static inline const struct fuse_mount *get_fuse_mount_super_c(const struct super_block *sb)
+{
+	return sb->s_fs_info;
+}
+
 static inline struct fuse_conn *get_fuse_conn_super(struct super_block *sb)
 {
 	return get_fuse_mount_super(sb)->fc;
 }
 
-static inline struct fuse_mount *get_fuse_mount(struct inode *inode)
+static inline struct fuse_mount *get_fuse_mount(const struct inode *inode)
 {
 	return get_fuse_mount_super(inode->i_sb);
 }
@@ -1688,5 +1696,17 @@ extern void fuse_sysctl_unregister(void);
 #define fuse_sysctl_register()		(0)
 #define fuse_sysctl_unregister()	do { } while (0)
 #endif /* CONFIG_SYSCTL */
+
+#if IS_ENABLED(CONFIG_FUSE_IOMAP)
+bool fuse_iomap_enabled(void);
+
+static inline bool fuse_has_iomap(const struct inode *inode)
+{
+	return get_fuse_conn(inode)->iomap;
+}
+#else
+# define fuse_iomap_enabled(...)		(false)
+# define fuse_has_iomap(...)			(false)
+#endif
 
 #endif /* _FS_FUSE_I_H */
