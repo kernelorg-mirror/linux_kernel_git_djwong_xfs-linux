@@ -1282,6 +1282,7 @@ static const struct address_space_operations fuse_iomap_aops = {
 void fuse_iomap_init_pagecache(struct inode *inode)
 {
 	struct fuse_inode *fi = get_fuse_inode(inode);
+	unsigned int min_order = 0;
 
 	ASSERT(get_fuse_conn_c(inode)->iomap_pagecache);
 
@@ -1296,6 +1297,11 @@ void fuse_iomap_init_pagecache(struct inode *inode)
 	INIT_WORK(&fi->ioend_work, fuse_iomap_end_io);
 	INIT_LIST_HEAD(&fi->ioend_list);
 	spin_lock_init(&fi->ioend_lock);
+
+	if (inode->i_blkbits > PAGE_SHIFT)
+		min_order = inode->i_blkbits - PAGE_SHIFT;
+
+	mapping_set_folio_min_order(inode->i_mapping, min_order);
 	set_bit(FUSE_I_IOMAP_PAGECACHE, &fi->state);
 }
 
