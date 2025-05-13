@@ -427,6 +427,28 @@ void fuse_iomap_init_reply(struct fuse_mount *fm)
 
 	if (sb->s_bdev)
 		__fuse_iomap_add_device(fc, sb->s_bdev_file);
+
+	if (fc->iomap_pagecache) {
+		struct backing_dev_info *old_bdi = sb->s_bdi;
+		char *suffix = sb->s_bdev ? "-fuseblk" : "-fuse";
+		int err;
+
+		/*
+		 * sb->s_bdi points to the initial private bdi however we want
+		 * to redirect it to a new private bdi with default dirty and
+		 * readahead settings because iomap writeback won't be pushing
+		 * a ton of dirty data through the fuse device
+		 */
+		sb->s_bdi = &noop_backing_dev_info;
+		err = super_setup_bdi_name(sb, "%u:%u%s.iomap", MAJOR(fc->dev),
+					   MINOR(fc->dev), suffix);
+		if (err) {
+			sb->s_bdi = old_bdi;
+		} else {
+			bdi_unregister(old_bdi);
+			bdi_put(old_bdi);
+		}
+	}
 }
 
 int fuse_iomap_add_device(struct fuse_conn *fc,
