@@ -236,6 +236,7 @@
  *  7.44
  *  - add FUSE_IOMAP and iomap_{begin,end,ioend} handlers for FIEMAP and
  *    SEEK_{DATA,HOLE} support
+ *  - add FUSE_NOTIFY_ADD_IOMAP_DEVICE for multi-device filesystems
  */
 
 #ifndef _LINUX_FUSE_H
@@ -681,6 +682,7 @@ enum fuse_notify_code {
 	FUSE_NOTIFY_RETRIEVE = 5,
 	FUSE_NOTIFY_DELETE = 6,
 	FUSE_NOTIFY_RESEND = 7,
+	FUSE_NOTIFY_ADD_IOMAP_DEVICE = 8,
 	FUSE_NOTIFY_CODE_MAX,
 };
 
@@ -1369,6 +1371,12 @@ struct fuse_iomap_end_in {
 	uint16_t map_type;	/* FUSE_IOMAP_TYPE_* */
 	uint16_t map_flags;	/* FUSE_IOMAP_F_* */
 	uint32_t map_dev;	/* device cookie * */
+};
+
+struct fuse_iomap_add_device_out {
+	int32_t fd;		/* fd of the open device to add */
+	uint32_t reserved;	/* must be zero */
+	uint32_t *map_dev;	/* location to receive device cookie */
 };
 
 #endif /* _LINUX_FUSE_H */

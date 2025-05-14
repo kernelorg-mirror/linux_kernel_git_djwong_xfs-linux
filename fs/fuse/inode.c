@@ -1010,6 +1010,8 @@ void fuse_conn_put(struct fuse_conn *fc)
 		struct fuse_iqueue *fiq = &fc->iq;
 		struct fuse_sync_bucket *bucket;
 
+		if (fc->iomap)
+			fuse_iomap_conn_put(fc);
 		if (IS_ENABLED(CONFIG_FUSE_DAX))
 			fuse_dax_conn_free(fc);
 		if (fc->timeout.req_timeout)
@@ -1449,6 +1451,9 @@ static void process_init_reply(struct fuse_mount *fm, struct fuse_args *args,
 
 		init_server_timeout(fc, timeout);
 
+		if (fc->iomap)
+			fuse_iomap_init_reply(fm);
+
 		fm->sb->s_bdi->ra_pages =
 				min(fm->sb->s_bdi->ra_pages, ra_pages);
 		fc->minor = arg->minor;
@@ -1886,6 +1891,10 @@ int fuse_fill_super_common(struct super_block *sb, struct fuse_fs_context *ctx)
  err_free_dax:
 	if (IS_ENABLED(CONFIG_FUSE_DAX))
 		fuse_dax_conn_free(fc);
+	/*
+	 * No need to call fuse_iomap_conn_put here because we don't add
+	 * devices until the init reply.
+	 */
  err:
 	return err;
 }

@@ -619,6 +619,12 @@ struct fuse_sync_bucket {
 	struct rcu_head rcu;
 };
 
+struct fuse_iomap {
+	/* array of file objects that reference block devices for iomap */
+	struct file **files;
+	unsigned int nr_files;
+};
+
 /**
  * A Fuse connection.
  *
@@ -968,6 +974,10 @@ struct fuse_conn {
 #ifdef CONFIG_FUSE_IO_URING
 	/**  uring connection information*/
 	struct fuse_ring *ring;
+#endif
+
+#ifdef CONFIG_FUSE_IOMAP
+	struct fuse_iomap iomap_conn;
 #endif
 
 	/** Only used if the connection opts into request timeouts */
@@ -1610,9 +1620,18 @@ static inline bool fuse_has_iomap(const struct inode *inode)
 {
 	return get_fuse_conn_c(inode)->iomap;
 }
+
+void fuse_iomap_init_reply(struct fuse_mount *fm);
+void fuse_iomap_conn_put(struct fuse_conn *fc);
+
+int fuse_iomap_add_device(struct fuse_conn *fc,
+			  const struct fuse_iomap_add_device_out *outarg);
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
+# define fuse_iomap_init_reply(...)		((void)0)
+# define fuse_iomap_conn_put(...)		((void)0)
+# define fuse_iomap_add_device(...)		(-ENOSYS)
 #endif
 
 #endif /* _FS_FUSE_I_H */

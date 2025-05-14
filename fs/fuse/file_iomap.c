@@ -142,6 +142,26 @@ static inline int fuse_iomap_validate(const struct fuse_iomap_begin_out *outarg,
 	return 0;
 }
 
+static inline struct block_device *fuse_iomap_bdev(struct fuse_mount *fm,
+						   unsigned int idx)
+{
+	struct fuse_conn *fc = fm->fc;
+	struct file *file = NULL;
+
+	spin_lock(&fc->lock);
+	if (idx < fc->iomap_conn.nr_files)
+		file = fc->iomap_conn.files[idx];
+	spin_unlock(&fc->lock);
+
+	if (!file)
+		return NULL;
+
+	if (!S_ISBLK(file_inode(file)->i_mode))
+		return NULL;
+
+	return I_BDEV(file->f_mapping->host);
+}
+
 static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 			    unsigned opflags, struct iomap *iomap,
 			    struct iomap *srcmap)
@@ -155,6 +175,7 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 	};
 	struct fuse_iomap_begin_out outarg = { };
 	struct fuse_mount *fm = get_fuse_mount(inode);
+	struct block_device *read_bdev;
 	FUSE_ARGS(args);
 	int err;
 
@@ -181,8 +202,18 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 	if (err)
 		return err;
 
+	read_bdev = fuse_iomap_bdev(fm, outarg.read_dev);
+	if (!read_bdev)
+		return -ENODEV;
+
 	if ((opflags & IOMAP_WRITE) &&
 	    outarg.write_type != FUSE_IOMAP_TYPE_PURE_OVERWRITE) {
+		struct block_device *write_bdev =
+			fuse_iomap_bdev(fm, outarg.write_dev);
+
+		if (!write_bdev)
+			return -ENODEV;
+
 		/*
 		 * For an out of place write, we must supply the write mapping
 		 * via @iomap, and the read mapping via @srcmap.
@@ -192,14 +223,14 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 		iomap->length = outarg.length;
 		iomap->type = outarg.write_type;
 		iomap->flags = outarg.write_flags;
-		iomap->bdev = inode->i_sb->s_bdev;
+		iomap->bdev = write_bdev;
 
 		srcmap->addr = outarg.read_addr;
 		srcmap->offset = outarg.offset;
 		srcmap->length = outarg.length;
 		srcmap->type = outarg.read_type;
 		srcmap->flags = outarg.read_flags;
-		srcmap->bdev = inode->i_sb->s_bdev;
+		srcmap->bdev = read_bdev;
 	} else {
 		/*
 		 * For everything else (reads, reporting, and pure overwrites),
@@ -211,7 +242,7 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 		iomap->length = outarg.length;
 		iomap->type = outarg.read_type;
 		iomap->flags = outarg.read_flags;
-		iomap->bdev = inode->i_sb->s_bdev;
+		iomap->bdev = read_bdev;
 	}
 
 	return 0;
@@ -278,3 +309,85 @@ const struct iomap_ops fuse_iomap_ops = {
 	.iomap_begin		= fuse_iomap_begin,
 	.iomap_end		= fuse_iomap_end,
 };
+
+void fuse_iomap_conn_put(struct fuse_conn *fc)
+{
+	unsigned int i;
+
+	for (i = 0; i < fc->iomap_conn.nr_files; i++) {
+		struct file *file = fc->iomap_conn.files[i];
+
+		trace_fuse_iomap_remove_dev(fc, i, file);
+
+		fc->iomap_conn.files[i] = NULL;
+		fput(file);
+	}
+
+	kfree(fc->iomap_conn.files);
+	fc->iomap_conn.nr_files = 0;
+}
+
+/* Add a bdev to the fuse connection, returns the index or a negative errno */
+static int __fuse_iomap_add_device(struct fuse_conn *fc, struct file *file)
+{
+	struct file **new_files;
+	int ret;
+
+	if (fc->iomap_conn.nr_files >= PAGE_SIZE / sizeof(unsigned int))
+		return -EMFILE;
+
+	new_files = krealloc_array(fc->iomap_conn.files,
+				   fc->iomap_conn.nr_files + 1,
+				   sizeof(struct file *),
+				   GFP_KERNEL | __GFP_ZERO);
+	if (!new_files)
+		return -ENOMEM;
+
+	spin_lock(&fc->lock);
+	fc->iomap_conn.files = new_files;
+	fc->iomap_conn.files[fc->iomap_conn.nr_files] = get_file(file);
+	ret = fc->iomap_conn.nr_files++;
+	spin_unlock(&fc->lock);
+
+	trace_fuse_iomap_add_dev(fc, ret, file);
+
+	return ret;
+}
+
+void fuse_iomap_init_reply(struct fuse_mount *fm)
+{
+	struct fuse_conn *fc = fm->fc;
+	struct super_block *sb = fm->sb;
+
+	if (sb->s_bdev)
+		__fuse_iomap_add_device(fc, sb->s_bdev_file);
+}
+
+int fuse_iomap_add_device(struct fuse_conn *fc,
+			  const struct fuse_iomap_add_device_out *outarg)
+{
+	struct file *file;
+	int ret;
+
+	if (!fc->iomap)
+		return -EINVAL;
+
+	if (outarg->reserved)
+		return -EINVAL;
+
+	CLASS(fd, somefd)(outarg->fd);
+	if (fd_empty(somefd))
+		return -EBADF;
+	file = fd_file(somefd);
+
+	if (!S_ISBLK(file_inode(file)->i_mode))
+		return -ENODEV;
+
+	down_read(&fc->killsb);
+	ret = __fuse_iomap_add_device(fc, file);
+	up_read(&fc->killsb);
+	if (ret < 0)
+		return ret;
+
+	return put_user(ret, outarg->map_dev);
+}

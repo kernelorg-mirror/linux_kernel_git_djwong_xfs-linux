@@ -380,6 +380,42 @@ TRACE_EVENT(fuse_iomap_end_error,
 		  __entry->pos, __entry->count, __entry->written,
 		  __entry->error)
 );
+
+TRACE_EVENT(fuse_iomap_dev_class,
+	TP_PROTO(const struct fuse_conn *fc, unsigned int idx,
+		 const struct file *file),
+
+	TP_ARGS(fc, idx, file),
+
+	TP_STRUCT__entry(
+		__field(dev_t,		connection)
+		__field(unsigned int,	idx)
+		__field(dev_t,		bdev)
+	),
+
+	TP_fast_assign(
+		struct inode *inode = file_inode(file);
+
+		__entry->connection	=	fc->dev;
+		__entry->idx		=	idx;
+		if (S_ISBLK(inode->i_mode)) {
+			__entry->bdev	=	inode->i_rdev;
+		} else
+			__entry->bdev	=	0;
+	),
+
+	TP_printk("connection %u idx %u dev %u:%u",
+		  __entry->connection,
+		  __entry->idx,
+		  MAJOR(__entry->bdev), MINOR(__entry->bdev))
+);
+#define DEFINE_FUSE_IOMAP_DEV_EVENT(name)		\
+DEFINE_EVENT(fuse_iomap_dev_class, name,		\
+	TP_PROTO(const struct fuse_conn *fc, unsigned int idx, \
+		 const struct file *file), \
+	TP_ARGS(fc, idx, file))
+DEFINE_FUSE_IOMAP_DEV_EVENT(fuse_iomap_add_dev);
+DEFINE_FUSE_IOMAP_DEV_EVENT(fuse_iomap_remove_dev);
 #endif /* CONFIG_FUSE_IOMAP */
 
 #endif /* _TRACE_FUSE_H */
