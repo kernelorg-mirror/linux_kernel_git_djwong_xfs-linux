@@ -2056,7 +2056,7 @@ void fuse_conn_destroy(struct fuse_mount *fm)
 {
 	struct fuse_conn *fc = fm->fc;
 
-	if (fc->destroy)
+	if (fc->destroy || fc->iomap)
 		fuse_send_destroy(fm);
 
 	fuse_abort_conn(fc);
