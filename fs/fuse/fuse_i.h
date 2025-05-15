@@ -1643,6 +1643,11 @@ void fuse_iomap_conn_put(struct fuse_conn *fc);
 
 int fuse_iomap_dev_add(struct fuse_conn *fc, const struct fuse_backing_map *map);
 void fuse_iomap_conn_destroy(struct fuse_mount *fm);
+
+int fuse_iomap_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
+		      u64 start, u64 length);
+loff_t fuse_iomap_lseek(struct file *file, loff_t offset, int whence);
+sector_t fuse_iomap_bmap(struct address_space *mapping, sector_t block);
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
@@ -1651,6 +1656,9 @@ void fuse_iomap_conn_destroy(struct fuse_mount *fm);
 # define fuse_iomap_conn_put(...)		((void)0)
 # define fuse_iomap_dev_add(...)		(-ENOSYS)
 # define fuse_iomap_conn_destroy(...)		((void)0)
+# define fuse_iomap_fiemap			NULL
+# define fuse_iomap_lseek(...)			(-ENOSYS)
+# define fuse_iomap_bmap(...)			(-ENOSYS)
 #endif
 
 #endif /* _FS_FUSE_I_H */
