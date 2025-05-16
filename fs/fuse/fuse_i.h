@@ -120,6 +120,24 @@ struct fuse_backing {
 	struct rcu_head rcu;
 };
 
+#if IS_ENABLED(CONFIG_FUSE_IOMAP)
+/*
+ * File incore extent information, present for each of data & attr forks.
+ */
+struct fuse_ifork {
+	int64_t			if_bytes;	/* bytes in if_data */
+	void			*if_data;	/* extent tree root */
+	int			if_height;	/* height of the extent tree */
+};
+
+struct fuse_iomap_cache {
+	struct fuse_ifork	im_read;
+	struct fuse_ifork	*im_write;
+	uint64_t		im_seq;		/* validity counter */
+	struct rw_semaphore	im_lock;	/* mapping lock */
+};
+#endif
+
 /** FUSE inode */
 struct fuse_inode {
 	/** Inode data */
@@ -185,6 +203,7 @@ struct fuse_inode {
 			spinlock_t ioend_lock;
 			struct work_struct ioend_work;
 			struct list_head ioend_list;
+			struct fuse_iomap_cache cache;
 #endif
 		};
 
@@ -255,6 +274,11 @@ enum {
 	FUSE_I_IOMAP,
 	/* Enable untorn writes */
 	FUSE_I_ATOMIC,
+	/*
+	 * Cache iomaps in the kernel.  This is required for any filesystem
+	 * that needs to synchronize pagecache write and writeback.
+	 */
+	FUSE_I_IOMAP_CACHE,
 };
 
 struct fuse_conn;
@@ -1764,6 +1788,18 @@ int fuse_dev_ioctl_iomap_support(struct file *file,
 				 struct fuse_iomap_support __user *argp);
 
 int fuse_iomap_fadvise(struct file *file, loff_t start, loff_t end, int advice);
+
+static inline bool fuse_inode_caches_iomaps(const struct inode *inode)
+{
+	const struct fuse_inode *fi = get_fuse_inode_c(inode);
+
+	return test_bit(FUSE_I_IOMAP_CACHE, &fi->state);
+}
+
+enum fuse_iomap_iodir {
+	READ_MAPPING,
+	WRITE_MAPPING,
+};
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
@@ -1790,6 +1826,7 @@ int fuse_iomap_fadvise(struct file *file, loff_t start, loff_t end, int advice);
 # define fuse_iomap_flush_unmap_range(...)	(-ENOSYS)
 # define fuse_dev_ioctl_iomap_support(...)	(-EOPNOTSUPP)
 # define fuse_iomap_fadvise			NULL
+# define fuse_inode_caches_iomaps(...)		(false)
 #endif
 
 #endif /* _FS_FUSE_I_H */
