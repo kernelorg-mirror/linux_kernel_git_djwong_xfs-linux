@@ -129,6 +129,7 @@ TRACE_EVENT(fuse_request_end,
 );
 
 #if IS_ENABLED(CONFIG_FUSE_IOMAP)
+struct fuse_iext_cursor;
 
 #define FUSE_IOMAP_F_STRINGS \
 	{ FUSE_IOMAP_F_NEW,			"new" }, \
@@ -182,6 +183,7 @@ TRACE_DEFINE_ENUM(FUSE_I_BTIME);
 TRACE_DEFINE_ENUM(FUSE_I_CACHE_IO_MODE);
 TRACE_DEFINE_ENUM(FUSE_I_IOMAP_DIRECTIO);
 TRACE_DEFINE_ENUM(FUSE_I_IOMAP_FILEIO);
+TRACE_DEFINE_ENUM(FUSE_I_IOMAP_CACHE);
 
 #define FUSE_IFLAG_STRINGS \
 	{ 1 << FUSE_I_ADVISE_RDPLUS,		"advise_rdplus" }, \
@@ -191,7 +193,8 @@ TRACE_DEFINE_ENUM(FUSE_I_IOMAP_FILEIO);
 	{ 1 << FUSE_I_BTIME,			"btime" }, \
 	{ 1 << FUSE_I_CACHE_IO_MODE,		"cacheio" }, \
 	{ 1 << FUSE_I_IOMAP_DIRECTIO,		"iomap_dio" }, \
-	{ 1 << FUSE_I_IOMAP_FILEIO,		"iomap_fileio" }
+	{ 1 << FUSE_I_IOMAP_FILEIO,		"iomap_fileio" }, \
+	{ 1 << FUSE_I_IOMAP_CACHE,		"iomap_cache" }
 
 #define IOMAP_IOEND_STRINGS \
 	{ IOMAP_IOEND_SHARED,			"shared" }, \
@@ -206,6 +209,26 @@ TRACE_DEFINE_ENUM(FUSE_I_IOMAP_FILEIO);
 	{ FUSE_IOMAP_CONFIG_MAX_LINKS,		"max_links" }, \
 	{ FUSE_IOMAP_CONFIG_TIME,		"time" }, \
 	{ FUSE_IOMAP_CONFIG_MAXBYTES,		"maxbytes" }
+
+TRACE_DEFINE_ENUM(FUSE_IOMAP_READ_FORK);
+TRACE_DEFINE_ENUM(FUSE_IOMAP_WRITE_FORK);
+
+#define FUSE_IOMAP_FORK_STRINGS \
+	{ FUSE_IOMAP_READ_FORK,			"read" }, \
+	{ FUSE_IOMAP_WRITE_FORK,		"write" }
+
+#define FUSE_IOMAP_CACHE_LOCK_STRINGS \
+	{ FUSE_IOMAP_LOCK_SHARED,		"shared" }, \
+	{ FUSE_IOMAP_LOCK_EXCL,			"exclusive" }
+
+#define FUSE_IEXT_STATE_STRINGS \
+	{ FUSE_IEXT_LEFT_CONTIG,		"l_cont" }, \
+	{ FUSE_IEXT_RIGHT_CONTIG,		"r_cont" }, \
+	{ FUSE_IEXT_LEFT_FILLING,		"l_fill" }, \
+	{ FUSE_IEXT_RIGHT_FILLING,		"r_fill" }, \
+	{ FUSE_IEXT_LEFT_VALID,			"l_valid" }, \
+	{ FUSE_IEXT_RIGHT_VALID,		"r_valid" }, \
+	{ FUSE_IEXT_WRITEFORK,			"writefork" }
 
 TRACE_EVENT(fuse_iomap_begin,
 	TP_PROTO(const struct inode *inode, loff_t pos, loff_t count,
@@ -1289,6 +1312,417 @@ DEFINE_FUSE_IOMAP_INLINE_EVENT(fuse_iomap_inline_read);
 DEFINE_FUSE_IOMAP_INLINE_EVENT(fuse_iomap_inline_write);
 DEFINE_FUSE_IOMAP_INLINE_EVENT(fuse_iomap_set_inline_iomap);
 DEFINE_FUSE_IOMAP_INLINE_EVENT(fuse_iomap_set_inline_srcmap);
+
+DECLARE_EVENT_CLASS(fuse_iomap_cache_lock_class,
+	TP_PROTO(const struct inode *inode, unsigned int lock_flags,
+		 unsigned long caller_ip),
+	TP_ARGS(inode, lock_flags, caller_ip),
+	TP_STRUCT__entry(
+		__field(dev_t, connection)
+		__field(uint64_t, ino)
+		__field(uint64_t,	nodeid)
+		__field(loff_t,		isize)
+		__field(unsigned int, lock_flags)
+		__field(unsigned long, caller_ip)
+	),
+	TP_fast_assign(
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->nodeid		=	fi->nodeid;
+		__entry->isize		=	i_size_read(inode);
+		__entry->lock_flags	=	lock_flags;
+		__entry->caller_ip	=	caller_ip;
+	),
+	TP_printk("connection %u ino %llu nodeid %llu isize 0x%llx lock (%s) caller %pS",
+		  __entry->connection, __entry->ino, __entry->nodeid,
+		  __entry->isize,
+		  __print_flags(__entry->lock_flags, "|", FUSE_IOMAP_CACHE_LOCK_STRINGS),
+		  (void *)__entry->caller_ip)
+)
+#define DEFINE_FUSE_IOMAP_CACHE_LOCK_EVENT(name)	\
+DEFINE_EVENT(fuse_iomap_cache_lock_class, name,		\
+	TP_PROTO(const struct inode *inode, unsigned int lock_flags, \
+		 unsigned long caller_ip), \
+	TP_ARGS(inode, lock_flags, caller_ip))
+DEFINE_FUSE_IOMAP_CACHE_LOCK_EVENT(fuse_iomap_cache_lock);
+DEFINE_FUSE_IOMAP_CACHE_LOCK_EVENT(fuse_iomap_cache_unlock);
+
+DECLARE_EVENT_CLASS(fuse_iext_class,
+	TP_PROTO(const struct inode *inode, const struct fuse_iext_cursor *cur,
+		 int state, unsigned long caller_ip),
+
+	TP_ARGS(inode, cur, state, caller_ip),
+
+	TP_STRUCT__entry(
+		__field(dev_t, connection)
+		__field(uint64_t, ino)
+		__field(void *, leaf)
+		__field(int, pos)
+		__field(loff_t, offset)
+		__field(uint64_t, addr)
+		__field(uint64_t, length)
+		__field(uint16_t, type)
+		__field(uint16_t, mapflags)
+		__field(uint32_t, dev)
+		__field(int, iext_state)
+		__field(unsigned long, caller_ip)
+	),
+	TP_fast_assign(
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+		const struct fuse_ifork *ifp;
+		struct fuse_iomap	r = { };
+
+		if (state & FUSE_IEXT_WRITEFORK)
+			ifp = fi->cache.im_write;
+		else
+			ifp = &fi->cache.im_read;
+		if (ifp)
+			fuse_iext_get_extent(ifp, cur, &r);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->leaf		=	cur->leaf;
+		__entry->pos		=	cur->pos;
+		__entry->offset		=	r.offset;
+		__entry->addr		=	r.addr;
+		__entry->length		=	r.length;
+		__entry->dev		=	r.dev;
+		__entry->type		=	r.type;
+		__entry->mapflags	=	r.flags;
+		__entry->iext_state	=	state;
+		__entry->caller_ip	=	caller_ip;
+	),
+	TP_printk("connection %u ino %llu state (%s) cur %p/%d "
+		  "offset 0x%llx addr 0x%llx length 0x%llx type %s mapflags (%s) dev %u caller %pS",
+		  __entry->connection, __entry->ino,
+		  __print_flags(__entry->iext_state, "|", FUSE_IEXT_STATE_STRINGS),
+		  __entry->leaf,
+		  __entry->pos,
+		  __entry->offset,
+		  __entry->addr,
+		  __entry->length,
+		  __print_symbolic(__entry->type, FUSE_IOMAP_TYPE_STRINGS),
+		  __print_flags(__entry->mapflags, "|", FUSE_IOMAP_F_STRINGS),
+		  __entry->dev,
+		  (void *)__entry->caller_ip)
+)
+
+#define DEFINE_IEXT_EVENT(name) \
+DEFINE_EVENT(fuse_iext_class, name, \
+	TP_PROTO(const struct inode *inode, const struct fuse_iext_cursor *cur, \
+		 int state, unsigned long caller_ip), \
+	TP_ARGS(inode, cur, state, caller_ip))
+DEFINE_IEXT_EVENT(fuse_iext_insert);
+DEFINE_IEXT_EVENT(fuse_iext_remove);
+DEFINE_IEXT_EVENT(fuse_iext_pre_update);
+DEFINE_IEXT_EVENT(fuse_iext_post_update);
+
+TRACE_EVENT(fuse_iext_update_class,
+	TP_PROTO(const struct inode *inode, uint32_t iext_state,
+		 const struct fuse_iomap *map),
+	TP_ARGS(inode, iext_state, map),
+
+	TP_STRUCT__entry(
+		__field(dev_t,			connection)
+		__field(uint64_t,		ino)
+		__field(uint64_t,		nodeid)
+		__field(loff_t,			isize)
+
+		__field(loff_t,			map_offset)
+		__field(loff_t,			map_length)
+		__field(uint16_t,		map_type)
+		__field(uint16_t,		map_flags)
+		__field(uint32_t,		map_dev)
+		__field(uint64_t,		map_addr)
+
+		__field(uint32_t,		iext_state)
+	),
+
+	TP_fast_assign(
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->nodeid		=	fi->nodeid;
+		__entry->isize		=	i_size_read(inode);
+
+		__entry->map_offset	=	map->offset;
+		__entry->map_length	=	map->length;
+		__entry->map_type	=	map->type;
+		__entry->map_flags	=	map->flags;
+		__entry->map_dev	=	map->dev;
+		__entry->map_addr	=	map->addr;
+
+		__entry->iext_state	=	iext_state;
+	),
+
+	TP_printk("connection %u ino %llu nodeid %llu isize 0x%llx state (%s) offset 0x%llx length 0x%llx type %s mapflags (%s) dev %u addr 0x%llx",
+		  __entry->connection, __entry->ino, __entry->nodeid,
+		  __entry->isize,
+		  __print_flags(__entry->iext_state, "|", FUSE_IEXT_STATE_STRINGS),
+		  __entry->map_offset, __entry->map_length,
+		  __print_symbolic(__entry->map_type, FUSE_IOMAP_TYPE_STRINGS),
+		  __print_flags(__entry->map_flags, "|", FUSE_IOMAP_F_STRINGS),
+		  __entry->map_dev, __entry->map_addr)
+);
+#define DEFINE_IEXT_UPDATE_EVENT(name) \
+DEFINE_EVENT(fuse_iext_update_class, name, \
+	TP_PROTO(const struct inode *inode, uint32_t iext_state, \
+		 const struct fuse_iomap *map), \
+	TP_ARGS(inode, iext_state, map))
+DEFINE_IEXT_UPDATE_EVENT(fuse_iext_del_mapping);
+DEFINE_IEXT_UPDATE_EVENT(fuse_iext_add_mapping);
+
+TRACE_EVENT(fuse_iext_alt_update_class,
+	TP_PROTO(const struct inode *inode, const struct fuse_iomap *map),
+	TP_ARGS(inode, map),
+
+	TP_STRUCT__entry(
+		__field(dev_t,			connection)
+		__field(uint64_t,		ino)
+		__field(uint64_t,		nodeid)
+
+		__field(loff_t,			map_offset)
+		__field(loff_t,			map_length)
+		__field(uint16_t,		map_type)
+		__field(uint16_t,		map_flags)
+		__field(uint32_t,		map_dev)
+		__field(uint64_t,		map_addr)
+	),
+
+	TP_fast_assign(
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->nodeid		=	fi->nodeid;
+
+		__entry->map_offset	=	map->offset;
+		__entry->map_length	=	map->length;
+		__entry->map_type	=	map->type;
+		__entry->map_flags	=	map->flags;
+		__entry->map_dev	=	map->dev;
+		__entry->map_addr	=	map->addr;
+	),
+
+	TP_printk("connection %u ino %llu nodeid %llu offset 0x%llx length 0x%llx type %s mapflags (%s) dev %u addr 0x%llx",
+		  __entry->connection, __entry->ino, __entry->nodeid,
+		  __entry->map_offset, __entry->map_length,
+		  __print_symbolic(__entry->map_type, FUSE_IOMAP_TYPE_STRINGS),
+		  __print_flags(__entry->map_flags, "|", FUSE_IOMAP_F_STRINGS),
+		  __entry->map_dev, __entry->map_addr)
+);
+#define DEFINE_IEXT_ALT_UPDATE_EVENT(name) \
+DEFINE_EVENT(fuse_iext_alt_update_class, name, \
+	TP_PROTO(const struct inode *inode, const struct fuse_iomap *map), \
+	TP_ARGS(inode, map))
+DEFINE_IEXT_ALT_UPDATE_EVENT(fuse_iext_del_mapping_got);
+DEFINE_IEXT_ALT_UPDATE_EVENT(fuse_iext_add_mapping_left);
+DEFINE_IEXT_ALT_UPDATE_EVENT(fuse_iext_add_mapping_right);
+
+TRACE_EVENT(fuse_iomap_cache_remove,
+	TP_PROTO(const struct inode *inode, enum fuse_iomap_fork whichfork,
+		 loff_t offset, uint64_t length, unsigned long caller_ip),
+	TP_ARGS(inode, whichfork, offset, length, caller_ip),
+
+	TP_STRUCT__entry(
+		__field(dev_t,			connection)
+		__field(uint64_t,		ino)
+		__field(uint64_t,		nodeid)
+		__field(loff_t,			isize)
+		__field(enum fuse_iomap_fork,	whichfork)
+		__field(loff_t,			offset)
+		__field(uint64_t,		length)
+		__field(unsigned long,		caller_ip)
+	),
+
+	TP_fast_assign(
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->nodeid		=	fi->nodeid;
+		__entry->isize		=	i_size_read(inode);
+		__entry->whichfork	=	whichfork;
+		__entry->offset		=	offset;
+		__entry->length		=	length;
+		__entry->caller_ip	=	caller_ip;
+	),
+
+	TP_printk("connection %u ino %llu nodeid %llu isize 0x%llx whichfork %s offset 0x%llx length 0x%llx caller %pS",
+		  __entry->connection, __entry->ino, __entry->nodeid,
+		  __entry->isize,
+		  __print_symbolic(__entry->whichfork, FUSE_IOMAP_FORK_STRINGS),
+		  __entry->offset, __entry->length, (void *)__entry->caller_ip)
+);
+
+TRACE_EVENT(fuse_iomap_mapping_class,
+	TP_PROTO(const struct inode *inode, enum fuse_iomap_fork whichfork,
+		 const struct fuse_iomap *map, unsigned long caller_ip),
+	TP_ARGS(inode, whichfork, map, caller_ip),
+
+	TP_STRUCT__entry(
+		__field(dev_t,			connection)
+		__field(uint64_t,		ino)
+		__field(uint64_t,		nodeid)
+		__field(loff_t,			isize)
+		__field(enum fuse_iomap_fork,	whichfork)
+		__field(loff_t,			offset)
+		__field(loff_t,			length)
+		__field(uint16_t,		maptype)
+		__field(uint16_t,		mapflags)
+		__field(uint32_t,		dev)
+		__field(uint64_t,		addr)
+		__field(unsigned long,		caller_ip)
+	),
+
+	TP_fast_assign(
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->nodeid		=	fi->nodeid;
+		__entry->isize		=	i_size_read(inode);
+		__entry->whichfork	=	whichfork;
+		__entry->offset		=	map->offset;
+		__entry->length		=	map->length;
+		__entry->maptype	=	map->type;
+		__entry->mapflags	=	map->flags;
+		__entry->dev		=	map->dev;
+		__entry->addr		=	map->addr;
+		__entry->caller_ip	=	caller_ip;
+	),
+
+	TP_printk("connection %u ino %llu nodeid %llu isize 0x%llx whichfork %s offset 0x%llx length 0x%llx type %s mapflags (%s) dev %u addr 0x%llx caller %pS",
+		  __entry->connection, __entry->ino, __entry->nodeid,
+		  __entry->isize,
+		  __print_symbolic(__entry->whichfork, FUSE_IOMAP_FORK_STRINGS),
+		  __entry->offset, __entry->length,
+		  __print_symbolic(__entry->maptype, FUSE_IOMAP_TYPE_STRINGS),
+		  __print_flags(__entry->mapflags, "|", FUSE_IOMAP_F_STRINGS),
+		  __entry->dev, __entry->addr, (void *)__entry->caller_ip)
+);
+#define DEFINE_FUSE_IOMAP_MAPPING_EVENT(name) \
+DEFINE_EVENT(fuse_iomap_mapping_class, name, \
+	TP_PROTO(const struct inode *inode, enum fuse_iomap_fork whichfork, \
+		 const struct fuse_iomap *map, unsigned long caller_ip), \
+	TP_ARGS(inode, whichfork, map, caller_ip))
+DEFINE_FUSE_IOMAP_MAPPING_EVENT(fuse_iomap_cache_add);
+DEFINE_FUSE_IOMAP_MAPPING_EVENT(fuse_iext_check_mapping);
+
+TRACE_EVENT(fuse_iomap_cache_lookup,
+	TP_PROTO(const struct inode *inode, enum fuse_iomap_fork whichfork,
+		 loff_t pos, uint64_t count, unsigned long caller_ip),
+	TP_ARGS(inode, whichfork, pos, count, caller_ip),
+
+	TP_STRUCT__entry(
+		__field(dev_t,			connection)
+		__field(uint64_t,		ino)
+		__field(uint64_t,		nodeid)
+		__field(loff_t,			isize)
+		__field(enum fuse_iomap_fork,	whichfork)
+		__field(loff_t,			pos)
+		__field(uint64_t,		count)
+		__field(unsigned long,		caller_ip)
+	),
+
+	TP_fast_assign(
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->nodeid		=	fi->nodeid;
+		__entry->isize		=	i_size_read(inode);
+		__entry->whichfork	=	whichfork;
+		__entry->pos		=	pos;
+		__entry->count		=	count;
+		__entry->caller_ip	=	caller_ip;
+	),
+
+	TP_printk("connection %u ino %llu nodeid %llu isize 0x%llx whichfork %s pos 0x%llx count 0x%llx caller %pS",
+		  __entry->connection, __entry->ino, __entry->nodeid,
+		  __entry->isize,
+		  __print_symbolic(__entry->whichfork, FUSE_IOMAP_FORK_STRINGS),
+		  __entry->pos, __entry->count,
+		  (void *)__entry->caller_ip)
+);
+
+TRACE_EVENT(fuse_iomap_cache_lookup_result,
+	TP_PROTO(const struct inode *inode, enum fuse_iomap_fork whichfork,
+		 loff_t pos, uint64_t count, const struct fuse_iomap *got,
+		 const struct fuse_iomap *map),
+	TP_ARGS(inode, whichfork, pos, count, got, map),
+
+	TP_STRUCT__entry(
+		__field(dev_t,			connection)
+		__field(uint64_t,		ino)
+		__field(uint64_t,		nodeid)
+		__field(loff_t,			isize)
+		__field(enum fuse_iomap_fork,	whichfork)
+		__field(loff_t,			pos)
+		__field(uint64_t,		count)
+
+		__field(loff_t,			got_offset)
+		__field(uint64_t,		got_length)
+		__field(uint64_t,		got_addr)
+
+		__field(loff_t,			map_offset)
+		__field(uint64_t,		map_length)
+		__field(uint16_t,		map_type)
+		__field(uint16_t,		map_flags)
+		__field(uint32_t,		map_dev)
+		__field(uint64_t,		map_addr)
+
+		__field(uint64_t,		validity_cookie)
+	),
+
+	TP_fast_assign(
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->nodeid		=	fi->nodeid;
+		__entry->isize		=	i_size_read(inode);
+		__entry->whichfork	=	whichfork;
+		__entry->pos		=	pos;
+		__entry->count		=	count;
+
+		__entry->got_offset	=	got->offset;
+		__entry->got_length	=	got->length;
+		__entry->got_addr	=	got->addr;
+
+		__entry->map_offset	=	map->offset;
+		__entry->map_length	=	map->length;
+		__entry->map_type	=	map->type;
+		__entry->map_flags	=	map->flags;
+		__entry->map_dev	=	map->dev;
+		__entry->map_addr	=	map->addr;
+
+		__entry->validity_cookie=	map->validity_cookie;
+	),
+
+	TP_printk("connection %u ino %llu nodeid %llu isize 0x%llx whichfork %s pos 0x%llx count 0x%llx map offset 0x%llx length 0x%llx type %s mapflags (%s) dev %u addr 0x%llx got offset 0x%llx length 0x%llx addr 0x%llx cookie 0x%llx",
+		  __entry->connection, __entry->ino, __entry->nodeid,
+		  __entry->isize,
+		  __print_symbolic(__entry->whichfork, FUSE_IOMAP_FORK_STRINGS),
+		  __entry->pos, __entry->count,
+		  __entry->map_offset, __entry->map_length,
+		  __print_symbolic(__entry->map_type, FUSE_IOMAP_TYPE_STRINGS),
+		  __print_flags(__entry->map_flags, "|", FUSE_IOMAP_F_STRINGS),
+		  __entry->map_dev, __entry->map_addr, __entry->got_offset,
+		  __entry->got_length, __entry->got_addr,
+		  __entry->validity_cookie)
+);
 #endif /* CONFIG_FUSE_IOMAP */
 
 #endif /* _TRACE_FUSE_H */
