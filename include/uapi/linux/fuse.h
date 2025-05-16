@@ -1324,6 +1324,7 @@ struct fuse_uring_cmd_req {
 };
 
 #define FUSE_IOMAP_TYPE_PURE_OVERWRITE	(0xFFFF) /* use read mapping data */
+#define FUSE_IOMAP_TYPE_NULL		(0xFFFE) /* no record here */
 #define FUSE_IOMAP_TYPE_HOLE		0	/* no blocks allocated, need allocation */
 #define FUSE_IOMAP_TYPE_DELALLOC	1	/* delayed allocation blocks */
 #define FUSE_IOMAP_TYPE_MAPPED		2	/* blocks allocated at @addr */
@@ -1419,5 +1420,8 @@ struct fuse_iomap_ioend_in {
 	uint32_t written;	/* bytes processed */
 	uint32_t reserved1;	/* zero */
 };
+
+/* invalidate all cached iomap mappings up to EOF */
+#define FUSE_IOMAP_INVAL_TO_EOF		(~0ULL)
 
 #endif /* _LINUX_FUSE_H */

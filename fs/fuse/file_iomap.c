@@ -4,6 +4,7 @@
  * Author: Darrick J. Wong <djwong@kernel.org.
  */
 #include "fuse_i.h"
+#include "iomap_cache.h"
 #include "fuse_trace.h"
 #include <linux/iomap.h>
 #include <linux/pagemap.h>
@@ -17,14 +18,6 @@ static bool __read_mostly enable_iomap =
 #endif
 module_param(enable_iomap, bool, 0644);
 MODULE_PARM_DESC(enable_iomap, "Enable file I/O through iomap");
-
-#if IS_ENABLED(CONFIG_FUSE_IOMAP_DEBUG)
-# define ASSERT(a)		do { WARN(!(a), "Assertion failed: %s, func: %s, line: %d", #a, __func__, __LINE__); } while (0)
-# define BAD_DATA(condition)	(WARN(condition, "Bad mapping: %s, func: %s, line: %d", #condition, __func__, __LINE__))
-#else
-# define ASSERT(a)
-# define BAD_DATA(condition)	(condition)
-#endif
 
 bool fuse_iomap_enabled(void)
 {
@@ -1325,6 +1318,12 @@ void fuse_iomap_init_pagecache(struct inode *inode)
 		min_order = inode->i_blkbits - PAGE_SHIFT;
 
 	mapping_set_folio_min_order(inode->i_mapping, min_order);
+
+	memset(&fi->cache.im_read, 0, sizeof(fi->cache.im_read));
+	fi->cache.im_seq = 0;
+	fi->cache.im_write = NULL;
+
+	init_rwsem(&fi->cache.im_lock);
 	set_bit(FUSE_I_IOMAP_PAGECACHE, &fi->state);
 }
 
@@ -1336,6 +1335,21 @@ void fuse_iomap_destroy_pagecache(struct inode *inode)
 	ASSERT(list_empty(&fi->ioend_list));
 
 	clear_bit(FUSE_I_IOMAP_PAGECACHE, &fi->state);
+}
+
+void fuse_iomap_destroy_cache(struct inode *inode)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	ASSERT(fuse_has_iomap(inode));
+
+	clear_bit(FUSE_I_IOMAP_CACHE, &fi->state);
+
+	fuse_iext_destroy(&fi->cache.im_read);
+	if (fi->cache.im_write) {
+		fuse_iext_destroy(fi->cache.im_write);
+		kfree(fi->cache.im_write);
+	}
 }
 
 /*

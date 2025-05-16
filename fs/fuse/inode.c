@@ -198,6 +198,8 @@ static void fuse_evict_inode(struct inode *inode)
 		fuse_iomap_destroy_directio(inode);
 	if (fuse_has_iomap_pagecache(inode))
 		fuse_iomap_destroy_pagecache(inode);
+	if (fuse_has_iomap_cache(inode))
+		fuse_iomap_destroy_cache(inode);
 }
 
 static int fuse_reconfigure(struct fs_context *fsc)

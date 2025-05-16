@@ -9,6 +9,7 @@
 #include "dev_uring_i.h"
 #include "fuse_i.h"
 #include "fuse_dev_i.h"
+#include "iomap_cache.h"
 
 #include <linux/init.h>
 #include <linux/module.h>
