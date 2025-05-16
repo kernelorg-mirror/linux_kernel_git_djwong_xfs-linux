@@ -1352,6 +1352,8 @@ struct fuse_uring_cmd_req {
 
 /* fuse-specific mapping type indicating that writes use the read mapping */
 #define FUSE_IOMAP_TYPE_PURE_OVERWRITE	(255)
+/* fuse-specific mapping type saying the server has populated the cache */
+#define FUSE_IOMAP_TYPE_RETRY_CACHE	(254)
 
 #define FUSE_IOMAP_DEV_NULL		(0U)	/* null device cookie */
 
@@ -1493,5 +1495,8 @@ struct fuse_iomap_dev_inval_out {
 	uint64_t offset;	/* range to invalidate pagecache, bytes */
 	uint64_t length;
 };
+
+/* invalidate all cached iomap mappings up to EOF */
+#define FUSE_IOMAP_INVAL_TO_EOF		(~0ULL)
 
 #endif /* _LINUX_FUSE_H */
