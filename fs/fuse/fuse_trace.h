@@ -228,6 +228,8 @@ DEFINE_FUSE_BACKING_EVENT(fuse_backing_close);
 struct iomap_writepage_ctx;
 struct iomap_ioend;
 struct iomap;
+struct fuse_iext_cursor;
+struct fuse_iomap_lookup;
 
 /* tracepoint boilerplate so we don't have to keep doing this */
 #define FUSE_IOMAP_OPFLAGS_FIELD \
@@ -257,6 +259,16 @@ struct iomap;
 		__entry->prefix##dev, \
 		__entry->prefix##addr, \
 		__print_flags(__entry->prefix##flags, "|", FUSE_IOMAP_F_STRINGS)
+
+#define FUSE_IOMAP_IODIR_FIELD \
+		__field(enum fuse_iomap_iodir,	iodir)
+
+#define FUSE_IOMAP_IODIR_FMT \
+		 " iodir %s"
+
+#define FUSE_IOMAP_IODIR_PRINTK_ARGS \
+		  __print_symbolic(__entry->iodir, FUSE_IOMAP_FORK_STRINGS)
+
 
 /* combinations of boilerplate to reduce typing further */
 #define FUSE_IOMAP_OP_FIELDS(prefix) \
@@ -325,6 +337,7 @@ TRACE_DEFINE_ENUM(FUSE_I_BTIME);
 TRACE_DEFINE_ENUM(FUSE_I_CACHE_IO_MODE);
 TRACE_DEFINE_ENUM(FUSE_I_IOMAP);
 TRACE_DEFINE_ENUM(FUSE_I_ATOMIC);
+TRACE_DEFINE_ENUM(FUSE_I_IOMAP_CACHE);
 
 #define FUSE_IFLAG_STRINGS \
 	{ 1 << FUSE_I_ADVISE_RDPLUS,		"advise_rdplus" }, \
@@ -334,7 +347,8 @@ TRACE_DEFINE_ENUM(FUSE_I_ATOMIC);
 	{ 1 << FUSE_I_BTIME,			"btime" }, \
 	{ 1 << FUSE_I_CACHE_IO_MODE,		"cacheio" }, \
 	{ 1 << FUSE_I_IOMAP,			"iomap" }, \
-	{ 1 << FUSE_I_ATOMIC,			"atomic" }
+	{ 1 << FUSE_I_ATOMIC,			"atomic" }, \
+	{ 1 << FUSE_I_IOMAP_CACHE,		"iomap_cache" }
 
 #define IOMAP_IOEND_STRINGS \
 	{ IOMAP_IOEND_SHARED,			"shared" }, \
@@ -349,6 +363,22 @@ TRACE_DEFINE_ENUM(FUSE_I_ATOMIC);
 	{ FUSE_IOMAP_CONFIG_MAX_LINKS,		"max_links" }, \
 	{ FUSE_IOMAP_CONFIG_TIME,		"time" }, \
 	{ FUSE_IOMAP_CONFIG_MAXBYTES,		"maxbytes" }
+
+TRACE_DEFINE_ENUM(READ_MAPPING);
+TRACE_DEFINE_ENUM(WRITE_MAPPING);
+
+#define FUSE_IOMAP_FORK_STRINGS \
+	{ READ_MAPPING,				"read" }, \
+	{ WRITE_MAPPING,			"write" }
+
+#define FUSE_IEXT_STATE_STRINGS \
+	{ FUSE_IEXT_LEFT_CONTIG,		"l_cont" }, \
+	{ FUSE_IEXT_RIGHT_CONTIG,		"r_cont" }, \
+	{ FUSE_IEXT_LEFT_FILLING,		"l_fill" }, \
+	{ FUSE_IEXT_RIGHT_FILLING,		"r_fill" }, \
+	{ FUSE_IEXT_LEFT_VALID,			"l_valid" }, \
+	{ FUSE_IEXT_RIGHT_VALID,		"r_valid" }, \
+	{ FUSE_IEXT_WRITE_MAPPING,		"write" }
 
 DECLARE_EVENT_CLASS(fuse_iomap_check_class,
 	TP_PROTO(const char *func, int line, const char *condition),
@@ -1089,6 +1119,269 @@ DEFINE_FUSE_IOMAP_INLINE_EVENT(fuse_iomap_inline_read);
 DEFINE_FUSE_IOMAP_INLINE_EVENT(fuse_iomap_inline_write);
 DEFINE_FUSE_IOMAP_INLINE_EVENT(fuse_iomap_set_inline_iomap);
 DEFINE_FUSE_IOMAP_INLINE_EVENT(fuse_iomap_set_inline_srcmap);
+
+DECLARE_EVENT_CLASS(fuse_iext_class,
+	TP_PROTO(const struct inode *inode, const struct fuse_iext_cursor *cur,
+		 int state, unsigned long caller_ip),
+
+	TP_ARGS(inode, cur, state, caller_ip),
+
+	TP_STRUCT__entry(
+		FUSE_INODE_FIELDS
+		FUSE_IOMAP_MAP_FIELDS(map)
+		__field(void *,			leaf)
+		__field(int,			pos)
+		__field(int,			iext_state)
+		__field(unsigned long,		caller_ip)
+	),
+	TP_fast_assign(
+		const struct fuse_ifork *ifp;
+		struct fuse_iomap_io r = { };
+		FUSE_INODE_ASSIGN(inode, fi, fm);
+
+		if (state & FUSE_IEXT_WRITE_MAPPING)
+			ifp = fi->cache.im_write;
+		else
+			ifp = &fi->cache.im_read;
+		if (ifp)
+			fuse_iext_get_extent(ifp, cur, &r);
+
+		__entry->mapoffset	=	r.offset;
+		__entry->mapaddr	=	r.addr;
+		__entry->maplength	=	r.length;
+		__entry->mapdev		=	r.dev;
+		__entry->maptype	=	r.type;
+		__entry->mapflags	=	r.flags;
+
+		__entry->leaf		=	cur->leaf;
+		__entry->pos		=	cur->pos;
+
+		__entry->iext_state	=	state;
+		__entry->caller_ip	=	caller_ip;
+	),
+	TP_printk(FUSE_INODE_FMT " state (%s) cur %p/%d " FUSE_IOMAP_MAP_FMT() " caller %pS",
+		  FUSE_INODE_PRINTK_ARGS,
+		  __print_flags(__entry->iext_state, "|", FUSE_IEXT_STATE_STRINGS),
+		  __entry->leaf,
+		  __entry->pos,
+		  FUSE_IOMAP_MAP_PRINTK_ARGS(map),
+		  (void *)__entry->caller_ip)
+)
+
+#define DEFINE_IEXT_EVENT(name) \
+DEFINE_EVENT(fuse_iext_class, name, \
+	TP_PROTO(const struct inode *inode, const struct fuse_iext_cursor *cur, \
+		 int state, unsigned long caller_ip), \
+	TP_ARGS(inode, cur, state, caller_ip))
+DEFINE_IEXT_EVENT(fuse_iext_insert);
+DEFINE_IEXT_EVENT(fuse_iext_remove);
+DEFINE_IEXT_EVENT(fuse_iext_pre_update);
+DEFINE_IEXT_EVENT(fuse_iext_post_update);
+
+TRACE_EVENT(fuse_iext_update_class,
+	TP_PROTO(const struct inode *inode, uint32_t iext_state,
+		 const struct fuse_iomap_io *map),
+	TP_ARGS(inode, iext_state, map),
+
+	TP_STRUCT__entry(
+		FUSE_INODE_FIELDS
+		FUSE_IOMAP_MAP_FIELDS(map)
+		__field(uint32_t,		iext_state)
+	),
+
+	TP_fast_assign(
+		FUSE_INODE_ASSIGN(inode, fi, fm);
+		__entry->mapoffset	=	map->offset;
+		__entry->maplength	=	map->length;
+		__entry->maptype	=	map->type;
+		__entry->mapflags	=	map->flags;
+		__entry->mapdev		=	map->dev;
+		__entry->mapaddr	=	map->addr;
+
+		__entry->iext_state	=	iext_state;
+	),
+
+	TP_printk(FUSE_INODE_FMT " state (%s)" FUSE_IOMAP_MAP_FMT(),
+		  FUSE_INODE_PRINTK_ARGS,
+		  __print_flags(__entry->iext_state, "|", FUSE_IEXT_STATE_STRINGS),
+		  FUSE_IOMAP_MAP_PRINTK_ARGS(map))
+);
+#define DEFINE_IEXT_UPDATE_EVENT(name) \
+DEFINE_EVENT(fuse_iext_update_class, name, \
+	TP_PROTO(const struct inode *inode, uint32_t iext_state, \
+		 const struct fuse_iomap_io *map), \
+	TP_ARGS(inode, iext_state, map))
+DEFINE_IEXT_UPDATE_EVENT(fuse_iext_del_mapping);
+DEFINE_IEXT_UPDATE_EVENT(fuse_iext_add_mapping);
+
+TRACE_EVENT(fuse_iext_alt_update_class,
+	TP_PROTO(const struct inode *inode, const struct fuse_iomap_io *map),
+	TP_ARGS(inode, map),
+
+	TP_STRUCT__entry(
+		FUSE_INODE_FIELDS
+		FUSE_IOMAP_MAP_FIELDS(map)
+	),
+
+	TP_fast_assign(
+		FUSE_INODE_ASSIGN(inode, fi, fm);
+
+		__entry->mapoffset	=	map->offset;
+		__entry->maplength	=	map->length;
+		__entry->maptype	=	map->type;
+		__entry->mapflags	=	map->flags;
+		__entry->mapdev		=	map->dev;
+		__entry->mapaddr	=	map->addr;
+	),
+
+	TP_printk(FUSE_INODE_FMT FUSE_IOMAP_MAP_FMT(),
+		  FUSE_INODE_PRINTK_ARGS,
+		  FUSE_IOMAP_MAP_PRINTK_ARGS(map))
+);
+#define DEFINE_IEXT_ALT_UPDATE_EVENT(name) \
+DEFINE_EVENT(fuse_iext_alt_update_class, name, \
+	TP_PROTO(const struct inode *inode, const struct fuse_iomap_io *map), \
+	TP_ARGS(inode, map))
+DEFINE_IEXT_ALT_UPDATE_EVENT(fuse_iext_del_mapping_got);
+DEFINE_IEXT_ALT_UPDATE_EVENT(fuse_iext_add_mapping_left);
+DEFINE_IEXT_ALT_UPDATE_EVENT(fuse_iext_add_mapping_right);
+
+TRACE_EVENT(fuse_iomap_cache_remove,
+	TP_PROTO(const struct inode *inode, enum fuse_iomap_iodir iodir,
+		 loff_t offset, uint64_t length, unsigned long caller_ip),
+	TP_ARGS(inode, iodir, offset, length, caller_ip),
+
+	TP_STRUCT__entry(
+		FUSE_IO_RANGE_FIELDS()
+		FUSE_IOMAP_IODIR_FIELD
+		__field(unsigned long,		caller_ip)
+	),
+
+	TP_fast_assign(
+		FUSE_INODE_ASSIGN(inode, fi, fm);
+		__entry->iodir		=	iodir;
+		__entry->offset		=	offset;
+		__entry->length		=	length;
+		__entry->caller_ip	=	caller_ip;
+	),
+
+	TP_printk(FUSE_IO_RANGE_FMT() FUSE_IOMAP_IODIR_FMT " caller %pS",
+		  FUSE_IO_RANGE_PRINTK_ARGS(),
+		  FUSE_IOMAP_IODIR_PRINTK_ARGS,
+		  (void *)__entry->caller_ip)
+);
+
+TRACE_EVENT(fuse_iomap_cached_mapping_class,
+	TP_PROTO(const struct inode *inode, enum fuse_iomap_iodir iodir,
+		 const struct fuse_iomap_io *map, unsigned long caller_ip),
+	TP_ARGS(inode, iodir, map, caller_ip),
+
+	TP_STRUCT__entry(
+		FUSE_INODE_FIELDS
+		FUSE_IOMAP_IODIR_FIELD
+		FUSE_IOMAP_MAP_FIELDS(map)
+		__field(unsigned long,		caller_ip)
+	),
+
+	TP_fast_assign(
+		FUSE_INODE_ASSIGN(inode, fi, fm);
+		__entry->iodir		=	iodir;
+
+		__entry->mapoffset	=	map->offset;
+		__entry->maplength	=	map->length;
+		__entry->maptype	=	map->type;
+		__entry->mapflags	=	map->flags;
+		__entry->mapdev		=	map->dev;
+		__entry->mapaddr	=	map->addr;
+
+		__entry->caller_ip	=	caller_ip;
+	),
+
+	TP_printk(FUSE_INODE_FMT FUSE_IOMAP_IODIR_FMT FUSE_IOMAP_MAP_FMT() " caller %pS",
+		  FUSE_INODE_PRINTK_ARGS,
+		  FUSE_IOMAP_IODIR_PRINTK_ARGS,
+		  FUSE_IOMAP_MAP_PRINTK_ARGS(map),
+		  (void *)__entry->caller_ip)
+);
+#define DEFINE_FUSE_IOMAP_CACHED_MAPPING_EVENT(name) \
+DEFINE_EVENT(fuse_iomap_cached_mapping_class, name, \
+	TP_PROTO(const struct inode *inode, enum fuse_iomap_iodir iodir, \
+		 const struct fuse_iomap_io *map, unsigned long caller_ip), \
+	TP_ARGS(inode, iodir, map, caller_ip))
+DEFINE_FUSE_IOMAP_CACHED_MAPPING_EVENT(fuse_iomap_cache_add);
+DEFINE_FUSE_IOMAP_CACHED_MAPPING_EVENT(fuse_iext_check_mapping);
+
+TRACE_EVENT(fuse_iomap_cache_lookup,
+	TP_PROTO(const struct inode *inode, enum fuse_iomap_iodir iodir,
+		 loff_t pos, uint64_t count, unsigned long caller_ip),
+	TP_ARGS(inode, iodir, pos, count, caller_ip),
+
+	TP_STRUCT__entry(
+		FUSE_IO_RANGE_FIELDS()
+		FUSE_IOMAP_IODIR_FIELD
+		__field(unsigned long,		caller_ip)
+	),
+
+	TP_fast_assign(
+		FUSE_INODE_ASSIGN(inode, fi, fm);
+		__entry->iodir		=	iodir;
+		__entry->offset		=	pos;
+		__entry->length		=	count;
+		__entry->caller_ip	=	caller_ip;
+	),
+
+	TP_printk(FUSE_IO_RANGE_FMT() FUSE_IOMAP_IODIR_FMT " caller %pS",
+		  FUSE_IO_RANGE_PRINTK_ARGS(),
+		  FUSE_IOMAP_IODIR_PRINTK_ARGS,
+		  (void *)__entry->caller_ip)
+);
+
+TRACE_EVENT(fuse_iomap_cache_lookup_result,
+	TP_PROTO(const struct inode *inode, enum fuse_iomap_iodir iodir,
+		 loff_t pos, uint64_t count, const struct fuse_iomap_io *got,
+		 const struct fuse_iomap_lookup *map),
+	TP_ARGS(inode, iodir, pos, count, got, map),
+
+	TP_STRUCT__entry(
+		FUSE_IO_RANGE_FIELDS()
+
+		FUSE_IOMAP_MAP_FIELDS(got)
+		FUSE_IOMAP_MAP_FIELDS(map)
+
+		FUSE_IOMAP_IODIR_FIELD
+		__field(uint64_t,		validity_cookie)
+	),
+
+	TP_fast_assign(
+		FUSE_INODE_ASSIGN(inode, fi, fm);
+		__entry->iodir		=	iodir;
+		__entry->offset		=	pos;
+		__entry->length		=	count;
+
+		__entry->gotoffset	=	got->offset;
+		__entry->gotlength	=	got->length;
+		__entry->gottype	=	got->type;
+		__entry->gotflags	=	got->flags;
+		__entry->gotdev		=	got->dev;
+		__entry->gotaddr	=	got->addr;
+
+		__entry->mapoffset	=	map->map.offset;
+		__entry->maplength	=	map->map.length;
+		__entry->maptype	=	map->map.type;
+		__entry->mapflags	=	map->map.flags;
+		__entry->mapdev		=	map->map.dev;
+		__entry->mapaddr	=	map->map.addr;
+
+		__entry->validity_cookie=	map->validity_cookie;
+	),
+
+	TP_printk(FUSE_IO_RANGE_FMT() FUSE_IOMAP_IODIR_FMT FUSE_IOMAP_MAP_FMT("map") FUSE_IOMAP_MAP_FMT("got") " cookie 0x%llx",
+		  FUSE_IO_RANGE_PRINTK_ARGS(),
+		  FUSE_IOMAP_IODIR_PRINTK_ARGS,
+		  FUSE_IOMAP_MAP_PRINTK_ARGS(map),
+		  FUSE_IOMAP_MAP_PRINTK_ARGS(got),
+		  __entry->validity_cookie)
+);
 #endif /* CONFIG_FUSE_IOMAP */
 
 #endif /* _TRACE_FUSE_H */
