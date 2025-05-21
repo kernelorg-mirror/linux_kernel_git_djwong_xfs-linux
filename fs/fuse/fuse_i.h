@@ -164,6 +164,13 @@ struct fuse_inode {
 
 			/* List of writepage requestst (pending or sent) */
 			struct rb_root writepages;
+
+#ifdef CONFIG_FUSE_IOMAP
+			/* pending io completions */
+			spinlock_t ioend_lock;
+			struct work_struct ioend_work;
+			struct list_head ioend_list;
+#endif
 		};
 
 		/* readdir cache (directory only) */
@@ -907,6 +914,9 @@ struct fuse_conn {
 	/* Use fs/iomap for direct I/O operations */
 	unsigned int iomap_directio:1;
 
+	/* Use fs/iomap for pagecache I/O operations */
+	unsigned int iomap_pagecache:1;
+
 	/* Use io_uring for communication */
 	unsigned int io_uring;
 
@@ -1613,6 +1623,9 @@ extern void fuse_sysctl_unregister(void);
 #define fuse_sysctl_unregister()	do { } while (0)
 #endif /* CONFIG_SYSCTL */
 
+sector_t fuse_bmap(struct address_space *mapping, sector_t block);
+ssize_t fuse_direct_IO(struct kiocb *iocb, struct iov_iter *iter);
+
 #if IS_ENABLED(CONFIG_FUSE_IOMAP)
 # include <linux/fiemap.h>
 # include <linux/iomap.h>
@@ -1650,6 +1663,26 @@ static inline bool fuse_want_iomap_direct_io(const struct kiocb *iocb)
 
 ssize_t fuse_iomap_direct_read(struct kiocb *iocb, struct iov_iter *to);
 ssize_t fuse_iomap_direct_write(struct kiocb *iocb, struct iov_iter *from);
+
+static inline bool fuse_has_iomap_pagecache(const struct inode *inode)
+{
+	return get_fuse_conn_c(inode)->iomap_pagecache;
+}
+
+static inline bool fuse_want_iomap_buffered_io(const struct kiocb *iocb)
+{
+	return fuse_has_iomap_pagecache(file_inode(iocb->ki_filp));
+}
+
+void fuse_iomap_init_pagecache(struct inode *inode);
+void fuse_iomap_destroy_pagecache(struct inode *inode);
+int fuse_iomap_mmap(struct file *file, struct vm_area_struct *vma);
+ssize_t fuse_iomap_buffered_read(struct kiocb *iocb, struct iov_iter *to);
+ssize_t fuse_iomap_buffered_write(struct kiocb *iocb, struct iov_iter *from);
+int fuse_iomap_setsize(struct mnt_idmap *idmap, struct dentry *dentry,
+		       struct iattr *iattr);
+int fuse_iomap_fallocate(struct file *file, int mode, loff_t offset,
+			 loff_t length, loff_t new_size);
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
@@ -1664,6 +1697,15 @@ ssize_t fuse_iomap_direct_write(struct kiocb *iocb, struct iov_iter *from);
 # define fuse_want_iomap_direct_io(...)		(false)
 # define fuse_iomap_direct_read(...)		(-ENOSYS)
 # define fuse_iomap_direct_write(...)		(-ENOSYS)
+# define fuse_has_iomap_pagecache(...)		(false)
+# define fuse_want_iomap_buffered_io(...)	(false)
+# define fuse_iomap_init_pagecache(...)		((void)0)
+# define fuse_iomap_destroy_pagecache(...)	((void)0)
+# define fuse_iomap_mmap(...)			(-ENOSYS)
+# define fuse_iomap_buffered_read(...)		(-ENOSYS)
+# define fuse_iomap_buffered_write(...)		(-ENOSYS)
+# define fuse_iomap_setsize(...)		(-ENOSYS)
+# define fuse_iomap_fallocate(...)		(-ENOSYS)
 #endif
 
 #endif /* _FS_FUSE_I_H */

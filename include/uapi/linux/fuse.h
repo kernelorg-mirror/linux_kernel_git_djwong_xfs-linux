@@ -238,6 +238,7 @@
  *    SEEK_{DATA,HOLE} support
  *  - add FUSE_NOTIFY_ADD_IOMAP_DEVICE for multi-device filesystems
  *  - add FUSE_IOMAP_DIRECTIO for direct I/O support
+ *  - add FUSE_IOMAP_PAGECACHE for buffered I/O support
  */
 
 #ifndef _LINUX_FUSE_H
@@ -449,6 +450,7 @@ struct fuse_file_lock {
  * FUSE_IOMAP: Client supports iomap for FIEMAP and SEEK_{DATA,HOLE} file
  *	       operations.
  * FUSE_IOMAP_DIRECTIO: Client supports iomap for direct I/O operations.
+ * FUSE_IOMAP_PAGECACHE: Client supports iomap for pagecache I/O operations.
  */
 #define FUSE_ASYNC_READ		(1 << 0)
 #define FUSE_POSIX_LOCKS	(1 << 1)
@@ -498,6 +500,7 @@ struct fuse_file_lock {
 #define FUSE_REQUEST_TIMEOUT	(1ULL << 42)
 #define FUSE_IOMAP		(1ULL << 43)
 #define FUSE_IOMAP_DIRECTIO	(1ULL << 44)
+#define FUSE_IOMAP_PAGECACHE	(1ULL << 45)
 
 /**
  * CUSE INIT request/reply flags

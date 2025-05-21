@@ -2012,6 +2012,12 @@ int fuse_do_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		set_bit(FUSE_I_SIZE_UNSTABLE, &fi->state);
 		if (trust_local_cmtime && attr->ia_size != inode->i_size)
 			attr->ia_valid |= ATTR_MTIME | ATTR_CTIME;
+
+		if (fuse_has_iomap_pagecache(inode)) {
+			err = fuse_iomap_setsize(idmap, dentry, attr);
+			if (err)
+				goto error;
+		}
 	}
 
 	memset(&inarg, 0, sizeof(inarg));

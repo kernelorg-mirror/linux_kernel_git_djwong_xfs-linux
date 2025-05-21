@@ -193,6 +193,9 @@ static void fuse_evict_inode(struct inode *inode)
 		WARN_ON(!list_empty(&fi->write_files));
 		WARN_ON(!list_empty(&fi->queued_writes));
 	}
+
+	if (S_ISREG(inode->i_mode) && fuse_has_iomap_pagecache(inode))
+		fuse_iomap_destroy_pagecache(inode);
 }
 
 static int fuse_reconfigure(struct fs_context *fsc)
@@ -1445,6 +1448,8 @@ static void process_init_reply(struct fuse_mount *fm, struct fuse_args *args,
 				fc->iomap = 1;
 			if ((flags & FUSE_IOMAP_DIRECTIO) && fc->iomap)
 				fc->iomap_directio = 1;
+			if ((flags & FUSE_IOMAP_PAGECACHE) && fc->iomap)
+				fc->iomap_pagecache = 1;
 		} else {
 			ra_pages = fc->max_read / PAGE_SIZE;
 			fc->no_lock = 1;
@@ -1517,7 +1522,7 @@ void fuse_send_init(struct fuse_mount *fm)
 	if (fuse_uring_enabled())
 		flags |= FUSE_OVER_IO_URING;
 	if (fuse_iomap_enabled())
-		flags |= FUSE_IOMAP | FUSE_IOMAP_DIRECTIO;
+		flags |= FUSE_IOMAP | FUSE_IOMAP_DIRECTIO | FUSE_IOMAP_PAGECACHE;
 
 	ia->in.flags = flags;
 	ia->in.flags2 = flags >> 32;
