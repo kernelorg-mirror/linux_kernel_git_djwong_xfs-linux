@@ -1425,3 +1425,21 @@ fuse_iomap_fallocate(
 
 	return 0;
 }
+
+int fuse_iomap_ioc_support(struct file *file,
+			   struct fuse_iomap_support __user *argp)
+{
+	struct fuse_iomap_support ios = { };
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	if (fuse_iomap_enabled())
+		ios.flags = FUSE_IOMAP_SUPPORT_BASICS |
+			    FUSE_IOMAP_SUPPORT_DIRECTIO |
+			    FUSE_IOMAP_SUPPORT_PAGECACHE;
+
+	if (copy_to_user(argp, &ios, sizeof(ios)))
+		return -EFAULT;
+	return 0;
+}
