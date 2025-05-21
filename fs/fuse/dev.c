@@ -2685,6 +2685,8 @@ static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 
 	case FUSE_DEV_IOC_IOMAP_DEV_ADD:
 		return fuse_dev_ioctl_iomap_dev_add(file, argp);
+	case FUSE_DEV_IOC_IOMAP_SUPPORT:
+		return fuse_dev_ioctl_iomap_support(file, argp);
 
 	default:
 		return -ENOTTY;
