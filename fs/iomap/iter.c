@@ -66,8 +66,11 @@ int iomap_iter(struct iomap_iter *iter, const struct iomap_ops *ops)
 
 	trace_iomap_iter(iter, ops, _RET_IP_);
 
-	if (!iter->iomap.length)
+	if (!iter->iomap.length) {
+		if (iter->len == 0)
+			return 0;
 		goto begin;
+	}
 
 	/*
 	 * Calculate how far the iter was advanced and the original length bytes
