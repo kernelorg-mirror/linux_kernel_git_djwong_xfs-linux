@@ -384,7 +384,7 @@ static int fuse_release(struct inode *inode, struct file *file)
 	 * Dirty pages might remain despite write_inode_now() call from
 	 * fuse_flush() due to writes racing with the close.
 	 */
-	if (fc->writeback_cache)
+	if (fc->writeback_cache || fuse_has_iomap_pagecache(inode))
 		write_inode_now(inode, 1);
 
 	fuse_release_common(file, false);
@@ -1669,8 +1669,6 @@ static ssize_t __fuse_direct_read(struct fuse_io_priv *io,
 	return res;
 }
 
-static ssize_t fuse_direct_IO(struct kiocb *iocb, struct iov_iter *iter);
-
 static ssize_t fuse_direct_read_iter(struct kiocb *iocb, struct iov_iter *to)
 {
 	ssize_t res;
@@ -1727,6 +1725,9 @@ static ssize_t fuse_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
 			return ret;
 	}
 
+	if (fuse_want_iomap_buffered_io(iocb))
+		return fuse_iomap_buffered_read(iocb, to);
+
 	if (FUSE_IS_DAX(inode))
 		return fuse_dax_read_iter(iocb, to);
 
@@ -1750,9 +1751,28 @@ static ssize_t fuse_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 
 	if (fuse_want_iomap_directio(iocb)) {
 		ssize_t ret = fuse_iomap_direct_write(iocb, from);
-		if (ret != -ENOSYS)
+		switch (ret) {
+		case -ENOTBLK:
+			/*
+			 * If we're going to fall back to the iomap buffered
+			 * write path only, then try the write again as a
+			 * synchronous buffered write.  Otherwise we let it
+			 * drop through to the old ->direct_IO path.
+			 */
+			if (fuse_want_iomap_buffered_io(iocb))
+				iocb->ki_flags |= IOCB_SYNC;
+			fallthrough;
+		case -ENOSYS:
+			/* no implementation, fall through */
+			break;
+		default:
+			/* errors, no progress, or even partial progress */
 			return ret;
+		}
 	}
+
+	if (fuse_want_iomap_buffered_io(iocb))
+		return fuse_iomap_buffered_write(iocb, from);
 
 	if (FUSE_IS_DAX(inode))
 		return fuse_dax_write_iter(iocb, from);
@@ -2379,6 +2399,9 @@ static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 	struct inode *inode = file_inode(file);
 	int rc;
 
+	if (fuse_has_iomap_pagecache(inode))
+		return fuse_iomap_mmap(file, vma);
+
 	/* DAX mmap is superior to direct_io mmap */
 	if (FUSE_IS_DAX(inode))
 		return fuse_dax_mmap(file, vma);
@@ -2577,7 +2600,7 @@ static int fuse_file_flock(struct file *file, int cmd, struct file_lock *fl)
 	return err;
 }
 
-static sector_t fuse_bmap(struct address_space *mapping, sector_t block)
+sector_t fuse_bmap(struct address_space *mapping, sector_t block)
 {
 	struct inode *inode = mapping->host;
 	struct fuse_mount *fm = get_fuse_mount(inode);
@@ -2833,8 +2856,7 @@ static inline loff_t fuse_round_up(struct fuse_conn *fc, loff_t off)
 	return round_up(off, fc->max_pages << PAGE_SHIFT);
 }
 
-static ssize_t
-fuse_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
+ssize_t fuse_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 {
 	DECLARE_COMPLETION_ONSTACK(wait);
 	ssize_t ret = 0;
@@ -2953,6 +2975,7 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 		.length = length,
 		.mode = mode
 	};
+	loff_t newsize = 0;
 	int err;
 	bool block_faults = FUSE_IS_DAX(inode) &&
 		(!(mode & FALLOC_FL_KEEP_SIZE) ||
@@ -2964,6 +2987,9 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 
 	if (fm->fc->no_fallocate)
 		return -EOPNOTSUPP;
+
+	if (fuse_has_iomap_pagecache(inode))
+		block_faults = true;
 
 	inode_lock(inode);
 	if (block_faults) {
@@ -2981,11 +3007,23 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 			goto out;
 	}
 
+	/*
+	 * If we are using iomap for file IO, fallocate must wait for all AIO
+	 * to complete before we continue as AIO can change the file size on
+	 * completion without holding any locks we currently hold. We must do
+	 * this first because AIO can update the in-memory inode size, and the
+	 * operations that follow require the in-memory size to be fully
+	 * up-to-date.
+	 */
+	if (fuse_has_iomap_pagecache(inode))
+		inode_dio_wait(inode);
+
 	if (!(mode & FALLOC_FL_KEEP_SIZE) &&
 	    offset + length > i_size_read(inode)) {
 		err = inode_newsize_ok(inode, offset + length);
 		if (err)
 			goto out;
+		newsize = offset + length;
 	}
 
 	err = file_modified(file);
@@ -3007,6 +3045,14 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 	}
 	if (err)
 		goto out;
+
+	if (fuse_has_iomap_pagecache(inode)) {
+		err = fuse_iomap_fallocate(file, mode, offset, length,
+					   newsize);
+		if (err)
+			goto out;
+		file_update_time(file);
+	}
 
 	/* we could have extended the file */
 	if (!(mode & FALLOC_FL_KEEP_SIZE)) {
@@ -3210,4 +3256,6 @@ void fuse_init_file_inode(struct inode *inode, unsigned int flags)
 		fuse_dax_inode_init(inode, flags);
 	if (get_fuse_conn_c(inode)->iomap_directio)
 		fuse_iomap_init_directio(inode);
+	if (get_fuse_conn_c(inode)->iomap_pagecache)
+		fuse_iomap_init_pagecache(inode);
 }

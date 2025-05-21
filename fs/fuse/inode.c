@@ -196,6 +196,8 @@ static void fuse_evict_inode(struct inode *inode)
 
 	if (fuse_has_iomap_directio(inode))
 		fuse_iomap_destroy_directio(inode);
+	if (fuse_has_iomap_pagecache(inode))
+		fuse_iomap_destroy_pagecache(inode);
 }
 
 static int fuse_reconfigure(struct fs_context *fsc)
@@ -228,6 +230,7 @@ void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 {
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct fuse_inode *fi = get_fuse_inode(inode);
+	u8 new_blkbits;
 
 	lockdep_assert_held(&fi->lock);
 
@@ -289,9 +292,14 @@ void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 	}
 
 	if (attr->blksize != 0)
-		inode->i_blkbits = ilog2(attr->blksize);
+		new_blkbits = ilog2(attr->blksize);
 	else
-		inode->i_blkbits = inode->i_sb->s_blocksize_bits;
+		new_blkbits = inode->i_sb->s_blocksize_bits;
+
+	if (fuse_has_iomap_pagecache(inode))
+		fuse_iomap_set_i_blkbits(inode, new_blkbits);
+	else
+		inode->i_blkbits = new_blkbits;
 
 	/*
 	 * Don't set the sticky bit in i_mode, unless we want the VFS
@@ -1448,6 +1456,8 @@ static void process_init_reply(struct fuse_mount *fm, struct fuse_args *args,
 				fc->iomap = 1;
 			if ((flags & FUSE_IOMAP_DIRECTIO) && fc->iomap)
 				fc->iomap_directio = 1;
+			if ((flags & FUSE_IOMAP_PAGECACHE) && fc->iomap)
+				fc->iomap_pagecache = 1;
 		} else {
 			ra_pages = fc->max_read / PAGE_SIZE;
 			fc->no_lock = 1;
@@ -1520,7 +1530,7 @@ void fuse_send_init(struct fuse_mount *fm)
 	if (fuse_uring_enabled())
 		flags |= FUSE_OVER_IO_URING;
 	if (fuse_iomap_enabled())
-		flags |= FUSE_IOMAP | FUSE_IOMAP_DIRECTIO;
+		flags |= FUSE_IOMAP | FUSE_IOMAP_DIRECTIO | FUSE_IOMAP_PAGECACHE;
 
 	ia->in.flags = flags;
 	ia->in.flags2 = flags >> 32;
