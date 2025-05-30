@@ -2333,3 +2333,338 @@ void fuse_iomap_copied_file_range(struct inode *inode, loff_t offset,
 
 	fuse_iomap_cache_invalidate_range(inode, offset, written);
 }
+
+static inline int
+fuse_iomap_upsert_validate_dev(
+	const struct fuse_iomap_dev	*fb,
+	uint16_t			map_type,
+	uint64_t			map_addr,
+	uint64_t			map_length)
+{
+	uint64_t			map_end;
+	sector_t			device_bytes;
+
+	if (!fb) {
+		if (BAD_DATA(map_addr != FUSE_IOMAP_NULL_ADDR))
+			return -EIO;
+
+		return 0;
+	}
+
+	if (BAD_DATA(map_addr == FUSE_IOMAP_NULL_ADDR))
+		return -EIO;
+
+	if (BAD_DATA(check_add_overflow(map_addr, map_length, &map_end)))
+		return -EIO;
+
+	device_bytes = bdev_nr_sectors(fb->bdev) << SECTOR_SHIFT;
+	if (BAD_DATA(map_end > device_bytes))
+		return -EIO;
+
+	return 0;
+}
+
+/* Check the incoming mappings to make sure they're not nonsense */
+static inline int
+fuse_iomap_upsert_validate(struct fuse_conn *fc,
+			   const struct fuse_iomap_upsert_out *outarg)
+{
+	uint64_t n;
+	int ret;
+
+	/* No garbage mapping types or flags */
+	if (BAD_DATA(!fuse_iomap_check_type(outarg->write_type)))
+		return -EIO;
+	if (BAD_DATA(!fuse_iomap_check_flags(outarg->write_flags)))
+		return -EIO;
+
+	if (BAD_DATA(!fuse_iomap_check_type(outarg->read_type)))
+		return -EIO;
+	if (BAD_DATA(!fuse_iomap_check_flags(outarg->read_flags)))
+		return -EIO;
+
+	/* No zero-length mappings; we'll check offset/maxbytes later */
+	if (BAD_DATA(outarg->read_length == 0))
+		return -EIO;
+	if (BAD_DATA(outarg->write_length == 0))
+		return -EIO;
+
+	/* No overflows in the file range */
+	if (BAD_DATA(check_add_overflow(outarg->read_offset,
+					outarg->read_length, &n)))
+		return -EIO;
+	if (BAD_DATA(check_add_overflow(outarg->write_offset,
+					outarg->write_length, &n)))
+		return -EIO;
+
+	switch (outarg->read_type) {
+	case FUSE_IOMAP_TYPE_PURE_OVERWRITE:
+		/* "Pure overwrite" only allowed for write mapping */
+		BAD_DATA(outarg->read_type == FUSE_IOMAP_TYPE_PURE_OVERWRITE);
+		return -EIO;
+	case FUSE_IOMAP_TYPE_MAPPED:
+	case FUSE_IOMAP_TYPE_UNWRITTEN:
+		/* Mappings backed by space must have a device/addr */
+		if (BAD_DATA(outarg->read_dev == FUSE_IOMAP_DEV_NULL))
+			return -EIO;
+		if (BAD_DATA(outarg->read_addr == FUSE_IOMAP_NULL_ADDR))
+			return -EIO;
+		break;
+	case FUSE_IOMAP_TYPE_DELALLOC:
+	case FUSE_IOMAP_TYPE_HOLE:
+	case FUSE_IOMAP_TYPE_INLINE:
+		/* Mappings not backed by space cannot have a device addr. */
+		if (BAD_DATA(outarg->read_dev != FUSE_IOMAP_DEV_NULL))
+			return -EIO;
+		if (BAD_DATA(outarg->read_addr != FUSE_IOMAP_NULL_ADDR))
+			return -EIO;
+		break;
+	case FUSE_IOMAP_TYPE_NULL:
+		/* We're ignoring this mapping */
+		break;
+	default:
+		/* should have been caught already */
+		return -EIO;
+	}
+
+	switch (outarg->write_type) {
+	case FUSE_IOMAP_TYPE_MAPPED:
+	case FUSE_IOMAP_TYPE_UNWRITTEN:
+		/* Mappings backed by space must have a device/addr */
+		if (BAD_DATA(outarg->write_dev == FUSE_IOMAP_DEV_NULL))
+			return -EIO;
+		if (BAD_DATA(outarg->write_addr == FUSE_IOMAP_NULL_ADDR))
+			return -EIO;
+		break;
+	case FUSE_IOMAP_TYPE_PURE_OVERWRITE:
+	case FUSE_IOMAP_TYPE_DELALLOC:
+	case FUSE_IOMAP_TYPE_HOLE:
+	case FUSE_IOMAP_TYPE_INLINE:
+		/* Mappings not backed by space cannot have a device addr. */
+		if (BAD_DATA(outarg->write_dev != FUSE_IOMAP_DEV_NULL))
+			return -EIO;
+		if (BAD_DATA(outarg->write_addr != FUSE_IOMAP_NULL_ADDR))
+			return -EIO;
+		break;
+	case FUSE_IOMAP_TYPE_NULL:
+		/* We're ignoring this mapping */
+		break;
+	default:
+		/* should have been caught already */
+		return -EIO;
+	}
+
+	if (outarg->read_type != FUSE_IOMAP_TYPE_NULL) {
+		struct fuse_iomap_dev *fb = fuse_iomap_find_dev(fc,
+							outarg->read_type,
+							outarg->read_dev);
+
+		if (IS_ERR(fb))
+			return PTR_ERR(fb);
+
+		ret = fuse_iomap_upsert_validate_dev(fb, outarg->read_type,
+						     outarg->read_addr,
+						     outarg->read_length);
+		fuse_iomap_dev_put(fb);
+		if (ret)
+			return ret;
+	}
+
+	if (outarg->write_type != FUSE_IOMAP_TYPE_NULL) {
+		struct fuse_iomap_dev *fb = fuse_iomap_find_dev(fc,
+							outarg->write_type,
+							outarg->write_dev);
+
+		if (IS_ERR(fb))
+			return PTR_ERR(fb);
+
+		ret = fuse_iomap_upsert_validate_dev(fb, outarg->write_type,
+						     outarg->write_addr,
+						     outarg->write_length);
+		fuse_iomap_dev_put(fb);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static inline int
+fuse_iomap_upsert_validate_range(const struct inode *inode,
+				 const struct fuse_iomap *map)
+{
+	const unsigned int blocksize = i_blocksize(inode);
+
+	/* Mapping can't start beyond maxbytes */
+	if (BAD_DATA(map->offset >= inode->i_sb->s_maxbytes))
+		return -EIO;
+
+	/* File range must be aligned to blocksize */
+	if (BAD_DATA(!IS_ALIGNED(map->offset, blocksize)))
+		return -EIO;
+	if (BAD_DATA(!IS_ALIGNED(map->length, blocksize)))
+		return -EIO;
+
+	return 0;
+}
+
+int fuse_iomap_upsert(struct fuse_conn *fc,
+		      const struct fuse_iomap_upsert_out *outarg)
+{
+	struct inode *inode;
+	struct fuse_inode *fi;
+	struct fuse_iomap read_map = {
+		.offset		= outarg->read_offset,
+		.length		= outarg->read_length,
+		.addr		= outarg->read_addr,
+		.type		= outarg->read_type,
+		.flags		= outarg->read_flags,
+		.dev		= outarg->read_dev,
+	};
+	struct fuse_iomap write_map = {
+		.offset		= outarg->write_offset,
+		.length		= outarg->write_length,
+		.addr		= outarg->write_addr,
+		.type		= outarg->write_type,
+		.flags		= outarg->write_flags,
+		.dev		= outarg->write_dev,
+	};
+	int ret;
+
+	if (!fc->iomap)
+		return -EINVAL;
+
+	ret = fuse_iomap_upsert_validate(fc, outarg);
+	if (ret)
+		return ret;
+
+	down_read(&fc->killsb);
+	inode = fuse_ilookup(fc, outarg->nodeid, NULL);
+	if (!inode) {
+		ret = -ESTALE;
+		goto out_sb;
+	}
+
+	trace_fuse_iomap_upsert(inode, outarg);
+
+	fi = get_fuse_inode(inode);
+	if (fi->orig_ino != outarg->attr_ino) {
+		ret = -EINVAL;
+		goto out_inode;
+	}
+
+	if (fuse_is_bad(inode)) {
+		ret = -EIO;
+		goto out_inode;
+	}
+
+	if (read_map.type != FUSE_IOMAP_TYPE_NULL) {
+		ret = fuse_iomap_upsert_validate_range(inode, &read_map);
+		if (ret)
+			goto out_inode;
+	}
+
+	if (write_map.type != FUSE_IOMAP_TYPE_NULL) {
+		ret = fuse_iomap_upsert_validate_range(inode, &write_map);
+		if (ret)
+			goto out_inode;
+	}
+
+	fuse_iomap_cache_lock(inode, FUSE_IOMAP_LOCK_EXCL);
+
+	if (!test_and_set_bit(FUSE_I_IOMAP_CACHE, &fi->state))
+		trace_fuse_iomap_cache_enable(inode);
+
+	if (read_map.type != FUSE_IOMAP_TYPE_NULL) {
+		ret = fuse_iomap_cache_upsert(inode, FUSE_IOMAP_READ_FORK,
+					      &read_map);
+		if (ret)
+			goto out_unlock;
+	}
+
+	if (write_map.type != FUSE_IOMAP_TYPE_NULL) {
+		ret = fuse_iomap_cache_upsert(inode, FUSE_IOMAP_WRITE_FORK,
+					      &write_map);
+		if (ret)
+			goto out_unlock;
+	}
+
+out_unlock:
+	fuse_iomap_cache_unlock(inode, FUSE_IOMAP_LOCK_EXCL);
+out_inode:
+	iput(inode);
+out_sb:
+	up_read(&fc->killsb);
+	return ret;
+}
+
+static inline int fuse_iomap_inval_validate(const struct inode *inode,
+					    uint64_t offset, uint64_t length)
+{
+	const unsigned int blocksize = i_blocksize(inode);
+
+	/* Range can't start beyond maxbytes */
+	if (BAD_DATA(offset >= inode->i_sb->s_maxbytes))
+		return -EIO;
+
+	/* File range must be aligned to blocksize */
+	if (BAD_DATA(!IS_ALIGNED(offset, blocksize)))
+		return -EIO;
+	if (length != FUSE_IOMAP_INVAL_TO_EOF &&
+	    BAD_DATA(!IS_ALIGNED(length, blocksize)))
+		return -EIO;
+
+	return 0;
+}
+
+int fuse_iomap_inval(struct fuse_conn *fc,
+		     const struct fuse_iomap_inval_out *outarg)
+{
+	struct inode *inode;
+	uint64_t read_length = outarg->read_length;
+	uint64_t write_length = outarg->write_length;
+	int ret = 0, ret2 = 0;
+
+	if (!fc->iomap)
+		return -EINVAL;
+
+	down_read(&fc->killsb);
+	inode = fuse_ilookup(fc, outarg->nodeid, NULL);
+	if (!inode) {
+		ret = -ESTALE;
+		goto out_sb;
+	}
+
+	trace_fuse_iomap_inval(inode, outarg);
+
+	if (fuse_is_bad(inode)) {
+		ret = -EIO;
+		goto out_inode;
+	}
+
+	if (write_length)
+		ret = fuse_iomap_inval_validate(inode, outarg->write_offset,
+						write_length);
+	if (read_length)
+		ret2 = fuse_iomap_inval_validate(inode, outarg->read_offset,
+						 read_length);
+	if (ret || ret2)
+		goto out_inode;
+
+	fuse_iomap_cache_lock(inode, FUSE_IOMAP_LOCK_EXCL);
+	if (read_length)
+		ret2 = fuse_iomap_cache_remove(inode, FUSE_IOMAP_READ_FORK,
+					       outarg->read_offset,
+					       read_length);
+	if (write_length)
+		ret = fuse_iomap_cache_remove(inode, FUSE_IOMAP_WRITE_FORK,
+					      outarg->write_offset,
+					      write_length);
+	fuse_iomap_cache_unlock(inode, FUSE_IOMAP_LOCK_EXCL);
+
+out_inode:
+	iput(inode);
+out_sb:
+	up_read(&fc->killsb);
+	return ret ? ret : ret2;
+}

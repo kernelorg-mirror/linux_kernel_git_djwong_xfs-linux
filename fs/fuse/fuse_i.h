@@ -1811,6 +1811,11 @@ static inline int fuse_iomap_cache_invalidate(struct inode *inode,
 	return fuse_iomap_cache_invalidate_range(inode, offset,
 						 FUSE_IOMAP_INVAL_TO_EOF);
 }
+
+int fuse_iomap_upsert(struct fuse_conn *fc,
+		      const struct fuse_iomap_upsert_out *outarg);
+int fuse_iomap_inval(struct fuse_conn *fc,
+		     const struct fuse_iomap_inval_out *outarg);
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
@@ -1848,6 +1853,8 @@ static inline int fuse_iomap_cache_invalidate(struct inode *inode,
 # define fuse_iomap_cache_upsert(...)		(-ENOSYS)
 # define fuse_iomap_cache_invalidate_range(...)	(-ENOSYS)
 # define fuse_iomap_cache_invalidate(...)	(-ENOSYS)
+# define fuse_iomap_upsert(...)			(-ENOSYS)
+# define fuse_iomap_inval(...)			(-ENOSYS)
 #endif
 
 #endif /* _FS_FUSE_I_H */

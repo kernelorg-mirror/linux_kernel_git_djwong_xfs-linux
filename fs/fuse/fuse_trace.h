@@ -841,6 +841,7 @@ DEFINE_EVENT(fuse_inode_state_class, name,	\
 	TP_ARGS(inode))
 DEFINE_FUSE_INODE_STATE_EVENT(fuse_iomap_init_inode);
 DEFINE_FUSE_INODE_STATE_EVENT(fuse_iomap_evict_inode);
+DEFINE_FUSE_INODE_STATE_EVENT(fuse_iomap_cache_enable);
 
 TRACE_EVENT(fuse_iomap_end_ioend,
 	TP_PROTO(const struct iomap_ioend *ioend),
@@ -1827,6 +1828,110 @@ TRACE_EVENT(fuse_iomap_invalid,
 		  __print_flags(__entry->mapflags, "|", FUSE_IOMAP_F_STRINGS),
 		  __entry->addr, __entry->old_validity_cookie,
 		  __entry->validity_cookie)
+);
+
+TRACE_EVENT(fuse_iomap_upsert,
+	TP_PROTO(const struct inode *inode,
+		 const struct fuse_iomap_upsert_out *outarg),
+	TP_ARGS(inode, outarg),
+
+	TP_STRUCT__entry(
+		__field(dev_t,			connection)
+		__field(uint64_t,		ino)
+		__field(uint64_t,		nodeid)
+		__field(loff_t,			isize)
+		__field(uint64_t,		attr_ino)
+
+		__field(uint64_t,		read_offset)
+		__field(uint64_t,		read_length)
+		__field(uint64_t,		read_addr)
+		__field(uint16_t,		read_maptype)
+		__field(uint16_t,		read_mapflags)
+		__field(uint32_t,		read_dev)
+
+		__field(uint64_t,		write_offset)
+		__field(uint64_t,		write_length)
+		__field(uint64_t,		write_addr)
+		__field(uint16_t,		write_maptype)
+		__field(uint16_t,		write_mapflags)
+		__field(uint32_t,		write_dev)
+	),
+
+	TP_fast_assign(
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->nodeid		=	outarg->nodeid;
+		__entry->isize		=	i_size_read(inode);
+		__entry->attr_ino	=	outarg->attr_ino;
+		__entry->read_offset	=	outarg->read_offset;
+		__entry->read_length	=	outarg->read_length;
+		__entry->read_addr	=	outarg->read_addr;
+		__entry->read_maptype	=	outarg->read_type;
+		__entry->read_mapflags	=	outarg->read_flags;
+		__entry->read_dev	=	outarg->read_dev;
+		__entry->write_offset	=	outarg->write_offset;
+		__entry->write_length	=	outarg->write_length;
+		__entry->write_addr	=	outarg->write_addr;
+		__entry->write_maptype	=	outarg->write_type;
+		__entry->write_mapflags	=	outarg->write_flags;
+		__entry->write_dev	=	outarg->write_dev;
+	),
+
+	TP_printk("connection %u ino %llu nodeid %llu isize 0x%llx attr_ino 0x%llx read offset 0x%llx read_length 0x%llx read_addr 0x%llx read_maptype %s read_mapflags (%s) read_dev %u write_offset 0x%llx write_length 0x%llx write_addr 0x%llx write_maptype %s write_mapflags (%s) write_dev %u",
+		  __entry->connection, __entry->ino, __entry->nodeid,
+		  __entry->isize, __entry->attr_ino, __entry->read_offset,
+		  __entry->read_length, __entry->read_addr,
+		  __print_symbolic(__entry->read_maptype, FUSE_IOMAP_TYPE_STRINGS),
+		  __print_flags(__entry->read_mapflags, "|", FUSE_IOMAP_F_STRINGS),
+		  __entry->read_dev, __entry->write_offset,
+		  __entry->write_length, __entry->write_addr,
+		  __print_symbolic(__entry->write_maptype, FUSE_IOMAP_TYPE_STRINGS),
+		  __print_flags(__entry->write_mapflags, "|", FUSE_IOMAP_F_STRINGS),
+		  __entry->write_dev)
+);
+
+TRACE_EVENT(fuse_iomap_inval,
+	TP_PROTO(const struct inode *inode,
+		 const struct fuse_iomap_inval_out *outarg),
+	TP_ARGS(inode, outarg),
+
+	TP_STRUCT__entry(
+		__field(dev_t,			connection)
+		__field(uint64_t,		ino)
+		__field(uint64_t,		nodeid)
+		__field(loff_t,			isize)
+		__field(uint64_t,		attr_ino)
+
+		__field(uint64_t,		read_offset)
+		__field(uint64_t,		read_length)
+
+		__field(uint64_t,		write_offset)
+		__field(uint64_t,		write_length)
+	),
+
+	TP_fast_assign(
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->nodeid		=	outarg->nodeid;
+		__entry->isize		=	i_size_read(inode);
+		__entry->attr_ino	=	outarg->attr_ino;
+		__entry->read_offset	=	outarg->read_offset;
+		__entry->read_length	=	outarg->read_length;
+		__entry->write_offset	=	outarg->write_offset;
+		__entry->write_length	=	outarg->write_length;
+	),
+
+	TP_printk("connection %u ino %llu nodeid %llu isize 0x%llx attr_ino 0x%llx read offset 0x%llx read_length 0x%llx write_offset 0x%llx write_length 0x%llx",
+		  __entry->connection, __entry->ino, __entry->nodeid,
+		  __entry->isize, __entry->attr_ino, __entry->read_offset,
+		  __entry->read_length, __entry->write_offset,
+		  __entry->write_length)
 );
 #endif /* CONFIG_FUSE_IOMAP */
 
