@@ -1804,6 +1804,11 @@ enum fuse_iomap_iodir {
 	READ_MAPPING,
 	WRITE_MAPPING,
 };
+
+int fuse_iomap_upsert(struct fuse_conn *fc,
+		      const struct fuse_iomap_upsert_out *outarg);
+int fuse_iomap_inval(struct fuse_conn *fc,
+		     const struct fuse_iomap_inval_out *outarg);
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
@@ -1834,6 +1839,8 @@ enum fuse_iomap_iodir {
 # define fuse_dev_ioctl_iomap_support(...)	(-EOPNOTSUPP)
 # define fuse_iomap_fadvise			NULL
 # define fuse_inode_caches_iomaps(...)		(false)
+# define fuse_iomap_upsert(...)			(-ENOSYS)
+# define fuse_iomap_inval(...)			(-ENOSYS)
 #endif
 
 #endif /* _FS_FUSE_I_H */
