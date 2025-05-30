@@ -242,6 +242,8 @@
  *  - add FUSE_DEV_IOC_IOMAP_DEV_ADD to configure block devices for iomap
  *  - add FUSE_IOMAP_DIRECTIO for direct I/O support
  *  - add FUSE_IOMAP_PAGECACHE for buffered I/O support
+ *  - add FUSE_NOTIFY_IOMAP_UPSERT and FUSE_NOTIFY_IOMAP_INVAL so fuse servers
+ *    can cache iomappings in the kernel
  */
 
 #ifndef _LINUX_FUSE_H
@@ -693,6 +695,8 @@ enum fuse_notify_code {
 	FUSE_NOTIFY_DELETE = 6,
 	FUSE_NOTIFY_RESEND = 7,
 	FUSE_NOTIFY_INC_EPOCH = 8,
+	FUSE_NOTIFY_IOMAP_UPSERT = 9,
+	FUSE_NOTIFY_IOMAP_INVAL = 10,
 	FUSE_NOTIFY_CODE_MAX,
 };
 
@@ -1423,5 +1427,35 @@ struct fuse_iomap_ioend_in {
 
 /* invalidate all cached iomap mappings up to EOF */
 #define FUSE_IOMAP_INVAL_TO_EOF		(~0ULL)
+
+struct fuse_iomap_inval_out {
+	uint64_t nodeid;	/* Inode ID */
+	uint64_t attr_ino;	/* matches fuse_attr:ino */
+
+	uint64_t read_offset;	/* range to invalidate read iomaps, bytes */
+	uint64_t read_length;	/* can be FUSE_IOMAP_INVAL_TO_EOF */
+
+	uint64_t write_offset;	/* range to invalidate write iomaps, bytes */
+	uint64_t write_length;	/* can be FUSE_IOMAP_INVAL_TO_EOF */
+};
+
+struct fuse_iomap_upsert_out {
+	uint64_t nodeid;	/* Inode ID */
+	uint64_t attr_ino;	/* matches fuse_attr:ino */
+
+	uint64_t read_offset;	/* file offset of mapping, bytes */
+	uint64_t read_length;	/* length of mapping, bytes */
+	uint64_t read_addr;	/* disk offset of mapping, bytes */
+	uint16_t read_type;	/* FUSE_IOMAP_TYPE_* */
+	uint16_t read_flags;	/* FUSE_IOMAP_F_* */
+	uint32_t read_dev;	/* device cookie */
+
+	uint64_t write_offset;	/* file offset of mapping, bytes */
+	uint64_t write_length;	/* length of mapping, bytes */
+	uint64_t write_addr;	/* disk offset of mapping, bytes */
+	uint16_t write_type;	/* FUSE_IOMAP_TYPE_* */
+	uint16_t write_flags;	/* FUSE_IOMAP_F_* */
+	uint32_t write_dev;	/* device cookie * */
+};
 
 #endif /* _LINUX_FUSE_H */
