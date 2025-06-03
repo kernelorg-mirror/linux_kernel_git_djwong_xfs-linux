@@ -1565,6 +1565,67 @@ fuse_iomap_cache_add(
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_FUSE_IOMAP_DEBUG)
+static inline void
+fuse_iomap_cache_validate_lookup(const struct inode *inode,
+				 enum fuse_iomap_fork whichfork,
+				 const struct fuse_iomap *fmap)
+{
+	const unsigned int blocksize = i_blocksize(inode);
+	uint64_t end;
+
+	/* No garbage mapping types or flags */
+	BAD_DATA(!fuse_iomap_check_type(fmap->type));
+	BAD_DATA(!fuse_iomap_check_flags(fmap->flags));
+
+	/* Must have returned a mapping for the first byte in the range */
+	BAD_DATA(fmap->length == 0);
+
+	/* File range must be aligned to blocksize */
+	BAD_DATA(!IS_ALIGNED(fmap->offset, blocksize));
+	BAD_DATA(!IS_ALIGNED(fmap->length, blocksize));
+
+	/* No overflows in the file range */
+	BAD_DATA(check_add_overflow(fmap->offset, fmap->length, &end));
+
+	/* File range cannot start past maxbytes */
+	BAD_DATA(fmap->offset >= inode->i_sb->s_maxbytes);
+
+	switch (fmap->type) {
+	case FUSE_IOMAP_TYPE_PURE_OVERWRITE:
+		/* "Pure overwrite" only allowed for write mapping */
+		BAD_DATA(whichfork != FUSE_IOMAP_WRITE_FORK);
+		break;
+	case FUSE_IOMAP_TYPE_MAPPED:
+	case FUSE_IOMAP_TYPE_UNWRITTEN:
+		/* Mappings backed by space must have a device/addr */
+		BAD_DATA(fmap->dev == FUSE_IOMAP_DEV_NULL);
+		BAD_DATA(fmap->addr == FUSE_IOMAP_NULL_ADDR);
+		break;
+	case FUSE_IOMAP_TYPE_DELALLOC:
+	case FUSE_IOMAP_TYPE_HOLE:
+	case FUSE_IOMAP_TYPE_INLINE:
+		/* Mappings not backed by space cannot have a device addr. */
+		BAD_DATA(fmap->dev != FUSE_IOMAP_DEV_NULL);
+		BAD_DATA(fmap->addr != FUSE_IOMAP_NULL_ADDR);
+		break;
+	case FUSE_IOMAP_TYPE_NULL:
+		/* Cache itself cannot contain null mappings */
+		BAD_DATA(fmap->type == FUSE_IOMAP_TYPE_NULL);
+		break;
+	default:
+		BAD_DATA(1);
+		break;
+	}
+
+	/* No overflows in the device range, if supplied */
+	if (fmap->addr != FUSE_IOMAP_NULL_ADDR)
+		BAD_DATA(check_add_overflow(fmap->addr, fmap->length, &end));
+}
+#else
+# define fuse_iomap_cache_validate_lookup(...)	((void)0)
+#endif
+
 /*
  * Trim the returned map to the required bounds
  */
@@ -1575,8 +1636,16 @@ fuse_iomap_trim(
 	loff_t			off,
 	loff_t			len)
 {
+	switch (got->type) {
+	case FUSE_IOMAP_TYPE_MAPPED:
+	case FUSE_IOMAP_TYPE_UNWRITTEN:
+		mval->addr = got->addr + (off - got->offset);
+		break;
+	default:
+		mval->addr = FUSE_IOMAP_NULL_ADDR;
+		break;
+	}
 	mval->offset = off;
-	mval->addr = got->addr + (off - got->offset);
 	mval->length = min_t(loff_t, len, got->length - (off - got->offset));
 	mval->type = got->type;
 	mval->flags = got->flags;
@@ -1625,6 +1694,8 @@ fuse_iomap_cache_lookup(
 		 */
 		return LOOKUP_MISS;
 	}
+
+	fuse_iomap_cache_validate_lookup(inode, whichfork, &got);
 
 	/* Found a mapping in the cache, return it */
 	fuse_iomap_trim(mval, &got, off, len);

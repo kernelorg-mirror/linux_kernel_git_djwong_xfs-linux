@@ -20,6 +20,9 @@
 void fuse_iomap_cache_lock(struct inode *inode, unsigned int lock_flags);
 void fuse_iomap_cache_unlock(struct inode *inode, unsigned int lock_flags);
 
+bool fuse_iomap_check_type(uint16_t type);
+bool fuse_iomap_check_flags(uint16_t flags);
+
 #define FUSE_IOMAP_MAX_LEN	((loff_t)(1ULL << 63))
 
 struct fuse_iext_leaf;
