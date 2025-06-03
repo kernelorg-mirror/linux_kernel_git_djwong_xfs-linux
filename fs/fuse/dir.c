@@ -2005,7 +2005,8 @@ int fuse_do_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 	struct fuse_setattr_in inarg;
 	struct fuse_attr_out outarg;
 	bool is_truncate = false;
-	bool is_wb = fc->writeback_cache && S_ISREG(inode->i_mode);
+	bool is_wb = S_ISREG(inode->i_mode) &&
+			(fuse_inode_has_iomap(inode) || fc->writeback_cache);
 	loff_t oldsize;
 	int err;
 	bool trust_local_cmtime = is_wb;
