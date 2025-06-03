@@ -2055,7 +2055,8 @@ int fuse_do_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 	struct fuse_attr_out outarg;
 	const bool is_iomap = fuse_inode_has_iomap(inode);
 	bool is_truncate = false;
-	bool is_wb = fc->writeback_cache && S_ISREG(inode->i_mode);
+	bool is_wb = (is_iomap || fc->writeback_cache) &&
+		     S_ISREG(inode->i_mode);
 	loff_t oldsize;
 	int err;
 	bool trust_local_cmtime = is_wb;
@@ -2189,6 +2190,8 @@ int fuse_do_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 	spin_lock(&fi->lock);
 	/* the kernel maintains i_mtime locally */
 	if (trust_local_cmtime) {
+		if ((attr->ia_valid & ATTR_ATIME) && is_iomap)
+			inode_set_atime_to_ts(inode, attr->ia_atime);
 		if (attr->ia_valid & ATTR_MTIME)
 			inode_set_mtime_to_ts(inode, attr->ia_mtime);
 		if (attr->ia_valid & ATTR_CTIME)
