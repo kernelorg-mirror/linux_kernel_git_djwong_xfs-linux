@@ -660,7 +660,11 @@ fuse_iext_realloc_root(
  */
 static inline void fuse_iext_inc_seq(struct fuse_iomap_cache *ip)
 {
-	WRITE_ONCE(ip->im_seq, READ_ONCE(ip->im_seq) + 1);
+	uint64_t new_val = READ_ONCE(ip->im_seq) + 1;
+
+	if (new_val == FUSE_IOMAP_ALWAYS_VALID)
+		new_val++;
+	WRITE_ONCE(ip->im_seq, new_val);
 }
 
 void
