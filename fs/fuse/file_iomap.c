@@ -1342,6 +1342,12 @@ static inline void fuse_iomap_set_fileio(struct inode *inode)
 
 	ASSERT(get_fuse_conn_c(inode)->iomap_fileio);
 
+	/*
+	 * Manage timestamps ourselves, don't make the fuse server do it.  This
+	 * is critical for mtime updates to work correctly with page_mkwrite.
+	 */
+	inode->i_flags &= ~S_NOCMTIME;
+	inode->i_flags &= ~S_NOATIME;
 	inode->i_data.a_ops = &fuse_iomap_aops;
 
 	INIT_WORK(&fi->ioend_work, fuse_iomap_end_io);
