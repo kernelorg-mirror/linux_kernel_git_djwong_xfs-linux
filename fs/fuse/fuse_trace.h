@@ -158,6 +158,7 @@ struct fuse_iext_cursor;
 
 #define FUSE_IOMAP_TYPE_STRINGS \
 	{ FUSE_IOMAP_TYPE_PURE_OVERWRITE,	"overwrite" }, \
+	{ FUSE_IOMAP_TYPE_NULL,			"null" }, \
 	{ FUSE_IOMAP_TYPE_HOLE,			"hole" }, \
 	{ FUSE_IOMAP_TYPE_DELALLOC,		"delalloc" }, \
 	{ FUSE_IOMAP_TYPE_MAPPED,		"mapped" }, \
@@ -1721,6 +1722,51 @@ TRACE_EVENT(fuse_iomap_cache_lookup_result,
 		  __print_flags(__entry->map_flags, "|", FUSE_IOMAP_F_STRINGS),
 		  __entry->map_dev, __entry->map_addr, __entry->got_offset,
 		  __entry->got_length, __entry->got_addr,
+		  __entry->validity_cookie)
+);
+
+TRACE_EVENT(fuse_iomap_invalid,
+	TP_PROTO(const struct inode *inode, const struct iomap *map,
+		 uint64_t validity_cookie),
+	TP_ARGS(inode, map, validity_cookie),
+
+	TP_STRUCT__entry(
+		__field(dev_t,			connection)
+		__field(uint64_t,		ino)
+		__field(uint64_t,		nodeid)
+		__field(loff_t,			isize)
+		__field(loff_t,			offset)
+		__field(uint64_t,		length)
+		__field(uint16_t,		maptype)
+		__field(uint16_t,		mapflags)
+		__field(uint64_t,		addr)
+		__field(uint64_t,		old_validity_cookie)
+		__field(uint64_t,		validity_cookie)
+	),
+
+	TP_fast_assign(
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->nodeid		=	fi->nodeid;
+		__entry->isize		=	i_size_read(inode);
+		__entry->offset		=	map->offset;
+		__entry->length		=	map->length;
+		__entry->maptype	=	map->type;
+		__entry->mapflags	=	map->flags;
+		__entry->addr		=	map->addr;
+		__entry->old_validity_cookie=	map->validity_cookie;
+		__entry->validity_cookie=	validity_cookie;
+	),
+
+	TP_printk("connection %u ino %llu nodeid %llu isize 0x%llx offset 0x%llx length 0x%llx type %s mapflags (%s) addr 0x%llx old_cookie 0x%llx new_cookie 0x%llx",
+		  __entry->connection, __entry->ino, __entry->nodeid,
+		  __entry->isize, __entry->offset, __entry->length,
+		  __print_symbolic(__entry->maptype, FUSE_IOMAP_TYPE_STRINGS),
+		  __print_flags(__entry->mapflags, "|", FUSE_IOMAP_F_STRINGS),
+		  __entry->addr, __entry->old_validity_cookie,
 		  __entry->validity_cookie)
 );
 #endif /* CONFIG_FUSE_IOMAP */
