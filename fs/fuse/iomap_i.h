@@ -143,6 +143,11 @@ static inline bool fuse_iext_peek_prev_extent(struct fuse_ifork *ifp,
 	     fuse_iext_get_extent((ifp), (ext), (got));	\
 	     fuse_iext_next((ifp), (ext)))
 
+/* iomaps that come direct from the fuse server are presumed to be valid */
+#define FUSE_IOMAP_ALWAYS_VALID	((uint64_t)0)
+/* set initial iomap cookie value to avoid ALWAYS_VALID */
+#define FUSE_IOMAP_INIT_COOKIE	((uint64_t)1)
+
 static inline uint64_t fuse_iext_read_seq(struct fuse_iomap_cache *ip)
 {
 	return (uint64_t)READ_ONCE(ip->im_seq);
