@@ -2633,6 +2633,24 @@ static long fuse_dev_ioctl_backing_open(struct file *file,
 	return fuse_backing_open(fud->fc, &map);
 }
 
+static long fuse_dev_ioctl_iomap_dev_add(struct file *file,
+					 struct fuse_backing_map __user *argp)
+{
+	struct fuse_dev *fud = fuse_get_dev(file);
+	struct fuse_backing_map map;
+
+	if (!fud)
+		return -EPERM;
+
+	if (!IS_ENABLED(CONFIG_FUSE_IOMAP))
+		return -EOPNOTSUPP;
+
+	if (copy_from_user(&map, argp, sizeof(map)))
+		return -EFAULT;
+
+	return fuse_iomap_dev_add(fud->fc, &map);
+}
+
 static long fuse_dev_ioctl_backing_close(struct file *file, __u32 __user *argp)
 {
 	struct fuse_dev *fud = fuse_get_dev(file);
@@ -2664,6 +2682,9 @@ static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 
 	case FUSE_DEV_IOC_BACKING_CLOSE:
 		return fuse_dev_ioctl_backing_close(file, argp);
+
+	case FUSE_DEV_IOC_IOMAP_DEV_ADD:
+		return fuse_dev_ioctl_iomap_dev_add(file, argp);
 
 	default:
 		return -ENOTTY;

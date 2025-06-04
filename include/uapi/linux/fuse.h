@@ -239,6 +239,7 @@
  *  7.99
  *  - add FUSE_IOMAP and iomap_{begin,end,ioend} handlers for FIEMAP and
  *    SEEK_{DATA,HOLE} support
+ *  - add FUSE_DEV_IOC_IOMAP_DEV_ADD to configure block devices for iomap
  */
 
 #ifndef _LINUX_FUSE_H
@@ -1136,6 +1137,8 @@ struct fuse_backing_map {
 #define FUSE_DEV_IOC_BACKING_OPEN	_IOW(FUSE_DEV_IOC_MAGIC, 1, \
 					     struct fuse_backing_map)
 #define FUSE_DEV_IOC_BACKING_CLOSE	_IOW(FUSE_DEV_IOC_MAGIC, 2, uint32_t)
+#define FUSE_DEV_IOC_IOMAP_DEV_ADD	_IOW(FUSE_DEV_IOC_MAGIC, 3, \
+					     struct fuse_backing_map)
 
 struct fuse_lseek_in {
 	uint64_t	fh;

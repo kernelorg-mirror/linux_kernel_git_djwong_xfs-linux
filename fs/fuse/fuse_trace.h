@@ -410,6 +410,68 @@ TRACE_EVENT(fuse_iomap_end_error,
 		  __entry->pos, __entry->count, __entry->written,
 		  __entry->error)
 );
+
+TRACE_EVENT(fuse_iomap_dev_add,
+	TP_PROTO(const struct fuse_conn *fc,
+		 const struct fuse_backing_map *map),
+
+	TP_ARGS(fc, map),
+
+	TP_STRUCT__entry(
+		__field(dev_t,		connection)
+		__field(int,		fd)
+		__field(unsigned int,	flags)
+	),
+
+	TP_fast_assign(
+		__entry->connection	=	fc->dev;
+		__entry->fd		=	map->fd;
+		__entry->flags		=	map->flags;
+	),
+
+	TP_printk("connection %u fd %d flags 0x%x",
+		  __entry->connection,
+		  __entry->fd,
+		  __entry->flags)
+);
+
+TRACE_EVENT(fuse_iomap_dev_class,
+	TP_PROTO(const struct fuse_conn *fc, unsigned int idx,
+		 const struct fuse_iomap_dev *fb),
+
+	TP_ARGS(fc, idx, fb),
+
+	TP_STRUCT__entry(
+		__field(dev_t,		connection)
+		__field(unsigned int,	idx)
+		__field(dev_t,		bdev)
+	),
+
+	TP_fast_assign(
+		__entry->connection	=	fc->dev;
+		__entry->idx		=	idx;
+
+		if (fb) {
+			struct inode *inode = file_inode(fb->file);
+
+			__entry->bdev	=	inode->i_rdev;
+		} else {
+			__entry->bdev	=	0;
+		}
+	),
+
+	TP_printk("connection %u idx %u dev %u:%u",
+		  __entry->connection,
+		  __entry->idx,
+		  MAJOR(__entry->bdev), MINOR(__entry->bdev))
+);
+#define DEFINE_FUSE_IOMAP_DEV_EVENT(name)		\
+DEFINE_EVENT(fuse_iomap_dev_class, name,		\
+	TP_PROTO(const struct fuse_conn *fc, unsigned int idx, \
+		 const struct fuse_iomap_dev *fb), \
+	TP_ARGS(fc, idx, fb))
+DEFINE_FUSE_IOMAP_DEV_EVENT(fuse_iomap_add_dev);
+DEFINE_FUSE_IOMAP_DEV_EVENT(fuse_iomap_remove_dev);
 #endif /* CONFIG_FUSE_IOMAP */
 
 #endif /* _TRACE_FUSE_H */

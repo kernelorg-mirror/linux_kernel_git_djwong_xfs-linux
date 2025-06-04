@@ -1015,6 +1015,7 @@ void fuse_conn_put(struct fuse_conn *fc)
 		struct fuse_iqueue *fiq = &fc->iq;
 		struct fuse_sync_bucket *bucket;
 
+		fuse_iomap_conn_put(fc);
 		if (IS_ENABLED(CONFIG_FUSE_DAX))
 			fuse_dax_conn_free(fc);
 		if (fc->timeout.req_timeout)
@@ -1454,6 +1455,9 @@ static void process_init_reply(struct fuse_mount *fm, struct fuse_args *args,
 
 		init_server_timeout(fc, timeout);
 
+		if (fc->iomap && !fuse_iomap_fill_super(fm))
+			ok = false;
+
 		fm->sb->s_bdi->ra_pages =
 				min(fm->sb->s_bdi->ra_pages, ra_pages);
 		fc->minor = arg->minor;
@@ -1823,10 +1827,15 @@ int fuse_fill_super_common(struct super_block *sb, struct fuse_fs_context *ctx)
 
 	sb->s_subtype = ctx->subtype;
 	ctx->subtype = NULL;
+
+	err = fuse_iomap_conn_alloc(fc);
+	if (err)
+		goto err;
+
 	if (IS_ENABLED(CONFIG_FUSE_DAX)) {
 		err = fuse_dax_conn_alloc(fc, ctx->dax_mode, ctx->dax_dev);
 		if (err)
-			goto err;
+			goto err_free_iomap;
 	}
 
 	if (ctx->fudptr) {
@@ -1888,6 +1897,8 @@ int fuse_fill_super_common(struct super_block *sb, struct fuse_fs_context *ctx)
  err_dev_free:
 	if (fud)
 		fuse_dev_free(fud);
+ err_free_iomap:
+	fuse_iomap_conn_put(fc);
  err_free_dax:
 	if (IS_ENABLED(CONFIG_FUSE_DAX))
 		fuse_dax_conn_free(fc);
