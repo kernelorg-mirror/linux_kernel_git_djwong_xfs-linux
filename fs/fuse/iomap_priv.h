@@ -37,6 +37,15 @@ enum fuse_iomap_iodir {
 
 #define EFSCORRUPTED	EUCLEAN
 
+struct fuse_iomap_dev {
+	struct file *file;
+	struct block_device *bdev;
+
+	/** refcount */
+	refcount_t count;
+	struct rcu_head rcu;
+};
+
 #endif /* CONFIG_FUSE_IOMAP */
 
 #endif /* _FS_FUSE_IOMAP_PRIV_H */

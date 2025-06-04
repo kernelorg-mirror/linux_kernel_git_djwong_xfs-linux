@@ -235,10 +235,6 @@ static inline bool fuse_iomap_check_mapping(const struct inode *inode,
 		return false;
 	}
 
-	/* XXX: we don't support devices yet */
-	if (BAD_DATA(map->dev != FUSE_IOMAP_DEV_NULL))
-		return false;
-
 	/* No overflows in the device range, if supplied */
 	if (map->addr != FUSE_IOMAP_NULL_ADDR &&
 	    BAD_DATA(check_add_overflow(map->addr, map->length, &end)))
@@ -250,6 +246,7 @@ static inline bool fuse_iomap_check_mapping(const struct inode *inode,
 /* Convert a mapping from the server into something the kernel can use */
 static inline void fuse_iomap_from_server(struct inode *inode,
 					  struct iomap *iomap,
+					  const struct fuse_iomap_dev *iodev,
 					  const struct fuse_iomap_io *fmap)
 {
 	iomap->addr = fmap->addr;
@@ -257,7 +254,9 @@ static inline void fuse_iomap_from_server(struct inode *inode,
 	iomap->length = fmap->length;
 	iomap->type = fuse_iomap_type_from_server(fmap->type);
 	iomap->flags = fuse_iomap_flags_from_server(fmap->flags);
-	iomap->bdev = inode->i_sb->s_bdev; /* XXX */
+
+	iomap->bdev = iodev ? iodev->bdev : NULL;
+	iomap->dax_dev = NULL;
 }
 
 /* Convert a mapping from the server into something the kernel can use */
@@ -308,6 +307,91 @@ static inline bool fuse_is_iomap_file_write(unsigned int opflags)
 	return opflags & (IOMAP_WRITE | IOMAP_ZERO | IOMAP_UNSHARE);
 }
 
+static struct fuse_iomap_dev *fuse_iomap_dev_get(struct fuse_iomap_dev *iodev)
+{
+	if (iodev && refcount_inc_not_zero(&iodev->count))
+		return iodev;
+	return NULL;
+}
+
+static void fuse_iomap_dev_free(struct fuse_iomap_dev *iodev)
+{
+	if (iodev->file)
+		fput(iodev->file);
+	kfree_rcu(iodev, rcu);
+}
+
+static void fuse_iomap_dev_put(struct fuse_iomap_dev *iodev)
+{
+	if (iodev && refcount_dec_and_test(&iodev->count))
+		fuse_iomap_dev_free(iodev);
+}
+
+static int fuse_iomap_dev_id_alloc(struct fuse_conn *fc,
+				   struct fuse_iomap_dev *iodev)
+{
+	int id;
+
+	idr_preload(GFP_KERNEL);
+	spin_lock(&fc->lock);
+	id = idr_alloc_cyclic(&fc->iomap_conn.device_map, iodev, 1, 0,
+			      GFP_ATOMIC);
+	spin_unlock(&fc->lock);
+	idr_preload_end();
+
+	trace_fuse_iomap_add_dev(fc, id, iodev);
+
+	return id;
+}
+
+static struct fuse_iomap_dev *fuse_iomap_dev_id_remove(struct fuse_conn *fc,
+						       int id)
+{
+	struct fuse_iomap_dev *iodev;
+
+	spin_lock(&fc->lock);
+	iodev = idr_remove(&fc->iomap_conn.device_map, id);
+	spin_unlock(&fc->lock);
+
+	if (iodev)
+		trace_fuse_iomap_remove_dev(fc, id, iodev);
+
+	return iodev;
+}
+
+static inline struct fuse_iomap_dev *
+fuse_iomap_dev_id_find(struct fuse_conn *fc, int idx)
+{
+	struct fuse_iomap_dev *iodev;
+
+	rcu_read_lock();
+	iodev = idr_find(&fc->iomap_conn.device_map, idx);
+	iodev = fuse_iomap_dev_get(iodev);
+	rcu_read_unlock();
+
+	return iodev;
+}
+
+static inline struct fuse_iomap_dev *
+fuse_iomap_find_dev(struct fuse_conn *fc, const struct fuse_iomap_io *map)
+{
+	struct fuse_iomap_dev *ret = NULL;
+
+	if (map->dev != FUSE_IOMAP_DEV_NULL && map->dev < INT_MAX)
+		ret = fuse_iomap_dev_id_find(fc, map->dev);
+
+	switch (map->type) {
+	case FUSE_IOMAP_TYPE_MAPPED:
+	case FUSE_IOMAP_TYPE_UNWRITTEN:
+		/* Mappings backed by space must have a device/addr */
+		if (BAD_DATA(ret == NULL))
+			return ERR_PTR(-EFSCORRUPTED);
+		break;
+	}
+
+	return ret;
+}
+
 static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 			    unsigned opflags, struct iomap *iomap,
 			    struct iomap *srcmap)
@@ -321,6 +405,8 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 	};
 	struct fuse_iomap_begin_out outarg = { };
 	struct fuse_mount *fm = get_fuse_mount(inode);
+	struct fuse_iomap_dev *read_dev = NULL;
+	struct fuse_iomap_dev *write_dev = NULL;
 	FUSE_ARGS(args);
 	int err;
 
@@ -347,24 +433,44 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 	if (err)
 		return err;
 
+	read_dev = fuse_iomap_find_dev(fm->fc, &outarg.read);
+	if (IS_ERR(read_dev))
+		return PTR_ERR(read_dev);
+
 	if (fuse_is_iomap_file_write(opflags) &&
 	    outarg.write.type != FUSE_IOMAP_TYPE_PURE_OVERWRITE) {
+		/* open the write device */
+		write_dev = fuse_iomap_find_dev(fm->fc, &outarg.write);
+		if (IS_ERR(write_dev)) {
+			err = PTR_ERR(write_dev);
+			goto out_read_dev;
+		}
+
 		/*
 		 * For an out of place write, we must supply the write mapping
 		 * via @iomap, and the read mapping via @srcmap.
 		 */
-		fuse_iomap_from_server(inode, iomap, &outarg.write);
-		fuse_iomap_from_server(inode, srcmap, &outarg.read);
+		fuse_iomap_from_server(inode, iomap, write_dev, &outarg.write);
+		fuse_iomap_from_server(inode, srcmap, read_dev, &outarg.read);
 	} else {
 		/*
 		 * For everything else (reads, reporting, and pure overwrites),
 		 * we can return the sole mapping through @iomap and leave
 		 * @srcmap unchanged from its default (HOLE).
 		 */
-		fuse_iomap_from_server(inode, iomap, &outarg.read);
+		fuse_iomap_from_server(inode, iomap, read_dev, &outarg.read);
 	}
 
-	return 0;
+	/*
+	 * XXX: if we ever want to support closing devices, we need a way to
+	 * track the fuse_iomap_dev refcount all the way through bio endios.
+	 * For now we put the refcount here because you can't remove an iomap
+	 * device until unmount time.
+	 */
+	fuse_iomap_dev_put(write_dev);
+out_read_dev:
+	fuse_iomap_dev_put(read_dev);
+	return err;
 }
 
 static bool fuse_want_iomap_end(const struct iomap *iomap, unsigned int opflags,
@@ -425,3 +531,119 @@ const struct iomap_ops fuse_iomap_ops = {
 	.iomap_begin		= fuse_iomap_begin,
 	.iomap_end		= fuse_iomap_end,
 };
+
+int fuse_iomap_conn_alloc(struct fuse_conn *fc)
+{
+	idr_init(&fc->iomap_conn.device_map);
+	return 0;
+}
+
+static int fuse_iomap_dev_id_free(int id, void *p, void *data)
+{
+	struct fuse_iomap_dev *iodev = p;
+	struct fuse_conn *fc = data;
+
+	trace_fuse_iomap_remove_dev(fc, id, iodev);
+
+	WARN_ON_ONCE(refcount_read(&iodev->count) != 1);
+	fuse_iomap_dev_free(iodev);
+	return 0;
+}
+
+void fuse_iomap_conn_put(struct fuse_conn *fc)
+{
+	idr_for_each(&fc->iomap_conn.device_map, fuse_iomap_dev_id_free, fc);
+	idr_destroy(&fc->iomap_conn.device_map);
+}
+
+static struct fuse_iomap_dev *fuse_iomap_dev_alloc(struct file *file)
+{
+	struct fuse_iomap_dev *iodev =
+			kmalloc(sizeof(struct fuse_iomap_dev), GFP_KERNEL);
+
+	if (!iodev)
+		return NULL;
+
+	iodev->file = file;
+	iodev->bdev = I_BDEV(file->f_mapping->host);
+	refcount_set(&iodev->count, 1);
+
+	return iodev;
+}
+
+bool fuse_iomap_fill_super(struct fuse_mount *fm)
+{
+	struct fuse_conn *fc = fm->fc;
+	struct super_block *sb = fm->sb;
+	int res;
+
+	if (sb->s_bdev) {
+		/*
+		 * Try to install s_bdev as the first iomap device, if this
+		 * is a block-device filesystem.
+		 */
+		struct fuse_iomap_dev *iodev =
+					fuse_iomap_dev_alloc(sb->s_bdev_file);
+
+		if (!iodev)
+			return false;
+
+		res = fuse_iomap_dev_id_alloc(fc, iodev);
+		if (res < 0)
+			return false;
+		if (res != 1) {
+			struct fuse_iomap_dev *bad =
+					fuse_iomap_dev_id_remove(fc, res);
+
+			ASSERT(res == 1);
+			ASSERT(bad == iodev);
+			fuse_iomap_dev_put(bad);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+int fuse_iomap_dev_add(struct fuse_conn *fc, const struct fuse_backing_map *map)
+{
+	struct file *file;
+	struct fuse_iomap_dev *iodev = NULL;
+	int res;
+
+	trace_fuse_iomap_dev_add(fc, map);
+
+	res = -EPERM;
+	if (!fc->iomap)
+		goto out;
+
+	res = -EINVAL;
+	if (map->flags || map->padding)
+		goto out;
+
+	file = fget_raw(map->fd);
+	res = -EBADF;
+	if (!file)
+		goto out;
+
+	res = -ENODEV;
+	if (!S_ISBLK(file_inode(file)->i_mode))
+		goto out_fput;
+
+	iodev = fuse_iomap_dev_alloc(file);
+	if (!iodev)
+		goto out_fput;
+
+	res = fuse_iomap_dev_id_alloc(fc, iodev);
+	if (res < 0) {
+		fuse_iomap_dev_free(iodev);
+		goto out;
+	}
+
+	return res;
+
+out_fput:
+	fput(file);
+out:
+	return res;
+}
