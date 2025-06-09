@@ -889,6 +889,7 @@ static int fuse_iomap_end(struct inode *inode, loff_t pos, loff_t count,
 			fuse_iomap_inline_free(iomap);
 			if (err)
 				goto out_err;
+			fuse_iomap_cache_invalidate_range(inode, pos, written);
 		} else {
 			fuse_iomap_inline_free(iomap);
 		}
@@ -973,6 +974,13 @@ static int fuse_iomap_ioend(struct inode *inode, loff_t pos, size_t written,
 	err = fuse_simple_request(fm, &args);
 
 	trace_fuse_iomap_ioend_error(inode, &inarg, err);
+
+	/*
+	 * If the ioend completed successfully, invalidate the range that we
+	 * just completed.
+	 */
+	if (!err)
+		fuse_iomap_cache_invalidate_range(inode, pos, written);
 
 	/*
 	 * Preserve the original error code if userspace didn't respond or
@@ -2198,6 +2206,19 @@ fuse_iomap_setsize_start(
 	return filemap_write_and_wait(inode->i_mapping);
 }
 
+int
+fuse_iomap_setsize_finish(
+	struct inode		*inode,
+	loff_t			newsize)
+{
+	ASSERT(fuse_has_iomap(inode));
+	ASSERT(fuse_has_iomap_fileio(inode));
+
+	trace_fuse_iomap_setsize(inode, newsize, 0);
+
+	return fuse_iomap_cache_invalidate(inode, newsize);
+}
+
 /*
  * Prepare for a file data block remapping operation by flushing and unmapping
  * all pagecache for the entire range.
@@ -2306,6 +2327,14 @@ fuse_iomap_fallocate(
 
 	trace_fuse_iomap_fallocate(inode, mode, offset, length, new_size);
 
+	if (mode & (FALLOC_FL_COLLAPSE_RANGE | FALLOC_FL_INSERT_RANGE))
+		error = fuse_iomap_cache_invalidate(inode, offset);
+	else
+		error = fuse_iomap_cache_invalidate_range(inode, offset,
+							  length);
+	if (error)
+		return error;
+
 	/*
 	 * If we unmapped blocks from the file range, then we zero the
 	 * pagecache for those regions and push them to disk rather than make
@@ -2323,6 +2352,8 @@ fuse_iomap_fallocate(
 	 */
 	if (new_size) {
 		error = fuse_iomap_setsize_start(inode, new_size);
+		if (!error)
+			error = fuse_iomap_setsize_finish(inode, new_size);
 		if (error)
 			return error;
 
@@ -2365,4 +2396,25 @@ int fuse_iomap_fadvise(struct file *file, loff_t start, loff_t end, int advice)
 	if (needlock)
 		inode_unlock_shared(inode);
 	return ret;
+}
+
+void fuse_iomap_open_truncate(struct inode *inode)
+{
+	ASSERT(fuse_has_iomap(inode));
+	ASSERT(fuse_has_iomap_fileio(inode));
+
+	trace_fuse_iomap_open_truncate(inode);
+
+	fuse_iomap_cache_invalidate(inode, 0);
+}
+
+void fuse_iomap_copied_file_range(struct inode *inode, loff_t offset,
+				  size_t written)
+{
+	ASSERT(fuse_has_iomap(inode));
+	ASSERT(fuse_has_iomap_fileio(inode));
+
+	trace_fuse_iomap_copied_file_range(inode, offset, written);
+
+	fuse_iomap_cache_invalidate_range(inode, offset, written);
 }
