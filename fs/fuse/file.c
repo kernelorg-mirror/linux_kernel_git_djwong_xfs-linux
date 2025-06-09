@@ -278,9 +278,11 @@ static int fuse_open(struct inode *inode, struct file *file)
 	if (is_wb_truncate || dax_truncate)
 		fuse_release_nowrite(inode);
 	if (!err) {
-		if (is_truncate)
+		if (is_truncate) {
 			truncate_pagecache(inode, 0);
-		else if (!(ff->open_flags & FOPEN_KEEP_CACHE))
+			if (fuse_has_iomap_pagecache(inode))
+				fuse_iomap_open_truncate(inode);
+		} else if (!(ff->open_flags & FOPEN_KEEP_CACHE))
 			invalidate_inode_pages2(inode->i_mapping);
 	}
 	if (dax_truncate)
@@ -3176,6 +3178,9 @@ static ssize_t __fuse_copy_file_range(struct file *file_in, loff_t pos_in,
 	truncate_inode_pages_range(inode_out->i_mapping,
 				   ALIGN_DOWN(pos_out, PAGE_SIZE),
 				   ALIGN(pos_out + outarg.size, PAGE_SIZE) - 1);
+
+	if (fuse_has_iomap_pagecache(inode_out))
+		fuse_iomap_copied_file_range(inode_out, pos_out, outarg.size);
 
 	file_update_time(file_out);
 	fuse_write_update_attr(inode_out, pos_out + outarg.size, outarg.size);

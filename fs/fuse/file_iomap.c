@@ -775,6 +775,13 @@ static int fuse_iomap_ioend(struct inode *inode, loff_t pos, size_t written,
 	trace_fuse_iomap_ioend_error(inode, &inarg, err);
 
 	/*
+	 * If the ioend completed successfully, invalidate the range that we
+	 * just completed.
+	 */
+	if (!err)
+		fuse_iomap_cache_invalidate_range(inode, pos, written);
+
+	/*
 	 * Preserve the original error code if userspace didn't respond or
 	 * returned success despite the error we passed along via the ioend.
 	 */
@@ -1819,7 +1826,10 @@ fuse_iomap_setsize(
 	error = inode_newsize_ok(inode, newsize);
 	if (error)
 		return error;
-	return fuse_iomap_setattr_size(inode, newsize);
+	error = fuse_iomap_setattr_size(inode, newsize);
+	if (error)
+		return error;
+	return fuse_iomap_cache_invalidate(inode, newsize);
 }
 
 static int fuse_iomap_punch_range(struct inode *inode, loff_t offset,
@@ -1901,6 +1911,14 @@ fuse_iomap_fallocate(
 
 	trace_fuse_iomap_fallocate(inode, mode, offset, length, new_size);
 
+	if (mode & (FALLOC_FL_COLLAPSE_RANGE | FALLOC_FL_INSERT_RANGE))
+		error = fuse_iomap_cache_invalidate(inode, offset);
+	else
+		error = fuse_iomap_cache_invalidate_range(inode, offset,
+							  length);
+	if (error)
+		return error;
+
 	/*
 	 * If we unmapped blocks from the file range, then we zero the
 	 * pagecache for those regions and push them to disk rather than make
@@ -1935,4 +1953,25 @@ int fuse_dev_ioctl_iomap_support(struct file *file,
 	if (copy_to_user(argp, &ios, sizeof(ios)))
 		return -EFAULT;
 	return 0;
+}
+
+void fuse_iomap_open_truncate(struct inode *inode)
+{
+	ASSERT(fuse_has_iomap(inode));
+	ASSERT(fuse_has_iomap_pagecache(inode));
+
+	trace_fuse_iomap_open_truncate(inode);
+
+	fuse_iomap_cache_invalidate(inode, 0);
+}
+
+void fuse_iomap_copied_file_range(struct inode *inode, loff_t offset,
+				  size_t written)
+{
+	ASSERT(fuse_has_iomap(inode));
+	ASSERT(fuse_has_iomap_pagecache(inode));
+
+	trace_fuse_iomap_copied_file_range(inode, offset, written);
+
+	fuse_iomap_cache_invalidate_range(inode, offset, written);
 }

@@ -1725,6 +1725,9 @@ int fuse_iomap_setsize(struct inode *inode, loff_t newsize);
 void fuse_iomap_set_i_blkbits(struct inode *inode, u8 new_blkbits);
 int fuse_iomap_fallocate(struct file *file, int mode, loff_t offset,
 			 loff_t length, loff_t new_size);
+void fuse_iomap_open_truncate(struct inode *inode);
+void fuse_iomap_copied_file_range(struct inode *inode, loff_t offset,
+				  size_t written);
 
 int fuse_dev_ioctl_iomap_support(struct file *file,
 				 struct fuse_iomap_support __user *argp);
@@ -1789,6 +1792,15 @@ fuse_iomap_cache_lookup(struct inode *inode,
 			enum fuse_iomap_fork whichfork,
 			loff_t off, uint64_t len,
 			struct fuse_iomap *mval);
+
+int fuse_iomap_cache_invalidate_range(struct inode *inode, loff_t offset,
+				      uint64_t length);
+static inline int fuse_iomap_cache_invalidate(struct inode *inode,
+					      loff_t offset)
+{
+	return fuse_iomap_cache_invalidate_range(inode, offset,
+						 FUSE_IOMAP_INVAL_TO_EOF);
+}
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
@@ -1816,11 +1828,15 @@ fuse_iomap_cache_lookup(struct inode *inode,
 # define fuse_iomap_setsize(...)		(-ENOSYS)
 # define fuse_iomap_set_i_blkbits(...)		((void)0)
 # define fuse_iomap_fallocate(...)		(-ENOSYS)
+# define fuse_iomap_open_truncate(...)		((void)0)
+# define fuse_iomap_copied_file_range(...)	((void)0)
 # define fuse_dev_ioctl_iomap_support(...)	(-EOPNOTSUPP)
 # define fuse_iomap_destroy_cache(...)		((void)0)
 # define fuse_iomap_cache_remove(...)		(-ENOSYS)
 # define fuse_iomap_cache_add(...)		(-ENOSYS)
 # define fuse_iomap_cache_upsert(...)		(-ENOSYS)
+# define fuse_iomap_cache_invalidate_range(...)	(-ENOSYS)
+# define fuse_iomap_cache_invalidate(...)	(-ENOSYS)
 #endif
 
 #endif /* _FS_FUSE_I_H */
