@@ -548,7 +548,12 @@ int fuse_fileattr_set(struct mnt_idmap *idmap,
 	struct fuse_file *ff;
 	unsigned int flags = fa->flags;
 	struct fsxattr xfa;
+	struct file_kattr old_ma = { };
+	bool is_wb = (fuse_get_cache_mask(inode) & STATX_CTIME);
 	int err;
+
+	if (is_wb)
+		vfs_fileattr_get(dentry, &old_ma);
 
 	ff = fuse_priv_ioctl_prepare(inode);
 	if (IS_ERR(ff))
@@ -573,6 +578,12 @@ int fuse_fileattr_set(struct mnt_idmap *idmap,
 
 cleanup:
 	fuse_priv_ioctl_cleanup(inode, ff);
+	/*
+	 * If we cache ctime updates and the fileattr changed, then force a
+	 * ctime update.
+	 */
+	if (is_wb && memcmp(&old_ma, fa, sizeof(old_ma)))
+		fuse_update_ctime(inode);
 
 	if (err == -ENOTTY)
 		err = -EOPNOTSUPP;
