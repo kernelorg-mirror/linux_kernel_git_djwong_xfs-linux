@@ -127,6 +127,37 @@ TRACE_EVENT(fuse_request_end,
 		  __entry->unique, __entry->len, __entry->error)
 );
 
+TRACE_EVENT(fuse_fileattr_update_inode,
+	TP_PROTO(const struct inode *inode, unsigned int old_iflags),
+
+	TP_ARGS(inode, old_iflags),
+
+	TP_STRUCT__entry(
+		__field(dev_t,		connection)
+		__field(uint64_t,	ino)
+		__field(uint64_t,	nodeid)
+		__field(loff_t,		isize)
+		__field(unsigned int,	old_iflags)
+		__field(unsigned int,	new_iflags)
+	),
+
+	TP_fast_assign(
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->nodeid		=	fi->nodeid;
+		__entry->isize		=	i_size_read(inode);
+		__entry->old_iflags	=	old_iflags;
+		__entry->new_iflags	=	inode->i_flags;
+	),
+
+	TP_printk("connection %u ino %llu nodeid %llu isize 0x%llx old_iflags 0x%x iflags 0x%x",
+		  __entry->connection, __entry->ino, __entry->nodeid,
+		  __entry->isize, __entry->old_iflags, __entry->new_iflags)
+);
+
 #if IS_ENABLED(CONFIG_FUSE_IOMAP)
 struct fuse_iext_cursor;
 

@@ -4,6 +4,7 @@
  */
 
 #include "fuse_i.h"
+#include "fuse_trace.h"
 
 #include <linux/uio.h>
 #include <linux/compat.h>
@@ -502,6 +503,91 @@ static void fuse_priv_ioctl_cleanup(struct inode *inode, struct fuse_file *ff)
 	fuse_file_release(inode, ff, O_RDONLY, NULL, S_ISDIR(inode->i_mode));
 }
 
+static inline void update_iflag(struct inode *inode, unsigned int iflag,
+				bool set)
+{
+	if (set)
+		inode->i_flags |= iflag;
+	else
+		inode->i_flags &= ~iflag;
+}
+
+static void fuse_fileattr_update_inode(struct inode *inode,
+				       const struct fileattr *fa)
+{
+	unsigned int old_iflags = inode->i_flags;
+
+	/*
+	 * Prior to iomap, the fuse driver sent all file IO operations to the
+	 * fuse server, which was wholly responsible for enforcing the
+	 * immutable and append bits.  With iomap, we let more of the kernel IO
+	 * path stay within the kernel, so we actually have to set the VFS
+	 * flags now so that the enforcement can take place inside the kernel.
+	 */
+	if (!fuse_has_iomap(inode))
+		return;
+
+	/*
+	 * Configure VFS enforcement of the three inode flags that we support.
+	 * XXX: still need to figure out what's going on wrt NOATIME in fuse.
+	 */
+	if (fa->flags_valid) {
+		update_iflag(inode, S_SYNC, fa->flags & FS_SYNC_FL);
+		update_iflag(inode, S_IMMUTABLE, fa->flags & FS_IMMUTABLE_FL);
+		update_iflag(inode, S_APPEND, fa->flags & FS_APPEND_FL);
+	} else if (fa->fsx_xflags) {
+		update_iflag(inode, S_SYNC, fa->fsx_xflags & FS_XFLAG_SYNC);
+		update_iflag(inode, S_IMMUTABLE,
+					fa->fsx_xflags & FS_XFLAG_IMMUTABLE);
+		update_iflag(inode, S_APPEND, fa->fsx_xflags & FS_XFLAG_APPEND);
+	}
+
+	trace_fuse_fileattr_update_inode(inode, old_iflags);
+
+	if (old_iflags != inode->i_flags)
+		fuse_invalidate_attr(inode);
+}
+
+void fuse_fileattr_init(struct inode *inode, const struct fuse_attr *attr)
+{
+	struct fileattr fa;
+	struct fsxattr xfa = { };
+	struct fuse_file *ff;
+	unsigned int flags = 0;
+	int err;
+
+	if (!fuse_has_iomap(inode))
+		return;
+
+	/*
+	 * Don't do this when we're setting up the root inode because the
+	 * connection workers haven't been set up yet.
+	 */
+	if (attr->ino == FUSE_ROOT_ID && attr->blksize == 0)
+		return;
+
+	ff = fuse_priv_ioctl_prepare(inode);
+	if (IS_ERR(ff))
+		return;
+
+	err = fuse_priv_ioctl(inode, ff, FS_IOC_FSGETXATTR, &xfa, sizeof(xfa));
+	if (!err) {
+		fileattr_fill_xflags(&fa, xfa.fsx_xflags);
+		fuse_fileattr_update_inode(inode, &fa);
+		goto cleanup;
+	}
+
+	err = fuse_priv_ioctl(inode, ff, FS_IOC_GETFLAGS, &flags, sizeof(flags));
+	if (!err) {
+		fileattr_fill_flags(&fa, flags);
+		fuse_fileattr_update_inode(inode, &fa);
+		goto cleanup;
+	}
+
+cleanup:
+	fuse_priv_ioctl_cleanup(inode, ff);
+}
+
 int fuse_fileattr_get(struct dentry *dentry, struct fileattr *fa)
 {
 	struct inode *inode = d_inode(dentry);
@@ -572,7 +658,10 @@ int fuse_fileattr_set(struct mnt_idmap *idmap,
 
 		err = fuse_priv_ioctl(inode, ff, FS_IOC_FSSETXATTR,
 				      &xfa, sizeof(xfa));
+		if (err)
+			goto cleanup;
 	}
+	fuse_fileattr_update_inode(inode, fa);
 
 cleanup:
 	fuse_priv_ioctl_cleanup(inode, ff);
