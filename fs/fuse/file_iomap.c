@@ -602,16 +602,16 @@ static int fuse_iomap_from_cache(struct inode *inode, struct iomap *iomap,
 				 const struct fuse_iomap_lookup *lmap)
 {
 	struct fuse_mount *fm = get_fuse_mount(inode);
-	struct fuse_iomap_dev *iodev;
+	struct fuse_backing *fb;
 
-	iodev = fuse_iomap_find_dev(fm->fc, &lmap->map);
-	if (IS_ERR(iodev))
-		return PTR_ERR(iodev);
+	fb = fuse_iomap_find_dev(fm->fc, &lmap->map);
+	if (IS_ERR(fb))
+		return PTR_ERR(fb);
 
-	fuse_iomap_from_server(inode, iomap, iodev, &lmap->map);
+	fuse_iomap_from_server(inode, iomap, fb, &lmap->map);
 	iomap->validity_cookie = lmap->validity_cookie;
 
-	fuse_iomap_dev_put(iodev);
+	fuse_backing_put(fb);
 	return 0;
 }
 
@@ -2480,13 +2480,13 @@ void fuse_iomap_copied_file_range(struct inode *inode, loff_t offset,
 
 static inline bool
 fuse_iomap_upsert_validate_dev(
-	const struct fuse_iomap_dev	*iodev,
+	const struct fuse_backing	*fb,
 	const struct fuse_iomap_io	*map)
 {
 	uint64_t			map_end;
 	sector_t			device_bytes;
 
-	if (!iodev) {
+	if (!fb) {
 		if (BAD_DATA(map->addr != FUSE_IOMAP_NULL_ADDR))
 			return false;
 
@@ -2499,7 +2499,7 @@ fuse_iomap_upsert_validate_dev(
 	if (BAD_DATA(check_add_overflow(map->addr, map->length, &map_end)))
 		return false;
 
-	device_bytes = bdev_nr_sectors(iodev->bdev) << SECTOR_SHIFT;
+	device_bytes = bdev_nr_sectors(fb->bdev) << SECTOR_SHIFT;
 	if (BAD_DATA(map_end > device_bytes))
 		return false;
 
@@ -2513,7 +2513,7 @@ fuse_iomap_upsert_validate_mapping(struct inode *inode,
 				   const struct fuse_iomap_io *map)
 {
 	struct fuse_conn *fc = get_fuse_conn(inode);
-	struct fuse_iomap_dev *iodev;
+	struct fuse_backing *fb;
 	bool ret;
 
 	if (!fuse_iomap_check_mapping(inode, map, iodir))
@@ -2530,12 +2530,12 @@ fuse_iomap_upsert_validate_mapping(struct inode *inode,
 		return true;
 
 	/* Make sure we can find the device */
-	iodev = fuse_iomap_find_dev(fc, map);
-	if (IS_ERR(iodev))
+	fb = fuse_iomap_find_dev(fc, map);
+	if (IS_ERR(fb))
 		return false;
 
-	ret = fuse_iomap_upsert_validate_dev(iodev, map);
-	fuse_iomap_dev_put(iodev);
+	ret = fuse_iomap_upsert_validate_dev(fb, map);
+	fuse_backing_put(fb);
 	return ret;
 }
 
