@@ -99,6 +99,7 @@ int fuse_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	const char *name;
 	umode_t mode = inode->i_mode;
+	bool is_iomap = fuse_has_iomap(inode);
 	int ret;
 
 	if (fuse_is_bad(inode))
@@ -121,8 +122,7 @@ int fuse_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 	 * ACL implementation was merged, so that's why it's gated on regular
 	 * iomap.  XXX: This should be some sort of separate flag?
 	 */
-	if (acl && type == ACL_TYPE_ACCESS &&
-	    fuse_has_iomap(inode) && fc->posix_acl) {
+	if (acl && type == ACL_TYPE_ACCESS && is_iomap && fc->posix_acl) {
 		ret = posix_acl_update_mode(idmap, inode, &mode, &acl);
 		if (ret)
 			return ret;
@@ -172,12 +172,21 @@ int fuse_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 			ret = 0;
 	}
 
-	/* If we scheduled a mode update above, push that to userspace now. */
-	if (!ret && mode != inode->i_mode) {
+	/*
+	 * When we're running in iomap mode, we need to update mode and ctime
+	 * ourselves instead of letting the fuse server figure that out.
+	 */
+	if (!ret && is_iomap) {
 		struct iattr attr = {
-			.ia_valid = ATTR_MODE,
-			.ia_mode = mode,
+			.ia_valid = ATTR_CTIME,
 		};
+
+		inode_set_ctime_current(inode);
+		attr.ia_ctime = inode_get_ctime(inode);
+		if (mode != inode->i_mode) {
+			attr.ia_valid |= ATTR_MODE;
+			attr.ia_mode = mode;
+		}
 
 		ret = fuse_do_setattr(idmap, dentry, &attr, NULL);
 	}
