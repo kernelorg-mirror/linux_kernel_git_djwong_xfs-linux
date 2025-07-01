@@ -159,6 +159,78 @@ TRACE_EVENT(fuse_fileattr_update_inode,
 		  __entry->isize, __entry->old_iflags, __entry->new_iflags)
 );
 
+TRACE_EVENT(fuse_setattr_fill,
+	TP_PROTO(const struct inode *inode,
+		 const struct fuse_setattr_in *inarg),
+	TP_ARGS(inode, inarg),
+
+	TP_STRUCT__entry(
+		__field(dev_t,			connection)
+		__field(uint64_t,		ino)
+		__field(uint64_t,		nodeid)
+		__field(umode_t,		mode)
+		__field(loff_t,			isize)
+
+		__field(uint32_t,		valid)
+		__field(umode_t,		new_mode)
+		__field(uint64_t,		new_size)
+	),
+
+	TP_fast_assign(
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->nodeid		=	inode->i_ino;
+		__entry->isize		=	i_size_read(inode);
+		__entry->valid		=	inarg->valid;
+		__entry->new_mode	=	inarg->mode;
+		__entry->new_size	=	inarg->size;
+	),
+
+	TP_printk("connection %u ino %llu nodeid %llu mode 0%o isize 0x%llx valid 0x%x new_mode 0%o new_size 0x%llx",
+		  __entry->connection, __entry->ino, __entry->nodeid,
+		  __entry->mode, __entry->isize, __entry->valid,
+		  __entry->new_mode, __entry->new_size)
+);
+
+TRACE_EVENT(fuse_setattr,
+	TP_PROTO(const struct inode *inode,
+		 const struct iattr *inarg),
+	TP_ARGS(inode, inarg),
+
+	TP_STRUCT__entry(
+		__field(dev_t,			connection)
+		__field(uint64_t,		ino)
+		__field(uint64_t,		nodeid)
+		__field(umode_t,		mode)
+		__field(loff_t,			isize)
+
+		__field(uint32_t,		valid)
+		__field(umode_t,		new_mode)
+		__field(uint64_t,		new_size)
+	),
+
+	TP_fast_assign(
+		const struct fuse_inode *fi = get_fuse_inode_c(inode);
+		const struct fuse_mount *fm = get_fuse_mount_c(inode);
+
+		__entry->connection	=	fm->fc->dev;
+		__entry->ino		=	fi->orig_ino;
+		__entry->nodeid		=	inode->i_ino;
+		__entry->isize		=	i_size_read(inode);
+		__entry->valid		=	inarg->ia_valid;
+		__entry->new_mode	=	inarg->ia_mode;
+		__entry->new_size	=	inarg->ia_size;
+	),
+
+	TP_printk("connection %u ino %llu nodeid %llu mode 0%o isize 0x%llx valid 0x%x new_mode 0%o new_size 0x%llx",
+		  __entry->connection, __entry->ino, __entry->nodeid,
+		  __entry->mode, __entry->isize, __entry->valid,
+		  __entry->new_mode, __entry->new_size)
+);
+
 #if IS_ENABLED(CONFIG_FUSE_IOMAP)
 struct fuse_iext_cursor;
 
