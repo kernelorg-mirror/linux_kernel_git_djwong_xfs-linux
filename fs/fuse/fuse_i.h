@@ -140,6 +140,10 @@ struct fuse_inode {
 	/** Version of last attribute change */
 	u64 attr_version;
 
+	/** statx file attributes */
+	u64 statx_attributes;
+	u64 statx_attributes_mask;
+
 	union {
 		/* read/write io cache (regular file only) */
 		struct {
@@ -1202,6 +1206,24 @@ void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 				   struct fuse_statx *sx,
 				   u64 attr_valid, u32 cache_mask,
 				   u64 evict_ctr);
+
+/*
+ * These statx attribute flags are set by the VFS so mask them out of replies
+ * from the fuse server.
+ */
+#define FUSE_STATX_VFS_ATTRIBUTES (STATX_ATTR_IMMUTABLE | STATX_ATTR_APPEND | \
+				  STATX_ATTR_AUTOMOUNT | STATX_ATTR_DAX | \
+				  STATX_ATTR_MOUNT_ROOT)
+
+static inline u64 fuse_statx_attributes_mask(const struct fuse_statx *sx)
+{
+	return sx->attributes_mask & ~FUSE_STATX_VFS_ATTRIBUTES;
+}
+
+static inline u64 fuse_statx_attributes(const struct fuse_statx *sx)
+{
+	return sx->attributes & ~FUSE_STATX_VFS_ATTRIBUTES;
+}
 
 u32 fuse_get_cache_mask(struct inode *inode);
 
