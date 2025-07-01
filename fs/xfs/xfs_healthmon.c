@@ -1485,19 +1485,15 @@ xfs_healthmon_validate(
 	return true;
 }
 
-/* Handle ioctls for the health monitoring thread. */
+/* Reconfigure the health monitor. */
 STATIC long
-xfs_healthmon_ioctl(
+xfs_healthmon_reconfigure(
 	struct file			*file,
 	unsigned int			cmd,
-	unsigned long			p)
+	void __user			*arg)
 {
 	struct xfs_health_monitor	hmo;
 	struct xfs_healthmon		*hm = file->private_data;
-	void __user			*arg = (void __user *)p;
-
-	if (cmd != XFS_IOC_HEALTH_MONITOR)
-		return -ENOTTY;
 
 	if (copy_from_user(&hmo, arg, sizeof(hmo)))
 		return -EFAULT;
@@ -1510,6 +1506,25 @@ xfs_healthmon_ioctl(
 	hm->verbose = !!(hmo.flags & XFS_HEALTH_MONITOR_VERBOSE);
 	mutex_unlock(&hm->lock);
 	return 0;
+}
+
+/* Handle ioctls for the health monitoring thread. */
+STATIC long
+xfs_healthmon_ioctl(
+	struct file			*file,
+	unsigned int			cmd,
+	unsigned long			p)
+{
+	void __user			*arg = (void __user *)p;
+
+	switch (cmd) {
+	case XFS_IOC_HEALTH_MONITOR:
+		return xfs_healthmon_reconfigure(file, cmd, arg);
+	default:
+		break;
+	}
+
+	return -ENOTTY;
 }
 
 static const struct file_operations xfs_healthmon_fops = {
