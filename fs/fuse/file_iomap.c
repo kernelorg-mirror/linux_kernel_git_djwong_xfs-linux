@@ -575,11 +575,103 @@ static struct fuse_iomap_dev *fuse_iomap_dev_alloc(struct file *file)
 	return fb;
 }
 
+#define FUSE_IOMAP_CONFIG_ALL (FUSE_IOMAP_CONFIG_SID | \
+			       FUSE_IOMAP_CONFIG_UUID | \
+			       FUSE_IOMAP_CONFIG_BLOCKSIZE | \
+			       FUSE_IOMAP_CONFIG_MAX_LINKS | \
+			       FUSE_IOMAP_CONFIG_TIME | \
+			       FUSE_IOMAP_CONFIG_MAXBYTES)
+
+static int fuse_iomap_config(struct fuse_mount *fm)
+{
+	struct fuse_iomap_config_in inarg = {
+		.maxbytes = MAX_LFS_FILESIZE,
+	};
+	struct fuse_iomap_config_out outarg = { };
+	FUSE_ARGS(args);
+	struct super_block *sb = fm->sb;
+	int err;
+
+	args.opcode = FUSE_IOMAP_CONFIG;
+	args.nodeid = 0;
+	args.in_numargs = 1;
+	args.in_args[0].size = sizeof(inarg);
+	args.in_args[0].value = &inarg;
+	args.out_numargs = 1;
+	args.out_args[0].size = sizeof(outarg);
+	args.out_args[0].value = &outarg;
+	args.force = true;
+	args.nocreds = true;
+	err = fuse_simple_request(fm, &args);
+	if (err == -ENOSYS)
+		return 0;
+	if (err)
+		return err;
+
+	trace_fuse_iomap_config(fm, &outarg);
+
+	if (outarg.flags & ~FUSE_IOMAP_CONFIG_ALL)
+		return -EINVAL;
+
+	if (outarg.s_uuid_len > sizeof(outarg.s_uuid))
+		return -EINVAL;
+
+	if (memchr_inv(outarg.s_pad, 0, sizeof(outarg.s_pad)))
+		return -EINVAL;
+
+	if (outarg.flags & FUSE_IOMAP_CONFIG_BLOCKSIZE) {
+		if (sb->s_bdev) {
+#ifdef CONFIG_BLOCK
+			if (!sb_set_blocksize(sb, outarg.s_blocksize))
+				return -EINVAL;
+#else
+			/*
+			 * XXX: how do we have a bdev filesystem without
+			 * CONFIG_BLOCK???
+			 */
+			return -EINVAL;
+#endif
+		} else {
+			sb->s_blocksize = outarg.s_blocksize;
+			sb->s_blocksize_bits = blksize_bits(outarg.s_blocksize);
+		}
+	}
+
+	if (outarg.flags & FUSE_IOMAP_CONFIG_SID)
+		memcpy(sb->s_id, outarg.s_id, sizeof(sb->s_id));
+
+	if (outarg.flags & FUSE_IOMAP_CONFIG_UUID) {
+		memcpy(&sb->s_uuid, outarg.s_uuid, outarg.s_uuid_len);
+		sb->s_uuid_len = outarg.s_uuid_len;
+	}
+
+	if (outarg.flags & FUSE_IOMAP_CONFIG_MAX_LINKS)
+		sb->s_max_links = outarg.s_max_links;
+
+	if (outarg.flags & FUSE_IOMAP_CONFIG_TIME) {
+		sb->s_time_gran = outarg.s_time_gran;
+		sb->s_time_min = outarg.s_time_min;
+		sb->s_time_max = outarg.s_time_max;
+	}
+
+	if (outarg.flags & FUSE_IOMAP_CONFIG_MAXBYTES)
+		sb->s_maxbytes = outarg.s_maxbytes;
+
+	return 0;
+}
+
 bool fuse_iomap_fill_super(struct fuse_mount *fm)
 {
 	struct fuse_conn *fc = fm->fc;
 	struct super_block *sb = fm->sb;
 	int res;
+
+	res = fuse_iomap_config(fm);
+	if (res) {
+		printk(KERN_ERR "%s: could not configure iomap, err=%d",
+		       sb->s_id, res);
+		return false;
+	}
 
 	if (sb->s_bdev) {
 		/*
