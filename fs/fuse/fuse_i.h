@@ -1380,6 +1380,9 @@ int fuse_init_fs_context_submount(struct fs_context *fsc);
  */
 void fuse_conn_destroy(struct fuse_mount *fm);
 
+/* Send the FUSE_DESTROY command. */
+void fuse_send_destroy(struct fuse_mount *fm);
+
 /* Drop the connection and free the fuse mount */
 void fuse_mount_destroy(struct fuse_mount *fm);
 
@@ -1639,6 +1642,7 @@ int fuse_iomap_conn_alloc(struct fuse_conn *fc);
 void fuse_iomap_conn_put(struct fuse_conn *fc);
 
 int fuse_iomap_dev_add(struct fuse_conn *fc, const struct fuse_backing_map *map);
+void fuse_iomap_conn_destroy(struct fuse_mount *fm);
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
@@ -1646,6 +1650,7 @@ int fuse_iomap_dev_add(struct fuse_conn *fc, const struct fuse_backing_map *map)
 # define fuse_iomap_conn_alloc(...)		(0)
 # define fuse_iomap_conn_put(...)		((void)0)
 # define fuse_iomap_dev_add(...)		(-ENOSYS)
+# define fuse_iomap_conn_destroy(...)		((void)0)
 #endif
 
 #endif /* _FS_FUSE_I_H */

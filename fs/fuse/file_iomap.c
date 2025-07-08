@@ -540,6 +540,12 @@ bool fuse_iomap_fill_super(struct fuse_mount *fm)
 		}
 	}
 
+	/*
+	 * Enable syncfs for iomap fuse servers so that we can send a final
+	 * flush at unmount time.  This also means that we can support
+	 * freeze/thaw properly.
+	 */
+	fc->sync_fs = true;
 	return true;
 }
 
@@ -584,4 +590,21 @@ out_fput:
 	fput(file);
 out:
 	return res;
+}
+
+void fuse_iomap_conn_destroy(struct fuse_mount *fm)
+{
+	struct fuse_conn *fc = fm->fc;
+
+	/*
+	 * Flush all pending commands, syncfs, flush that, and send a destroy
+	 * command.  This gives the fuse server a chance to process all the
+	 * pending releases, write the last bits of metadata changes to disk,
+	 * and close the iomap block devices before we return from the umount
+	 * call.  The caller already flushed previously pending requests, so we
+	 * only need the flush to wait for syncfs.
+	 */
+	sync_filesystem(fm->sb);
+	fuse_flush_requests(fc, 60 * HZ);
+	fuse_send_destroy(fm);
 }

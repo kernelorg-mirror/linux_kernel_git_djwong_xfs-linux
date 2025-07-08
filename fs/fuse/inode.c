@@ -618,7 +618,7 @@ static void fuse_umount_begin(struct super_block *sb)
 		retire_super(sb);
 }
 
-static void fuse_send_destroy(struct fuse_mount *fm)
+void fuse_send_destroy(struct fuse_mount *fm)
 {
 	if (fm->fc->conn_init) {
 		FUSE_ARGS(args);
@@ -2064,7 +2064,9 @@ void fuse_conn_destroy(struct fuse_mount *fm)
 	struct fuse_conn *fc = fm->fc;
 
 	fuse_flush_requests(fc, 30 * HZ);
-	if (fc->destroy)
+	if (fc->iomap)
+		fuse_iomap_conn_destroy(fm);
+	else if (fc->destroy)
 		fuse_send_destroy(fm);
 
 	fuse_abort_conn(fc);
