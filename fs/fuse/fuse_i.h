@@ -1364,6 +1364,9 @@ int fuse_init_fs_context_submount(struct fs_context *fsc);
  */
 void fuse_conn_destroy(struct fuse_mount *fm);
 
+/* Send the FUSE_DESTROY command. */
+void fuse_send_destroy(struct fuse_mount *fm);
+
 /* Drop the connection and free the fuse mount */
 void fuse_mount_destroy(struct fuse_mount *fm);
 
@@ -1641,6 +1644,8 @@ void fuse_iomap_sysfs_cleanup(struct kobject *kobj);
 
 int fuse_iomap_backing_open(struct fuse_conn *fc, struct fuse_backing *fb);
 int fuse_iomap_backing_close(struct fuse_conn *fc, struct fuse_backing *fb);
+void fuse_iomap_mount(struct fuse_mount *fm);
+void fuse_iomap_unmount(struct fuse_mount *fm);
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
@@ -1648,6 +1653,8 @@ int fuse_iomap_backing_close(struct fuse_conn *fc, struct fuse_backing *fb);
 # define fuse_iomap_sysfs_cleanup(...)		((void)0)
 # define fuse_iomap_backing_open(...)		(-EOPNOTSUPP)
 # define fuse_iomap_backing_close(...)		(-EOPNOTSUPP)
+# define fuse_iomap_mount(...)			((void)0)
+# define fuse_iomap_unmount(...)		((void)0)
 #endif
 
 #endif /* _FS_FUSE_I_H */
