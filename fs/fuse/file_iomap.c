@@ -604,3 +604,32 @@ const struct fuse_backing_ops fuse_iomap_backing_ops = {
 	.may_close = fuse_iomap_may_close,
 	.post_open = fuse_iomap_post_open,
 };
+
+void fuse_iomap_mount(struct fuse_mount *fm)
+{
+	struct fuse_conn *fc = fm->fc;
+
+	/*
+	 * Enable syncfs for iomap fuse servers so that we can send a final
+	 * flush at unmount time.  This also means that we can support
+	 * freeze/thaw properly.
+	 */
+	fc->sync_fs = true;
+}
+
+void fuse_iomap_unmount(struct fuse_mount *fm)
+{
+	struct fuse_conn *fc = fm->fc;
+
+	/*
+	 * Flush all pending commands, syncfs, flush that, and send a destroy
+	 * command.  This gives the fuse server a chance to process all the
+	 * pending releases, write the last bits of metadata changes to disk,
+	 * and close the iomap block devices before we return from the umount
+	 * call.  The caller already flushed previously pending requests, so we
+	 * only need the flush to wait for syncfs.
+	 */
+	sync_filesystem(fm->sb);
+	fuse_flush_requests_and_wait(fc, secs_to_jiffies(60));
+	fuse_send_destroy(fm);
+}
