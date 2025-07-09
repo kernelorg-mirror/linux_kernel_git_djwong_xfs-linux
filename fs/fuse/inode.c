@@ -2094,8 +2094,17 @@ void fuse_conn_destroy(struct fuse_mount *fm)
 {
 	struct fuse_conn *fc = fm->fc;
 
-	if (fc->destroy)
+	if (fc->destroy) {
+		/*
+		 * Flush all pending requests (most of which will be
+		 * FUSE_RELEASE) before sending FUSE_DESTROY, because the fuse
+		 * server must close the filesystem before replying to the
+		 * destroy message, because unmount is about to release its
+		 * O_EXCL hold on the block device.
+		 */
+		fuse_flush_requests_and_wait(fc);
 		fuse_send_destroy(fm);
+	}
 
 	fuse_abort_conn(fc);
 	fuse_wait_aborted(fc);
