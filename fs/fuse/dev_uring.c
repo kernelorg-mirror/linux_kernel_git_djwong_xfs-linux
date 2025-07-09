@@ -7,6 +7,7 @@
 #include "fuse_i.h"
 #include "dev_uring_i.h"
 #include "fuse_dev_i.h"
+#include "fuse_trace.h"
 
 #include <linux/fs.h>
 #include <linux/io_uring/cmd.h>
@@ -1265,11 +1266,16 @@ void fuse_uring_queue_fuse_req(struct fuse_iqueue *fiq, struct fuse_req *req)
 
 	err = -EINVAL;
 	queue = fuse_uring_task_to_queue(ring);
-	if (!queue)
+	if (!queue) {
+		trace_fuse_request_send(req);
 		goto err;
+	}
 
 	if (req->in.h.opcode != FUSE_NOTIFY_REPLY)
 		req->in.h.unique = fuse_get_unique(fiq);
+
+	/* tracepoint captures in.h.unique */
+	trace_fuse_request_send(req);
 
 	spin_lock(&queue->lock);
 	err = -ENOTCONN;
