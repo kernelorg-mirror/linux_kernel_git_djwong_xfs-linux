@@ -2040,6 +2040,7 @@ void fuse_conn_destroy(struct fuse_mount *fm)
 {
 	struct fuse_conn *fc = fm->fc;
 
+	fuse_flush_requests_and_wait(fc, secs_to_jiffies(30));
 	if (fc->destroy)
 		fuse_send_destroy(fm);
 
