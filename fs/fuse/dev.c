@@ -376,10 +376,15 @@ static void fuse_dev_queue_req(struct fuse_iqueue *fiq, struct fuse_req *req)
 	if (fiq->connected) {
 		if (req->in.h.opcode != FUSE_NOTIFY_REPLY)
 			req->in.h.unique = fuse_get_unique_locked(fiq);
+
+		/* tracepoint captures in.h.unique */
+		trace_fuse_request_send(req);
+
 		list_add_tail(&req->list, &fiq->pending);
 		fuse_dev_wake_and_unlock(fiq);
 	} else {
 		spin_unlock(&fiq->lock);
+		trace_fuse_request_send(req);
 		req->out.h.error = -ENOTCONN;
 		clear_bit(FR_PENDING, &req->flags);
 		fuse_request_end(req);
@@ -398,7 +403,6 @@ static void fuse_send_one(struct fuse_iqueue *fiq, struct fuse_req *req)
 	req->in.h.len = sizeof(struct fuse_in_header) +
 		fuse_len_args(req->args->in_numargs,
 			      (struct fuse_arg *) req->args->in_args);
-	trace_fuse_request_send(req);
 	fiq->ops->send_req(fiq, req);
 }
 
