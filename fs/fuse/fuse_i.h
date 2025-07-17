@@ -161,6 +161,13 @@ struct fuse_inode {
 
 			/* waitq for direct-io completion */
 			wait_queue_head_t direct_io_waitq;
+
+#ifdef CONFIG_FUSE_IOMAP
+			/* pending io completions */
+			spinlock_t ioend_lock;
+			struct work_struct ioend_work;
+			struct list_head ioend_list;
+#endif
 		};
 
 		/* readdir cache (directory only) */
@@ -228,6 +235,8 @@ enum {
 	FUSE_I_CACHE_IO_MODE,
 	/* Use iomap for directio reads and writes */
 	FUSE_I_IOMAP_DIRECTIO,
+	/* Use iomap for buffered read and writes */
+	FUSE_I_IOMAP_FILEIO,
 };
 
 struct fuse_conn;
@@ -915,6 +924,9 @@ struct fuse_conn {
 
 	/* Use fs/iomap for direct I/O operations */
 	unsigned int iomap_directio:1;
+
+	/* Use fs/iomap for buffered I/O operations */
+	unsigned int iomap_fileio:1;
 
 	/* Use io_uring for communication */
 	unsigned int io_uring;
@@ -1631,6 +1643,9 @@ extern void fuse_sysctl_unregister(void);
 #define fuse_sysctl_unregister()	do { } while (0)
 #endif /* CONFIG_SYSCTL */
 
+sector_t fuse_bmap(struct address_space *mapping, sector_t block);
+ssize_t fuse_direct_IO(struct kiocb *iocb, struct iov_iter *iter);
+
 #if IS_ENABLED(CONFIG_FUSE_IOMAP)
 # include <linux/fiemap.h>
 # include <linux/iomap.h>
@@ -1674,6 +1689,28 @@ static inline bool fuse_want_iomap_directio(const struct kiocb *iocb)
 
 ssize_t fuse_iomap_direct_read(struct kiocb *iocb, struct iov_iter *to);
 ssize_t fuse_iomap_direct_write(struct kiocb *iocb, struct iov_iter *from);
+
+static inline bool fuse_has_iomap_fileio(const struct inode *inode)
+{
+	const struct fuse_inode *fi = get_fuse_inode_c(inode);
+
+	return test_bit(FUSE_I_IOMAP_FILEIO, &fi->state);
+}
+
+static inline bool fuse_want_iomap_buffered_io(const struct kiocb *iocb)
+{
+	return fuse_has_iomap_fileio(file_inode(iocb->ki_filp));
+}
+
+int fuse_iomap_mmap(struct file *file, struct vm_area_struct *vma);
+ssize_t fuse_iomap_buffered_read(struct kiocb *iocb, struct iov_iter *to);
+ssize_t fuse_iomap_buffered_write(struct kiocb *iocb, struct iov_iter *from);
+int fuse_iomap_setsize(struct inode *inode, loff_t newsize);
+void fuse_iomap_set_i_blkbits(struct inode *inode, u8 new_blkbits);
+int fuse_iomap_fallocate(struct file *file, int mode, loff_t offset,
+			 loff_t length, loff_t new_size);
+int fuse_iomap_flush_unmap_range(struct inode *inode, loff_t pos,
+				 loff_t endpos);
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
@@ -1692,6 +1729,15 @@ ssize_t fuse_iomap_direct_write(struct kiocb *iocb, struct iov_iter *from);
 # define fuse_want_iomap_directio(...)		(false)
 # define fuse_iomap_direct_read(...)		(-ENOSYS)
 # define fuse_iomap_direct_write(...)		(-ENOSYS)
+# define fuse_has_iomap_fileio(...)		(false)
+# define fuse_want_iomap_buffered_io(...)	(false)
+# define fuse_iomap_mmap(...)			(-ENOSYS)
+# define fuse_iomap_buffered_read(...)		(-ENOSYS)
+# define fuse_iomap_buffered_write(...)		(-ENOSYS)
+# define fuse_iomap_setsize(...)		(-ENOSYS)
+# define fuse_iomap_set_i_blkbits(...)		((void)0)
+# define fuse_iomap_fallocate(...)		(-ENOSYS)
+# define fuse_iomap_flush_unmap_range(...)	(-ENOSYS)
 #endif
 
 #endif /* _FS_FUSE_I_H */
