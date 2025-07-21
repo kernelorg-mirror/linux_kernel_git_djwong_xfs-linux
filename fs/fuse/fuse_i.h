@@ -276,6 +276,8 @@ enum {
 	FUSE_I_EXCLUSIVE,
 	/* Use iomap for this inode */
 	FUSE_I_IOMAP,
+	/* Enable untorn writes */
+	FUSE_I_ATOMIC,
 };
 
 struct fuse_conn;
@@ -1774,6 +1776,13 @@ static inline bool fuse_inode_has_iomap(const struct inode *inode)
 	const struct fuse_inode *fi = get_fuse_inode(inode);
 
 	return test_bit(FUSE_I_IOMAP, &fi->state);
+}
+
+static inline bool fuse_inode_has_atomic(const struct inode *inode)
+{
+	const struct fuse_inode *fi = get_fuse_inode(inode);
+
+	return test_bit(FUSE_I_ATOMIC, &fi->state);
 }
 
 int fuse_iomap_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
