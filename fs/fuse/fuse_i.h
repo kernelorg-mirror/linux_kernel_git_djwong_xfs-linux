@@ -253,6 +253,8 @@ enum {
 	FUSE_I_CACHE_IO_MODE,
 	/* Use iomap for this inode */
 	FUSE_I_IOMAP,
+	/* Enable untorn writes */
+	FUSE_I_ATOMIC,
 };
 
 struct fuse_conn;
@@ -1726,6 +1728,13 @@ static inline bool fuse_inode_has_iomap(const struct inode *inode)
 	const struct fuse_inode *fi = get_fuse_inode_c(inode);
 
 	return test_bit(FUSE_I_IOMAP, &fi->state);
+}
+
+static inline bool fuse_inode_has_atomic(const struct inode *inode)
+{
+	const struct fuse_inode *fi = get_fuse_inode_c(inode);
+
+	return test_bit(FUSE_I_ATOMIC, &fi->state);
 }
 
 static inline bool fuse_want_iomap_directio(const struct kiocb *iocb)
