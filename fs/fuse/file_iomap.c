@@ -1114,6 +1114,8 @@ void fuse_iomap_open(struct inode *inode, struct file *file)
 {
 	if (fuse_has_iomap_directio(inode))
 		file->f_mode |= FMODE_NOWAIT | FMODE_CAN_ODIRECT;
+	if (fuse_has_iomap_atomic(inode))
+		file->f_mode |= FMODE_CAN_ATOMIC_WRITE;
 	if (fuse_has_iomap_fileio(inode))
 		file->f_mode |= FMODE_NOWAIT;
 }
@@ -1185,6 +1187,24 @@ static inline void fuse_iomap_clear_fileio(struct inode *inode)
 	clear_bit(FUSE_I_IOMAP_FILEIO, &fi->state);
 }
 
+static inline void fuse_iomap_set_atomic(struct inode *inode)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	ASSERT(get_fuse_conn_c(inode)->iomap_directio);
+
+	set_bit(FUSE_I_IOMAP_ATOMIC, &fi->state);
+}
+
+static inline void fuse_iomap_clear_atomic(struct inode *inode)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	ASSERT(get_fuse_conn_c(inode)->iomap_directio);
+
+	clear_bit(FUSE_I_IOMAP_ATOMIC, &fi->state);
+}
+
 void fuse_iomap_init_inode(struct inode *inode, unsigned attr_flags)
 {
 	struct fuse_conn *conn = get_fuse_conn(inode);
@@ -1193,6 +1213,9 @@ void fuse_iomap_init_inode(struct inode *inode, unsigned attr_flags)
 		fuse_iomap_set_directio(inode);
 	if (conn->iomap_fileio && (attr_flags & FUSE_ATTR_IOMAP_FILEIO))
 		fuse_iomap_set_fileio(inode);
+	if ((conn->iomap_fileio || conn->iomap_directio) &&
+	    (attr_flags & FUSE_ATTR_IOMAP_ATOMIC))
+		fuse_iomap_set_atomic(inode);
 
 	trace_fuse_iomap_init_inode(inode);
 }
@@ -1201,6 +1224,8 @@ void fuse_iomap_evict_inode(struct inode *inode)
 {
 	trace_fuse_iomap_evict_inode(inode);
 
+	if (fuse_has_iomap_atomic(inode))
+		fuse_iomap_clear_atomic(inode);
 	if (fuse_has_iomap_directio(inode))
 		fuse_iomap_clear_directio(inode);
 	if (fuse_has_iomap_fileio(inode))
@@ -1396,6 +1421,17 @@ restart:
 	return kiocb_modified(iocb);
 }
 
+static inline ssize_t fuse_iomap_atomic_write_valid(struct kiocb *iocb,
+						    struct iov_iter *from)
+{
+	struct inode *inode = file_inode(iocb->ki_filp);
+
+	if (iov_iter_count(from) != i_blocksize(inode))
+		return -EINVAL;
+
+	return generic_atomic_write_valid(iocb, from);
+}
+
 ssize_t fuse_iomap_direct_write(struct kiocb *iocb, struct iov_iter *from)
 {
 	struct inode *inode = file_inode(iocb->ki_filp);
@@ -1411,6 +1447,12 @@ ssize_t fuse_iomap_direct_write(struct kiocb *iocb, struct iov_iter *from)
 
 	if (!count)
 		return 0;
+
+	if (iocb->ki_flags & IOCB_ATOMIC) {
+		ret = fuse_iomap_atomic_write_valid(iocb, from);
+		if (ret)
+			return ret;
+	}
 
 	/*
 	 * direct I/O must be aligned to the fsblock size or we fall back to
@@ -1813,6 +1855,12 @@ ssize_t fuse_iomap_buffered_write(struct kiocb *iocb, struct iov_iter *from)
 
 	if (!iov_iter_count(from))
 		return 0;
+
+	if (iocb->ki_flags & IOCB_ATOMIC) {
+		ret = fuse_iomap_atomic_write_valid(iocb, from);
+		if (ret)
+			return ret;
+	}
 
 	ret = fuse_iomap_ilock_iocb(iocb, EXCL);
 	if (ret)

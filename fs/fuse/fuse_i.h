@@ -237,6 +237,8 @@ enum {
 	FUSE_I_IOMAP_DIRECTIO,
 	/* Use iomap for buffered read and writes */
 	FUSE_I_IOMAP_FILEIO,
+	/* Use iomap for atomic writes */
+	FUSE_I_IOMAP_ATOMIC,
 };
 
 struct fuse_conn;
@@ -1669,6 +1671,13 @@ static inline bool fuse_has_iomap_directio(const struct inode *inode)
 	const struct fuse_inode *fi = get_fuse_inode_c(inode);
 
 	return test_bit(FUSE_I_IOMAP_DIRECTIO, &fi->state);
+}
+
+static inline bool fuse_has_iomap_atomic(const struct inode *inode)
+{
+	const struct fuse_inode *fi = get_fuse_inode_c(inode);
+
+	return test_bit(FUSE_I_IOMAP_ATOMIC, &fi->state);
 }
 
 static inline bool fuse_want_iomap_directio(const struct kiocb *iocb)

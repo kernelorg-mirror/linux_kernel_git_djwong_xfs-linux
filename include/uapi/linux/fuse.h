@@ -243,6 +243,7 @@
  *  - add FUSE_IOMAP_DIRECTIO/FUSE_ATTR_IOMAP_DIRECTIO for direct I/O support
  *  - add FUSE_IOMAP_FILEIO/FUSE_ATTR_IOMAP_FILEIO for buffered I/O support
  *  - add FUSE_IOMAP_CONFIG so the fuse server can configure more fs geometry
+ *  - add FUSE_ATTR_IOMAP_ATOMIC for single-fsblock atomic write support
  */
 
 #ifndef _LINUX_FUSE_H
@@ -603,11 +604,13 @@ struct fuse_file_lock {
  * FUSE_ATTR_DAX: Enable DAX for this file in per inode DAX mode
  * FUSE_ATTR_IOMAP_DIRECTIO: Use iomap for directio
  * FUSE_ATTR_IOMAP_FILEIO: Use iomap for buffered io
+ * FUSE_ATTR_IOMAP_ATOMIC: Use iomap for atomic writes
  */
 #define FUSE_ATTR_SUBMOUNT      (1 << 0)
 #define FUSE_ATTR_DAX		(1 << 1)
 #define FUSE_ATTR_IOMAP_DIRECTIO	(1 << 2)
 #define FUSE_ATTR_IOMAP_FILEIO	(1 << 3)
+#define FUSE_ATTR_IOMAP_ATOMIC	(1 << 4)
 
 /**
  * Open flags
