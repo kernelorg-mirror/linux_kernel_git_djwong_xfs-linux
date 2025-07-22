@@ -1012,7 +1012,7 @@ fuse_should_send_iomap_ioend(const struct fuse_mount *fm,
 static inline bool fuse_ioend_is_append(const struct fuse_inode *fi,
 					loff_t pos, size_t written)
 {
-	return pos + written > i_size_read(&fi->inode);
+	return pos + written > fi->i_disk_size;
 }
 
 static int fuse_iomap_ioend(struct inode *inode, loff_t pos, size_t written,
