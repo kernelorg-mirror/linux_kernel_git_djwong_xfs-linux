@@ -1028,6 +1028,7 @@ static int fuse_iomap_ioend(struct inode *inode, loff_t pos, size_t written,
 		.written = written,
 		.new_addr = new_addr,
 	};
+	struct fuse_iomap_ioend_out outarg = { };
 
 	if (fuse_ioend_is_append(fi, pos, written))
 		inarg.ioendflags |= FUSE_IOMAP_IOEND_APPEND;
@@ -1043,6 +1044,9 @@ static int fuse_iomap_ioend(struct inode *inode, loff_t pos, size_t written,
 		args.in_numargs = 1;
 		args.in_args[0].size = sizeof(inarg);
 		args.in_args[0].value = &inarg;
+		args.out_numargs = 1;
+		args.out_args[0].size = sizeof(outarg);
+		args.out_args[0].value = &outarg;
 		err = fuse_simple_request(fm, &args);
 		switch (err) {
 		case -ENOSYS:
@@ -1056,7 +1060,8 @@ static int fuse_iomap_ioend(struct inode *inode, loff_t pos, size_t written,
 		case 0:
 			break;
 		default:
-			trace_fuse_iomap_ioend_error(inode, &inarg, err);
+			trace_fuse_iomap_ioend_error(inode, &inarg, &outarg,
+						     err);
 
 			/*
 			 * If the write IO failed, return the failure code to
@@ -1077,6 +1082,7 @@ static int fuse_iomap_ioend(struct inode *inode, loff_t pos, size_t written,
 	 * confusingly takes the new i_size as "pos".  Invalidate cached
 	 * mappings for the file range that we just completed.
 	 */
+	fi->i_disk_size = outarg.newsize;
 	fuse_write_update_attr(inode, pos + written, written);
 	fuse_iomap_cache_invalidate_range(inode, pos, written);
 	return 0;
@@ -2322,10 +2328,13 @@ fuse_iomap_setsize_finish(
 	struct inode		*inode,
 	loff_t			newsize)
 {
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
 	ASSERT(fuse_inode_has_iomap(inode));
 
 	trace_fuse_iomap_setsize(inode, newsize, 0);
 
+	fi->i_disk_size = newsize;
 	return fuse_iomap_cache_invalidate(inode, newsize);
 }
 
@@ -2559,20 +2568,26 @@ out_killsb:
 
 void fuse_iomap_open_truncate(struct inode *inode)
 {
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
 	ASSERT(fuse_inode_has_iomap(inode));
 
 	trace_fuse_iomap_open_truncate(inode);
 
 	fuse_iomap_cache_invalidate(inode, 0);
+	fi->i_disk_size = 0;
 }
 
 void fuse_iomap_release_truncate(struct inode *inode)
 {
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
 	ASSERT(fuse_inode_has_iomap(inode));
 
 	trace_fuse_iomap_release_truncate(inode);
 
 	fuse_iomap_cache_invalidate(inode, 0);
+	fi->i_disk_size = 0;
 }
 
 void fuse_iomap_copied_file_range(struct inode *inode, loff_t offset,
@@ -2827,4 +2842,10 @@ int fuse_dev_ioctl_iomap_set_blocksize(struct file *file,
 	ret = set_blocksize(fb->file, fbi.blocksize);
 	fuse_backing_put(fb);
 	return ret;
+}
+
+void fuse_iomap_set_disk_size(struct fuse_inode *fi, loff_t newsize)
+{
+	if (fuse_inode_has_iomap(&fi->inode))
+		fi->i_disk_size = newsize;
 }

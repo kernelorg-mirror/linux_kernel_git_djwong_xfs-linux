@@ -301,6 +301,8 @@ void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 	else
 		fi->cached_i_blkbits = fc->blkbits;
 
+	fuse_iomap_set_disk_size(fi, attr->size);
+
 	/*
 	 * Don't set the sticky bit in i_mode, unless we want the VFS
 	 * to check permissions.  This prevents failures due to the
@@ -355,6 +357,7 @@ static void fuse_change_attributes_i(struct inode *inode, struct fuse_attr *attr
 	 * in the inode.
 	 */
 	cache_mask = fuse_get_cache_mask(inode);
+	fuse_iomap_set_disk_size(fi, attr->size);
 	if (cache_mask & STATX_SIZE)
 		attr->size = i_size_read(inode);
 

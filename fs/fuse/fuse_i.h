@@ -211,6 +211,9 @@ struct fuse_inode {
 
 			/* cached iomap mappings */
 			struct fuse_iomap_cache cache;
+
+			/* file size as reported by fuse server */
+			loff_t i_disk_size;
 		};
 #endif
 
@@ -1880,6 +1883,7 @@ int fuse_iomap_upsert(struct fuse_conn *fc,
 		      const struct fuse_iomap_upsert_out *outarg);
 int fuse_iomap_inval(struct fuse_conn *fc,
 		     const struct fuse_iomap_inval_out *outarg);
+void fuse_iomap_set_disk_size(struct fuse_inode *fi, loff_t newsize);
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
@@ -1916,6 +1920,7 @@ int fuse_iomap_inval(struct fuse_conn *fc,
 # define fuse_inode_caches_iomaps(...)		(false)
 # define fuse_iomap_upsert(...)			(-ENOSYS)
 # define fuse_iomap_inval(...)			(-ENOSYS)
+# define fuse_iomap_set_disk_size(...)		((void)0)
 #endif
 
 #endif /* _FS_FUSE_I_H */

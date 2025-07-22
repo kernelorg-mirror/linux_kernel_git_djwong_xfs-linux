@@ -86,7 +86,8 @@ OPCODES
 		__field(dev_t,			connection) \
 		__field(uint64_t,		ino) \
 		__field(uint64_t,		nodeid) \
-		__field(loff_t,			isize)
+		__field(loff_t,			isize) \
+		__field(loff_t,			idisksize)
 
 #define FUSE_INODE_ASSIGN(inode, fi, fm) \
 		const struct fuse_inode *fi = get_fuse_inode(inode); \
@@ -95,16 +96,19 @@ OPCODES
 		__entry->connection	=	(fm)->fc->dev; \
 		__entry->ino		=	(fi)->orig_ino; \
 		__entry->nodeid		=	(fi)->nodeid; \
-		__entry->isize		=	i_size_read(inode)
+		__entry->isize		=	i_size_read(inode); \
+		__entry->idisksize	=	fuse_inode_has_iomap(inode) ? \
+							(fi)->i_disk_size : 0
 
 #define FUSE_INODE_FMT \
-		"connection %u ino %llu nodeid %llu isize 0x%llx"
+		"connection %u ino %llu nodeid %llu isize 0x%llx idisksize 0x%llx"
 
 #define FUSE_INODE_PRINTK_ARGS \
 		__entry->connection, \
 		__entry->ino, \
 		__entry->nodeid, \
-		__entry->isize
+		__entry->isize, \
+		__entry->idisksize
 
 #define FUSE_FILE_RANGE_FIELDS(prefix) \
 		__field(loff_t,			prefix##offset) \
@@ -671,15 +675,17 @@ TRACE_EVENT(fuse_iomap_ioend,
 TRACE_EVENT(fuse_iomap_ioend_error,
 	TP_PROTO(const struct inode *inode,
 		 const struct fuse_iomap_ioend_in *inarg,
+		 const struct fuse_iomap_ioend_out *outarg,
 		 int error),
 
-	TP_ARGS(inode, inarg, error),
+	TP_ARGS(inode, inarg, outarg, error),
 
 	TP_STRUCT__entry(
 		FUSE_IO_RANGE_FIELDS()
 		__field(unsigned,		ioendflags)
 		__field(int,			error)
 		__field(uint64_t,		new_addr)
+		__field(uint64_t,		new_size)
 	),
 
 	TP_fast_assign(
@@ -689,13 +695,15 @@ TRACE_EVENT(fuse_iomap_ioend_error,
 		__entry->ioendflags	=	inarg->ioendflags;
 		__entry->error		=	error;
 		__entry->new_addr	=	inarg->new_addr;
+		__entry->new_size	=	outarg->newsize;
 	),
 
-	TP_printk(FUSE_IO_RANGE_FMT() " ioendflags (%s) error %d new_addr 0x%llx",
+	TP_printk(FUSE_IO_RANGE_FMT() " ioendflags (%s) error %d new_addr 0x%llx new_size 0x%llx",
 		  FUSE_IO_RANGE_PRINTK_ARGS(),
 		  __print_flags(__entry->ioendflags, "|", FUSE_IOMAP_IOEND_STRINGS),
 		  __entry->error,
-		  __entry->new_addr)
+		  __entry->new_addr,
+		  __entry->new_size)
 );
 
 TRACE_EVENT(fuse_iomap_dev_add,
