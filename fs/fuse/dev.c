@@ -26,7 +26,6 @@
 #include <linux/seq_file.h>
 #include <linux/nmi.h>
 
-#define CREATE_TRACE_POINTS
 #include "fuse_trace.h"
 
 MODULE_ALIAS_MISCDEV(FUSE_MINOR);
