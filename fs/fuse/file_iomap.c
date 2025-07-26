@@ -5,6 +5,8 @@
  */
 #include <linux/iomap.h>
 #include <linux/fiemap.h>
+#include <linux/pagemap.h>
+#include <linux/falloc.h>
 #include "fuse_i.h"
 #include "fuse_trace.h"
 #include "iomap_priv.h"
@@ -241,7 +243,7 @@ static inline uint16_t fuse_iomap_flags_from_server(uint16_t fuse_f_flags)
 		ret |= FUSE_IOMAP_OP_##word
 static inline uint32_t fuse_iomap_op_to_server(unsigned iomap_op_flags)
 {
-	uint32_t ret = 0;
+	uint32_t ret = iomap_op_flags & FUSE_IOMAP_OP_WRITEBACK;
 
 	XMAP(WRITE);
 	XMAP(ZERO);
@@ -389,7 +391,8 @@ fuse_iomap_begin_validate(const struct inode *inode,
 
 static inline bool fuse_is_iomap_file_write(unsigned int opflags)
 {
-	return opflags & (IOMAP_WRITE | IOMAP_ZERO | IOMAP_UNSHARE);
+	return opflags & (IOMAP_WRITE | IOMAP_ZERO | IOMAP_UNSHARE |
+			  FUSE_IOMAP_OP_WRITEBACK);
 }
 
 static inline struct fuse_backing *
@@ -849,20 +852,14 @@ static int fuse_iomap_ilock_iocb(const struct kiocb *iocb,
 	return 0;
 }
 
-static inline void fuse_inode_set_iomap(struct inode *inode)
-{
-	struct fuse_inode *fi = get_fuse_inode(inode);
-
-	ASSERT(fuse_has_iomap(inode));
-
-	set_bit(FUSE_I_IOMAP, &fi->state);
-}
+static inline void fuse_inode_set_iomap(struct inode *inode);
 
 static inline void fuse_inode_clear_iomap(struct inode *inode)
 {
 	struct fuse_inode *fi = get_fuse_inode(inode);
 
 	ASSERT(fuse_has_iomap(inode));
+	ASSERT(list_empty(&fi->ioend_list));
 
 	clear_bit(FUSE_I_IOMAP, &fi->state);
 }
@@ -971,6 +968,112 @@ static int fuse_iomap_direct_write_sync(struct kiocb *iocb, loff_t start,
 	return err;
 }
 
+static const struct iomap_write_ops fuse_iomap_write_ops = {
+};
+
+static int
+fuse_iomap_zero_range(
+	struct inode		*inode,
+	loff_t			pos,
+	loff_t			len,
+	bool			*did_zero)
+{
+	return iomap_zero_range(inode, pos, len, did_zero, &fuse_iomap_ops,
+				&fuse_iomap_write_ops, NULL);
+}
+
+/* Take care of zeroing post-EOF blocks when they might exist. */
+static ssize_t
+fuse_iomap_write_zero_eof(
+	struct kiocb		*iocb,
+	struct iov_iter		*from,
+	bool			*drained_dio)
+{
+	struct inode *inode = file_inode(iocb->ki_filp);
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct address_space *mapping = iocb->ki_filp->f_mapping;
+	loff_t			isize;
+	int			error;
+
+	/*
+	 * We need to serialise against EOF updates that occur in IO
+	 * completions here. We want to make sure that nobody is changing the
+	 * size while we do this check until we have placed an IO barrier (i.e.
+	 * hold i_rwsem exclusively) that prevents new IO from being
+	 * dispatched.  The spinlock effectively forms a memory barrier once we
+	 * have i_rwsem exclusively so we are guaranteed to see the latest EOF
+	 * value and hence be able to correctly determine if we need to run
+	 * zeroing.
+	 */
+	spin_lock(&fi->lock);
+	isize = i_size_read(inode);
+	if (iocb->ki_pos <= isize) {
+		spin_unlock(&fi->lock);
+		return 0;
+	}
+	spin_unlock(&fi->lock);
+
+	if (iocb->ki_flags & IOCB_NOWAIT)
+		return -EAGAIN;
+
+	if (!(*drained_dio)) {
+		/*
+		 * We now have an IO submission barrier in place, but AIO can
+		 * do EOF updates during IO completion and hence we now need to
+		 * wait for all of them to drain.  Non-AIO DIO will have
+		 * drained before we are given the exclusive i_rwsem, and so
+		 * for most cases this wait is a no-op.
+		 */
+		inode_dio_wait(inode);
+		*drained_dio = true;
+		return 1;
+	}
+
+	trace_fuse_iomap_write_zero_eof(iocb, from);
+
+	filemap_invalidate_lock(mapping);
+	error = fuse_iomap_zero_range(inode, isize, iocb->ki_pos - isize, NULL);
+	filemap_invalidate_unlock(mapping);
+
+	return error;
+}
+
+static ssize_t
+fuse_iomap_write_checks(
+	struct kiocb		*iocb,
+	struct iov_iter		*from)
+{
+	struct inode		*inode = iocb->ki_filp->f_mapping->host;
+	ssize_t			error;
+	bool			drained_dio = false;
+
+restart:
+	error = generic_write_checks(iocb, from);
+	if (error <= 0)
+		return error;
+
+	/*
+	 * If the offset is beyond the size of the file, we need to zero all
+	 * blocks that fall between the existing EOF and the start of this
+	 * write.
+	 *
+	 * We can do an unlocked check for i_size here safely as I/O completion
+	 * can only extend EOF.  Truncate is locked out at this point, so the
+	 * EOF cannot move backwards, only forwards. Hence we only need to take
+	 * the slow path when we are at or beyond the current EOF.
+	 */
+	if (fuse_inode_has_iomap(inode) &&
+	    iocb->ki_pos > i_size_read(inode)) {
+		error = fuse_iomap_write_zero_eof(iocb, from, &drained_dio);
+		if (error == 1)
+			goto restart;
+		if (error)
+			return error;
+	}
+
+	return kiocb_modified(iocb);
+}
+
 ssize_t fuse_iomap_direct_write(struct kiocb *iocb, struct iov_iter *from)
 {
 	struct inode *inode = file_inode(iocb->ki_filp);
@@ -1013,8 +1116,9 @@ ssize_t fuse_iomap_direct_write(struct kiocb *iocb, struct iov_iter *from)
 	ret = fuse_iomap_ilock_iocb(iocb, EXCL);
 	if (ret)
 		goto out_dsync;
-	ret = generic_write_checks(iocb, from);
-	if (ret <= 0)
+
+	ret = fuse_iomap_write_checks(iocb, from);
+	if (ret)
 		goto out_unlock;
 
 	ret = iomap_dio_rw(iocb, from, &fuse_iomap_ops,
@@ -1035,4 +1139,573 @@ out_dsync:
 	if (was_dsync)
 		iocb->ki_flags |= IOCB_DSYNC;
 	return ret;
+}
+
+struct fuse_writepage_ctx {
+	struct iomap_writepage_ctx ctx;
+};
+
+static void fuse_iomap_end_ioend(struct iomap_ioend *ioend)
+{
+	struct inode *inode = ioend->io_inode;
+	unsigned int ioendflags = FUSE_IOMAP_IOEND_WRITEBACK;
+	unsigned int nofs_flag;
+	int error = blk_status_to_errno(ioend->io_bio.bi_status);
+
+	ASSERT(fuse_inode_has_iomap(inode));
+
+	if (fuse_is_bad(inode))
+		return;
+
+	trace_fuse_iomap_end_ioend(ioend);
+
+	if (ioend->io_flags & IOMAP_IOEND_SHARED)
+		ioendflags |= FUSE_IOMAP_IOEND_SHARED;
+	if (ioend->io_flags & IOMAP_IOEND_UNWRITTEN)
+		ioendflags |= FUSE_IOMAP_IOEND_UNWRITTEN;
+
+	/*
+	 * We can allocate memory here while doing writeback on behalf of
+	 * memory reclaim.  To avoid memory allocation deadlocks set the
+	 * task-wide nofs context for the following operations.
+	 */
+	nofs_flag = memalloc_nofs_save();
+	fuse_iomap_ioend(inode, ioend->io_offset, ioend->io_size, error,
+			 ioendflags, ioend->io_sector);
+	iomap_finish_ioends(ioend, error);
+	memalloc_nofs_restore(nofs_flag);
+}
+
+/*
+ * Finish all pending IO completions that require transactional modifications.
+ *
+ * We try to merge physical and logically contiguous ioends before completion to
+ * minimise the number of transactions we need to perform during IO completion.
+ * Both unwritten extent conversion and COW remapping need to iterate and modify
+ * one physical extent at a time, so we gain nothing by merging physically
+ * discontiguous extents here.
+ *
+ * The ioend chain length that we can be processing here is largely unbound in
+ * length and we may have to perform significant amounts of work on each ioend
+ * to complete it. Hence we have to be careful about holding the CPU for too
+ * long in this loop.
+ */
+static void fuse_iomap_end_io(struct work_struct *work)
+{
+	struct fuse_inode *fi =
+		container_of(work, struct fuse_inode, ioend_work);
+	struct iomap_ioend *ioend;
+	struct list_head tmp;
+	unsigned long flags;
+
+	spin_lock_irqsave(&fi->ioend_lock, flags);
+	list_replace_init(&fi->ioend_list, &tmp);
+	spin_unlock_irqrestore(&fi->ioend_lock, flags);
+
+	iomap_sort_ioends(&tmp);
+	while ((ioend = list_first_entry_or_null(&tmp, struct iomap_ioend,
+			io_list))) {
+		list_del_init(&ioend->io_list);
+		iomap_ioend_try_merge(ioend, &tmp);
+		fuse_iomap_end_ioend(ioend);
+		cond_resched();
+	}
+}
+
+static void fuse_iomap_end_bio(struct bio *bio)
+{
+	struct iomap_ioend *ioend = iomap_ioend_from_bio(bio);
+	struct inode *inode = ioend->io_inode;
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	unsigned long flags;
+
+	ASSERT(fuse_inode_has_iomap(inode));
+
+	spin_lock_irqsave(&fi->ioend_lock, flags);
+	if (list_empty(&fi->ioend_list))
+		WARN_ON_ONCE(!queue_work(system_unbound_wq, &fi->ioend_work));
+	list_add_tail(&ioend->io_list, &fi->ioend_list);
+	spin_unlock_irqrestore(&fi->ioend_lock, flags);
+}
+
+/*
+ * Fast revalidation of the cached writeback mapping. Return true if the current
+ * mapping is valid, false otherwise.
+ */
+static bool fuse_iomap_revalidate_writeback(struct iomap_writepage_ctx *wpc,
+					    loff_t offset)
+{
+	if (offset < wpc->iomap.offset ||
+	    offset >= wpc->iomap.offset + wpc->iomap.length)
+		return false;
+
+	/* XXX actually use revalidation cookie */
+	return true;
+}
+
+/*
+ * If the folio has delalloc blocks on it, the caller is asking us to punch them
+ * out. If we don't, we can leave a stale delalloc mapping covered by a clean
+ * page that needs to be dirtied again before the delalloc mapping can be
+ * converted. This stale delalloc mapping can trip up a later direct I/O read
+ * operation on the same region.
+ *
+ * We prevent this by truncating away the delalloc regions on the folio. Because
+ * they are delalloc, we can do this without needing a transaction. Indeed - if
+ * we get ENOSPC errors, we have to be able to do this truncation without a
+ * transaction as there is no space left for block reservation (typically why
+ * we see a ENOSPC in writeback).
+ */
+static void fuse_iomap_discard_folio(struct folio *folio, loff_t pos, int error)
+{
+	struct inode *inode = folio->mapping->host;
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	loff_t end = folio_pos(folio) + folio_size(folio);
+
+	if (fuse_is_bad(inode))
+		return;
+
+	ASSERT(fuse_inode_has_iomap(inode));
+
+	trace_fuse_iomap_discard_folio(inode, pos, folio_size(folio));
+
+	printk_ratelimited(KERN_ERR
+		"page discard on page %px, inode 0x%llx, pos %llu.",
+			folio, fi->orig_ino, pos);
+
+	/* Userspace may need to remove delayed allocations */
+	fuse_iomap_ioend(inode, pos, end - pos, error, 0, FUSE_IOMAP_NULL_ADDR);
+}
+
+static ssize_t fuse_iomap_writeback_range(struct iomap_writepage_ctx *wpc,
+					  struct folio *folio, u64 offset,
+					  unsigned int len, u64 end_pos)
+{
+	struct inode *inode = wpc->inode;
+	struct iomap write_iomap, dontcare;
+	ssize_t ret;
+
+	if (fuse_is_bad(inode)) {
+		ret = -EIO;
+		goto discard_folio;
+	}
+
+	ASSERT(fuse_inode_has_iomap(inode));
+
+	trace_fuse_iomap_writeback_range(inode, offset, len, end_pos);
+
+	if (!fuse_iomap_revalidate_writeback(wpc, offset)) {
+		ret = fuse_iomap_begin(inode, offset, len,
+				       FUSE_IOMAP_OP_WRITEBACK,
+				       &write_iomap, &dontcare);
+		if (ret)
+			goto discard_folio;
+
+		/*
+		 * Landed in a hole or beyond EOF?  Send that to iomap, it'll
+		 * skip writing back the file range.
+		 */
+		if (write_iomap.offset > offset) {
+			write_iomap.length = write_iomap.offset - offset;
+			write_iomap.offset = offset;
+			write_iomap.type = IOMAP_HOLE;
+		}
+
+		memcpy(&wpc->iomap, &write_iomap, sizeof(struct iomap));
+	}
+
+	ret = iomap_add_to_ioend(wpc, folio, offset, end_pos, len);
+	if (ret < 0)
+		goto discard_folio;
+
+	return ret;
+discard_folio:
+	fuse_iomap_discard_folio(folio, offset, ret);
+	return ret;
+}
+
+static int fuse_iomap_writeback_submit(struct iomap_writepage_ctx *wpc,
+				       int error)
+{
+	struct iomap_ioend *ioend = wpc->wb_ctx;
+
+	ASSERT(fuse_inode_has_iomap(ioend->io_inode));
+
+	trace_fuse_iomap_writeback_submit(wpc, error);
+
+	/* always call our ioend function, even if we cancel the bio */
+	ioend->io_bio.bi_end_io = fuse_iomap_end_bio;
+	return iomap_ioend_writeback_submit(wpc, error);
+}
+
+static const struct iomap_writeback_ops fuse_iomap_writeback_ops = {
+	.writeback_range	= fuse_iomap_writeback_range,
+	.writeback_submit	= fuse_iomap_writeback_submit,
+};
+
+static int fuse_iomap_writepages(struct address_space *mapping,
+				 struct writeback_control *wbc)
+{
+	struct fuse_writepage_ctx wpc = {
+		.ctx = {
+			.inode = mapping->host,
+			.wbc = wbc,
+			.ops = &fuse_iomap_writeback_ops,
+		},
+	};
+
+	ASSERT(fuse_inode_has_iomap(mapping->host));
+
+	trace_fuse_iomap_writepages(mapping->host, wbc);
+
+	return iomap_writepages(&wpc.ctx);
+}
+
+static int fuse_iomap_read_folio(struct file *file, struct folio *folio)
+{
+	ASSERT(fuse_inode_has_iomap(file_inode(file)));
+
+	trace_fuse_iomap_read_folio(folio);
+
+	return iomap_read_folio(folio, &fuse_iomap_ops);
+}
+
+static void fuse_iomap_readahead(struct readahead_control *rac)
+{
+	ASSERT(fuse_inode_has_iomap(file_inode(rac->file)));
+
+	trace_fuse_iomap_readahead(rac);
+
+	iomap_readahead(rac, &fuse_iomap_ops);
+}
+
+static const struct address_space_operations fuse_iomap_aops = {
+	.read_folio		= fuse_iomap_read_folio,
+	.readahead		= fuse_iomap_readahead,
+	.writepages		= fuse_iomap_writepages,
+	.dirty_folio		= iomap_dirty_folio,
+	.release_folio		= iomap_release_folio,
+	.invalidate_folio	= iomap_invalidate_folio,
+	.migrate_folio		= filemap_migrate_folio,
+	.is_partially_uptodate  = iomap_is_partially_uptodate,
+	.error_remove_folio	= generic_error_remove_folio,
+
+	/* These aren't pagecache operations per se */
+	.bmap			= fuse_bmap,
+};
+
+static inline void fuse_inode_set_iomap(struct inode *inode)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	ASSERT(fuse_has_iomap(inode));
+
+	inode->i_data.a_ops = &fuse_iomap_aops;
+
+	INIT_WORK(&fi->ioend_work, fuse_iomap_end_io);
+	INIT_LIST_HEAD(&fi->ioend_list);
+	spin_lock_init(&fi->ioend_lock);
+	set_bit(FUSE_I_IOMAP, &fi->state);
+}
+
+/*
+ * Locking for serialisation of IO during page faults. This results in a lock
+ * ordering of:
+ *
+ * mmap_lock (MM)
+ *   sb_start_pagefault(vfs, freeze)
+ *     invalidate_lock (vfs - truncate serialisation)
+ *       page_lock (MM)
+ *         i_lock (FUSE - extent map serialisation)
+ */
+static vm_fault_t fuse_iomap_page_mkwrite(struct vm_fault *vmf)
+{
+	struct inode *inode = file_inode(vmf->vma->vm_file);
+	struct address_space *mapping = vmf->vma->vm_file->f_mapping;
+	vm_fault_t ret;
+
+	ASSERT(fuse_inode_has_iomap(inode));
+
+	trace_fuse_iomap_page_mkwrite(vmf);
+
+	sb_start_pagefault(inode->i_sb);
+	file_update_time(vmf->vma->vm_file);
+
+	filemap_invalidate_lock_shared(mapping);
+	ret = iomap_page_mkwrite(vmf, &fuse_iomap_ops, NULL);
+	filemap_invalidate_unlock_shared(mapping);
+
+	sb_end_pagefault(inode->i_sb);
+	return ret;
+}
+
+static const struct vm_operations_struct fuse_iomap_vm_ops = {
+	.fault		= filemap_fault,
+	.map_pages	= filemap_map_pages,
+	.page_mkwrite	= fuse_iomap_page_mkwrite,
+};
+
+int fuse_iomap_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	ASSERT(fuse_inode_has_iomap(file_inode(file)));
+
+	file_accessed(file);
+	vma->vm_ops = &fuse_iomap_vm_ops;
+	return 0;
+}
+
+ssize_t fuse_iomap_buffered_read(struct kiocb *iocb, struct iov_iter *to)
+{
+	struct inode *inode = file_inode(iocb->ki_filp);
+	ssize_t ret;
+
+	ASSERT(fuse_inode_has_iomap(inode));
+
+	trace_fuse_iomap_buffered_read(iocb, to);
+
+	if (!iov_iter_count(to))
+		return 0; /* skip atime */
+
+	file_accessed(iocb->ki_filp);
+
+	ret = fuse_iomap_ilock_iocb(iocb, SHARED);
+	if (ret)
+		return ret;
+	ret = generic_file_read_iter(iocb, to);
+	inode_unlock_shared(inode);
+
+	trace_fuse_iomap_buffered_read_end(iocb, to, ret);
+	return ret;
+}
+
+ssize_t fuse_iomap_buffered_write(struct kiocb *iocb, struct iov_iter *from)
+{
+	struct inode *inode = file_inode(iocb->ki_filp);
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	loff_t pos = iocb->ki_pos;
+	ssize_t ret;
+
+	ASSERT(fuse_inode_has_iomap(inode));
+
+	trace_fuse_iomap_buffered_write(iocb, from);
+
+	if (!iov_iter_count(from))
+		return 0;
+
+	ret = fuse_iomap_ilock_iocb(iocb, EXCL);
+	if (ret)
+		return ret;
+
+	ret = fuse_iomap_write_checks(iocb, from);
+	if (ret)
+		goto out_unlock;
+
+	if (inode->i_size < pos + iov_iter_count(from))
+		set_bit(FUSE_I_SIZE_UNSTABLE, &fi->state);
+
+	ret = iomap_file_buffered_write(iocb, from, &fuse_iomap_ops,
+					&fuse_iomap_write_ops, NULL);
+
+	if (ret > 0)
+		fuse_write_update_attr(inode, pos + ret, ret);
+	clear_bit(FUSE_I_SIZE_UNSTABLE, &fi->state);
+
+out_unlock:
+	inode_unlock(inode);
+
+	if (ret > 0) {
+		/* Handle various SYNC-type writes */
+		ret = generic_write_sync(iocb, ret);
+	}
+	trace_fuse_iomap_buffered_write_end(iocb, from, ret);
+	return ret;
+}
+
+static int
+fuse_iomap_truncate_page(
+	struct inode *inode,
+	loff_t			pos,
+	bool			*did_zero)
+{
+	return iomap_truncate_page(inode, pos, did_zero, &fuse_iomap_ops,
+				   &fuse_iomap_write_ops, NULL);
+}
+/*
+ * Truncate pagecache for a file before sending the truncate request to
+ * userspace.  Must have write permission and not be a directory.
+ *
+ * Caution: The caller of this function is responsible for calling
+ * setattr_prepare() or otherwise verifying the change is fine.
+ */
+int
+fuse_iomap_setsize_start(
+	struct inode		*inode,
+	loff_t			newsize)
+{
+	loff_t			oldsize = i_size_read(inode);
+	int			error;
+	bool			did_zeroing = false;
+
+	rwsem_assert_held_write(&inode->i_rwsem);
+	rwsem_assert_held_write(&inode->i_mapping->invalidate_lock);
+	ASSERT(S_ISREG(inode->i_mode));
+
+	/*
+	 * Wait for all direct I/O to complete.
+	 */
+	inode_dio_wait(inode);
+
+	/*
+	 * File data changes must be complete and flushed to disk before we
+	 * call userspace to modify the inode.
+	 *
+	 * Start with zeroing any data beyond EOF that we may expose on file
+	 * extension, or zeroing out the rest of the block on a downward
+	 * truncate.
+	 */
+	if (newsize > oldsize) {
+		trace_fuse_iomap_truncate_up(inode, oldsize, newsize - oldsize);
+
+		error = fuse_iomap_zero_range(inode, oldsize, newsize - oldsize,
+					      &did_zeroing);
+	} else {
+		trace_fuse_iomap_truncate_down(inode, newsize,
+					       oldsize - newsize);
+
+		error = fuse_iomap_truncate_page(inode, newsize, &did_zeroing);
+	}
+	if (error)
+		return error;
+
+	/*
+	 * We've already locked out new page faults, so now we can safely
+	 * remove pages from the page cache knowing they won't get refaulted
+	 * until we drop the mapping invalidation lock after the extent
+	 * manipulations are complete. The truncate_setsize() call also cleans
+	 * folios spanning EOF on extending truncates and hence ensures
+	 * sub-page block size filesystems are correctly handled, too.
+	 *
+	 * And we update in-core i_size and truncate page cache beyond newsize
+	 * before writing back the whole file, so we're guaranteed not to write
+	 * stale data past the new EOF on truncate down.
+	 */
+	truncate_setsize(inode, newsize);
+
+	/*
+	 * Flush the entire pagecache to ensure the fuse server logs the inode
+	 * size change and all dirty data that might be associated with it.
+	 * We don't know the ondisk inode size, so we only have this clumsy
+	 * hammer.
+	 */
+	return filemap_write_and_wait(inode->i_mapping);
+}
+
+/*
+ * Prepare for a file data block remapping operation by flushing and unmapping
+ * all pagecache for the entire range.
+ */
+int fuse_iomap_flush_unmap_range(struct inode *inode, loff_t pos,
+				 loff_t endpos)
+{
+	loff_t			start, end;
+	unsigned int		rounding;
+	int			error;
+
+	/*
+	 * Make sure we extend the flush out to extent alignment boundaries so
+	 * any extent range overlapping the start/end of the modification we
+	 * are about to do is clean and idle.
+	 */
+	rounding = max_t(unsigned int, i_blocksize(inode), PAGE_SIZE);
+	start = round_down(pos, rounding);
+	end = round_up(endpos + 1, rounding) - 1;
+
+	trace_fuse_iomap_flush_unmap_range(inode, start, end + 1 - start);
+
+	error = filemap_write_and_wait_range(inode->i_mapping, start, end);
+	if (error)
+		return error;
+	truncate_pagecache_range(inode, start, end);
+	return 0;
+}
+
+static int fuse_iomap_punch_range(struct inode *inode, loff_t offset,
+				  loff_t length)
+{
+	loff_t isize = i_size_read(inode);
+	int error;
+
+	trace_fuse_iomap_punch_range(inode, offset, length);
+
+	/*
+	 * Now that we've unmap all full blocks we'll have to zero out any
+	 * partial block at the beginning and/or end.  iomap_zero_range is
+	 * smart enough to skip holes and unwritten extents, including those we
+	 * just created, but we must take care not to zero beyond EOF, which
+	 * would enlarge i_size.
+	 */
+	if (offset >= isize)
+		return 0;
+	if (offset + length > isize)
+		length = isize - offset;
+	error = fuse_iomap_zero_range(inode, offset, length, NULL);
+	if (error)
+		return error;
+
+	/*
+	 * If we zeroed right up to EOF and EOF straddles a page boundary we
+	 * must make sure that the post-EOF area is also zeroed because the
+	 * page could be mmap'd and iomap_zero_range doesn't do that for us.
+	 * Writeback of the eof page will do this, albeit clumsily.
+	 */
+	if (offset + length >= isize && offset_in_page(offset + length) > 0) {
+		error = filemap_write_and_wait_range(inode->i_mapping,
+					round_down(offset + length, PAGE_SIZE),
+					LLONG_MAX);
+	}
+
+	return error;
+}
+
+int
+fuse_iomap_fallocate(
+	struct file		*file,
+	int			mode,
+	loff_t			offset,
+	loff_t			length,
+	loff_t			new_size)
+{
+	struct inode *inode = file_inode(file);
+	int error;
+
+	ASSERT(fuse_has_iomap(inode));
+	ASSERT(fuse_inode_has_iomap(inode));
+
+	trace_fuse_iomap_fallocate(inode, mode, offset, length, new_size);
+
+	/*
+	 * If we unmapped blocks from the file range, then we zero the
+	 * pagecache for those regions and push them to disk rather than make
+	 * the fuse server manually zero the disk blocks.
+	 */
+	if (mode & (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_ZERO_RANGE)) {
+		error = fuse_iomap_punch_range(inode, offset, length);
+		if (error)
+			return error;
+	}
+
+	/*
+	 * If this is an extending write, we need to zero the bytes beyond the
+	 * new EOF and bounce the new size out to userspace.
+	 */
+	if (new_size) {
+		error = fuse_iomap_setsize_start(inode, new_size);
+		if (error)
+			return error;
+
+		fuse_write_update_attr(inode, new_size, length);
+	}
+
+	file_update_time(file);
+	return 0;
 }

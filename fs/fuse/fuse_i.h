@@ -179,6 +179,13 @@ struct fuse_inode {
 
 			/* waitq for direct-io completion */
 			wait_queue_head_t direct_io_waitq;
+
+#ifdef CONFIG_FUSE_IOMAP
+			/* pending io completions */
+			spinlock_t ioend_lock;
+			struct work_struct ioend_work;
+			struct list_head ioend_list;
+#endif
 		};
 
 		/* readdir cache (directory only) */
@@ -929,8 +936,8 @@ struct fuse_conn {
 	unsigned int sync_init:1;
 
 	/*
-	 * Use fs/iomap for FIEMAP and SEEK_{DATA,HOLE} file operations and
-	 * direct I/O.
+	 * Use fs/iomap for FIEMAP and SEEK_{DATA,HOLE} file operations,
+	 * buffered I/O, and direct I/O.
 	 */
 	unsigned int iomap:1;
 
@@ -1686,6 +1693,8 @@ void fuse_iomap_sysfs_cleanup(struct kobject *kobj);
 # define fuse_iomap_sysfs_cleanup(...)		((void)0)
 #endif
 
+sector_t fuse_bmap(struct address_space *mapping, sector_t block);
+
 #if IS_ENABLED(CONFIG_FUSE_IOMAP)
 bool fuse_iomap_enabled(void);
 
@@ -1724,6 +1733,20 @@ static inline bool fuse_want_iomap_directio(const struct kiocb *iocb)
 
 ssize_t fuse_iomap_direct_read(struct kiocb *iocb, struct iov_iter *to);
 ssize_t fuse_iomap_direct_write(struct kiocb *iocb, struct iov_iter *from);
+
+static inline bool fuse_want_iomap_buffered_io(const struct kiocb *iocb)
+{
+	return fuse_inode_has_iomap(file_inode(iocb->ki_filp));
+}
+
+int fuse_iomap_mmap(struct file *file, struct vm_area_struct *vma);
+ssize_t fuse_iomap_buffered_read(struct kiocb *iocb, struct iov_iter *to);
+ssize_t fuse_iomap_buffered_write(struct kiocb *iocb, struct iov_iter *from);
+int fuse_iomap_setsize_start(struct inode *inode, loff_t newsize);
+int fuse_iomap_fallocate(struct file *file, int mode, loff_t offset,
+			 loff_t length, loff_t new_size);
+int fuse_iomap_flush_unmap_range(struct inode *inode, loff_t pos,
+				 loff_t endpos);
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
@@ -1739,6 +1762,13 @@ ssize_t fuse_iomap_direct_write(struct kiocb *iocb, struct iov_iter *from);
 # define fuse_want_iomap_directio(...)		(false)
 # define fuse_iomap_direct_read(...)		(-ENOSYS)
 # define fuse_iomap_direct_write(...)		(-ENOSYS)
+# define fuse_want_iomap_buffered_io(...)	(false)
+# define fuse_iomap_mmap(...)			(-ENOSYS)
+# define fuse_iomap_buffered_read(...)		(-ENOSYS)
+# define fuse_iomap_buffered_write(...)		(-ENOSYS)
+# define fuse_iomap_setsize_start(...)		(-ENOSYS)
+# define fuse_iomap_fallocate(...)		(-ENOSYS)
+# define fuse_iomap_flush_unmap_range(...)	(-ENOSYS)
 #endif
 
 #endif /* _FS_FUSE_I_H */
