@@ -1369,6 +1369,9 @@ struct fuse_uring_cmd_req {
 #define FUSE_IOMAP_OP_ATOMIC		(1U << 9)
 #define FUSE_IOMAP_OP_DONTCACHE		(1U << 10)
 
+/* pagecache writeback operation */
+#define FUSE_IOMAP_OP_WRITEBACK		(1U << 31)
+
 #define FUSE_IOMAP_NULL_ADDR		(-1ULL)	/* addr is not valid */
 
 struct fuse_iomap_io {
@@ -1418,6 +1421,8 @@ struct fuse_iomap_end_in {
 #define FUSE_IOMAP_IOEND_DIRECT		(1U << 3)
 /* is append ioend */
 #define FUSE_IOMAP_IOEND_APPEND		(1U << 4)
+/* is pagecache writeback */
+#define FUSE_IOMAP_IOEND_WRITEBACK	(1U << 5)
 
 struct fuse_iomap_ioend_in {
 	uint32_t ioendflags;	/* FUSE_IOMAP_IOEND_* */
