@@ -231,6 +231,7 @@ void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 {
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct fuse_inode *fi = get_fuse_inode(inode);
+	u8 new_blkbits;
 
 	lockdep_assert_held(&fi->lock);
 
@@ -295,9 +296,14 @@ void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 	}
 
 	if (attr->blksize != 0)
-		inode->i_blkbits = ilog2(attr->blksize);
+		new_blkbits = ilog2(attr->blksize);
 	else
-		inode->i_blkbits = inode->i_sb->s_blocksize_bits;
+		new_blkbits = inode->i_sb->s_blocksize_bits;
+
+	if (fuse_inode_has_iomap(inode))
+		fuse_iomap_set_i_blkbits(inode, new_blkbits);
+	else
+		inode->i_blkbits = new_blkbits;
 
 	/*
 	 * Don't set the sticky bit in i_mode, unless we want the VFS
