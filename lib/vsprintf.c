@@ -57,7 +57,11 @@
 #include "kstrtox.h"
 
 /* Disable pointer hashing if requested */
+#if IS_ENABLED(CONFIG_DISABLE_DMESG_POINTER_HASHING)
+bool no_hash_pointers __ro_after_init = true;
+#else
 bool no_hash_pointers __ro_after_init;
+#endif
 EXPORT_SYMBOL_GPL(no_hash_pointers);
 
 /*
@@ -815,6 +819,9 @@ int ptr_to_hashval(const void *ptr, unsigned long *hashval_out)
 static char *ptr_to_id(char *buf, char *end, const void *ptr,
 		       struct printf_spec spec)
 {
+#if IS_ENABLED(CONFIG_DISABLE_DMESG_POINTER_HASHING)
+	return pointer_string(buf, end, ptr, spec);
+#else
 	const char *str = sizeof(ptr) == 8 ? "(____ptrval____)" : "(ptrval)";
 	unsigned long hashval;
 	int ret;
@@ -840,6 +847,7 @@ static char *ptr_to_id(char *buf, char *end, const void *ptr,
 	}
 
 	return pointer_string(buf, end, (const void *)hashval, spec);
+#endif
 }
 
 static char *default_pointer(char *buf, char *end, const void *ptr,
