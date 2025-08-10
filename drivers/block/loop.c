@@ -1560,6 +1560,9 @@ static int lo_ioctl(struct block_device *bdev, blk_mode_t mode,
 		if (copy_from_user(&config, argp, sizeof(config)))
 			return -EFAULT;
 
+#ifdef CONFIG_BLK_DEV_LOOP_TRY_DIRECTIO
+		config.info.lo_flags |= LO_FLAGS_DIRECT_IO;
+#endif
 		return loop_configure(lo, mode, bdev, &config);
 	}
 	case LOOP_CHANGE_FD:

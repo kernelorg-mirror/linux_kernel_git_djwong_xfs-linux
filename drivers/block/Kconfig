@@ -176,6 +176,23 @@ config BLK_DEV_LOOP
 
 	  Most users will answer N here.
 
+config BLK_DEV_LOOP_TRY_DIRECTIO
+	bool "Configure loopback devices for directio by default"
+	default n
+	depends on BLK_DEV_LOOP
+	help
+	  Try to use directio read and writes with the loop device whenever
+	  possible.  This eliminates the possibility that loop device IO will
+	  throttle when writing to the underlying file's page cache by taking
+	  the page cache out of the picture.  This may cause more fragmentation
+	  on the underlying filesystem.
+
+	  If directio is not available, the kernel will fall back to using the
+	  page cache.  Userspace can change the setting at a later time with
+	  losetup.
+
+	  Most users should answer N here.
+
 config BLK_DEV_LOOP_MIN_COUNT
 	int "Number of loop devices to pre-create at init time"
 	depends on BLK_DEV_LOOP
