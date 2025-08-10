@@ -2,6 +2,13 @@
 menu "EFI (Extensible Firmware Interface) Support"
 	depends on EFI
 
+config EFI_SIGN_SECUREBOOT
+	bool "Sign kernel for UEFI SecureBoot"
+	depends on EFI
+	default n
+	help
+	  Say Y here to sign the kernel with provided secureboot keys.
+
 config EFI_ESRT
 	bool
 	depends on EFI

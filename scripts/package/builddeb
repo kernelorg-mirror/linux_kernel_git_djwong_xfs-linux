@@ -64,6 +64,11 @@ install_linux_image () {
 		installed_image_path="boot/vmlinuz-${KERNELRELEASE}";;
 	esac
 	cp "$(${MAKE} -s -f ${srctree}/Makefile image_name)" "${pdir}/${installed_image_path}"
+	if is_enabled CONFIG_EFI_SIGN_SECUREBOOT; then
+		sbsign --key certs/djsecureboot.privkey --cert certs/djsecureboot.pem \
+			--output "${pdir}/${installed_image_path}" \
+			"$(${MAKE} -s -f ${srctree}/Makefile image_name)"
+	fi
 
 	if [ "${ARCH}" != um ]; then
 		install_maint_scripts "${pdir}"
