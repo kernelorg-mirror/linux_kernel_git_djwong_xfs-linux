@@ -4,6 +4,7 @@
 set -eu
 
 diff_patch=$1
+rm -f "${diff_patch}" ; exit 0 # djwong build tools
 
 mkdir -p "$(dirname "${diff_patch}")"
 

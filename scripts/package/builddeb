@@ -156,6 +156,27 @@ install_libc_headers () {
 	mv "$pdir/usr/include/asm" "$pdir/usr/include/${DEB_HOST_MULTIARCH}"
 }
 
+# djwong tools package
+install_tools () {
+	pdir=debian/$1
+
+	rm -rf "$pdir"
+
+	# The Ubuntu linux-tools dispatcher requires this exact path
+	tools_libdir=$pdir/usr/lib/linux-tools-$KERNELRELEASE/
+	tools_linkdir=$pdir/usr/lib/linux-tools/$KERNELRELEASE/
+	mkdir -p $tools_libdir $tools_linkdir
+
+	cp tools/perf/perf $tools_libdir/
+	cp turbostat $tools_libdir/ || true
+	cp x86_energy_perf_policy $tools_libdir/ || true
+	for i in $tools_libdir/*; do
+		test -e "$i" || continue
+		b="$(basename "$i")"
+		ln -s -f ../../linux-tools-$KERNELRELEASE/$b $tools_linkdir/$b
+	done
+}
+
 package=$1
 
 case "${package}" in
@@ -163,8 +184,10 @@ case "${package}" in
 	install_linux_image_dbg "${package}";;
 linux-image-*|user-mode-linux-*)
 	install_linux_image "${package}";;
-linux-libc-dev)
+linux-libc-dev*)
 	install_libc_headers "${package}";;
 linux-headers-*)
 	install_kernel_headers "${package}";;
+linux-tools-*)
+	install_tools "${package}";;
 esac

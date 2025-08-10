@@ -166,10 +166,11 @@ else
 fi
 sourcename=${KDEB_SOURCENAME:-linux-upstream}
 
+taglocalversion="-mtr$LOCALVERSION"
 if [ "$ARCH" = "um" ] ; then
 	packagename=user-mode-linux
 else
-	packagename=linux-image
+	packagename=linux-image$taglocalversion
 fi
 
 debarch=
@@ -195,7 +196,10 @@ host_gnu=$(dpkg-architecture -a "${debarch}" -q DEB_HOST_GNU_TYPE | sed 's/_/-/g
 cat <<EOF > debian/changelog
 $sourcename ($packageversion) $distribution; urgency=low
 
-  * Custom built Linux kernel.
+  * Custom built Linux kernel with these stgit patches:
+EOF
+(test -d source && cd source/ ; stg ser | sed -e '/^-/d' -e 's/^. /    - /g') >> debian/changelog
+cat <<EOF >> debian/changelog
 
  -- $maintainer  $(date -R)
 EOF
@@ -215,7 +219,7 @@ Build-Depends-Arch: bc, bison, flex,
  python3:native, rsync
 Homepage: https://www.kernel.org/
 
-Package: $packagename-${KERNELRELEASE}
+Package: $packagename
 Architecture: $debarch
 Description: Linux kernel, version ${KERNELRELEASE}
  This package contains the Linux kernel, modules and corresponding other
@@ -225,10 +229,12 @@ EOF
 if [ "${SRCARCH}" != um ]; then
 cat <<EOF >> debian/control
 
-Package: linux-libc-dev
+Package: linux-libc-dev$taglocalversion
 Section: devel
-Provides: linux-kernel-headers
 Architecture: $debarch
+Replaces: linux-libc-dev, linux-libc-dev-amd64-cross
+Provides: linux-kernel-headers, linux-libc-dev (= $packageversion), linux-libc-dev-amd64-cross (= $packageversion)
+Conflicts: linux-libc-dev, linux-libc-dev-amd64-cross
 Description: Linux support headers for userspace development
  This package provides userspaces headers from the Linux kernel.  These headers
  are used by the installed headers for GNU glibc and other system libraries.
@@ -238,9 +244,9 @@ EOF
 if is_enabled CONFIG_MODULES; then
 cat <<EOF >> debian/control
 
-Package: linux-headers-${KERNELRELEASE}
+Package: linux-headers$taglocalversion
 Architecture: $debarch
-Build-Profiles: <!pkg.${sourcename}.nokernelheaders>
+Build-Profiles: <!pkg.${sourcename}.nokernelheaders-djwong>
 Description: Linux kernel headers for ${KERNELRELEASE} on $debarch
  This package provides kernel header files for ${KERNELRELEASE} on $debarch
  .
@@ -252,7 +258,7 @@ fi
 if is_enabled CONFIG_DEBUG_INFO; then
 cat <<EOF >> debian/control
 
-Package: linux-image-${KERNELRELEASE}-dbg
+Package: linux-image$taglocalversion-dbg
 Section: debug
 Architecture: $debarch
 Build-Profiles: <!pkg.${sourcename}.nokerneldbg>
@@ -261,6 +267,20 @@ Description: Linux kernel debugging symbols for ${KERNELRELEASE}
  all the necessary debug symbols for the kernel and its modules.
 EOF
 fi
+
+# djwong tools package
+cat <<EOF >> debian/control
+
+Package: linux-tools$taglocalversion
+Section: devel
+Architecture: $debarch
+Depends: libc6, libdw1, libelf1, liblzma5, libnuma1, libpci3, libslang2, libudev1, libunwind8, zlib1g, linux-tools-common
+Provides: linux-tools-djwong-kernel
+Description: Linux kernel version specific tools for ${KERNELRELEASE}
+ This package provides the architecture dependent parts for kernel
+ version locked tools (such as perf and x86_energy_perf_policy) for
+ version ${KERNELRELEASE}.
+EOF
 
 cat <<EOF > debian/rules.vars
 ARCH := ${ARCH}

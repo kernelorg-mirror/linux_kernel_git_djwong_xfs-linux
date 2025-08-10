@@ -27,13 +27,14 @@ make-opts = ARCH=$(ARCH) KERNELRELEASE=$(KERNELRELEASE) \
     $(addprefix KBUILD_BUILD_VERSION=,$(revision)) \
     $(addprefix CROSS_COMPILE=,$(CROSS_COMPILE))
 
-binary-targets := $(addprefix binary-, image image-dbg headers libc-dev)
+binary-targets := $(addprefix binary-, image image-dbg headers libc-dev tools)
 
 all-packages = $(shell dh_listpackages)
 image-package = $(filter linux-image-% user-%, $(filter-out %-dbg, $(all-packages)))
 image-dbg-package = $(filter %-dbg, $(all-packages))
-libc-dev-package = $(filter linux-libc-dev, $(all-packages))
+libc-dev-package = $(filter linux-libc-dev%, $(all-packages))
 headers-package = $(filter linux-headers-%, $(all-packages))
+tools-package = $(filter linux-tools-%, $(all-packages))
 
 mk-files = $(patsubst binary-%,debian/%.files,$1)
 package = $($(@:binary-%=%-package))
@@ -78,6 +79,11 @@ build-indep:
 build-arch:
 	$(Q)$(MAKE) $(make-opts) olddefconfig
 	$(Q)$(MAKE) $(make-opts) $(if $(filter um,$(ARCH)),,headers) all
+
+	# build djwong tools package
+	$(MAKE) $(make-opts) NO_JEVENTS=1 -k tools/perf || \
+	$(MAKE) $(make-opts) NO_JEVENTS=1 NO_LIBTRACEEVENT=1 NO_LIBELF=1 -k tools/perf
+	-$(MAKE) $(make-opts) -k tools/turbostat tools/x86_energy_perf_policy
 
 .PHONY: clean
 clean:
