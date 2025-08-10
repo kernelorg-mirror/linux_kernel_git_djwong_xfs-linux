@@ -3206,10 +3206,22 @@ void __init boot_cpu_hotplug_init(void)
  * present.
  */
 static bool attack_vectors[NR_CPU_ATTACK_VECTORS] __ro_after_init = {
+#ifdef CONFIG_ATTACK_MITIGATIONS_OFF
+	[CPU_MITIGATE_USER_KERNEL] = false,
+	[CPU_MITIGATE_USER_USER] = false,
+	[CPU_MITIGATE_GUEST_HOST] = false,
+	[CPU_MITIGATE_GUEST_GUEST] = false,
+#elif defined CONFIG_ATTACK_MITIGATIONS_ON
+	[CPU_MITIGATE_USER_KERNEL] = true,
+	[CPU_MITIGATE_USER_USER] = true,
+	[CPU_MITIGATE_GUEST_HOST] = true,
+	[CPU_MITIGATE_GUEST_GUEST] = true,
+#else
 	[CPU_MITIGATE_USER_KERNEL] = true,
 	[CPU_MITIGATE_USER_USER] = true,
 	[CPU_MITIGATE_GUEST_HOST] = IS_ENABLED(CONFIG_KVM),
 	[CPU_MITIGATE_GUEST_GUEST] = IS_ENABLED(CONFIG_KVM),
+#endif
 };
 
 bool cpu_attack_vector_mitigated(enum cpu_attack_vectors v)
@@ -3246,8 +3258,22 @@ enum {
 	NR_VECTOR_PARAMS,
 };
 
-enum smt_mitigations smt_mitigations __ro_after_init = SMT_MITIGATIONS_AUTO;
-static enum cpu_mitigations cpu_mitigations __ro_after_init = CPU_MITIGATIONS_AUTO;
+enum smt_mitigations smt_mitigations __ro_after_init =
+#ifdef CONFIG_SMT_MITIGATIONS_OFF
+	SMT_MITIGATIONS_OFF;
+#elif defined CONFIG_SMT_MITIGATIONS_ON
+	SMT_MITIGATIONS_ON;
+#elif defined CONFIG_SMT_MITIGATIONS_AUTO
+	SMT_MITIGATIONS_AUTO;
+#endif
+static enum cpu_mitigations cpu_mitigations __ro_after_init =
+#ifdef CONFIG_CPU_MITIGATIONS_OFF
+	CPU_MITIGATIONS_OFF;
+#elif defined CONFIG_CPU_MITIGATIONS_AUTO_NOSMT
+	CPU_MITIGATIONS_AUTO_NOSMT;
+#elif defined CONFIG_CPU_MITIGATIONS_AUTO
+	CPU_MITIGATIONS_AUTO;
+#endif
 
 static const match_table_t global_mitigations = {
 	{ CPU_MITIGATIONS_AUTO_NOSMT,	"auto,nosmt"},
