@@ -6,6 +6,14 @@
 
 ccflags-y += -I $(src)		# needed for trace events
 
+ifeq ($(CONFIG_IOMAP_GCOV_ALL),y)
+GCOV_PROFILE := y
+endif
+
+ifeq ($(CONFIG_IOMAP_GCOV_NONE),y)
+GCOV_PROFILE := n
+endif
+
 obj-$(CONFIG_FS_IOMAP)		+= iomap.o
 
 iomap-y				+= trace.o \

@@ -1470,4 +1470,20 @@ config FIND_NORMAL_PAGE
 
 source "mm/damon/Kconfig"
 
+config PAGECACHE_GCOV_ALL
+	bool "Generate gcov data for all the pagecache?"
+	default n
+	depends on GCOV_KERNEL && !GCOV_PROFILE_ALL
+	help
+	  Tell the compiler to generate gcov information for all of VFS
+	  even though it isn't globally enabled.
+
+config PAGECACHE_GCOV_NONE
+	bool "Omit gcov data for all the pagecache?"
+	default n
+	depends on GCOV_KERNEL && GCOV_PROFILE_ALL
+	help
+	  Tell the compiler to generate gcov information for none of VFS
+	  even when it will be generated for the rest of the kernel.
+
 endmenu

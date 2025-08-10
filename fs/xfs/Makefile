@@ -9,6 +9,14 @@ ccflags-y += -I $(src)/libxfs
 
 obj-$(CONFIG_XFS_FS)		+= xfs.o
 
+ifeq ($(CONFIG_XFS_GCOV_ALL),y)
+GCOV_PROFILE := y
+endif
+
+ifeq ($(CONFIG_XFS_GCOV_NONE),y)
+GCOV_PROFILE := n
+endif
+
 # this one should be compiled first, as the tracing macros can easily blow up
 xfs-y				+= xfs_trace.o
 

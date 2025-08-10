@@ -32,3 +32,19 @@ config JBD2_DEBUG
 	  number between 1 and 5. The higher the number, the more debugging
 	  output is generated.  To turn debugging off again, do
 	  "echo 0 > /sys/module/jbd2/parameters/jbd2_debug".
+
+config JBD2_GCOV_ALL
+	bool "Generate gcov data for all of JBD2?"
+	default n
+	depends on JBD2 && GCOV_KERNEL && !GCOV_PROFILE_ALL
+	help
+	  Tell the compiler to generate gcov information for all of JBD2
+	  even though it isn't globally enabled.
+
+config JBD2_GCOV_NONE
+	bool "Omit gcov data for all of JBD2?"
+	default n
+	depends on JBD2 && GCOV_KERNEL && GCOV_PROFILE_ALL
+	help
+	  Tell the compiler to generate gcov information for none of JBD2
+	  even when it will be generated for the rest of the kernel.

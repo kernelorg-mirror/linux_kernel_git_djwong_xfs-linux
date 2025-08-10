@@ -25,6 +25,38 @@ config FS_STACK
 config BUFFER_HEAD
 	bool
 
+config IOMAP_GCOV_ALL
+	bool "Generate gcov data for all of fs/iomap?"
+	default n
+	depends on FS_IOMAP && GCOV_KERNEL && !GCOV_PROFILE_ALL
+	help
+	  Tell the compiler to generate gcov information for all of IOMAP
+	  even though it isn't globally enabled.
+
+config IOMAP_GCOV_NONE
+	bool "Omit gcov data for all of fs/iomap?"
+	default n
+	depends on FS_IOMAP && GCOV_KERNEL && GCOV_PROFILE_ALL
+	help
+	  Tell the compiler to generate gcov information for none of IOMAP
+	  even when it will be generated for the rest of the kernel.
+
+config FS_GCOV_ALL
+	bool "Generate gcov data for all the VFS?"
+	default n
+	depends on GCOV_KERNEL && !GCOV_PROFILE_ALL
+	help
+	  Tell the compiler to generate gcov information for all of VFS
+	  even though it isn't globally enabled.
+
+config FS_GCOV_NONE
+	bool "Omit gcov data for all the VFS?"
+	default n
+	depends on GCOV_KERNEL && GCOV_PROFILE_ALL
+	help
+	  Tell the compiler to generate gcov information for none of VFS
+	  even when it will be generated for the rest of the kernel.
+
 # old blockdev_direct_IO implementation.  Use iomap for new code instead
 config LEGACY_DIRECT_IO
 	depends on BUFFER_HEAD

@@ -90,3 +90,19 @@ config EXT4_KUNIT_TESTS
 	  to the KUnit documentation in Documentation/dev-tools/kunit/.
 
 	  If unsure, say N.
+
+config EXT4_GCOV_ALL
+	bool "Generate gcov data for all of EXT4?"
+	default n
+	depends on EXT4_FS && GCOV_KERNEL && !GCOV_PROFILE_ALL
+	help
+	  Tell the compiler to generate gcov information for all of EXT4
+	  even though it isn't globally enabled.
+
+config EXT4_GCOV_NONE
+	bool "Omit gcov data for all of EXT4?"
+	default n
+	depends on EXT4_FS && GCOV_KERNEL && GCOV_PROFILE_ALL
+	help
+	  Tell the compiler to generate gcov information for none of EXT4
+	  even when it will be generated for the rest of the kernel.

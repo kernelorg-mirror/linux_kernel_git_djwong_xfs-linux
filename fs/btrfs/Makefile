@@ -22,6 +22,14 @@ subdir-ccflags-y += -Wno-shift-negative-value
 
 obj-$(CONFIG_BTRFS_FS) := btrfs.o
 
+ifeq ($(CONFIG_BTRFS_GCOV_ALL),y)
+GCOV_PROFILE := y
+endif
+
+ifeq ($(CONFIG_BTRFS_GCOV_NONE),y)
+GCOV_PROFILE := n
+endif
+
 btrfs-y += super.o ctree.o extent-tree.o print-tree.o root-tree.o dir-item.o \
 	   file-item.o inode-item.o disk-io.o \
 	   transaction.o inode.o file.o defrag.o \

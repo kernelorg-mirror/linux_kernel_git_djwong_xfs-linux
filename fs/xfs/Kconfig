@@ -241,3 +241,19 @@ config XFS_ASSERT_FATAL
 	  result in warnings.
 
 	  This behavior can be modified at runtime via sysfs.
+
+config XFS_GCOV_ALL
+	bool "Generate gcov data for all of XFS?"
+	default n
+	depends on XFS_FS && GCOV_KERNEL && !GCOV_PROFILE_ALL
+	help
+	  Tell the compiler to generate gcov information for all of XFS
+	  even though it isn't globally enabled.
+
+config XFS_GCOV_NONE
+	bool "Omit gcov data for all of XFS?"
+	default n
+	depends on XFS_FS && GCOV_KERNEL && GCOV_PROFILE_ALL
+	help
+	  Tell the compiler to generate gcov information for none of XFS
+	  even when it will be generated for the rest of the kernel.
