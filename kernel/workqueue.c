@@ -2740,16 +2740,16 @@ static int format_worker_id(char *buf, size_t size, struct worker *worker,
 			    struct worker_pool *pool)
 {
 	if (worker->rescue_wq)
-		return scnprintf(buf, size, "kworker/R-%s",
+		return scnprintf(buf, size, "R-%s",
 				 worker->rescue_wq->name);
 
 	if (pool) {
 		if (pool->cpu >= 0)
-			return scnprintf(buf, size, "kworker/%d:%d%s",
+			return scnprintf(buf, size, "%d:%d%s",
 					 pool->cpu, worker->id,
 					 pool->attrs->nice < 0  ? "H" : "");
 		else
-			return scnprintf(buf, size, "kworker/u%d:%d",
+			return scnprintf(buf, size, "u%d:%d",
 					 pool->id, worker->id);
 	} else {
 		return scnprintf(buf, size, "kworker/dying");
