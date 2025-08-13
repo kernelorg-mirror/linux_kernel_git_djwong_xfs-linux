@@ -105,9 +105,6 @@ void fuse_iomap_sysfs_cleanup(struct kobject *fuse_kobj)
 
 bool fuse_iomap_enabled(void)
 {
-	/* Don't let anyone touch iomap until the end of the patchset. */
-	return false;
-
 	/*
 	 * There are fears that a fuse+iomap server could somehow DoS the
 	 * system by doing things like going out to lunch during a writeback
