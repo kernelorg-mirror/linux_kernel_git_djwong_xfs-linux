@@ -1614,9 +1614,14 @@ static inline bool fuse_has_iomap(const struct inode *inode)
 {
 	return get_fuse_conn_c(inode)->iomap;
 }
+
+int fuse_iomap_sysfs_init(struct kobject *kobj);
+void fuse_iomap_sysfs_cleanup(struct kobject *kobj);
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
+# define fuse_iomap_sysfs_init(...)		(0)
+# define fuse_iomap_sysfs_cleanup(...)		((void)0)
 #endif
 
 #endif /* _FS_FUSE_I_H */
