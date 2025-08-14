@@ -2256,8 +2256,14 @@ static int fuse_sysfs_init(void)
 	if (err)
 		goto out_fuse_unregister;
 
+	err = fuse_iomap_sysfs_init(fuse_kobj);
+	if (err)
+		goto out_fuse_connections;
+
 	return 0;
 
+ out_fuse_connections:
+	sysfs_remove_mount_point(fuse_kobj, "connections");
  out_fuse_unregister:
 	kobject_put(fuse_kobj);
  out_err:
@@ -2266,6 +2272,7 @@ static int fuse_sysfs_init(void)
 
 static void fuse_sysfs_cleanup(void)
 {
+	fuse_iomap_sysfs_cleanup(fuse_kobj);
 	sysfs_remove_mount_point(fuse_kobj, "connections");
 	kobject_put(fuse_kobj);
 }
