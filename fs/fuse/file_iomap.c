@@ -8,6 +8,12 @@
 #include "fuse_trace.h"
 #include "iomap_i.h"
 
+#if IS_ENABLED(CONFIG_FUSE_IOMAP_DEBUG_DEFAULT)
+DEFINE_STATIC_KEY_TRUE(fuse_iomap_debug);
+#else
+DEFINE_STATIC_KEY_FALSE(fuse_iomap_debug);
+#endif
+
 static bool __read_mostly enable_iomap =
 #if IS_ENABLED(CONFIG_FUSE_IOMAP_BY_DEFAULT)
 	true;
@@ -16,6 +22,81 @@ static bool __read_mostly enable_iomap =
 #endif
 module_param(enable_iomap, bool, 0644);
 MODULE_PARM_DESC(enable_iomap, "Enable file I/O through iomap");
+
+#if IS_ENABLED(CONFIG_FUSE_IOMAP_DEBUG)
+static struct kobject *iomap_kobj;
+
+static ssize_t fuse_iomap_debug_show(struct kobject *kobject,
+				     struct kobj_attribute *a, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", !!static_key_enabled(&fuse_iomap_debug));
+}
+
+static ssize_t fuse_iomap_debug_store(struct kobject *kobject,
+				      struct kobj_attribute *a,
+				      const char *buf, size_t count)
+{
+	int ret;
+	int val;
+
+	ret = kstrtoint(buf, 0, &val);
+	if (ret)
+		return ret;
+
+	if (val < 0 || val > 1)
+		return -EINVAL;
+
+	if (val)
+		static_branch_enable(&fuse_iomap_debug);
+	else
+		static_branch_disable(&fuse_iomap_debug);
+
+	return count;
+}
+
+#define __INIT_KOBJ_ATTR(_name, _mode, _show, _store)			\
+{									\
+	.attr	= { .name = __stringify(_name), .mode = _mode },	\
+	.show	= _show,						\
+	.store	= _store,						\
+}
+
+#define FUSE_ATTR_RW(_name, _show, _store)			\
+	static struct kobj_attribute fuse_attr_##_name =	\
+			__INIT_KOBJ_ATTR(_name, 0644, _show, _store)
+
+#define FUSE_ATTR_PTR(_name)					\
+	(&fuse_attr_##_name.attr)
+
+FUSE_ATTR_RW(debug, fuse_iomap_debug_show, fuse_iomap_debug_store);
+
+static const struct attribute *fuse_iomap_attrs[] = {
+	FUSE_ATTR_PTR(debug),
+	NULL,
+};
+
+int fuse_iomap_sysfs_init(struct kobject *fuse_kobj)
+{
+	int error;
+
+	iomap_kobj = kobject_create_and_add("iomap", fuse_kobj);
+	if (!iomap_kobj)
+		return -ENOMEM;
+
+	error = sysfs_create_files(iomap_kobj, fuse_iomap_attrs);
+	if (error) {
+		kobject_put(iomap_kobj);
+		return error;
+	}
+
+	return 0;
+}
+
+void fuse_iomap_sysfs_cleanup(struct kobject *fuse_kobj)
+{
+	kobject_put(iomap_kobj);
+}
+#endif /* IS_ENABLED(CONFIG_FUSE_IOMAP_DEBUG) */
 
 bool fuse_iomap_enabled(void)
 {
