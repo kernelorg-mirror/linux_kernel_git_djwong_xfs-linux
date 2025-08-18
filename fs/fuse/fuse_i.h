@@ -1025,6 +1025,9 @@ struct fuse_conn {
 	struct fuse_ring *ring;
 #endif
 
+	/** How many subsystems still need initialization? */
+	atomic_t need_init;
+
 	/** Only used if the connection opts into request timeouts */
 	struct {
 		/* Worker for checking if any requests have timed out */
@@ -1429,6 +1432,7 @@ struct fuse_dev *fuse_dev_alloc(void);
 void fuse_dev_install(struct fuse_dev *fud, struct fuse_conn *fc);
 void fuse_dev_free(struct fuse_dev *fud);
 int fuse_send_init(struct fuse_mount *fm);
+void fuse_finish_init(struct fuse_conn *fc, bool ok);
 
 /**
  * Fill in superblock and initialize fuse connection
@@ -1741,7 +1745,8 @@ static inline bool fuse_has_iomap(const struct inode *inode)
 
 extern const struct fuse_backing_ops fuse_iomap_backing_ops;
 
-void fuse_iomap_mount(struct fuse_mount *fm);
+int fuse_iomap_mount(struct fuse_mount *fm);
+void fuse_iomap_mount_async(struct fuse_mount *fm);
 void fuse_iomap_unmount(struct fuse_mount *fm);
 
 void fuse_iomap_init_reg_inode(struct inode *inode, unsigned attr_flags);
@@ -1790,7 +1795,8 @@ int fuse_dev_ioctl_iomap_support(struct file *file,
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
-# define fuse_iomap_mount(...)			((void)0)
+# define fuse_iomap_mount(...)			(0)
+# define fuse_iomap_mount_async(...)		((void)0)
 # define fuse_iomap_unmount(...)		((void)0)
 # define fuse_iomap_init_reg_inode(...)		((void)0)
 # define fuse_iomap_init_nonreg_inode(...)	((void)0)
