@@ -97,12 +97,14 @@ struct fuse_submount_lookup {
 };
 
 struct fuse_conn;
+struct fuse_backing;
 
 /** Operations for subsystems that want to use a backing file */
 struct fuse_backing_ops {
 	int (*may_admin)(struct fuse_conn *fc, uint32_t flags);
 	int (*may_open)(struct fuse_conn *fc, struct file *file);
 	int (*may_close)(struct fuse_conn *fc, struct file *file);
+	int (*post_open)(struct fuse_conn *fc, struct fuse_backing *fb);
 	unsigned int type;
 };
 
@@ -110,6 +112,7 @@ struct fuse_backing_ops {
 struct fuse_backing {
 	struct file *file;
 	struct cred *cred;
+	struct block_device *bdev;
 	const struct fuse_backing_ops *ops;
 
 	/** refcount */
@@ -1667,6 +1670,8 @@ static inline bool fuse_has_iomap(const struct inode *inode)
 {
 	return get_fuse_conn_c(inode)->iomap;
 }
+
+extern const struct fuse_backing_ops fuse_iomap_backing_ops;
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
