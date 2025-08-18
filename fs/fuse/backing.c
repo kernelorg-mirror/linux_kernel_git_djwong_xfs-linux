@@ -6,6 +6,7 @@
  */
 
 #include "fuse_i.h"
+#include "fuse_trace.h"
 
 #include <linux/file.h>
 
@@ -81,16 +82,14 @@ void fuse_backing_files_free(struct fuse_conn *fc)
 
 int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 {
-	struct file *file;
-	struct super_block *backing_sb;
+	struct file *file = NULL;
 	struct fuse_backing *fb = NULL;
-	int res;
+	int res, passthrough_res;
 
 	pr_debug("%s: fd=%d flags=0x%x\n", __func__, map->fd, map->flags);
 
-	/* TODO: relax CAP_SYS_ADMIN once backing files are visible to lsof */
 	res = -EPERM;
-	if (!fc->passthrough || !capable(CAP_SYS_ADMIN))
+	if (!fc->passthrough)
 		goto out;
 
 	res = -EINVAL;
@@ -102,46 +101,68 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 	if (!file)
 		goto out;
 
-	backing_sb = file_inode(file)->i_sb;
-	res = -ELOOP;
-	if (backing_sb->s_stack_depth >= fc->max_stack_depth)
-		goto out_fput;
-
 	fb = kmalloc(sizeof(struct fuse_backing), GFP_KERNEL);
 	res = -ENOMEM;
 	if (!fb)
-		goto out_fput;
+		goto out_file;
 
+	/* fb now owns file */
 	fb->file = file;
+	file = NULL;
 	fb->cred = prepare_creds();
 	refcount_set(&fb->count, 1);
 
-	res = fuse_backing_id_alloc(fc, fb);
-	if (res < 0) {
-		fuse_backing_free(fb);
-		fb = NULL;
+	/*
+	 * Each _backing_open function should either:
+	 *
+	 * 1. Take a ref to fb if it wants the file and return 0.
+	 * 2. Return 0 without taking a ref if the backing file isn't needed.
+	 * 3. Return an errno explaining why it couldn't attach.
+	 *
+	 * If at least one subsystem bumps the reference count to open it,
+	 * we'll install it into the index and return the index.  If nobody
+	 * opens the file, the error code will be passed up.  EPERM is the
+	 * default.
+	 */
+	passthrough_res = fuse_passthrough_backing_open(fc, fb);
+
+	if (refcount_read(&fb->count) < 2) {
+		if (passthrough_res)
+			res = passthrough_res;
+		if (!res)
+			res = -EPERM;
+		goto out_fb;
 	}
 
-out:
-	pr_debug("%s: fb=0x%p, ret=%i\n", __func__, fb, res);
+	res = fuse_backing_id_alloc(fc, fb);
+	if (res < 0)
+		goto out_fb;
 
+	trace_fuse_backing_open(fc, res, fb);
+
+	pr_debug("%s: fb=0x%p, ret=%i\n", __func__, fb, res);
+	fuse_backing_put(fb);
 	return res;
 
-out_fput:
-	fput(file);
-	goto out;
+out_fb:
+	fuse_backing_free(fb);
+out_file:
+	if (file)
+		fput(file);
+out:
+	pr_debug("%s: ret=%i\n", __func__, res);
+	return res;
 }
 
 int fuse_backing_close(struct fuse_conn *fc, int backing_id)
 {
-	struct fuse_backing *fb = NULL;
-	int err;
+	struct fuse_backing *fb = NULL, *test_fb;
+	int err, passthrough_err;
 
 	pr_debug("%s: backing_id=%d\n", __func__, backing_id);
 
-	/* TODO: relax CAP_SYS_ADMIN once backing files are visible to lsof */
 	err = -EPERM;
-	if (!fc->passthrough || !capable(CAP_SYS_ADMIN))
+	if (!fc->passthrough)
 		goto out;
 
 	err = -EINVAL;
@@ -149,12 +170,45 @@ int fuse_backing_close(struct fuse_conn *fc, int backing_id)
 		goto out;
 
 	err = -ENOENT;
-	fb = fuse_backing_id_remove(fc, backing_id);
+	fb = fuse_backing_lookup(fc, backing_id);
 	if (!fb)
 		goto out;
 
+	/*
+	 * Each _backing_close function should either:
+	 *
+	 * 1. Release the ref that it took in _backing_open and return 0.
+	 * 2. Don't release the ref if the backing file is busy, and return 0.
+	 * 2. Return an errno explaining why it couldn't detach.
+	 *
+	 * If there are no more active references to the backing file, it will
+	 * be closed and removed from the index.  If there are still active
+	 * references to the backing file other than the one we just took, the
+	 * error code will be passed up.  EBUSY is the default.
+	 */
+	passthrough_err = fuse_passthrough_backing_close(fc, fb);
+
+	if (refcount_read(&fb->count) > 1) {
+		if (passthrough_err)
+			err = passthrough_err;
+		if (!err)
+			err = -EBUSY;
+		goto out_fb;
+	}
+
+	trace_fuse_backing_close(fc, backing_id, fb);
+
+	err = -ENOENT;
+	test_fb = fuse_backing_id_remove(fc, backing_id);
+	if (!test_fb)
+		goto out_fb;
+
+	WARN_ON(fb != test_fb);
+	pr_debug("%s: fb=0x%p, err=0\n", __func__, fb);
 	fuse_backing_put(fb);
-	err = 0;
+	return 0;
+out_fb:
+	fuse_backing_put(fb);
 out:
 	pr_debug("%s: fb=0x%p, err=%i\n", __func__, fb, err);
 

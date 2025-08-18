@@ -958,7 +958,7 @@ struct fuse_conn {
 	/* New writepages go into this bucket */
 	struct fuse_sync_bucket __rcu *curr_bucket;
 
-#ifdef CONFIG_FUSE_PASSTHROUGH
+#ifdef CONFIG_FUSE_BACKING
 	/** IDR for backing files ids */
 	struct idr backing_files_map;
 #endif
@@ -1536,7 +1536,7 @@ void fuse_file_release(struct inode *inode, struct fuse_file *ff,
 		       unsigned int open_flags, fl_owner_t id, bool isdir);
 
 /* backing.c */
-#ifdef CONFIG_FUSE_PASSTHROUGH
+#ifdef CONFIG_FUSE_BACKING
 struct fuse_backing *fuse_backing_get(struct fuse_backing *fb);
 void fuse_backing_put(struct fuse_backing *fb);
 struct fuse_backing *fuse_backing_lookup(struct fuse_conn *fc, int backing_id);
@@ -1595,6 +1595,16 @@ static inline struct file *fuse_file_passthrough(struct fuse_file *ff)
 	return NULL;
 #endif
 }
+
+#ifdef CONFIG_FUSE_PASSTHROUGH
+int fuse_passthrough_backing_open(struct fuse_conn *fc,
+				  struct fuse_backing *fb);
+int fuse_passthrough_backing_close(struct fuse_conn *fc,
+				   struct fuse_backing *fb);
+#else
+# define fuse_passthrough_backing_open(...)	(-EOPNOTSUPP)
+# define fuse_passthrough_backing_close(...)	(-EOPNOTSUPP)
+#endif
 
 ssize_t fuse_passthrough_read_iter(struct kiocb *iocb, struct iov_iter *iter);
 ssize_t fuse_passthrough_write_iter(struct kiocb *iocb, struct iov_iter *iter);
