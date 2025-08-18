@@ -164,7 +164,7 @@ struct fuse_backing *fuse_passthrough_open(struct file *file,
 		goto out;
 
 	err = -ENOENT;
-	fb = fuse_backing_lookup(fc, backing_id);
+	fb = fuse_backing_lookup(fc, &fuse_passthrough_backing_ops, backing_id);
 	if (!fb)
 		goto out;
 
@@ -197,3 +197,32 @@ void fuse_passthrough_release(struct fuse_file *ff, struct fuse_backing *fb)
 	put_cred(ff->cred);
 	ff->cred = NULL;
 }
+
+static int fuse_passthrough_may_admin(struct fuse_conn *fc, unsigned int flags)
+{
+	/* TODO: relax CAP_SYS_ADMIN once backing files are visible to lsof */
+	if (!fc->passthrough || !capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	if (flags)
+		return -EINVAL;
+
+	return 0;
+}
+
+static int fuse_passthrough_may_open(struct fuse_conn *fc, struct file *file)
+{
+	struct super_block *backing_sb;
+
+	backing_sb = file_inode(file)->i_sb;
+	if (backing_sb->s_stack_depth >= fc->max_stack_depth)
+		return -ELOOP;
+
+	return 0;
+}
+
+const struct fuse_backing_ops fuse_passthrough_backing_ops = {
+	.type = FUSE_BACKING_TYPE_PASSTHROUGH,
+	.may_admin = fuse_passthrough_may_admin,
+	.may_open = fuse_passthrough_may_open,
+};
