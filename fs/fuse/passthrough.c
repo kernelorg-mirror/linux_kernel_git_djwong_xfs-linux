@@ -197,3 +197,31 @@ void fuse_passthrough_release(struct fuse_file *ff, struct fuse_backing *fb)
 	put_cred(ff->cred);
 	ff->cred = NULL;
 }
+
+int fuse_passthrough_backing_open(struct fuse_conn *fc,
+				  struct fuse_backing *fb)
+{
+	struct super_block *backing_sb;
+
+	/* TODO: relax CAP_SYS_ADMIN once backing files are visible to lsof */
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	backing_sb = file_inode(fb->file)->i_sb;
+	if (backing_sb->s_stack_depth >= fc->max_stack_depth)
+		return -ELOOP;
+
+	fuse_backing_get(fb);
+	return 0;
+}
+
+int fuse_passthrough_backing_close(struct fuse_conn *fc,
+				   struct fuse_backing *fb)
+{
+	/* TODO: relax CAP_SYS_ADMIN once backing files are visible to lsof */
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	fuse_backing_put(fb);
+	return 0;
+}
