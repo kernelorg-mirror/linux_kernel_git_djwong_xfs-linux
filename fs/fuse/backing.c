@@ -91,6 +91,10 @@ fuse_backing_ops_from_map(const struct fuse_backing_map *map)
 	case FUSE_BACKING_TYPE_PASSTHROUGH:
 		return &fuse_passthrough_backing_ops;
 #endif
+#ifdef CONFIG_FUSE_IOMAP
+	case FUSE_BACKING_TYPE_IOMAP:
+		return &fuse_iomap_backing_ops;
+#endif
 	default:
 		break;
 	}
@@ -138,7 +142,15 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 	fb->file = file;
 	fb->cred = prepare_creds();
 	fb->ops = ops;
+	fb->bdev = NULL;
 	refcount_set(&fb->count, 1);
+
+	res = ops->post_open ? ops->post_open(fc, fb) : 0;
+	if (res) {
+		fuse_backing_free(fb);
+		fb = NULL;
+		goto out;
+	}
 
 	res = fuse_backing_id_alloc(fc, fb);
 	if (res < 0) {
