@@ -1124,9 +1124,15 @@ struct fuse_notify_retrieve_in {
 	uint64_t	dummy4;
 };
 
+#define FUSE_BACKING_TYPE_MASK		(0xFF)
+#define FUSE_BACKING_TYPE_PASSTHROUGH	(0)
+#define FUSE_BACKING_MAX_TYPE		(FUSE_BACKING_TYPE_PASSTHROUGH)
+
+#define FUSE_BACKING_FLAGS_ALL		(FUSE_BACKING_TYPE_MASK)
+
 struct fuse_backing_map {
 	int32_t		fd;
-	uint32_t	flags;
+	uint32_t	flags; /* FUSE_BACKING_* */
 	uint64_t	padding;
 };
 

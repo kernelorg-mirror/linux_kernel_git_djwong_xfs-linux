@@ -6,6 +6,7 @@
  */
 
 #include "fuse_i.h"
+#include "fuse_trace.h"
 
 #include <linux/file.h>
 
@@ -66,35 +67,58 @@ static struct fuse_backing *fuse_backing_id_remove(struct fuse_conn *fc,
 
 static int fuse_backing_id_free(int id, void *p, void *data)
 {
+	struct fuse_conn *fc = data;
 	struct fuse_backing *fb = p;
 
 	WARN_ON_ONCE(refcount_read(&fb->count) != 1);
+
+	trace_fuse_backing_close(fc, id, fb);
 	fuse_backing_free(fb);
 	return 0;
 }
 
 void fuse_backing_files_free(struct fuse_conn *fc)
 {
-	idr_for_each(&fc->backing_files_map, fuse_backing_id_free, NULL);
+	idr_for_each(&fc->backing_files_map, fuse_backing_id_free, fc);
 	idr_destroy(&fc->backing_files_map);
+}
+
+static inline const struct fuse_backing_ops *
+fuse_backing_ops_from_map(const struct fuse_backing_map *map)
+{
+	switch (map->flags & FUSE_BACKING_TYPE_MASK) {
+#ifdef CONFIG_FUSE_PASSTHROUGH
+	case FUSE_BACKING_TYPE_PASSTHROUGH:
+		return &fuse_passthrough_backing_ops;
+#endif
+	default:
+		break;
+	}
+
+	return NULL;
 }
 
 int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 {
 	struct file *file;
-	struct super_block *backing_sb;
 	struct fuse_backing *fb = NULL;
+	const struct fuse_backing_ops *ops = fuse_backing_ops_from_map(map);
+	uint32_t op_flags = map->flags & ~FUSE_BACKING_TYPE_MASK;
 	int res;
 
 	pr_debug("%s: fd=%d flags=0x%x\n", __func__, map->fd, map->flags);
 
-	/* TODO: relax CAP_SYS_ADMIN once backing files are visible to lsof */
-	res = -EPERM;
-	if (!fc->passthrough || !capable(CAP_SYS_ADMIN))
+	res = -EOPNOTSUPP;
+	if (!ops)
+		goto out;
+	WARN_ON(ops->type != (map->flags & FUSE_BACKING_TYPE_MASK));
+
+	res = ops->may_admin ? ops->may_admin(fc, op_flags) : 0;
+	if (res)
 		goto out;
 
 	res = -EINVAL;
-	if (map->flags || map->padding)
+	if (map->padding)
 		goto out;
 
 	file = fget_raw(map->fd);
@@ -102,9 +126,8 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 	if (!file)
 		goto out;
 
-	backing_sb = file_inode(file)->i_sb;
-	res = -ELOOP;
-	if (backing_sb->s_stack_depth >= fc->max_stack_depth)
+	res = ops->may_open ? ops->may_open(fc, file) : 0;
+	if (res)
 		goto out_fput;
 
 	fb = kmalloc(sizeof(struct fuse_backing), GFP_KERNEL);
@@ -114,14 +137,17 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 
 	fb->file = file;
 	fb->cred = prepare_creds();
+	fb->ops = ops;
 	refcount_set(&fb->count, 1);
 
 	res = fuse_backing_id_alloc(fc, fb);
 	if (res < 0) {
 		fuse_backing_free(fb);
 		fb = NULL;
+		goto out;
 	}
 
+	trace_fuse_backing_open(fc, res, fb);
 out:
 	pr_debug("%s: fb=0x%p, ret=%i\n", __func__, fb, res);
 
@@ -132,41 +158,73 @@ out_fput:
 	goto out;
 }
 
+static struct fuse_backing *__fuse_backing_lookup(struct fuse_conn *fc,
+						  int backing_id)
+{
+	struct fuse_backing *fb;
+
+	rcu_read_lock();
+	fb = idr_find(&fc->backing_files_map, backing_id);
+	fb = fuse_backing_get(fb);
+	rcu_read_unlock();
+
+	return fb;
+}
+
 int fuse_backing_close(struct fuse_conn *fc, int backing_id)
 {
-	struct fuse_backing *fb = NULL;
+	struct fuse_backing *fb, *test_fb;
+	const struct fuse_backing_ops *ops;
 	int err;
 
 	pr_debug("%s: backing_id=%d\n", __func__, backing_id);
-
-	/* TODO: relax CAP_SYS_ADMIN once backing files are visible to lsof */
-	err = -EPERM;
-	if (!fc->passthrough || !capable(CAP_SYS_ADMIN))
-		goto out;
 
 	err = -EINVAL;
 	if (backing_id <= 0)
 		goto out;
 
 	err = -ENOENT;
-	fb = fuse_backing_id_remove(fc, backing_id);
+	fb = __fuse_backing_lookup(fc, backing_id);
 	if (!fb)
 		goto out;
+	ops = fb->ops;
 
-	fuse_backing_put(fb);
+	err = ops->may_admin ? ops->may_admin(fc, 0) : 0;
+	if (err)
+		goto out_fb;
+
+	err = ops->may_close ? ops->may_close(fc, fb->file) : 0;
+	if (err)
+		goto out_fb;
+
+	trace_fuse_backing_close(fc, backing_id, fb);
+
+	err = -ENOENT;
+	test_fb = fuse_backing_id_remove(fc, backing_id);
+	if (!test_fb)
+		goto out_fb;
+
+	WARN_ON(fb != test_fb);
 	err = 0;
+	fuse_backing_put(test_fb);
+out_fb:
+	fuse_backing_put(fb);
 out:
 	pr_debug("%s: fb=0x%p, err=%i\n", __func__, fb, err);
 
 	return err;
 }
 
-struct fuse_backing *fuse_backing_lookup(struct fuse_conn *fc, int backing_id)
+struct fuse_backing *fuse_backing_lookup(struct fuse_conn *fc,
+					 const struct fuse_backing_ops *ops,
+					 int backing_id)
 {
 	struct fuse_backing *fb;
 
 	rcu_read_lock();
 	fb = idr_find(&fc->backing_files_map, backing_id);
+	if (fb && fb->ops != ops)
+		fb = NULL;
 	fb = fuse_backing_get(fb);
 	rcu_read_unlock();
 
