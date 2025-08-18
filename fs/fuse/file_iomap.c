@@ -319,10 +319,6 @@ static inline bool fuse_iomap_check_mapping(const struct inode *inode,
 		return false;
 	}
 
-	/* XXX: we don't support devices yet */
-	if (BAD_DATA(map->dev != FUSE_IOMAP_DEV_NULL))
-		return false;
-
 	/* No overflows in the device range, if supplied */
 	if (map->addr != FUSE_IOMAP_NULL_ADDR &&
 	    BAD_DATA(check_add_overflow(map->addr, map->length, &end)))
@@ -333,6 +329,7 @@ static inline bool fuse_iomap_check_mapping(const struct inode *inode,
 
 /* Convert a mapping from the server into something the kernel can use */
 static inline void fuse_iomap_from_server(struct iomap *iomap,
+					  const struct fuse_backing *fb,
 					  const struct fuse_iomap_io *fmap)
 {
 	iomap->addr = fmap->addr;
@@ -340,11 +337,32 @@ static inline void fuse_iomap_from_server(struct iomap *iomap,
 	iomap->length = fmap->length;
 	iomap->type = fuse_iomap_type_from_server(fmap->type);
 	iomap->flags = fuse_iomap_flags_from_server(fmap->flags);
-	iomap->bdev = NULL; /* XXX */
+	iomap->bdev = fb ? fb->bdev : NULL;
+	iomap->dax_dev = NULL;
+}
+
+static bool fuse_iomap_matches_bdev(const struct fuse_backing *fb,
+				    const void *data)
+{
+	return fb->bdev == data;
+}
+
+static inline uint32_t
+fuse_iomap_find_backing_id(struct fuse_conn *fc,
+			   const struct block_device *bdev)
+{
+	int ret = -ENODEV;
+
+	if (bdev)
+		ret = fuse_backing_lookup_id(fc, fuse_iomap_matches_bdev, bdev);
+	if (ret < 0)
+		return FUSE_IOMAP_DEV_NULL;
+	return ret;
 }
 
 /* Convert a mapping from the kernel into something the server can use */
-static inline void fuse_iomap_to_server(struct fuse_iomap_io *fmap,
+static inline void fuse_iomap_to_server(struct fuse_conn *fc,
+					struct fuse_iomap_io *fmap,
 					const struct iomap *iomap)
 {
 	fmap->addr = fmap->addr;
@@ -352,7 +370,7 @@ static inline void fuse_iomap_to_server(struct fuse_iomap_io *fmap,
 	fmap->length = iomap->length;
 	fmap->type = fuse_iomap_type_to_server(iomap->type);
 	fmap->flags = fuse_iomap_flags_to_server(iomap->flags);
-	fmap->dev = FUSE_IOMAP_DEV_NULL; /* XXX */
+	fmap->dev = fuse_iomap_find_backing_id(fc, iomap->bdev);
 }
 
 /* Check the incoming _begin mappings to make sure they're not nonsense. */
@@ -391,6 +409,27 @@ static inline bool fuse_is_iomap_file_write(unsigned int opflags)
 	return opflags & (IOMAP_WRITE | IOMAP_ZERO | IOMAP_UNSHARE);
 }
 
+static inline struct fuse_backing *
+fuse_iomap_find_dev(struct fuse_conn *fc, const struct fuse_iomap_io *map)
+{
+	struct fuse_backing *ret = NULL;
+
+	if (map->dev != FUSE_IOMAP_DEV_NULL && map->dev < INT_MAX)
+		ret = fuse_backing_lookup(fc, &fuse_iomap_backing_ops,
+					  map->dev);
+
+	switch (map->type) {
+	case FUSE_IOMAP_TYPE_MAPPED:
+	case FUSE_IOMAP_TYPE_UNWRITTEN:
+		/* Mappings backed by space must have a device/addr */
+		if (BAD_DATA(ret == NULL))
+			return ERR_PTR(-EFSCORRUPTED);
+		break;
+	}
+
+	return ret;
+}
+
 static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 			    unsigned opflags, struct iomap *iomap,
 			    struct iomap *srcmap)
@@ -404,6 +443,8 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 	};
 	struct fuse_iomap_begin_out outarg = { };
 	struct fuse_mount *fm = get_fuse_mount(inode);
+	struct fuse_backing *read_dev = NULL;
+	struct fuse_backing *write_dev = NULL;
 	FUSE_ARGS(args);
 	int err;
 
@@ -430,24 +471,44 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 	if (err)
 		return err;
 
+	read_dev = fuse_iomap_find_dev(fm->fc, &outarg.read);
+	if (IS_ERR(read_dev))
+		return PTR_ERR(read_dev);
+
 	if (fuse_is_iomap_file_write(opflags) &&
 	    outarg.write.type != FUSE_IOMAP_TYPE_PURE_OVERWRITE) {
+		/* open the write device */
+		write_dev = fuse_iomap_find_dev(fm->fc, &outarg.write);
+		if (IS_ERR(write_dev)) {
+			err = PTR_ERR(write_dev);
+			goto out_read_dev;
+		}
+
 		/*
 		 * For an out of place write, we must supply the write mapping
 		 * via @iomap, and the read mapping via @srcmap.
 		 */
-		fuse_iomap_from_server(iomap, &outarg.write);
-		fuse_iomap_from_server(srcmap, &outarg.read);
+		fuse_iomap_from_server(iomap, write_dev, &outarg.write);
+		fuse_iomap_from_server(srcmap, read_dev, &outarg.read);
 	} else {
 		/*
 		 * For everything else (reads, reporting, and pure overwrites),
 		 * we can return the sole mapping through @iomap and leave
 		 * @srcmap unchanged from its default (HOLE).
 		 */
-		fuse_iomap_from_server(iomap, &outarg.read);
+		fuse_iomap_from_server(iomap, read_dev, &outarg.read);
 	}
 
-	return 0;
+	/*
+	 * XXX: if we ever want to support closing devices, we need a way to
+	 * track the fuse_backing refcount all the way through bio endios.
+	 * For now we put the refcount here because you can't remove an iomap
+	 * device until unmount time.
+	 */
+	fuse_backing_put(write_dev);
+out_read_dev:
+	fuse_backing_put(read_dev);
+	return err;
 }
 
 /* Decide if we send FUSE_IOMAP_END to the fuse server */
@@ -489,7 +550,7 @@ static int fuse_iomap_end(struct inode *inode, loff_t pos, loff_t count,
 		};
 		FUSE_ARGS(args);
 
-		fuse_iomap_to_server(&inarg.map, iomap);
+		fuse_iomap_to_server(fm->fc, &inarg.map, iomap);
 
 		trace_fuse_iomap_end(inode, &inarg);
 
@@ -518,4 +579,45 @@ static int fuse_iomap_end(struct inode *inode, loff_t pos, loff_t count,
 const struct iomap_ops fuse_iomap_ops = {
 	.iomap_begin		= fuse_iomap_begin,
 	.iomap_end		= fuse_iomap_end,
+};
+
+static int fuse_iomap_may_admin(struct fuse_conn *fc, unsigned int flags)
+{
+	if (!fc->iomap)
+		return -EPERM;
+
+	if (flags)
+		return -EINVAL;
+
+	return 0;
+}
+
+static int fuse_iomap_may_open(struct fuse_conn *fc, struct file *file)
+{
+	if (!S_ISBLK(file_inode(file)->i_mode))
+		return -ENODEV;
+
+	return 0;
+}
+
+static int fuse_iomap_post_open(struct fuse_conn *fc, struct fuse_backing *fb)
+{
+	fb->bdev = I_BDEV(fb->file->f_mapping->host);
+	return 0;
+}
+
+static int fuse_iomap_may_close(struct fuse_conn *fc, struct file *file)
+{
+	/* We only support closing iomap block devices at unmount */
+	return -EBUSY;
+}
+
+const struct fuse_backing_ops fuse_iomap_backing_ops = {
+	.type = FUSE_BACKING_TYPE_IOMAP,
+	.id_start = 1,
+	.id_end = 1025,		/* maximum 1024 block devices */
+	.may_admin = fuse_iomap_may_admin,
+	.may_open = fuse_iomap_may_open,
+	.may_close = fuse_iomap_may_close,
+	.post_open = fuse_iomap_post_open,
 };
