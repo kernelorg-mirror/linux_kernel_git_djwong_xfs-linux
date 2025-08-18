@@ -67,16 +67,19 @@ static struct fuse_backing *fuse_backing_id_remove(struct fuse_conn *fc,
 
 static int fuse_backing_id_free(int id, void *p, void *data)
 {
+	struct fuse_conn *fc = data;
 	struct fuse_backing *fb = p;
 
 	WARN_ON_ONCE(refcount_read(&fb->count) != 1);
+
+	trace_fuse_backing_close(fc, id, fb);
 	fuse_backing_free(fb);
 	return 0;
 }
 
 void fuse_backing_files_free(struct fuse_conn *fc)
 {
-	idr_for_each(&fc->backing_files_map, fuse_backing_id_free, NULL);
+	idr_for_each(&fc->backing_files_map, fuse_backing_id_free, fc);
 	idr_destroy(&fc->backing_files_map);
 }
 
@@ -84,12 +87,12 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 {
 	struct file *file = NULL;
 	struct fuse_backing *fb = NULL;
-	int res, passthrough_res;
+	int res, passthrough_res, iomap_res;
 
 	pr_debug("%s: fd=%d flags=0x%x\n", __func__, map->fd, map->flags);
 
 	res = -EPERM;
-	if (!fc->passthrough)
+	if (!fc->passthrough && !fc->iomap)
 		goto out;
 
 	res = -EINVAL;
@@ -125,10 +128,13 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 	 * default.
 	 */
 	passthrough_res = fuse_passthrough_backing_open(fc, fb);
+	iomap_res = fuse_iomap_backing_open(fc, fb);
 
 	if (refcount_read(&fb->count) < 2) {
 		if (passthrough_res)
 			res = passthrough_res;
+		if (!res && iomap_res)
+			res = iomap_res;
 		if (!res)
 			res = -EPERM;
 		goto out_fb;
@@ -157,12 +163,12 @@ out:
 int fuse_backing_close(struct fuse_conn *fc, int backing_id)
 {
 	struct fuse_backing *fb = NULL, *test_fb;
-	int err, passthrough_err;
+	int err, passthrough_err, iomap_err;
 
 	pr_debug("%s: backing_id=%d\n", __func__, backing_id);
 
 	err = -EPERM;
-	if (!fc->passthrough)
+	if (!fc->passthrough && !fc->iomap)
 		goto out;
 
 	err = -EINVAL;
@@ -187,10 +193,13 @@ int fuse_backing_close(struct fuse_conn *fc, int backing_id)
 	 * error code will be passed up.  EBUSY is the default.
 	 */
 	passthrough_err = fuse_passthrough_backing_close(fc, fb);
+	iomap_err = fuse_iomap_backing_close(fc, fb);
 
 	if (refcount_read(&fb->count) > 1) {
 		if (passthrough_err)
 			err = passthrough_err;
+		if (!err && iomap_err)
+			err = iomap_err;
 		if (!err)
 			err = -EBUSY;
 		goto out_fb;

@@ -6,6 +6,7 @@
 #include "dev_uring_i.h"
 #include "fuse_i.h"
 #include "fuse_dev_i.h"
+#include "iomap_priv.h"
 
 #include <linux/pagemap.h>
 

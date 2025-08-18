@@ -319,10 +319,6 @@ static inline bool fuse_iomap_check_mapping(const struct inode *inode,
 		return false;
 	}
 
-	/* XXX: we don't support devices yet */
-	if (BAD_DATA(map->dev != FUSE_IOMAP_DEV_NULL))
-		return false;
-
 	/* No overflows in the device range, if supplied */
 	if (map->addr != FUSE_IOMAP_NULL_ADDR &&
 	    BAD_DATA(check_add_overflow(map->addr, map->length, &end)))
@@ -334,6 +330,7 @@ static inline bool fuse_iomap_check_mapping(const struct inode *inode,
 /* Convert a mapping from the server into something the kernel can use */
 static inline void fuse_iomap_from_server(struct inode *inode,
 					  struct iomap *iomap,
+					  const struct fuse_backing *fb,
 					  const struct fuse_iomap_io *fmap)
 {
 	iomap->addr = fmap->addr;
@@ -341,7 +338,9 @@ static inline void fuse_iomap_from_server(struct inode *inode,
 	iomap->length = fmap->length;
 	iomap->type = fuse_iomap_type_from_server(fmap->type);
 	iomap->flags = fuse_iomap_flags_from_server(fmap->flags);
-	iomap->bdev = inode->i_sb->s_bdev; /* XXX */
+
+	iomap->bdev = fb ? fb->bdev : NULL;
+	iomap->dax_dev = NULL;
 }
 
 /* Convert a mapping from the server into something the kernel can use */
@@ -392,6 +391,32 @@ static inline bool fuse_is_iomap_file_write(unsigned int opflags)
 	return opflags & (IOMAP_WRITE | IOMAP_ZERO | IOMAP_UNSHARE);
 }
 
+static inline struct fuse_backing *
+fuse_iomap_find_dev(struct fuse_conn *fc, const struct fuse_iomap_io *map)
+{
+	struct fuse_backing *ret = NULL;
+
+	if (map->dev != FUSE_IOMAP_DEV_NULL && map->dev < INT_MAX)
+		ret = fuse_backing_lookup(fc, map->dev);
+
+	switch (map->type) {
+	case FUSE_IOMAP_TYPE_MAPPED:
+	case FUSE_IOMAP_TYPE_UNWRITTEN:
+		/* Mappings backed by space must have a device/addr */
+		if (BAD_DATA(ret == NULL))
+			return ERR_PTR(-EFSCORRUPTED);
+		break;
+	}
+
+	/* Must be one of our open devices */
+	if (ret && BAD_DATA(ret->iomap == 0)) {
+		fuse_backing_put(ret);
+		return ERR_PTR(-EFSCORRUPTED);
+	}
+
+	return ret;
+}
+
 static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 			    unsigned opflags, struct iomap *iomap,
 			    struct iomap *srcmap)
@@ -405,6 +430,8 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 	};
 	struct fuse_iomap_begin_out outarg = { };
 	struct fuse_mount *fm = get_fuse_mount(inode);
+	struct fuse_backing *read_dev = NULL;
+	struct fuse_backing *write_dev = NULL;
 	FUSE_ARGS(args);
 	int err;
 
@@ -431,24 +458,44 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 	if (err)
 		return err;
 
+	read_dev = fuse_iomap_find_dev(fm->fc, &outarg.read);
+	if (IS_ERR(read_dev))
+		return PTR_ERR(read_dev);
+
 	if (fuse_is_iomap_file_write(opflags) &&
 	    outarg.write.type != FUSE_IOMAP_TYPE_PURE_OVERWRITE) {
+		/* open the write device */
+		write_dev = fuse_iomap_find_dev(fm->fc, &outarg.write);
+		if (IS_ERR(write_dev)) {
+			err = PTR_ERR(write_dev);
+			goto out_read_dev;
+		}
+
 		/*
 		 * For an out of place write, we must supply the write mapping
 		 * via @iomap, and the read mapping via @srcmap.
 		 */
-		fuse_iomap_from_server(inode, iomap, &outarg.write);
-		fuse_iomap_from_server(inode, srcmap, &outarg.read);
+		fuse_iomap_from_server(inode, iomap, write_dev, &outarg.write);
+		fuse_iomap_from_server(inode, srcmap, read_dev, &outarg.read);
 	} else {
 		/*
 		 * For everything else (reads, reporting, and pure overwrites),
 		 * we can return the sole mapping through @iomap and leave
 		 * @srcmap unchanged from its default (HOLE).
 		 */
-		fuse_iomap_from_server(inode, iomap, &outarg.read);
+		fuse_iomap_from_server(inode, iomap, read_dev, &outarg.read);
 	}
 
-	return 0;
+	/*
+	 * XXX: if we ever want to support closing devices, we need a way to
+	 * track the fuse_backing refcount all the way through bio endios.
+	 * For now we put the refcount here because you can't remove an iomap
+	 * device until unmount time.
+	 */
+	fuse_backing_put(write_dev);
+out_read_dev:
+	fuse_backing_put(read_dev);
+	return err;
 }
 
 /* Decide if we send FUSE_IOMAP_END to the fuse server */
@@ -523,3 +570,26 @@ const struct iomap_ops fuse_iomap_ops = {
 	.iomap_begin		= fuse_iomap_begin,
 	.iomap_end		= fuse_iomap_end,
 };
+
+int fuse_iomap_backing_open(struct fuse_conn *fc, struct fuse_backing *fb)
+{
+	if (!fc->iomap)
+		return 0;
+
+	if (!S_ISBLK(file_inode(fb->file)->i_mode))
+		return -ENODEV;
+
+	fb->iomap = 1;
+	fb->bdev = I_BDEV(fb->file->f_mapping->host);
+	fuse_backing_get(fb);
+	return 0;
+}
+
+int fuse_iomap_backing_close(struct fuse_conn *fc, struct fuse_backing *fb)
+{
+	if (!fb->iomap)
+		return 0;
+
+	/* We only support closing iomap block devices at unmount */
+	return -EBUSY;
+}

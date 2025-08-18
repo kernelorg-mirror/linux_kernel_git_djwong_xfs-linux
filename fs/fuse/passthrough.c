@@ -168,6 +168,11 @@ struct fuse_backing *fuse_passthrough_open(struct file *file,
 	if (!fb)
 		goto out;
 
+	if (!fb->passthrough) {
+		fuse_backing_put(fb);
+		goto out;
+	}
+
 	/* Allocate backing file per fuse file to store fuse path */
 	backing_file = backing_file_open(&file->f_path, file->f_flags,
 					 &fb->file->f_path, fb->cred);
@@ -203,6 +208,9 @@ int fuse_passthrough_backing_open(struct fuse_conn *fc,
 {
 	struct super_block *backing_sb;
 
+	if (!fc->passthrough)
+		return 0;
+
 	/* TODO: relax CAP_SYS_ADMIN once backing files are visible to lsof */
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
@@ -211,6 +219,7 @@ int fuse_passthrough_backing_open(struct fuse_conn *fc,
 	if (backing_sb->s_stack_depth >= fc->max_stack_depth)
 		return -ELOOP;
 
+	fb->passthrough = 1;
 	fuse_backing_get(fb);
 	return 0;
 }
@@ -218,10 +227,14 @@ int fuse_passthrough_backing_open(struct fuse_conn *fc,
 int fuse_passthrough_backing_close(struct fuse_conn *fc,
 				   struct fuse_backing *fb)
 {
+	if (!fb->passthrough)
+		return 0;
+
 	/* TODO: relax CAP_SYS_ADMIN once backing files are visible to lsof */
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
+	fb->passthrough = 0;
 	fuse_backing_put(fb);
 	return 0;
 }

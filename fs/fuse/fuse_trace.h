@@ -175,6 +175,13 @@ TRACE_EVENT(fuse_request_end,
 );
 
 #ifdef CONFIG_FUSE_BACKING
+#define FUSE_BACKING_PASSTHROUGH	(1U << 0)
+#define FUSE_BACKING_IOMAP		(1U << 1)
+
+#define FUSE_BACKING_FLAG_STRINGS \
+	{ FUSE_BACKING_PASSTHROUGH,		"pass" }, \
+	{ FUSE_BACKING_IOMAP,			"iomap" }
+
 TRACE_EVENT(fuse_backing_class,
 	TP_PROTO(const struct fuse_conn *fc, unsigned int idx,
 		 const struct fuse_backing *fb),
@@ -184,7 +191,9 @@ TRACE_EVENT(fuse_backing_class,
 	TP_STRUCT__entry(
 		__field(dev_t,			connection)
 		__field(unsigned int,		idx)
+		__field(unsigned int,		flags)
 		__field(unsigned long,		ino)
+		__field(dev_t,			rdev)
 	),
 
 	TP_fast_assign(
@@ -193,12 +202,23 @@ TRACE_EVENT(fuse_backing_class,
 		__entry->connection	=	fc->dev;
 		__entry->idx		=	idx;
 		__entry->ino		=	inode->i_ino;
+		__entry->flags		=	0;
+		if (fb->passthrough)
+			__entry->flags	|=	FUSE_BACKING_PASSTHROUGH;
+		if (fb->iomap) {
+			__entry->rdev	=	inode->i_rdev;
+			__entry->flags	|=	FUSE_BACKING_IOMAP;
+		} else {
+			__entry->rdev	=	0;
+		}
 	),
 
-	TP_printk("connection %u idx %u ino 0x%lx",
+	TP_printk("connection %u idx %u flags (%s) ino 0x%lx rdev %u:%u",
 		  __entry->connection,
 		  __entry->idx,
-		  __entry->ino)
+		  __print_flags(__entry->flags, "|", FUSE_BACKING_FLAG_STRINGS),
+		  __entry->ino,
+		  MAJOR(__entry->rdev), MINOR(__entry->rdev))
 );
 #define DEFINE_FUSE_BACKING_EVENT(name)		\
 DEFINE_EVENT(fuse_backing_class, name,		\
@@ -210,6 +230,7 @@ DEFINE_FUSE_BACKING_EVENT(fuse_backing_close);
 #endif
 
 #if IS_ENABLED(CONFIG_FUSE_IOMAP)
+struct fuse_iomap_dev;
 
 /* tracepoint boilerplate so we don't have to keep doing this */
 #define FUSE_IOMAP_OPFLAGS_FIELD \
@@ -451,6 +472,30 @@ TRACE_EVENT(fuse_iomap_end_error,
 		  FUSE_IOMAP_OP_PRINTK_ARGS(),
 		  __entry->written,
 		  __entry->error)
+);
+
+TRACE_EVENT(fuse_iomap_dev_add,
+	TP_PROTO(const struct fuse_conn *fc,
+		 const struct fuse_backing_map *map),
+
+	TP_ARGS(fc, map),
+
+	TP_STRUCT__entry(
+		__field(dev_t,			connection)
+		__field(int,			fd)
+		__field(unsigned int,		flags)
+	),
+
+	TP_fast_assign(
+		__entry->connection	=	fc->dev;
+		__entry->fd		=	map->fd;
+		__entry->flags		=	map->flags;
+	),
+
+	TP_printk("connection %u fd %d flags 0x%x",
+		  __entry->connection,
+		  __entry->fd,
+		  __entry->flags)
 );
 #endif /* CONFIG_FUSE_IOMAP */
 

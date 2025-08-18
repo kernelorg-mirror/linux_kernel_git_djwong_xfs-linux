@@ -100,6 +100,10 @@ struct fuse_submount_lookup {
 struct fuse_backing {
 	struct file *file;
 	struct cred *cred;
+	struct block_device *bdev;
+
+	unsigned int passthrough:1;
+	unsigned int iomap:1;
 
 	/** refcount */
 	refcount_t count;
@@ -1634,11 +1638,16 @@ static inline bool fuse_has_iomap(const struct inode *inode)
 
 int fuse_iomap_sysfs_init(struct kobject *kobj);
 void fuse_iomap_sysfs_cleanup(struct kobject *kobj);
+
+int fuse_iomap_backing_open(struct fuse_conn *fc, struct fuse_backing *fb);
+int fuse_iomap_backing_close(struct fuse_conn *fc, struct fuse_backing *fb);
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
 # define fuse_iomap_sysfs_init(...)		(0)
 # define fuse_iomap_sysfs_cleanup(...)		((void)0)
+# define fuse_iomap_backing_open(...)		(-EOPNOTSUPP)
+# define fuse_iomap_backing_close(...)		(-EOPNOTSUPP)
 #endif
 
 #endif /* _FS_FUSE_I_H */
