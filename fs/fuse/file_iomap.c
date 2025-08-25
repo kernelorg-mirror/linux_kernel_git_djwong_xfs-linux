@@ -1012,6 +1012,12 @@ static void fuse_iomap_config_reply(struct fuse_mount *fm,
 	fc->iomap_conn.no_end = 0;
 	fc->iomap_conn.no_ioend = 0;
 
+	/*
+	 * We could be on the hook for a substantial amount of writeback, so
+	 * prohibit reclaim from recursing into fuse or the kernel from
+	 * throttling any bdis that the fuse server might write to.
+	 */
+	current->flags |= PF_MEMALLOC_NOFS | PF_LOCAL_THROTTLE;
 done:
 	kfree(ia);
 	fuse_finish_init(fc, ok);
