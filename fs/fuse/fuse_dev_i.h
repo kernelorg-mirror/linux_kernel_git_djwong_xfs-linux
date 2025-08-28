@@ -39,8 +39,10 @@ struct fuse_copy_state {
 	} ring;
 };
 
-#define FUSE_DEV_SYNC_INIT ((struct fuse_dev *) 1)
-#define FUSE_DEV_PTR_MASK (~1UL)
+#define FUSE_DEV_SYNC_INIT	(1UL << 0)
+#define FUSE_DEV_INHERIT_IOMAP	(1UL << 1)
+#define FUSE_DEV_FLAGS_MASK	(FUSE_DEV_SYNC_INIT | FUSE_DEV_INHERIT_IOMAP)
+#define FUSE_DEV_PTR_MASK	(~FUSE_DEV_FLAGS_MASK)
 
 static inline struct fuse_dev *__fuse_get_dev(struct file *file)
 {
@@ -50,7 +52,31 @@ static inline struct fuse_dev *__fuse_get_dev(struct file *file)
 	 */
 	struct fuse_dev *fud = READ_ONCE(file->private_data);
 
-	return (typeof(fud)) ((unsigned long) fud & FUSE_DEV_PTR_MASK);
+	return (typeof(fud)) ((uintptr_t)fud & FUSE_DEV_PTR_MASK);
+}
+
+static inline struct fuse_dev *__fuse_get_dev_and_flags(struct file *file,
+							uintptr_t *flagsp)
+{
+	/*
+	 * Lockless access is OK, because file->private data is set
+	 * once during mount and is valid until the file is released.
+	 */
+	struct fuse_dev *fud = READ_ONCE(file->private_data);
+
+	*flagsp = ((uintptr_t)fud) & FUSE_DEV_FLAGS_MASK;
+	return (typeof(fud)) ((uintptr_t) fud & FUSE_DEV_PTR_MASK);
+}
+
+static inline int __fuse_set_dev_flags(struct file *file, uintptr_t flag)
+{
+	uintptr_t old_flags = 0;
+
+	if (__fuse_get_dev_and_flags(file, &old_flags))
+		return -EINVAL;
+
+	WRITE_ONCE(file->private_data, (struct fuse_dev *)(old_flags | flag));
+	return 0;
 }
 
 struct fuse_dev *fuse_get_dev(struct file *file);
