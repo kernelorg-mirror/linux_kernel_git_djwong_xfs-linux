@@ -967,6 +967,13 @@ struct fuse_conn {
 	unsigned int sync_init:1;
 
 	/*
+	 * Are filesystems using this connection allowed to use iomap?  This is
+	 * determined by the privilege level of the process that initiated the
+	 * mount() call.
+	 */
+	unsigned int may_iomap:1;
+
+	/*
 	 * Use fs/iomap for FIEMAP and SEEK_{DATA,HOLE} file operations,
 	 * buffered I/O, and direct I/O.
 	 */
@@ -1807,6 +1814,7 @@ void fuse_iomap_open_truncate(struct inode *inode);
 void fuse_iomap_copied_file_range(struct inode *inode, loff_t offset,
 				  size_t written);
 
+int fuse_dev_ioctl_add_iomap(struct file *file);
 int fuse_dev_ioctl_iomap_support(struct file *file,
 				 struct fuse_iomap_support __user *argp);
 
@@ -1855,6 +1863,7 @@ int fuse_iomap_inval(struct fuse_conn *fc,
 # define fuse_iomap_flush_unmap_range(...)	(-ENOSYS)
 # define fuse_iomap_open_truncate(...)		((void)0)
 # define fuse_iomap_copied_file_range(...)	((void)0)
+# define fuse_dev_ioctl_add_iomap(...)		(-EOPNOTSUPP)
 # define fuse_dev_ioctl_iomap_support(...)	(-EOPNOTSUPP)
 # define fuse_iomap_fadvise			NULL
 # define fuse_inode_caches_iomaps(...)		(false)
