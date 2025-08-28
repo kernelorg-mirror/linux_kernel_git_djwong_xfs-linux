@@ -1017,6 +1017,7 @@ void fuse_conn_init(struct fuse_conn *fc, struct fuse_mount *fm,
 	fc->name_max = FUSE_NAME_LOW_MAX;
 	fc->timeout.req_timeout = 0;
 	fc->root_nodeid = FUSE_ROOT_ID;
+	fc->may_iomap = fuse_iomap_enabled();
 
 	if (IS_ENABLED(CONFIG_FUSE_BACKING))
 		fuse_backing_files_init(fc);
@@ -1476,7 +1477,7 @@ static void process_init_reply(struct fuse_mount *fm, struct fuse_args *args,
 			if (flags & FUSE_REQUEST_TIMEOUT)
 				timeout = arg->request_timeout;
 
-			if ((flags & FUSE_IOMAP) && fuse_iomap_enabled()) {
+			if ((flags & FUSE_IOMAP) && fc->may_iomap) {
 				fc->local_fs = 1;
 				fc->iomap = 1;
 				printk(KERN_WARNING
@@ -1564,7 +1565,7 @@ static struct fuse_init_args *fuse_new_init(struct fuse_mount *fm)
 	 */
 	if (fuse_uring_enabled())
 		flags |= FUSE_OVER_IO_URING;
-	if (fuse_iomap_enabled())
+	if (fm->fc->may_iomap)
 		flags |= FUSE_IOMAP;
 
 	ia->in.flags = flags;
@@ -1939,11 +1940,16 @@ int fuse_fill_super_common(struct super_block *sb, struct fuse_fs_context *ctx)
 
 	mutex_lock(&fuse_mutex);
 	err = -EINVAL;
-	if (ctx->fudptr && *ctx->fudptr) {
-		if (*ctx->fudptr == FUSE_DEV_SYNC_INIT) {
-			fc->sync_init = 1;
-		} else
+	if (ctx->fudptr) {
+		uintptr_t raw = (uintptr_t)(*ctx->fudptr);
+		uintptr_t flags = raw & FUSE_DEV_FLAGS_MASK;
+
+		if (raw & FUSE_DEV_PTR_MASK)
 			goto err_unlock;
+		if (flags & FUSE_DEV_SYNC_INIT)
+			fc->sync_init = 1;
+		if (flags & FUSE_DEV_INHERIT_IOMAP)
+			fc->may_iomap = 1;
 	}
 
 	err = fuse_ctl_add_conn(fc);
