@@ -1558,7 +1558,7 @@ struct fuse_dev *fuse_get_dev(struct file *file)
 		return fud;
 
 	err = wait_event_interruptible(fuse_dev_waitq,
-				       READ_ONCE(file->private_data) != FUSE_DEV_SYNC_INIT);
+				       __fuse_get_dev(file) != NULL);
 	if (err)
 		return ERR_PTR(err);
 
@@ -2764,13 +2764,10 @@ static long fuse_dev_ioctl_backing_close(struct file *file, __u32 __user *argp)
 
 static long fuse_dev_ioctl_sync_init(struct file *file)
 {
-	int err = -EINVAL;
+	int err;
 
 	mutex_lock(&fuse_mutex);
-	if (!__fuse_get_dev(file)) {
-		WRITE_ONCE(file->private_data, FUSE_DEV_SYNC_INIT);
-		err = 0;
-	}
+	err = __fuse_set_dev_flags(file, FUSE_DEV_SYNC_INIT);
 	mutex_unlock(&fuse_mutex);
 	return err;
 }
@@ -2795,6 +2792,8 @@ static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 
 	case FUSE_DEV_IOC_IOMAP_SUPPORT:
 		return fuse_dev_ioctl_iomap_support(file, argp);
+	case FUSE_DEV_IOC_ADD_IOMAP:
+		return fuse_dev_ioctl_add_iomap(file);
 
 	default:
 		return -ENOTTY;
