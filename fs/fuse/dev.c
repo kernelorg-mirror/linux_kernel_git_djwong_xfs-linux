@@ -1533,14 +1533,34 @@ static int fuse_dev_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
+struct fuse_dev *fuse_get_dev(struct file *file)
+{
+	struct fuse_dev *fud = __fuse_get_dev(file);
+	int err;
+
+	if (likely(fud))
+		return fud;
+
+	err = wait_event_interruptible(fuse_dev_waitq,
+				       READ_ONCE(file->private_data) != FUSE_DEV_SYNC_INIT);
+	if (err)
+		return ERR_PTR(err);
+
+	fud = __fuse_get_dev(file);
+	if (!fud)
+		return ERR_PTR(-EPERM);
+
+	return fud;
+}
+
 static ssize_t fuse_dev_read(struct kiocb *iocb, struct iov_iter *to)
 {
 	struct fuse_copy_state cs;
 	struct file *file = iocb->ki_filp;
 	struct fuse_dev *fud = fuse_get_dev(file);
 
-	if (!fud)
-		return -EPERM;
+	if (IS_ERR(fud))
+		return PTR_ERR(fud);
 
 	if (!user_backed_iter(to))
 		return -EINVAL;
@@ -1560,8 +1580,8 @@ static ssize_t fuse_dev_splice_read(struct file *in, loff_t *ppos,
 	struct fuse_copy_state cs;
 	struct fuse_dev *fud = fuse_get_dev(in);
 
-	if (!fud)
-		return -EPERM;
+	if (IS_ERR(fud))
+		return PTR_ERR(fud);
 
 	bufs = kvmalloc_array(pipe->max_usage, sizeof(struct pipe_buffer),
 			      GFP_KERNEL);
@@ -2236,8 +2256,8 @@ static ssize_t fuse_dev_write(struct kiocb *iocb, struct iov_iter *from)
 	struct fuse_copy_state cs;
 	struct fuse_dev *fud = fuse_get_dev(iocb->ki_filp);
 
-	if (!fud)
-		return -EPERM;
+	if (IS_ERR(fud))
+		return PTR_ERR(fud);
 
 	if (!user_backed_iter(from))
 		return -EINVAL;
@@ -2261,8 +2281,8 @@ static ssize_t fuse_dev_splice_write(struct pipe_inode_info *pipe,
 	ssize_t ret;
 
 	fud = fuse_get_dev(out);
-	if (!fud)
-		return -EPERM;
+	if (IS_ERR(fud))
+		return PTR_ERR(fud);
 
 	pipe_lock(pipe);
 
@@ -2346,7 +2366,7 @@ static __poll_t fuse_dev_poll(struct file *file, poll_table *wait)
 	struct fuse_iqueue *fiq;
 	struct fuse_dev *fud = fuse_get_dev(file);
 
-	if (!fud)
+	if (IS_ERR(fud))
 		return EPOLLERR;
 
 	fiq = &fud->fc->iq;
@@ -2530,7 +2550,7 @@ void fuse_wait_aborted(struct fuse_conn *fc)
 
 int fuse_dev_release(struct inode *inode, struct file *file)
 {
-	struct fuse_dev *fud = fuse_get_dev(file);
+	struct fuse_dev *fud = __fuse_get_dev(file);
 
 	if (fud) {
 		struct fuse_conn *fc = fud->fc;
@@ -2561,8 +2581,8 @@ static int fuse_dev_fasync(int fd, struct file *file, int on)
 {
 	struct fuse_dev *fud = fuse_get_dev(file);
 
-	if (!fud)
-		return -EPERM;
+	if (IS_ERR(fud))
+		return PTR_ERR(fud);
 
 	/* No locking - fasync_helper does its own locking */
 	return fasync_helper(fd, file, on, &fud->fc->iq.fasync);
@@ -2572,7 +2592,7 @@ static int fuse_device_clone(struct fuse_conn *fc, struct file *new)
 {
 	struct fuse_dev *fud;
 
-	if (new->private_data)
+	if (__fuse_get_dev(new))
 		return -EINVAL;
 
 	fud = fuse_dev_alloc_install(fc);
@@ -2603,7 +2623,7 @@ static long fuse_dev_ioctl_clone(struct file *file, __u32 __user *argp)
 	 * uses the same ioctl handler.
 	 */
 	if (fd_file(f)->f_op == file->f_op)
-		fud = fuse_get_dev(fd_file(f));
+		fud = __fuse_get_dev(fd_file(f));
 
 	res = -EINVAL;
 	if (fud) {
@@ -2621,8 +2641,8 @@ static long fuse_dev_ioctl_backing_open(struct file *file,
 	struct fuse_dev *fud = fuse_get_dev(file);
 	struct fuse_backing_map map;
 
-	if (!fud)
-		return -EPERM;
+	if (IS_ERR(fud))
+		return PTR_ERR(fud);
 
 	if (!IS_ENABLED(CONFIG_FUSE_PASSTHROUGH))
 		return -EOPNOTSUPP;
@@ -2638,8 +2658,8 @@ static long fuse_dev_ioctl_backing_close(struct file *file, __u32 __user *argp)
 	struct fuse_dev *fud = fuse_get_dev(file);
 	int backing_id;
 
-	if (!fud)
-		return -EPERM;
+	if (IS_ERR(fud))
+		return PTR_ERR(fud);
 
 	if (!IS_ENABLED(CONFIG_FUSE_PASSTHROUGH))
 		return -EOPNOTSUPP;
@@ -2648,6 +2668,19 @@ static long fuse_dev_ioctl_backing_close(struct file *file, __u32 __user *argp)
 		return -EFAULT;
 
 	return fuse_backing_close(fud->fc, backing_id);
+}
+
+static long fuse_dev_ioctl_sync_init(struct file *file)
+{
+	int err = -EINVAL;
+
+	mutex_lock(&fuse_mutex);
+	if (!__fuse_get_dev(file)) {
+		WRITE_ONCE(file->private_data, FUSE_DEV_SYNC_INIT);
+		err = 0;
+	}
+	mutex_unlock(&fuse_mutex);
+	return err;
 }
 
 static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
@@ -2665,6 +2698,9 @@ static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 	case FUSE_DEV_IOC_BACKING_CLOSE:
 		return fuse_dev_ioctl_backing_close(file, argp);
 
+	case FUSE_DEV_IOC_SYNC_INIT:
+		return fuse_dev_ioctl_sync_init(file);
+
 	default:
 		return -ENOTTY;
 	}
@@ -2673,7 +2709,7 @@ static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 #ifdef CONFIG_PROC_FS
 static void fuse_dev_show_fdinfo(struct seq_file *seq, struct file *file)
 {
-	struct fuse_dev *fud = fuse_get_dev(file);
+	struct fuse_dev *fud = __fuse_get_dev(file);
 	if (!fud)
 		return;
 
