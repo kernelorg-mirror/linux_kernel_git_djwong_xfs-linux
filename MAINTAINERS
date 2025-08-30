@@ -18,6 +18,8 @@ Descriptions of section entries and preferred order
 	   Obsolete:	Old code. Something tagged obsolete generally means
 			it has been replaced by a better system and you
 			should be using that.
+	   Externally maintained: Project authors send stuff in volume eagerly,
+			advancing gimcrack git repositories offsite.
 	W: *Web-page* with status/info
 	Q: *Patchwork* web based patch tracking system site
 	B: URI for where to file *bugs*. A web-page with detailed bug
