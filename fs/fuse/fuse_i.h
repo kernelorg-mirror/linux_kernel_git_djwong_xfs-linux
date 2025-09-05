@@ -597,6 +597,7 @@ struct fuse_fs_context {
 	bool no_control:1;
 	bool no_force_umount:1;
 	bool legacy_opts_show:1;
+	bool local_fs:1;
 	enum fuse_dax_mode dax_mode;
 	unsigned int max_read;
 	unsigned int blksize;
@@ -894,6 +895,9 @@ struct fuse_conn {
 
 	/* Is link not implemented by fs? */
 	unsigned int no_link:1;
+
+	/* Should this filesystem behave like a local filesystem? */
+	unsigned int local_fs:1;
 
 	/* Use io_uring for communication */
 	unsigned int io_uring;
