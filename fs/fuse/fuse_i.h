@@ -1840,6 +1840,8 @@ void fuse_iomap_copied_file_range(struct inode *inode, loff_t offset,
 int fuse_dev_ioctl_add_iomap(struct file *file);
 int fuse_dev_ioctl_iomap_support(struct file *file,
 				 struct fuse_iomap_support __user *argp);
+int fuse_dev_ioctl_iomap_set_blocksize(struct file *file,
+				struct fuse_iomap_backing_info __user *argp);
 
 int fuse_iomap_fadvise(struct file *file, loff_t start, loff_t end, int advice);
 
@@ -1888,6 +1890,7 @@ int fuse_iomap_inval(struct fuse_conn *fc,
 # define fuse_iomap_copied_file_range(...)	((void)0)
 # define fuse_dev_ioctl_add_iomap(...)		(-EOPNOTSUPP)
 # define fuse_dev_ioctl_iomap_support(...)	(-EOPNOTSUPP)
+# define fuse_dev_ioctl_iomap_set_blocksize(...) (-EOPNOTSUPP)
 # define fuse_iomap_fadvise			NULL
 # define fuse_inode_caches_iomaps(...)		(false)
 # define fuse_iomap_upsert(...)			(-ENOSYS)
