@@ -31,6 +31,8 @@ int fuse_file_cached_io_open(struct inode *inode, struct fuse_file *ff)
 {
 	struct fuse_inode *fi = get_fuse_inode(inode);
 
+	WARN_ON(fuse_inode_has_iomap(inode));
+
 	/* There are no io modes if server does not implement open */
 	if (!ff->args)
 		return 0;
@@ -87,6 +89,8 @@ int fuse_inode_uncached_io_start(struct fuse_inode *fi, struct fuse_backing *fb)
 	struct fuse_backing *oldfb;
 	int err = 0;
 
+	WARN_ON(fuse_inode_has_iomap(&fi->inode));
+
 	spin_lock(&fi->lock);
 	/* deny conflicting backing files on same fuse inode */
 	oldfb = fuse_inode_backing(fi);
@@ -132,6 +136,8 @@ static int fuse_file_uncached_io_open(struct inode *inode,
 void fuse_inode_uncached_io_end(struct fuse_inode *fi)
 {
 	struct fuse_backing *oldfb = NULL;
+
+	WARN_ON(fuse_inode_has_iomap(&fi->inode));
 
 	spin_lock(&fi->lock);
 	WARN_ON(fi->iocachectr >= 0);
@@ -256,6 +262,8 @@ fail:
 void fuse_file_io_release(struct fuse_file *ff, struct inode *inode)
 {
 	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	WARN_ON(ff->iomode != IOM_NONE && fuse_inode_has_iomap(inode));
 
 	/*
 	 * Last passthrough file close allows caching inode io mode.

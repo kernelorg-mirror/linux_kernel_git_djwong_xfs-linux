@@ -1963,6 +1963,7 @@ void fuse_set_nowrite(struct inode *inode)
 {
 	struct fuse_inode *fi = get_fuse_inode(inode);
 
+	WARN_ON(fuse_inode_has_iomap(inode));
 	BUG_ON(!inode_is_locked(inode));
 
 	spin_lock(&fi->lock);
@@ -1982,6 +1983,7 @@ static void __fuse_release_nowrite(struct inode *inode)
 {
 	struct fuse_inode *fi = get_fuse_inode(inode);
 
+	WARN_ON(fuse_inode_has_iomap(inode));
 	BUG_ON(fi->writectr != FUSE_NOWRITE);
 	fi->writectr = 0;
 	fuse_flush_writepages(inode);

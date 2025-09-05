@@ -190,6 +190,9 @@ static void fuse_link_write_file(struct file *file)
 	struct inode *inode = file_inode(file);
 	struct fuse_inode *fi = get_fuse_inode(inode);
 	struct fuse_file *ff = file->private_data;
+
+	WARN_ON(fuse_inode_has_iomap(inode));
+
 	/*
 	 * file may be written through mmap, so chain it onto the
 	 * inodes's write_file list
@@ -1906,6 +1909,8 @@ __acquires(fi->lock)
 	__u64 data_size = 0;
 	int err, i;
 
+	WARN_ON(fuse_inode_has_iomap(wpa->inode));
+
 	for (i = 0; i < ap->num_folios; i++)
 		data_size += ap->descs[i].length;
 
@@ -1959,6 +1964,8 @@ __acquires(fi->lock)
 	loff_t crop = i_size_read(inode);
 	struct fuse_writepage_args *wpa;
 
+	WARN_ON(fuse_inode_has_iomap(inode));
+
 	while (fi->writectr >= 0 && !list_empty(&fi->queued_writes)) {
 		wpa = list_entry(fi->queued_writes.next,
 				 struct fuse_writepage_args, queue_entry);
@@ -1975,6 +1982,8 @@ static void fuse_writepage_end(struct fuse_mount *fm, struct fuse_args *args,
 	struct inode *inode = wpa->inode;
 	struct fuse_inode *fi = get_fuse_inode(inode);
 	struct fuse_conn *fc = get_fuse_conn(inode);
+
+	WARN_ON(fuse_inode_has_iomap(inode));
 
 	mapping_set_error(inode->i_mapping, error);
 	/*
@@ -2143,6 +2152,8 @@ static void fuse_writepages_send(struct inode *inode,
 	struct fuse_writepage_args *wpa = data->wpa;
 	struct fuse_inode *fi = get_fuse_inode(inode);
 
+	WARN_ON(fuse_inode_has_iomap(inode));
+
 	spin_lock(&fi->lock);
 	list_add_tail(&wpa->queue_entry, &fi->queued_writes);
 	fuse_flush_writepages(inode);
@@ -2195,6 +2206,7 @@ static ssize_t fuse_iomap_writeback_range(struct iomap_writepage_ctx *wpc,
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	loff_t offset = offset_in_folio(folio, pos);
 
+	WARN_ON(fuse_inode_has_iomap(inode));
 	WARN_ON_ONCE(!data);
 
 	if (!data->ff) {
@@ -2267,6 +2279,8 @@ static int fuse_writepages(struct address_space *mapping,
 		.wb_ctx	= &data,
 	};
 
+	WARN_ON(fuse_inode_has_iomap(wpc.inode));
+
 	if (fuse_is_bad(inode))
 		return -EIO;
 
@@ -2287,6 +2301,8 @@ static int fuse_launder_folio(struct folio *folio)
 		.ops = &fuse_writeback_ops,
 		.wb_ctx	= &data,
 	};
+
+	WARN_ON(fuse_inode_has_iomap(wpc.inode));
 
 	if (folio_clear_dirty_for_io(folio)) {
 		err = iomap_writeback_folio(&wpc, folio);
