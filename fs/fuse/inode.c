@@ -196,6 +196,8 @@ static void fuse_evict_inode(struct inode *inode)
 		WARN_ON(!list_empty(&fi->write_files));
 		WARN_ON(!list_empty(&fi->queued_writes));
 	}
+
+	fuse_iomap_evict_inode(inode);
 }
 
 static int fuse_reconfigure(struct fs_context *fsc)
@@ -428,20 +430,32 @@ static void fuse_init_inode(struct inode *inode, struct fuse_attr *attr,
 	inode->i_size = attr->size;
 	inode_set_mtime(inode, attr->mtime, attr->mtimensec);
 	inode_set_ctime(inode, attr->ctime, attr->ctimensec);
-	if (S_ISREG(inode->i_mode)) {
+	switch (inode->i_mode & S_IFMT) {
+	case S_IFREG:
 		fuse_init_common(inode);
 		fuse_init_file_inode(inode, attr->flags);
-	} else if (S_ISDIR(inode->i_mode))
+		break;
+	case S_IFDIR:
 		fuse_init_dir(inode);
-	else if (S_ISLNK(inode->i_mode))
+		fuse_iomap_init_nonreg_inode(inode, attr->flags);
+		break;
+	case S_IFLNK:
 		fuse_init_symlink(inode);
-	else if (S_ISCHR(inode->i_mode) || S_ISBLK(inode->i_mode) ||
-		 S_ISFIFO(inode->i_mode) || S_ISSOCK(inode->i_mode)) {
+		fuse_iomap_init_nonreg_inode(inode, attr->flags);
+		break;
+	case S_IFCHR:
+	case S_IFBLK:
+	case S_IFIFO:
+	case S_IFSOCK:
 		fuse_init_common(inode);
 		init_special_inode(inode, inode->i_mode,
 				   new_decode_dev(attr->rdev));
-	} else
+		fuse_iomap_init_nonreg_inode(inode, attr->flags);
+		break;
+	default:
 		BUG();
+		break;
+	}
 	/*
 	 * Ensure that we don't cache acls for daemons without FUSE_POSIX_ACL
 	 * so they see the exact same behavior as before.
