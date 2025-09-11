@@ -638,3 +638,52 @@ void fuse_iomap_unmount(struct fuse_mount *fm)
 	fuse_flush_requests(fc);
 	fuse_send_destroy(fm);
 }
+
+static inline void fuse_inode_set_iomap(struct inode *inode)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	set_bit(FUSE_I_IOMAP, &fi->state);
+}
+
+static inline void fuse_inode_clear_iomap(struct inode *inode)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	clear_bit(FUSE_I_IOMAP, &fi->state);
+}
+
+void fuse_iomap_init_nonreg_inode(struct inode *inode, unsigned attr_flags)
+{
+	struct fuse_conn *conn = get_fuse_conn(inode);
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	ASSERT(!S_ISREG(inode->i_mode));
+
+	if (conn->iomap && (attr_flags & FUSE_ATTR_IOMAP))
+		set_bit(FUSE_I_EXCLUSIVE, &fi->state);
+}
+
+void fuse_iomap_init_reg_inode(struct inode *inode, unsigned attr_flags)
+{
+	struct fuse_conn *conn = get_fuse_conn(inode);
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	ASSERT(S_ISREG(inode->i_mode));
+
+	if (conn->iomap && (attr_flags & FUSE_ATTR_IOMAP)) {
+		set_bit(FUSE_I_EXCLUSIVE, &fi->state);
+		fuse_inode_set_iomap(inode);
+	}
+}
+
+void fuse_iomap_evict_inode(struct inode *inode)
+{
+	struct fuse_conn *conn = get_fuse_conn(inode);
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	if (fuse_inode_has_iomap(inode))
+		fuse_inode_clear_iomap(inode);
+	if (conn->iomap && fuse_inode_is_exclusive(inode))
+		clear_bit(FUSE_I_EXCLUSIVE, &fi->state);
+}
