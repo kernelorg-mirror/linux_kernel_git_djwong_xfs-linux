@@ -1766,6 +1766,10 @@ void fuse_iomap_open_truncate(struct inode *inode);
 void fuse_iomap_release_truncate(struct inode *inode);
 
 void fuse_iomap_set_disk_size(struct fuse_inode *fi, loff_t newsize);
+static inline loff_t fuse_iomap_get_disk_size(const struct fuse_inode *fi)
+{
+	return fuse_inode_has_iomap(&fi->inode) ? fi->i_disk_size : 0;
+}
 int fuse_iomap_setsize_finish(struct inode *inode, loff_t newsize);
 
 static inline bool fuse_want_iomap_directio(const struct kiocb *iocb)
@@ -1792,6 +1796,7 @@ ssize_t fuse_iomap_direct_write(struct kiocb *iocb, struct iov_iter *from);
 # define fuse_iomap_open_truncate(...)		((void)0)
 # define fuse_iomap_release_truncate(...)	((void)0)
 # define fuse_iomap_set_disk_size(...)		((void)0)
+# define fuse_iomap_get_disk_size(...)		((loff_t)0)
 # define fuse_iomap_setsize_finish(...)		(-ENOSYS)
 # define fuse_want_iomap_directio(...)		(false)
 # define fuse_iomap_direct_read(...)		(-ENOSYS)
