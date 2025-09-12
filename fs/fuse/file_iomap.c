@@ -2664,6 +2664,8 @@ int fuse_iomap_upsert(struct fuse_conn *fc,
 		goto out_sb;
 	}
 
+	trace_fuse_iomap_upsert(inode, outarg);
+
 	fi = get_fuse_inode(inode);
 	if (BAD_DATA(fi->orig_ino != outarg->attr_ino)) {
 		ret = -EINVAL;
@@ -2681,7 +2683,8 @@ int fuse_iomap_upsert(struct fuse_conn *fc,
 
 	fuse_iomap_cache_lock(inode);
 
-	set_bit(FUSE_I_IOMAP_CACHE, &fi->state);
+	if (!test_and_set_bit(FUSE_I_IOMAP_CACHE, &fi->state))
+		trace_fuse_iomap_cache_enable(inode);
 
 	if (outarg->read.type != FUSE_IOMAP_TYPE_NOCACHE) {
 		ret = fuse_iomap_cache_upsert(inode, READ_MAPPING,
@@ -2744,6 +2747,8 @@ int fuse_iomap_inval(struct fuse_conn *fc,
 		ret = -ESTALE;
 		goto out_sb;
 	}
+
+	trace_fuse_iomap_inval(inode, outarg);
 
 	fi = get_fuse_inode(inode);
 	if (BAD_DATA(fi->orig_ino != outarg->attr_ino)) {
