@@ -618,6 +618,8 @@ static int fuse_iomap_ioend(struct inode *inode, loff_t pos, size_t written,
 	if (fuse_ioend_is_append(fi, pos, written))
 		inarg.ioendflags |= FUSE_IOMAP_IOEND_APPEND;
 
+	trace_fuse_iomap_ioend(inode, &inarg);
+
 	if (fuse_should_send_iomap_ioend(fm, &inarg)) {
 		FUSE_ARGS(args);
 		int err;
@@ -640,6 +642,8 @@ static int fuse_iomap_ioend(struct inode *inode, loff_t pos, size_t written,
 		case 0:
 			break;
 		default:
+			trace_fuse_iomap_ioend_error(inode, &inarg, err);
+
 			/*
 			 * If the write IO failed, return the failure code to
 			 * the caller no matter what happens with the ioend.
@@ -909,6 +913,8 @@ ssize_t fuse_iomap_direct_read(struct kiocb *iocb, struct iov_iter *to)
 
 	ASSERT(fuse_inode_has_iomap(inode));
 
+	trace_fuse_iomap_direct_read(iocb, to);
+
 	if (!iov_iter_count(to))
 		return 0; /* skip atime */
 
@@ -920,6 +926,7 @@ ssize_t fuse_iomap_direct_read(struct kiocb *iocb, struct iov_iter *to)
 	ret = iomap_dio_rw(iocb, to, &fuse_iomap_ops, NULL, 0, NULL, 0);
 	inode_unlock_shared(inode);
 
+	trace_fuse_iomap_direct_read_end(iocb, to, ret);
 	return ret;
 }
 
@@ -935,6 +942,9 @@ static int fuse_iomap_dio_write_end_io(struct kiocb *iocb, ssize_t written,
 		return -EIO;
 
 	ASSERT(fuse_inode_has_iomap(inode));
+
+	trace_fuse_iomap_dio_write_end_io(inode, iocb->ki_pos, written, error,
+					  dioflags);
 
 	if (dioflags & IOMAP_DIO_COW)
 		ioendflags |= FUSE_IOMAP_IOEND_SHARED;
@@ -966,6 +976,8 @@ ssize_t fuse_iomap_direct_write(struct kiocb *iocb, struct iov_iter *from)
 	ssize_t ret;
 
 	ASSERT(fuse_inode_has_iomap(inode));
+
+	trace_fuse_iomap_direct_write(iocb, from);
 
 	if (!count)
 		return 0;
@@ -1003,5 +1015,6 @@ ssize_t fuse_iomap_direct_write(struct kiocb *iocb, struct iov_iter *from)
 out_unlock:
 	inode_unlock(inode);
 out_dsync:
+	trace_fuse_iomap_direct_write_end(iocb, from, ret);
 	return ret;
 }
