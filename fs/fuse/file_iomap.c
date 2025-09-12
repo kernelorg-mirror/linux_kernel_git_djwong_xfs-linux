@@ -2448,6 +2448,8 @@ void fuse_iomap_open_truncate(struct inode *inode)
 {
 	ASSERT(fuse_inode_has_iomap(inode));
 
+	trace_fuse_iomap_open_truncate(inode);
+
 	fuse_iomap_cache_invalidate(inode, 0);
 }
 
@@ -2455,6 +2457,8 @@ void fuse_iomap_copied_file_range(struct inode *inode, loff_t offset,
 				  size_t written)
 {
 	ASSERT(fuse_inode_has_iomap(inode));
+
+	trace_fuse_iomap_copied_file_range(inode, offset, written);
 
 	fuse_iomap_cache_invalidate_range(inode, offset, written);
 }
