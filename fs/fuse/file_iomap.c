@@ -737,6 +737,8 @@ static int fuse_iomap_process_config(struct fuse_mount *fm, int error,
 		return error;
 	}
 
+	trace_fuse_iomap_config(fm, outarg);
+
 	if (outarg->flags & ~FUSE_IOMAP_CONFIG_ALL)
 		return -EINVAL;
 
@@ -762,6 +764,7 @@ static int fuse_iomap_process_config(struct fuse_mount *fm, int error,
 			sb->s_blocksize = outarg->s_blocksize;
 			sb->s_blocksize_bits = blksize_bits(outarg->s_blocksize);
 		}
+		fm->fc->blkbits = sb->s_blocksize_bits;
 	}
 
 	if (outarg->flags & FUSE_IOMAP_CONFIG_SID)
