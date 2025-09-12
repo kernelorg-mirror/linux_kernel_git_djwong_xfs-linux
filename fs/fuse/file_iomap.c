@@ -658,10 +658,14 @@ void fuse_iomap_init_inode(struct inode *inode, unsigned attr_flags)
 
 	if (conn->iomap && (attr_flags & FUSE_ATTR_IOMAP))
 		fuse_inode_set_iomap(inode);
+
+	trace_fuse_iomap_init_inode(inode);
 }
 
 void fuse_iomap_evict_inode(struct inode *inode)
 {
+	trace_fuse_iomap_evict_inode(inode);
+
 	if (fuse_inode_has_iomap(inode))
 		fuse_inode_clear_iomap(inode);
 }
