@@ -677,6 +677,8 @@ void fuse_iomap_init_nonreg_inode(struct inode *inode, unsigned attr_flags)
 
 	if (conn->iomap && (attr_flags & FUSE_ATTR_IOMAP))
 		set_bit(FUSE_I_EXCLUSIVE, &fi->state);
+
+	trace_fuse_iomap_init_inode(inode);
 }
 
 void fuse_iomap_init_reg_inode(struct inode *inode, unsigned attr_flags)
@@ -690,12 +692,16 @@ void fuse_iomap_init_reg_inode(struct inode *inode, unsigned attr_flags)
 		set_bit(FUSE_I_EXCLUSIVE, &fi->state);
 		fuse_inode_set_iomap(inode);
 	}
+
+	trace_fuse_iomap_init_inode(inode);
 }
 
 void fuse_iomap_evict_inode(struct inode *inode)
 {
 	struct fuse_conn *conn = get_fuse_conn(inode);
 	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	trace_fuse_iomap_evict_inode(inode);
 
 	if (fuse_inode_has_iomap(inode))
 		fuse_inode_clear_iomap(inode);
