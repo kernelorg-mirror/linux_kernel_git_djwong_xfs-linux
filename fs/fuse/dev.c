@@ -1791,6 +1791,12 @@ static int fuse_notify_store(struct fuse_conn *fc, unsigned int size,
 	if (!inode)
 		goto out_up_killsb;
 
+	/* no backchannels for messing with the pagecache */
+	if (fuse_inode_has_iomap(inode)) {
+		err = -EOPNOTSUPP;
+		goto out_iput;
+	}
+
 	mapping = inode->i_mapping;
 	index = outarg.offset >> PAGE_SHIFT;
 	offset = outarg.offset & ~PAGE_MASK;
@@ -1874,6 +1880,9 @@ static int fuse_retrieve(struct fuse_mount *fm, struct inode *inode,
 	size_t args_size = sizeof(*ra);
 	struct fuse_args_pages *ap;
 	struct fuse_args *args;
+
+	if (fuse_inode_has_iomap(inode))
+		return -EOPNOTSUPP;
 
 	offset = outarg->offset & ~PAGE_MASK;
 	file_size = i_size_read(inode);
