@@ -693,6 +693,8 @@ int fuse_iomap_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 	if (!fuse_allow_current_process(fc))
 		return -EACCES;
 
+	trace_fuse_iomap_fiemap(inode, start, count, fieinfo->fi_flags);
+
 	inode_lock_shared(inode);
 	error = iomap_fiemap(inode, fieinfo, start, count, &fuse_iomap_ops);
 	inode_unlock_shared(inode);
@@ -719,6 +721,8 @@ loff_t fuse_iomap_lseek(struct file *file, loff_t offset, int whence)
 
 	if (!fuse_allow_current_process(fc))
 		return -EACCES;
+
+	trace_fuse_iomap_lseek(inode, offset, whence);
 
 	switch (whence) {
 	case SEEK_HOLE:
