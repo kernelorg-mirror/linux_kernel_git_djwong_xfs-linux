@@ -4,6 +4,7 @@
  */
 
 #include "fuse_i.h"
+#include "fuse_trace.h"
 
 #include <linux/uio.h>
 #include <linux/compat.h>
@@ -531,6 +532,8 @@ static void fuse_fileattr_update_inode(struct inode *inode,
 		update_iflag(inode, S_APPEND, fa->fsx_xflags & FS_XFLAG_APPEND);
 	}
 
+	trace_fuse_fileattr_update_inode(inode, old_iflags);
+
 	if (old_iflags != inode->i_flags)
 		fuse_invalidate_attr(inode);
 }
@@ -538,6 +541,7 @@ static void fuse_fileattr_update_inode(struct inode *inode,
 void fuse_fileattr_init(struct inode *inode, const struct fuse_attr *attr)
 {
 	struct fuse_conn *fc = get_fuse_conn(inode);
+	unsigned int old_iflags = inode->i_flags;
 
 	if (!fc->local_fs)
 		return;
@@ -550,6 +554,8 @@ void fuse_fileattr_init(struct inode *inode, const struct fuse_attr *attr)
 
 	if (attr->flags & FUSE_ATTR_APPEND)
 		inode->i_flags |= S_APPEND;
+
+	trace_fuse_fileattr_init(inode, old_iflags);
 }
 
 int fuse_fileattr_get(struct dentry *dentry, struct file_kattr *fa)
