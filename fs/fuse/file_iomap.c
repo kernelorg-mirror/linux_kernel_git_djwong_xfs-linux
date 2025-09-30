@@ -8,6 +8,7 @@
 #include <linux/pagemap.h>
 #include <linux/falloc.h>
 #include <linux/fadvise.h>
+#include <linux/swap.h>
 #include "fuse_i.h"
 #include "fuse_trace.h"
 #include "iomap_i.h"
@@ -1766,6 +1767,14 @@ static void fuse_iomap_readahead(struct readahead_control *rac)
 	iomap_readahead(rac, &fuse_iomap_ops);
 }
 
+static int fuse_iomap_swap_activate(struct swap_info_struct *sis,
+				    struct file *swap_file, sector_t *span)
+{
+	/* obtain the block device from the header iomapping */
+	sis->bdev = NULL;
+	return iomap_swapfile_activate(sis, swap_file, span, &fuse_iomap_ops);
+}
+
 static const struct address_space_operations fuse_iomap_aops = {
 	.read_folio		= fuse_iomap_read_folio,
 	.readahead		= fuse_iomap_readahead,
@@ -1776,6 +1785,7 @@ static const struct address_space_operations fuse_iomap_aops = {
 	.migrate_folio		= filemap_migrate_folio,
 	.is_partially_uptodate  = iomap_is_partially_uptodate,
 	.error_remove_folio	= generic_error_remove_folio,
+	.swap_activate		= fuse_iomap_swap_activate,
 
 	/* These aren't pagecache operations per se */
 	.bmap			= fuse_bmap,
