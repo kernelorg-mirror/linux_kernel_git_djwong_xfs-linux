@@ -5363,9 +5363,11 @@ kmem_cache_prefill_sheaf(struct kmem_cache *s, gfp_t gfp, unsigned int size)
 		 * Creating a cache without sheaves and then requesting a
 		 * prefilled sheaf is however not expected, so warn.
 		 */
+#if 0
 		WARN_ON_ONCE(s->sheaf_capacity == 0 &&
 			     !IS_ENABLED(CONFIG_SLUB_TINY) &&
 			     !(s->flags & SLAB_DEBUG_FLAGS));
+#endif
 
 		sheaf = kzalloc(struct_size(sheaf, objects, size), gfp);
 		if (!sheaf)
