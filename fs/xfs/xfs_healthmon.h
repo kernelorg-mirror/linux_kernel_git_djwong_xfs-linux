@@ -10,6 +10,9 @@ struct xfs_healthmon {
 	/* Filesystem type for use with iter_supers_type. */
 	struct file_system_type		*fstyp;
 
+	/* charge event object usage to this memory cgroup */
+	struct mem_cgroup		*memcg;
+
 	/*
 	 * Weak reference to the xfs_mount that might point to this health
 	 * monitor.  If you want to dereference this pointer you must hold

@@ -386,8 +386,12 @@ STATIC void
 xfs_healthmon_unmount(
 	struct xfs_healthmon		*hm)
 {
-	struct xfs_healthmon_event	*event =
-			kzalloc(sizeof(struct xfs_healthmon_event), GFP_NOFS);
+	struct xfs_healthmon_event	*event;
+	struct mem_cgroup		*old_memcg;
+
+	old_memcg = set_active_memcg(hm->memcg);
+	event = kzalloc(sizeof(struct xfs_healthmon_event), GFP_NOFS);
+	set_active_memcg(old_memcg);
 
 	mutex_lock(&hm->lock);
 
@@ -456,6 +460,7 @@ xfs_healthmon_metadata(
 		.type			= health_update_to_type(hup->type),
 		.domain			= health_update_to_domain(hup->domain),
 	};
+	struct mem_cgroup		*old_memcg;
 
 	trace_xfs_healthmon_metadata_hook(hm, hup);
 
@@ -490,9 +495,11 @@ xfs_healthmon_metadata(
 		return;
 	}
 
+	old_memcg = set_active_memcg(hm->memcg);
 	mutex_lock(&hm->lock);
 	xfs_healthmon_append(hm, &event);
 	mutex_unlock(&hm->lock);
+	set_active_memcg(old_memcg);
 }
 
 /* Add a health event to the reporting queue. */
@@ -524,12 +531,15 @@ xfs_healthmon_shutdown_hook(
 		.domain			= XFS_HEALTHMON_MOUNT,
 		.flags			= flags,
 	};
+	struct mem_cgroup		*old_memcg;
 
 	trace_xfs_healthmon_shutdown_hook(hm, flags);
 
+	old_memcg = set_active_memcg(hm->memcg);
 	mutex_lock(&hm->lock);
 	xfs_healthmon_append(hm, &event);
 	mutex_unlock(&hm->lock);
+	set_active_memcg(old_memcg);
 }
 
 static inline enum xfs_healthmon_domain
@@ -561,12 +571,16 @@ xfs_healthmon_media_error_hook(
 		.daddr			= p->daddr,
 		.bbcount		= p->bbcount,
 	};
+	struct mem_cgroup		*old_memcg;
 
 	trace_xfs_healthmon_media_error_hook(hm, p);
 
+	old_memcg = set_active_memcg(hm->memcg);
 	mutex_lock(&hm->lock);
 	xfs_healthmon_append(hm, &event);
 	mutex_unlock(&hm->lock);
+	set_active_memcg(old_memcg);
+
 }
 
 static inline enum xfs_healthmon_type file_ioerr_type(enum fserror_type action)
@@ -605,6 +619,7 @@ xfs_healthmon_file_ioerror_hook(
 		.flen			= p->len,
 		.error			= p->error,
 	};
+	struct mem_cgroup		*old_memcg;
 
 	/* Already covered by the metadata health hook */
 	if (p->type == FSERR_METADATA)
@@ -612,9 +627,11 @@ xfs_healthmon_file_ioerror_hook(
 
 	trace_xfs_healthmon_file_ioerror_hook(hm, p);
 
+	old_memcg = set_active_memcg(hm->memcg);
 	mutex_lock(&hm->lock);
 	xfs_healthmon_append(hm, &event);
 	mutex_unlock(&hm->lock);
+	set_active_memcg(old_memcg);
 }
 
 static inline void
@@ -1073,6 +1090,7 @@ xfs_healthmon_release(
 	mutex_destroy(&hm->lock);
 	xfs_healthmon_free_events(hm);
 	kfree(hm->buffer);
+	mem_cgroup_put(hm->memcg);
 	kfree_rcu_mightsleep(hm);
 
 	return 0;
@@ -1272,6 +1290,7 @@ xfs_ioc_health_monitor(
 		return -ENOMEM;
 	hm->mp = mp;
 	hm->dev = mp->m_super->s_dev;
+	hm->memcg = get_mem_cgroup_from_mm(current->mm);
 	hm->fstyp = mp->m_super->s_type;
 	atomic_set(&hm->ref, 1);
 	hm->format = hmo.format;
@@ -1317,6 +1336,7 @@ out_mutex:
 	ASSERT(atomic_read(&hm->ref) == 1);
 	mutex_destroy(&hm->lock);
 	xfs_healthmon_free_events(hm);
+	mem_cgroup_put(hm->memcg);
 	kfree_rcu_mightsleep(hm);
 	return ret;
 }
