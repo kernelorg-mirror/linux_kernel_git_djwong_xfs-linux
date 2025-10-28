@@ -71,6 +71,9 @@ struct xfs_healthmon {
 	struct xfs_healthmon_event	*first_event;
 	struct xfs_healthmon_event	*last_event;
 
+	/* charge event object usage to this memory cgroup */
+	struct mem_cgroup		*memcg;
+
 	/* live update hooks */
 	struct xfs_shutdown_hook	shook;
 	struct xfs_health_hook		hhook;
@@ -503,6 +506,7 @@ xfs_healthmon_metadata_hook(
 	struct xfs_health_update_params	*hup = data;
 	struct xfs_healthmon		*hm;
 	struct xfs_healthmon_event	*event;
+	struct mem_cgroup		*old_memcg;
 	enum xfs_health_update_type	type = action;
 	unsigned int			mask = 0;
 	int				error;
@@ -514,6 +518,7 @@ xfs_healthmon_metadata_hook(
 		return NOTIFY_DONE;
 
 	mutex_lock(&hm->lock);
+	old_memcg = set_active_memcg(hm->memcg);
 
 	trace_xfs_healthmon_metadata_hook(hm->mp, action, hup, hm->events,
 			hm->lost_prev_event);
@@ -589,6 +594,7 @@ xfs_healthmon_metadata_hook(
 		goto out_event;
 
 out_unlock:
+	set_active_memcg(old_memcg);
 	mutex_unlock(&hm->lock);
 	return NOTIFY_DONE;
 out_event:
@@ -605,11 +611,13 @@ xfs_healthmon_shutdown_hook(
 {
 	struct xfs_healthmon		*hm;
 	struct xfs_healthmon_event	*event;
+	struct mem_cgroup		*old_memcg;
 	int				error;
 
 	hm = container_of(nb, struct xfs_healthmon, shook.shutdown_hook.nb);
 
 	mutex_lock(&hm->lock);
+	old_memcg = set_active_memcg(hm->memcg);
 
 	trace_xfs_healthmon_shutdown_hook(hm->mp, action, hm->events,
 			hm->lost_prev_event);
@@ -629,6 +637,7 @@ xfs_healthmon_shutdown_hook(
 		kfree(event);
 
 out_unlock:
+	set_active_memcg(old_memcg);
 	mutex_unlock(&hm->lock);
 	return NOTIFY_DONE;
 }
@@ -643,12 +652,14 @@ xfs_healthmon_media_error_hook(
 	struct xfs_healthmon		*hm;
 	struct xfs_healthmon_event	*event;
 	struct xfs_media_error_params	*p = data;
+	struct mem_cgroup		*old_memcg;
 	enum xfs_healthmon_domain	domain = 0; /* shut up gcc */
 	int				error;
 
 	hm = container_of(nb, struct xfs_healthmon, mhook.error_hook.nb);
 
 	mutex_lock(&hm->lock);
+	old_memcg = set_active_memcg(hm->memcg);
 
 	trace_xfs_healthmon_media_error_hook(p, hm->events,
 			hm->lost_prev_event);
@@ -680,6 +691,7 @@ xfs_healthmon_media_error_hook(
 		kfree(event);
 
 out_unlock:
+	set_active_memcg(old_memcg);
 	mutex_unlock(&hm->lock);
 	return NOTIFY_DONE;
 }
@@ -694,6 +706,7 @@ xfs_healthmon_file_ioerror_hook(
 	struct xfs_healthmon		*hm;
 	struct xfs_healthmon_event	*event;
 	struct xfs_file_ioerror_params	*p = data;
+	struct mem_cgroup		*old_memcg;
 	enum xfs_healthmon_type		type = 0;
 	int				error;
 
@@ -711,6 +724,7 @@ xfs_healthmon_file_ioerror_hook(
 	}
 
 	mutex_lock(&hm->lock);
+	old_memcg = set_active_memcg(hm->memcg);
 
 	trace_xfs_healthmon_file_ioerror_hook(hm->mp, action, p, hm->events,
 			hm->lost_prev_event);
@@ -747,6 +761,7 @@ xfs_healthmon_file_ioerror_hook(
 		kfree(event);
 
 out_unlock:
+	set_active_memcg(old_memcg);
 	mutex_unlock(&hm->lock);
 	return NOTIFY_DONE;
 }
@@ -1585,6 +1600,7 @@ xfs_healthmon_release(
 	xfs_healthmon_free_events(hm);
 	if (hm->outbuf.size)
 		kfree(hm->outbuf.buffer);
+	mem_cgroup_put(hm->memcg);
 	kfree(hm);
 
 	return 0;
@@ -1767,6 +1783,7 @@ xfs_ioc_health_monitor(
 		return -ENOMEM;
 	hm->mp = mp;
 	hm->format = hmo.format;
+	hm->memcg = get_mem_cgroup_from_mm(current->mm);
 
 	/*
 	 * Since we already got a ref to the module, take a reference to the
@@ -1849,6 +1866,7 @@ out_hooks:
 	xfs_shutdown_hook_disable();
 	mutex_destroy(&hm->lock);
 	xfs_healthmon_free_events(hm);
+	mem_cgroup_put(hm->memcg);
 	kfree(hm);
 	return ret;
 }
