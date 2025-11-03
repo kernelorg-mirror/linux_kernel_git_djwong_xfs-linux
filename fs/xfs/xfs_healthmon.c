@@ -74,7 +74,7 @@ struct xfs_healthmon {
 	struct xfs_shutdown_hook	shook;
 	struct xfs_health_hook		hhook;
 	struct xfs_media_error_hook	mhook;
-	struct xfs_file_ioerror_hook	fhook;
+	struct fs_error_hook		fhook;
 
 	/* filesystem mount, or NULL if we've unmounted */
 	struct xfs_mount		*mp;
@@ -644,15 +644,15 @@ xfs_healthmon_media_error_hook(
 static inline enum xfs_healthmon_type file_ioerr_type(unsigned long action)
 {
 	switch (action) {
-	case XFS_FILE_IOERROR_BUFFERED_READ:
+	case FSERR_BUFFERED_READ:
 		return XFS_HEALTHMON_BUFREAD;
-	case XFS_FILE_IOERROR_BUFFERED_WRITE:
+	case FSERR_BUFFERED_WRITE:
 		return XFS_HEALTHMON_BUFWRITE;
-	case XFS_FILE_IOERROR_DIRECT_READ:
+	case FSERR_DIRECTIO_READ:
 		return XFS_HEALTHMON_DIOREAD;
-	case XFS_FILE_IOERROR_DIRECT_WRITE:
+	case FSERR_DIRECTIO_WRITE:
 		return XFS_HEALTHMON_DIOWRITE;
-	case XFS_FILE_IOERROR_DATA_LOST:
+	case FSERR_DATA_LOST:
 		return XFS_HEALTHMON_DATALOST;
 	}
 
@@ -667,17 +667,18 @@ xfs_healthmon_file_ioerror_hook(
 	unsigned long			action,
 	void				*data)
 {
-	struct xfs_file_ioerror_params	*p = data;
+	struct fs_error			*p = data;
+	struct xfs_inode		*ip = XFS_I(p->inode);
 	struct xfs_healthmon_event	event = {
 		.type			= file_ioerr_type(action),
 		.domain			= XFS_HEALTHMON_FILERANGE,
-		.fino			= p->ino,
-		.fgen			= p->gen,
+		.fino			= ip->i_ino,
+		.fgen			= VFS_I(ip)->i_generation,
 		.fpos			= p->pos,
 		.flen			= p->len,
 	};
 	struct xfs_healthmon		*hm =
-		container_of(nb, struct xfs_healthmon, fhook.ioerror_hook.nb);
+		container_of(nb, struct xfs_healthmon, fhook.nb);
 	struct mem_cgroup		*old_memcg;
 
 	if (event.type == -1)
@@ -1111,7 +1112,7 @@ xfs_healthmon_detach_hooks(
 	 * through the health monitoring subsystem from xfs_fs_put_super, so
 	 * it is now time to detach the hooks.
 	 */
-	xfs_file_ioerror_hook_del(hm->mp, &hm->fhook);
+	sb_unhook_error(hm->mp->m_super, &hm->fhook);
 	xfs_media_error_hook_del(hm->mp, &hm->mhook);
 	xfs_shutdown_hook_del(hm->mp, &hm->shook);
 	xfs_health_hook_del(hm->mp, &hm->hhook);
@@ -1364,9 +1365,8 @@ xfs_ioc_health_monitor(
 	if (ret)
 		goto out_shutdownhook;
 
-	xfs_file_ioerror_hook_setup(&hm->fhook,
-			xfs_healthmon_file_ioerror_hook);
-	ret = xfs_file_ioerror_hook_add(mp, &hm->fhook);
+	sb_init_error_hook(&hm->fhook, xfs_healthmon_file_ioerror_hook);
+	ret = sb_hook_error(mp->m_super, &hm->fhook);
 	if (ret)
 		goto out_mediahook;
 
@@ -1391,7 +1391,7 @@ xfs_ioc_health_monitor(
 	return fd;
 
 out_ioerrhook:
-	xfs_file_ioerror_hook_del(mp, &hm->fhook);
+	sb_unhook_error(mp->m_super, &hm->fhook);
 out_mediahook:
 	xfs_media_error_hook_del(mp, &hm->mhook);
 out_shutdownhook:

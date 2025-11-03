@@ -6262,24 +6262,23 @@ TRACE_EVENT(xfs_healthmon_media_error_hook,
 		  __entry->lost_prev)
 );
 
-#define XFS_FILE_IOERROR_STRINGS \
-	{ XFS_FILE_IOERROR_BUFFERED_READ,	"buffered_read" }, \
-	{ XFS_FILE_IOERROR_BUFFERED_WRITE,	"buffered_write" }, \
-	{ XFS_FILE_IOERROR_DIRECT_READ,		"directio_read" }, \
-	{ XFS_FILE_IOERROR_DIRECT_WRITE,	"directio_write" }, \
-	{ XFS_FILE_IOERROR_DATA_LOST,		"data_lost" }
+#define FS_ERROR_STRINGS \
+	{ FSERR_BUFFERED_READ,		"buffered_read" }, \
+	{ FSERR_BUFFERED_WRITE,		"buffered_write" }, \
+	{ FSERR_DIRECTIO_READ,		"directio_read" }, \
+	{ FSERR_DIRECTIO_WRITE,		"directio_write" }, \
+	{ FSERR_DATA_LOST,		"data_lost" }
 
-
-TRACE_DEFINE_ENUM(XFS_FILE_IOERROR_BUFFERED_READ);
-TRACE_DEFINE_ENUM(XFS_FILE_IOERROR_BUFFERED_WRITE);
-TRACE_DEFINE_ENUM(XFS_FILE_IOERROR_DIRECT_READ);
-TRACE_DEFINE_ENUM(XFS_FILE_IOERROR_DIRECT_WRITE);
-TRACE_DEFINE_ENUM(XFS_FILE_IOERROR_DATA_LOST);
+TRACE_DEFINE_ENUM(FSERR_BUFFERED_READ);
+TRACE_DEFINE_ENUM(FSERR_BUFFERED_WRITE);
+TRACE_DEFINE_ENUM(FSERR_DIRECTIO_READ);
+TRACE_DEFINE_ENUM(FSERR_DIRECTIO_WRITE);
+TRACE_DEFINE_ENUM(FSERR_DATA_LOST);
 
 TRACE_EVENT(xfs_healthmon_file_ioerror_hook,
 	TP_PROTO(const struct xfs_mount *mp,
 		 unsigned long action,
-		 const struct xfs_file_ioerror_params *p,
+		 const struct fs_error *p,
 		 unsigned int events, unsigned long long lost_prev),
 	TP_ARGS(mp, action, p, events, lost_prev),
 	TP_STRUCT__entry(
@@ -6294,10 +6293,12 @@ TRACE_EVENT(xfs_healthmon_file_ioerror_hook,
 		__field(unsigned long long, lost_prev)
 	),
 	TP_fast_assign(
+		struct xfs_inode *ip = XFS_I(p->inode);
+
 		__entry->dev = mp ? mp->m_super->s_dev : 0;
 		__entry->action = action;
-		__entry->ino = p->ino;
-		__entry->gen = p->gen;
+		__entry->ino = ip->i_ino;
+		__entry->gen = p->inode->i_generation;
 		__entry->pos = p->pos;
 		__entry->len = p->len;
 		__entry->events = events;
@@ -6307,7 +6308,7 @@ TRACE_EVENT(xfs_healthmon_file_ioerror_hook,
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ino,
 		  __entry->gen,
-		  __print_symbolic(__entry->action, XFS_FILE_IOERROR_STRINGS),
+		  __print_symbolic(__entry->action, FS_ERROR_STRINGS),
 		  __entry->pos,
 		  __entry->len,
 		  __entry->events,
