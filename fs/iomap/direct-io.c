@@ -100,10 +100,6 @@ ssize_t iomap_dio_complete(struct iomap_dio *dio)
 			    (dio->flags & IOMAP_DIO_WRITE) ? FSERR_DIO_WRITE :
 							     FSERR_DIO_READ,
 			    offset, dio->size, dio->error);
-	if (dio->error && dops && dops->ioerror)
-		dops->ioerror(file_inode(iocb->ki_filp),
-				(dio->flags & IOMAP_DIO_WRITE) ? WRITE : READ,
-				offset, dio->size, dio->error);
 
 	if (likely(!ret)) {
 		ret = dio->size;

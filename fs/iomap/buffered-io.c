@@ -296,10 +296,6 @@ inline void iomap_mapping_ioerror(struct address_space *mapping, int direction,
 	inode_error(inode,
 		    direction == READ ? FSERR_READAHEAD : FSERR_WRITEBACK,
 		    pos, len, error);
-
-	if (mapping && mapping->a_ops->ioerror)
-		mapping->a_ops->ioerror(mapping, direction, pos, len,
-				error);
 }
 
 /**
