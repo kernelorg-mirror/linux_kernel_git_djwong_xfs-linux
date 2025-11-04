@@ -363,6 +363,7 @@ static struct super_block *alloc_super(struct file_system_type *type, int flags,
 	spin_lock_init(&s->s_inode_list_lock);
 	INIT_LIST_HEAD(&s->s_inodes_wb);
 	spin_lock_init(&s->s_inode_wblist_lock);
+	BLOCKING_INIT_NOTIFIER_HEAD(&s->s_error_notifier);
 
 	s->s_count = 1;
 	atomic_set(&s->s_active, 1);
@@ -2267,3 +2268,55 @@ int sb_init_dio_done_wq(struct super_block *sb)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(sb_init_dio_done_wq);
+
+static void handle_sb_error(struct work_struct *work)
+{
+	struct fs_error *fserr = container_of(work, struct fs_error, work);
+
+	fsnotify_sb_error(fserr->sb, fserr->inode, fserr->error);
+	blocking_notifier_call_chain(&fserr->sb->s_error_notifier, fserr->type,
+				     fserr);
+	iput(fserr->inode);
+	kfree(fserr);
+}
+
+/**
+ * Report a filesystem error.  The actual work is deferred to a workqueue so
+ * that we're always in process context and to avoid blowing out the caller's
+ * stack.
+ *
+ * @sb Filesystem superblock
+ * @inode Inode within filesystem, if applicable
+ * @type Type of error
+ * @pos Start of file range affected, if applicable
+ * @len Length of file range affected, if applicable
+ * @error Error encountered.
+ */
+void __sb_error(struct super_block *sb, struct inode *inode,
+		enum fs_error_type type, loff_t pos, u64 len, int error)
+{
+	struct fs_error *fserr = kzalloc(sizeof(struct fs_error), GFP_ATOMIC);
+
+	if (!fserr) {
+		printk(KERN_ERR
+ "lost fs error report for ino %lu type %u pos 0x%llx len 0x%llx error %d",
+				inode ? inode->i_ino : 0, type,
+				pos, len, error);
+		return;
+	}
+
+	if (inode) {
+		fserr->sb = inode->i_sb;
+		fserr->inode = igrab(inode);
+	} else {
+		fserr->sb = sb;
+	}
+	fserr->type = type;
+	fserr->pos = pos;
+	fserr->len = len;
+	fserr->error = error;
+	INIT_WORK(&fserr->work, handle_sb_error);
+
+	schedule_work(&fserr->work);
+}
+EXPORT_SYMBOL_GPL(__sb_error);
