@@ -80,6 +80,7 @@ struct fs_context;
 struct fs_parameter_spec;
 struct file_kattr;
 struct iomap_ops;
+struct notifier_head;
 
 extern void __init inode_init(void);
 extern void __init inode_init_early(void);
@@ -1587,6 +1588,7 @@ struct super_block {
 
 	spinlock_t		s_inode_wblist_lock;
 	struct list_head	s_inodes_wb;	/* writeback inodes */
+	struct blocking_notifier_head	s_error_notifier;
 } __randomize_layout;
 
 static inline struct user_namespace *i_user_ns(const struct inode *inode)
@@ -4068,5 +4070,52 @@ static inline bool extensible_ioctl_valid(unsigned int cmd_a,
 		return false;
 	return true;
 }
+
+enum fs_error_type {
+	/* pagecache I/O failed */
+	FSERR_BUFFERED_READ,
+	FSERR_BUFFERED_WRITE,
+
+	/* direct I/O failed */
+	FSERR_DIRECTIO_READ,
+	FSERR_DIRECTIO_WRITE,
+
+	/* out of band media error reported */
+	FSERR_DATA_LOST,
+};
+
+struct fs_error {
+	struct execute_work xwork;
+	struct inode *inode;
+	loff_t pos;
+	u64 len;
+	enum fs_error_type type;
+	int error;
+};
+
+struct fs_error_hook {
+	struct notifier_block nb;
+};
+
+static inline int sb_hook_error(struct super_block *sb,
+				struct fs_error_hook *h)
+{
+	return blocking_notifier_chain_register(&sb->s_error_notifier, &h->nb);
+}
+
+static inline void sb_unhook_error(struct super_block *sb,
+				   struct fs_error_hook *h)
+{
+	blocking_notifier_chain_unregister(&sb->s_error_notifier, &h->nb);
+}
+
+static inline void sb_init_error_hook(struct fs_error_hook *h, notifier_fn_t fn)
+{
+	h->nb.notifier_call = fn;
+	h->nb.priority = 0;
+}
+
+void inode_error(struct inode *inode, enum fs_error_type type, loff_t pos,
+		 u64 len, int error);
 
 #endif /* _LINUX_FS_H */
