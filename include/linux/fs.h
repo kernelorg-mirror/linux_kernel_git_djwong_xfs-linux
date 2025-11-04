@@ -80,6 +80,7 @@ struct fs_context;
 struct fs_parameter_spec;
 struct file_kattr;
 struct iomap_ops;
+struct notifier_head;
 
 extern void __init inode_init(void);
 extern void __init inode_init_early(void);
@@ -1587,6 +1588,7 @@ struct super_block {
 
 	spinlock_t		s_inode_wblist_lock;
 	struct list_head	s_inodes_wb;	/* writeback inodes */
+	struct blocking_notifier_head	s_error_notifier;
 } __randomize_layout;
 
 static inline struct user_namespace *i_user_ns(const struct inode *inode)
@@ -4067,6 +4069,68 @@ static inline bool extensible_ioctl_valid(unsigned int cmd_a,
 	if (_IOC_SIZE(cmd_a) < min_size)
 		return false;
 	return true;
+}
+
+enum fs_error_type {
+	/* pagecache reads and writes */
+	FSERR_READAHEAD,
+	FSERR_WRITEBACK,
+
+	/* directio read and writes */
+	FSERR_DIO_READ,
+	FSERR_DIO_WRITE,
+
+	/* media error */
+	FSERR_DATA_LOST,
+
+	/* filesystem metadata */
+	FSERR_METADATA,
+};
+
+struct fs_error {
+	struct work_struct work;
+	struct super_block *sb;
+	struct inode *inode;
+	loff_t pos;
+	u64 len;
+	enum fs_error_type type;
+	int error;
+};
+
+struct fs_error_hook {
+	struct notifier_block nb;
+};
+
+static inline int sb_hook_error(struct super_block *sb,
+				struct fs_error_hook *h)
+{
+	return blocking_notifier_chain_register(&sb->s_error_notifier, &h->nb);
+}
+
+static inline void sb_unhook_error(struct super_block *sb,
+				   struct fs_error_hook *h)
+{
+	blocking_notifier_chain_unregister(&sb->s_error_notifier, &h->nb);
+}
+
+static inline void sb_init_error_hook(struct fs_error_hook *h, notifier_fn_t fn)
+{
+	h->nb.notifier_call = fn;
+	h->nb.priority = 0;
+}
+
+void __sb_error(struct super_block *sb, struct inode *inode,
+		enum fs_error_type type, loff_t pos, u64 len, int error);
+
+static inline void sb_error(struct super_block *sb, int error)
+{
+	__sb_error(sb, NULL, FSERR_METADATA, 0, 0, error);
+}
+
+static inline void inode_error(struct inode *inode, enum fs_error_type type,
+			       loff_t pos, u64 len, int error)
+{
+	__sb_error(inode->i_sb, inode, type, pos, len, error);
 }
 
 #endif /* _LINUX_FS_H */

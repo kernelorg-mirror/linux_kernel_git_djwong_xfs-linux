@@ -291,6 +291,12 @@ static inline bool iomap_block_needs_zeroing(const struct iomap_iter *iter,
 inline void iomap_mapping_ioerror(struct address_space *mapping, int direction,
 		loff_t pos, u64 len, int error)
 {
+	struct inode *inode = mapping->host;
+
+	inode_error(inode,
+		    direction == READ ? FSERR_READAHEAD : FSERR_WRITEBACK,
+		    pos, len, error);
+
 	if (mapping && mapping->a_ops->ioerror)
 		mapping->a_ops->ioerror(mapping, direction, pos, len,
 				error);
