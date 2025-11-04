@@ -71,6 +71,9 @@ xfs_fs_health_update_hook(
 	unsigned int			old_mask,
 	unsigned int			new_mask)
 {
+	if (op != XFS_HEALTHUP_HEALTHY && new_mask)
+		sb_error(mp->m_super, -EFSCORRUPTED);
+
 	if (xfs_hooks_switched_on(&xfs_health_hooks_switch)) {
 		struct xfs_health_update_params	p = {
 			.domain		= XFS_HEALTHUP_FS,
@@ -91,13 +94,17 @@ xfs_group_health_update_hook(
 	unsigned int			old_mask,
 	unsigned int			new_mask)
 {
+	struct xfs_mount		*mp = xg->xg_mount;
+
+	if (op != XFS_HEALTHUP_HEALTHY && new_mask)
+		sb_error(mp->m_super, -EFSCORRUPTED);
+
 	if (xfs_hooks_switched_on(&xfs_health_hooks_switch)) {
 		struct xfs_health_update_params	p = {
 			.old_mask	= old_mask,
 			.new_mask	= new_mask,
 			.group		= xg->xg_gno,
 		};
-		struct xfs_mount	*mp = xg->xg_mount;
 
 		switch (xg->xg_type) {
 		case XG_TYPE_AG:
@@ -124,6 +131,9 @@ xfs_inode_health_update_hook(
 	unsigned int			old_mask,
 	unsigned int			new_mask)
 {
+	if (op != XFS_HEALTHUP_HEALTHY && new_mask)
+		inode_error(VFS_I(ip), FSERR_METADATA, 0, 0, -EFSCORRUPTED);
+
 	if (xfs_hooks_switched_on(&xfs_health_hooks_switch)) {
 		struct xfs_health_update_params	p = {
 			.domain		= XFS_HEALTHUP_INODE,
