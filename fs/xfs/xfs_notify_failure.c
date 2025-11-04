@@ -178,9 +178,10 @@ xfs_dax_failure_fn(
 		invalidate_inode_pages2_range(mapping, pgoff,
 					      pgoff + pgcnt - 1);
 
-	xfs_inode_media_error(ip,
+	inode_error(VFS_I(ip), FSERR_DATA_LOST,
 			XFS_FSB_TO_B(mp, (u64)pgoff << PAGE_SHIFT),
-			XFS_FSB_TO_B(mp, (u64)pgcnt << PAGE_SHIFT));
+			XFS_FSB_TO_B(mp, (u64)pgcnt << PAGE_SHIFT),
+			-EIO);
 
 	xfs_irele(ip);
 	return error;
@@ -496,8 +497,8 @@ xfs_report_one_data_lost(
 	if (rmap_end > lost_end)
 		blocks -= rmap_end - lost_end;
 
-	xfs_inode_media_error(ip, XFS_FSB_TO_B(mp, fileoff),
-			XFS_FSB_TO_B(mp, blocks));
+	inode_error(VFS_I(ip), FSERR_DATA_LOST, XFS_FSB_TO_B(mp, fileoff),
+			XFS_FSB_TO_B(mp, blocks), -EIO);
 
 	xfs_irele(ip);
 	return 0;
