@@ -1568,6 +1568,10 @@ xfs_attr3_leaf_add_work(
 	if (be16_to_cpu(entry->nameidx) < ichdr->firstused)
 		ichdr->firstused = be16_to_cpu(entry->nameidx);
 
+	if (ichdr->firstused < ichdr->count * sizeof(xfs_attr_leaf_entry_t)
+					+ xfs_attr3_leaf_hdr_size(leaf))
+		xfs_err(mp, "ino 0x%llx daddr 0x%llx firstused %u count %u entsz %zu hdrsize %u magic 0x%x rhs %zu", args->dp->i_ino, xfs_buf_daddr(bp), ichdr->firstused, ichdr->count, sizeof(xfs_attr_leaf_entry_t), xfs_attr3_leaf_hdr_size(leaf), leaf->hdr.info.magic, ichdr->count * sizeof(xfs_attr_leaf_entry_t) + xfs_attr3_leaf_hdr_size(leaf));
+
 	ASSERT(ichdr->firstused >= ichdr->count * sizeof(xfs_attr_leaf_entry_t)
 					+ xfs_attr3_leaf_hdr_size(leaf));
 	tmp = (ichdr->count - 1) * sizeof(xfs_attr_leaf_entry_t)
