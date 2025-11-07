@@ -2506,13 +2506,10 @@ static void end_polls(struct fuse_conn *fc)
  * Flush all pending requests and wait for them.  Only call this function when
  * it is no longer possible for other threads to add requests.
  */
-void fuse_flush_requests_and_wait(struct fuse_conn *fc)
+void fuse_flush_requests(struct fuse_conn *fc)
 {
-	bool was_connected;
-
 	spin_lock(&fc->lock);
 	spin_lock(&fc->bg_lock);
-	was_connected = fc->connected;
 	if (fc->connected) {
 		/* Push all the background requests to the queue. */
 		fc->blocked = 0;
@@ -2521,22 +2518,6 @@ void fuse_flush_requests_and_wait(struct fuse_conn *fc)
 	}
 	spin_unlock(&fc->bg_lock);
 	spin_unlock(&fc->lock);
-
-	if (!was_connected)
-		return;
-
-	/*
-	 * Wait for all pending fuse requests to complete or abort.  The fuse
-	 * server could take a significant amount of time to complete a
-	 * request, so run this in a loop with a short timeout so that we don't
-	 * trip the soft lockup detector.
-	 */
-	smp_mb();
-	while (wait_event_timeout(fc->blocked_waitq,
-			!fc->connected || atomic_read(&fc->num_waiting) == 0,
-			HZ) == 0) {
-		/* empty */
-	}
 }
 
 /*

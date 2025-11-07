@@ -2269,9 +2269,10 @@ void fuse_conn_destroy(struct fuse_mount *fm)
 		 * FUSE_RELEASE) before sending FUSE_DESTROY, because the fuse
 		 * server must close the filesystem before replying to the
 		 * destroy message, because unmount is about to release its
-		 * O_EXCL hold on the block device.
+		 * O_EXCL hold on the block device.  We don't wait, so libfuse
+		 * has to do that for us.
 		 */
-		fuse_flush_requests_and_wait(fc);
+		fuse_flush_requests(fc);
 		fuse_send_destroy(fm);
 	}
 

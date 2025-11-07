@@ -1323,15 +1323,12 @@ void fuse_iomap_unmount(struct fuse_mount *fm)
 	struct fuse_conn *fc = fm->fc;
 
 	/*
-	 * Flush all pending commands, then issue a syncfs, flush the syncfs,
-	 * and send a destroy command.  This gives the fuse server a chance to
-	 * process all the pending releases, write the last bits of metadata
-	 * changes to disk, and close the iomap block devices before we return
-	 * from the umount call.
+	 * Flush all pending commands and send a destroy command.  This gives
+	 * the fuse server a chance to process all the pending releases, write
+	 * the last bits of metadata changes to disk, and close the iomap block
+	 * devices before we return from the umount call.
 	 */
-	fuse_flush_requests_and_wait(fc);
-	sync_filesystem(fm->sb);
-	fuse_flush_requests_and_wait(fc);
+	fuse_flush_requests(fc);
 	fuse_send_destroy(fm);
 }
 
