@@ -104,6 +104,41 @@ lost:
 }
 EXPORT_SYMBOL_GPL(fserror_report_fileio);
 
+/**
+ * Report a filesystem metadata / internal error.
+ *
+ * Event dispatch work is deferred to a workqueue to avoid problems with
+ * already-held locks.  Unmount will wait for queued events.
+ *
+ * @sb The filesystem in question
+ * @error Error encountered.
+ */
+void fserror_report_metadata(struct super_block *sb, int error)
+{
+	struct fserror_event *event;
+
+	/*
+	 * Ignore events if nobody asked for it or the super is being torn down
+	 * around us.
+	 */
+	if (!(sb->s_flags & SB_ACTIVE))
+		return;
+
+	event = fserror_alloc_event();
+	if (!event) {
+		printk(KERN_ERR "%s: lost filesystem error report error=%d",
+		       sb->s_id, error);
+		return;
+	}
+
+	event->sb = sb;
+	event->type = FSERR_METADATA;
+	event->error = error;
+
+	fserror_submit_event(sb, event);
+}
+EXPORT_SYMBOL_GPL(fserror_report_metadata);
+
 static int __init fserror_init(void)
 {
 	return mempool_init_kmalloc_pool(&fserror_events_pool,

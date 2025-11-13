@@ -33,6 +33,9 @@ enum fserror_type {
 
 	/* out of band media error reported */
 	FSERR_DATA_LOST,
+
+	/* filesystem metadata */
+	FSERR_METADATA,
 };
 
 struct fserror_event {
@@ -53,5 +56,12 @@ static inline void fserror_report_datalost(struct inode *inode,
 {
 	fserror_report_fileio(inode, FSERR_DATA_LOST, pos, len, -EIO);
 }
+
+static inline void fserror_report_filemeta(struct inode *inode, int error)
+{
+	fserror_report_fileio(inode, FSERR_METADATA, 0, 0, error);
+}
+
+void fserror_report_metadata(struct super_block *sb, int error);
 
 #endif /* _LINUX_FSERROR_H__ */
