@@ -21,6 +21,8 @@
 #include "xfs_rtgroup.h"
 #include "xfs_healthmon.h"
 
+#include <linux/fserror.h>
+
 /* Call downstream hooks for a filesystem unmount health update. */
 static inline void
 xfs_health_unmount_hook(
@@ -34,6 +36,16 @@ xfs_health_unmount_hook(
 
 		xfs_healthmon_metadata_hook(hmon, &p);
 	}
+}
+
+/* Report a metadata sickness or corruption to the VFS. */
+static inline void
+xfs_health_report_error(
+	struct xfs_mount		*mp,
+	enum xfs_health_update_type	type)
+{
+	if (type < XFS_HEALTHUP_HEALTHY)
+		fserror_report_metadata(mp->m_super, -EFSCORRUPTED);
 }
 
 /* Call downstream hooks for a filesystem health update. */
@@ -57,6 +69,8 @@ xfs_fs_health_update_hook(
 
 		xfs_healthmon_metadata_hook(hmon, &p);
 	}
+
+	xfs_health_report_error(mp, type);
 }
 
 /* Call downstream hooks for a group health update. */
@@ -92,6 +106,18 @@ xfs_group_health_update_hook(
 
 		xfs_healthmon_metadata_hook(hmon, &p);
 	}
+
+	xfs_health_report_error(xg->xg_mount, type);
+}
+
+/* Report a metadata sickness or corruption to the VFS. */
+static inline void
+xfs_health_report_file_error(
+	struct xfs_inode		*ip,
+	enum xfs_health_update_type	type)
+{
+	if (type < XFS_HEALTHUP_HEALTHY)
+		fserror_report_filemeta(VFS_I(ip), -EFSCORRUPTED);
 }
 
 /* Call downstream hooks for an inode health update. */
@@ -117,6 +143,8 @@ xfs_inode_health_update_hook(
 
 		xfs_healthmon_metadata_hook(hmon, &p);
 	}
+
+	xfs_health_report_file_error(ip, type);
 }
 
 static void
