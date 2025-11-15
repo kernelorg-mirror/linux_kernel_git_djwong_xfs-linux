@@ -21,6 +21,18 @@
 #include "xfs_rtgroup.h"
 #include "xfs_healthmon.h"
 
+#include <linux/fserror.h>
+
+/* Report a metadata sickness or corruption to the VFS. */
+static inline void
+xfs_health_report_error(
+	struct xfs_mount		*mp,
+	enum xfs_health_update_type	type)
+{
+	if (type < XFS_HEALTHUP_HEALTHY)
+		fserror_report_metadata(mp->m_super, -EFSCORRUPTED, GFP_NOFS);
+}
+
 /* Call downstream hooks for a filesystem health update. */
 static inline void
 xfs_fs_report_health(
@@ -42,6 +54,8 @@ xfs_fs_report_health(
 
 		xfs_healthmon_report_metadata(hmon, &p);
 	}
+
+	xfs_health_report_error(mp, type);
 }
 
 /* Call downstream hooks for a group health update. */
@@ -77,6 +91,19 @@ xfs_group_report_health(
 
 		xfs_healthmon_report_metadata(hmon, &p);
 	}
+
+	xfs_health_report_error(xg->xg_mount, type);
+}
+
+/* Report a metadata sickness or corruption to the VFS. */
+static inline void
+xfs_health_report_file_error(
+	struct xfs_inode		*ip,
+	enum xfs_health_update_type	type)
+{
+	if (type < XFS_HEALTHUP_HEALTHY)
+		fserror_report_file_metadata(VFS_I(ip), -EFSCORRUPTED,
+				GFP_NOFS);
 }
 
 /* Call downstream hooks for an inode health update. */
@@ -102,6 +129,8 @@ xfs_inode_report_health(
 
 		xfs_healthmon_report_metadata(hmon, &p);
 	}
+
+	xfs_health_report_file_error(ip, type);
 }
 
 static void
