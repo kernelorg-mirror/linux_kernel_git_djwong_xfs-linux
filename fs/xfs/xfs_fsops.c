@@ -27,6 +27,8 @@
 #include "xfs_metafile.h"
 #include "xfs_healthmon.h"
 
+#include <linux/fserror.h>
+
 /*
  * Write new AG headers to disk. Non-transactional, but need to be
  * written and completed prior to the growfs transaction being logged.
@@ -547,6 +549,8 @@ xfs_do_force_shutdown(
 		xfs_healthmon_report_shutdown(hm, flags);
 		xfs_healthmon_put(hm);
 	}
+
+	fserror_report_shutdown(mp->m_super, GFP_KERNEL);
 }
 
 /*
