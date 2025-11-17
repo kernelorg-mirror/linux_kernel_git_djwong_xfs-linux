@@ -6010,15 +6010,29 @@ DEFINE_HEALTHMON_EVENT(xfs_healthmon_report_unmount);
 
 #define XFS_HEALTHMON_TYPE_STRINGS \
 	{ XFS_HEALTHMON_LOST,		"lost" }, \
-	{ XFS_HEALTHMON_UNMOUNT,	"unmount" }
+	{ XFS_HEALTHMON_UNMOUNT,	"unmount" }, \
+	{ XFS_HEALTHMON_SICK,		"sick" }, \
+	{ XFS_HEALTHMON_CORRUPT,	"corrupt" }, \
+	{ XFS_HEALTHMON_HEALTHY,	"healthy" }
 
 #define XFS_HEALTHMON_DOMAIN_STRINGS \
-	{ XFS_HEALTHMON_MOUNT,		"mount" }
+	{ XFS_HEALTHMON_MOUNT,		"mount" }, \
+	{ XFS_HEALTHMON_FS,		"fs" }, \
+	{ XFS_HEALTHMON_AG,		"ag" }, \
+	{ XFS_HEALTHMON_INODE,		"inode" }, \
+	{ XFS_HEALTHMON_RTGROUP,	"rtgroup" }
 
 TRACE_DEFINE_ENUM(XFS_HEALTHMON_LOST);
 TRACE_DEFINE_ENUM(XFS_HEALTHMON_UNMOUNT);
+TRACE_DEFINE_ENUM(XFS_HEALTHMON_SICK);
+TRACE_DEFINE_ENUM(XFS_HEALTHMON_CORRUPT);
+TRACE_DEFINE_ENUM(XFS_HEALTHMON_HEALTHY);
 
 TRACE_DEFINE_ENUM(XFS_HEALTHMON_MOUNT);
+TRACE_DEFINE_ENUM(XFS_HEALTHMON_FS);
+TRACE_DEFINE_ENUM(XFS_HEALTHMON_AG);
+TRACE_DEFINE_ENUM(XFS_HEALTHMON_INODE);
+TRACE_DEFINE_ENUM(XFS_HEALTHMON_RTGROUP);
 
 DECLARE_EVENT_CLASS(xfs_healthmon_event_class,
 	TP_PROTO(const struct xfs_healthmon *hm,
@@ -6055,6 +6069,19 @@ DECLARE_EVENT_CLASS(xfs_healthmon_event_class,
 				break;
 			}
 			break;
+		case XFS_HEALTHMON_FS:
+			__entry->mask = event->fsmask;
+			break;
+		case XFS_HEALTHMON_AG:
+		case XFS_HEALTHMON_RTGROUP:
+			__entry->mask = event->grpmask;
+			__entry->group = event->group;
+			break;
+		case XFS_HEALTHMON_INODE:
+			__entry->mask = event->imask;
+			__entry->ino = event->ino;
+			__entry->gen = event->gen;
+			break;
 		}
 	),
 	TP_printk("dev %d:%d type %s domain %s mask 0x%x ino 0x%llx gen 0x%x offset 0x%llx len 0x%llx group 0x%x lost %llu",
@@ -6081,6 +6108,61 @@ DEFINE_HEALTHMONEVENT_EVENT(xfs_healthmon_format);
 DEFINE_HEALTHMONEVENT_EVENT(xfs_healthmon_format_overflow);
 DEFINE_HEALTHMONEVENT_EVENT(xfs_healthmon_drop);
 DEFINE_HEALTHMONEVENT_EVENT(xfs_healthmon_merge);
+
+#define XFS_HEALTHUP_TYPE_STRINGS \
+	{ XFS_HEALTHUP_SICK,		"sick" }, \
+	{ XFS_HEALTHUP_CORRUPT,		"corrupt" }, \
+	{ XFS_HEALTHUP_HEALTHY,		"healthy" }
+
+#define XFS_HEALTHUP_DOMAIN_STRINGS \
+	{ XFS_HEALTHUP_FS,		"fs" }, \
+	{ XFS_HEALTHUP_AG,		"ag" }, \
+	{ XFS_HEALTHUP_INODE,		"inode" }, \
+	{ XFS_HEALTHUP_RTGROUP,		"rtgroup" }
+
+TRACE_DEFINE_ENUM(XFS_HEALTHUP_SICK);
+TRACE_DEFINE_ENUM(XFS_HEALTHUP_CORRUPT);
+TRACE_DEFINE_ENUM(XFS_HEALTHUP_HEALTHY);
+
+TRACE_DEFINE_ENUM(XFS_HEALTHUP_FS);
+TRACE_DEFINE_ENUM(XFS_HEALTHUP_AG);
+TRACE_DEFINE_ENUM(XFS_HEALTHUP_INODE);
+TRACE_DEFINE_ENUM(XFS_HEALTHUP_RTGROUP);
+
+TRACE_EVENT(xfs_healthmon_report_metadata,
+	TP_PROTO(const struct xfs_healthmon *hm,
+		 const struct xfs_health_update_params *p),
+	TP_ARGS(hm, p),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned int, type)
+		__field(unsigned int, domain)
+		__field(unsigned int, old_mask)
+		__field(unsigned int, new_mask)
+		__field(unsigned long long, ino)
+		__field(unsigned int, gen)
+		__field(unsigned int, group)
+	),
+	TP_fast_assign(
+		__entry->dev = hm->dev;
+		__entry->type = p->type;
+		__entry->domain = p->domain;
+		__entry->old_mask = p->old_mask;
+		__entry->new_mask = p->new_mask;
+		__entry->ino = p->ino;
+		__entry->gen = p->gen;
+		__entry->group = p->group;
+	),
+	TP_printk("dev %d:%d type %s domain %s oldmask 0x%x newmask 0x%x ino 0x%llx gen 0x%x group 0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __print_symbolic(__entry->type, XFS_HEALTHUP_TYPE_STRINGS),
+		  __print_symbolic(__entry->domain, XFS_HEALTHUP_DOMAIN_STRINGS),
+		  __entry->old_mask,
+		  __entry->new_mask,
+		  __entry->ino,
+		  __entry->gen,
+		  __entry->group)
+);
 
 #endif /* _TRACE_XFS_H */
 
