@@ -26,6 +26,7 @@
 #include <linux/mm.h>
 #include <linux/dax.h>
 #include <linux/fs.h>
+#include <linux/fserror.h>
 
 struct xfs_failure_info {
 	xfs_agblock_t		startblock;
@@ -115,6 +116,10 @@ xfs_dax_failure_fn(
 	if (notify->mf_flags & MF_MEM_PRE_REMOVE)
 		invalidate_inode_pages2_range(mapping, pgoff,
 					      pgoff + pgcnt - 1);
+
+	fserror_report_datalost(VFS_I(ip),
+			XFS_FSB_TO_B(mp, (u64)pgoff << PAGE_SHIFT),
+			XFS_FSB_TO_B(mp, (u64)pgcnt << PAGE_SHIFT));
 
 	xfs_irele(ip);
 	return error;
