@@ -47,6 +47,7 @@
 #include "xfs_parent.h"
 #include "xfs_rtalloc.h"
 #include "xfs_zone_alloc.h"
+#include "xfs_healthmon.h"
 #include "scrub/stats.h"
 #include "scrub/rcbag_btree.h"
 
@@ -55,6 +56,7 @@
 #include <linux/fs_parser.h>
 #include <linux/uuid.h>
 #include <linux/fsevent.h>
+#include <linux/fserror.h>
 
 static const struct super_operations xfs_super_operations;
 
@@ -1305,6 +1307,15 @@ xfs_fs_show_stats(
 	return 0;
 }
 
+static void
+xfs_fs_report_error(
+	const struct fserror_event	*event)
+{
+	/* healthmon already knows about non-inode and metadata errors */
+	if (event->inode && event->type != FSERR_METADATA)
+		xfs_healthmon_report_file_ioerror(XFS_I(event->inode), event);
+}
+
 static const struct super_operations xfs_super_operations = {
 	.alloc_inode		= xfs_fs_alloc_inode,
 	.destroy_inode		= xfs_fs_destroy_inode,
@@ -1321,6 +1332,7 @@ static const struct super_operations xfs_super_operations = {
 	.free_cached_objects	= xfs_fs_free_cached_objects,
 	.shutdown		= xfs_fs_shutdown,
 	.show_stats		= xfs_fs_show_stats,
+	.report_error		= xfs_fs_report_error,
 };
 
 static int
