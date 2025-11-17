@@ -22,11 +22,36 @@
 #include "xfs_notify_failure.h"
 #include "xfs_rtgroup.h"
 #include "xfs_rtrmap_btree.h"
+#include "xfs_healthmon.h"
 
 #include <linux/mm.h>
 #include <linux/dax.h>
 #include <linux/fs.h>
 #include <linux/fserror.h>
+
+/* Call downstream hooks for a media error. */
+static inline void
+xfs_report_media_error(
+	struct xfs_mount		*mp,
+	enum xfs_failed_device		fdev,
+	xfs_daddr_t			daddr,
+	uint64_t			bbcount,
+	bool				pre_remove)
+{
+	struct xfs_healthmon		*hm = xfs_healthmon_get(mp);
+
+	if (hm) {
+		struct xfs_media_error_params	p = {
+			.fdev		= fdev,
+			.daddr		= daddr,
+			.bbcount	= bbcount,
+			.pre_remove	= pre_remove,
+		};
+
+		xfs_healthmon_report_media(hm, &p);
+		xfs_healthmon_put(hm);
+	}
+}
 
 struct xfs_failure_info {
 	xfs_agblock_t		startblock;
@@ -219,6 +244,9 @@ xfs_dax_notify_logdev_failure(
 	if (error)
 		return error;
 
+	xfs_report_media_error(mp, XFS_FAILED_LOGDEV, daddr, bblen,
+			mf_flags & MF_MEM_PRE_REMOVE);
+
 	/*
 	 * In the pre-remove case the failure notification is attempting to
 	 * trigger a force unmount.  The expectation is that the device is
@@ -252,15 +280,19 @@ xfs_dax_notify_dev_failure(
 	uint64_t		bblen;
 	struct xfs_group	*xg = NULL;
 
-	if (!xfs_has_rmapbt(mp)) {
-		xfs_debug(mp, "notify_failure() needs rmapbt enabled!");
-		return -EOPNOTSUPP;
-	}
-
 	error = xfs_dax_translate_range(xfs_group_type_buftarg(mp, type),
 			offset, len, &daddr, &bblen);
 	if (error)
 		return error;
+
+	xfs_report_media_error(mp, type == XG_TYPE_RTG ?
+			XFS_FAILED_RTDEV : XFS_FAILED_DATADEV,
+			daddr, bblen, mf_flags & MF_MEM_PRE_REMOVE);
+
+	if (!xfs_has_rmapbt(mp)) {
+		xfs_debug(mp, "notify_failure() needs rmapbt enabled!");
+		return -EOPNOTSUPP;
+	}
 
 	if (type == XG_TYPE_RTG) {
 		start_bno = xfs_daddr_to_rtb(mp, daddr);
