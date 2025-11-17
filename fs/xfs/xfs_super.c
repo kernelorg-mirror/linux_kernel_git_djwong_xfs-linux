@@ -2308,7 +2308,7 @@ xfs_kill_sb(
 	xfs_mount_free(XFS_M(sb));
 }
 
-static struct file_system_type xfs_fs_type = {
+struct file_system_type xfs_fs_type = {
 	.owner			= THIS_MODULE,
 	.name			= "xfs",
 	.init_fs_context	= xfs_init_fs_context,

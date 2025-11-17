@@ -101,4 +101,6 @@ extern struct workqueue_struct *xfs_discard_wq;
 
 struct dentry *xfs_debugfs_mkdir(const char *name, struct dentry *parent);
 
+extern struct file_system_type xfs_fs_type;
+
 #endif	/* __XFS_SUPER_H__ */
