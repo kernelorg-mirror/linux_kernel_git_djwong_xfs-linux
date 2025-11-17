@@ -25,6 +25,7 @@
 #include "xfs_rtrmap_btree.h"
 #include "xfs_rtrefcount_btree.h"
 #include "xfs_metafile.h"
+#include "xfs_healthmon.h"
 
 #include <linux/fserror.h>
 #include <linux/fsevent.h>
@@ -498,14 +499,13 @@ xfs_fs_goingdown(
  */
 void
 xfs_do_force_shutdown(
-	struct xfs_mount *mp,
-	uint32_t	flags,
-	char		*fname,
-	int		lnnum)
+	struct xfs_mount	*mp,
+	uint32_t		flags,
+	char			*fname,
+	int			lnnum)
 {
-	int		tag;
-	const char	*why;
-
+	int			tag;
+	const char		*why;
 
 	if (xfs_set_shutdown(mp)) {
 		xlog_shutdown_wait(mp->m_log);
@@ -546,6 +546,7 @@ xfs_do_force_shutdown(
 
 	fserror_report_shutdown(mp->m_super, GFP_KERNEL);
 	fsevent_send_shutdown(mp->m_super, &mp->m_kobj.kobject);
+	xfs_healthmon_report_shutdown(mp, flags);
 }
 
 /*
