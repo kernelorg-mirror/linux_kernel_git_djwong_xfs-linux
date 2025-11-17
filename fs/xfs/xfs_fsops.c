@@ -25,6 +25,7 @@
 #include "xfs_rtrmap_btree.h"
 #include "xfs_rtrefcount_btree.h"
 #include "xfs_metafile.h"
+#include "xfs_healthmon.h"
 
 /*
  * Write new AG headers to disk. Non-transactional, but need to be
@@ -495,14 +496,14 @@ xfs_fs_goingdown(
  */
 void
 xfs_do_force_shutdown(
-	struct xfs_mount *mp,
-	uint32_t	flags,
-	char		*fname,
-	int		lnnum)
+	struct xfs_mount	*mp,
+	uint32_t		flags,
+	char			*fname,
+	int			lnnum)
 {
-	int		tag;
-	const char	*why;
-
+	int			tag;
+	const char		*why;
+	struct xfs_healthmon	*hm;
 
 	if (xfs_set_shutdown(mp)) {
 		xlog_shutdown_wait(mp->m_log);
@@ -540,6 +541,12 @@ xfs_do_force_shutdown(
 		"Please unmount the filesystem and rectify the problem(s)");
 	if (xfs_error_level >= XFS_ERRLEVEL_HIGH)
 		xfs_stack_trace();
+
+	hm = xfs_healthmon_get(mp);
+	if (hm) {
+		xfs_healthmon_report_shutdown(hm, flags);
+		xfs_healthmon_put(hm);
+	}
 }
 
 /*
