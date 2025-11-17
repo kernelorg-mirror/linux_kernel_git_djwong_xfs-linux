@@ -18,6 +18,7 @@
 #include "xfs_da_btree.h"
 #include "xfs_quota_defs.h"
 #include "xfs_rtgroup.h"
+#include "xfs_health.h"
 #include "xfs_healthmon.h"
 
 #include <linux/anon_inodes.h>
@@ -213,6 +214,33 @@ xfs_healthmon_merge_events(
 	case XFS_HEALTHMON_LOST:
 		existing->lostcount += new->lostcount;
 		return true;
+
+	case XFS_HEALTHMON_SICK:
+	case XFS_HEALTHMON_CORRUPT:
+	case XFS_HEALTHMON_HEALTHY:
+		switch (existing->domain) {
+		case XFS_HEALTHMON_FS:
+			existing->fsmask |= new->fsmask;
+			return true;
+		case XFS_HEALTHMON_AG:
+		case XFS_HEALTHMON_RTGROUP:
+			if (existing->group == new->group){
+				existing->grpmask |= new->grpmask;
+				return true;
+			}
+			return false;
+		case XFS_HEALTHMON_INODE:
+			if (existing->ino == new->ino &&
+			    existing->gen == new->gen) {
+				existing->imask |= new->imask;
+				return true;
+			}
+			return false;
+		default:
+			ASSERT(0);
+			return false;
+		}
+		return false;
 	}
 
 	return false;
@@ -396,6 +424,120 @@ xfs_healthmon_unmount(
 	xfs_healthmon_detach(hm);
 }
 
+static inline enum xfs_healthmon_type
+health_update_to_type(
+	enum xfs_health_update_type	type)
+{
+	switch (type) {
+	case XFS_HEALTHUP_SICK:
+		return XFS_HEALTHMON_SICK;
+	case XFS_HEALTHUP_CORRUPT:
+		return XFS_HEALTHMON_CORRUPT;
+	case XFS_HEALTHUP_HEALTHY:
+		return XFS_HEALTHMON_HEALTHY;
+	}
+
+	ASSERT(0);
+	return 0;
+}
+
+static inline enum xfs_healthmon_domain
+health_update_to_domain(
+	enum xfs_health_update_domain	domain)
+{
+	switch (domain) {
+	case XFS_HEALTHUP_FS:
+		return XFS_HEALTHMON_FS;
+	case XFS_HEALTHUP_AG:
+		return XFS_HEALTHMON_AG;
+	case XFS_HEALTHUP_RTGROUP:
+		return XFS_HEALTHMON_RTGROUP;
+	case XFS_HEALTHUP_INODE:
+		return XFS_HEALTHMON_INODE;
+	}
+
+	ASSERT(0);
+	return 0;
+}
+
+/* Compute the reporting mask for non-unmount metadata health events. */
+static inline unsigned int
+health_update_event_mask(
+	struct xfs_healthmon			*hm,
+	const struct xfs_health_update_params	*hup)
+{
+	/* If we want all events, return all events. */
+	if (hm->verbose)
+		return hup->new_mask;
+
+	switch (hup->type) {
+	case XFS_HEALTHUP_SICK:
+		/* Always report runtime corruptions */
+		return hup->new_mask;
+	case XFS_HEALTHUP_CORRUPT:
+		/* Only report new fsck errors */
+		return hup->new_mask & ~hup->old_mask;
+	case XFS_HEALTHUP_HEALTHY:
+		/* Only report healthy metadata that got fixed */
+		return hup->new_mask & hup->old_mask;
+	}
+
+	ASSERT(0);
+	return 0;
+}
+
+/* Add a health event to the reporting queue. */
+void
+xfs_healthmon_report_metadata(
+	struct xfs_healthmon		*hm,
+	const struct xfs_health_update_params *hup)
+{
+	struct xfs_healthmon_event	event = {
+		.type			= health_update_to_type(hup->type),
+		.domain			= health_update_to_domain(hup->domain),
+	};
+	unsigned int			mask =
+			health_update_event_mask(hm, hup);
+
+	if (!mask)
+		return;
+
+	trace_xfs_healthmon_report_metadata(hm, hup);
+
+	/* Ignore the event if it's only reporting a secondary health state. */
+	switch (event.domain) {
+	case XFS_HEALTHMON_FS:
+		event.fsmask = mask & ~XFS_SICK_FS_SECONDARY;
+		if (!event.fsmask)
+			return;
+		break;
+	case XFS_HEALTHMON_AG:
+		event.grpmask = mask & ~XFS_SICK_AG_SECONDARY;
+		if (!event.grpmask)
+			return;
+		event.group = hup->group;
+		break;
+	case XFS_HEALTHMON_RTGROUP:
+		event.grpmask = mask & ~XFS_SICK_RG_SECONDARY;
+		if (!event.grpmask)
+			return;
+		event.group = hup->group;
+		break;
+	case XFS_HEALTHMON_INODE:
+		event.imask = mask & ~XFS_SICK_INO_SECONDARY;
+		if (!event.imask)
+			return;
+		event.ino = hup->ino;
+		event.gen = hup->gen;
+		break;
+	default:
+		ASSERT(0);
+		return;
+	}
+
+	xfs_healthmon_push(hm, &event);
+}
+
 static inline void
 xfs_healthmon_reset_outbuf(
 	struct xfs_healthmon		*hm)
@@ -406,11 +548,19 @@ xfs_healthmon_reset_outbuf(
 
 static const unsigned int domain_map[] = {
 	[XFS_HEALTHMON_MOUNT]		= XFS_HEALTH_MONITOR_DOMAIN_MOUNT,
+	[XFS_HEALTHMON_FS]		= XFS_HEALTH_MONITOR_DOMAIN_FS,
+	[XFS_HEALTHMON_AG]		= XFS_HEALTH_MONITOR_DOMAIN_AG,
+	[XFS_HEALTHMON_INODE]		= XFS_HEALTH_MONITOR_DOMAIN_INODE,
+	[XFS_HEALTHMON_RTGROUP]		= XFS_HEALTH_MONITOR_DOMAIN_RTGROUP,
 };
 
 static const unsigned int type_map[] = {
 	[XFS_HEALTHMON_RUNNING]		= XFS_HEALTH_MONITOR_TYPE_RUNNING,
 	[XFS_HEALTHMON_LOST]		= XFS_HEALTH_MONITOR_TYPE_LOST,
+	[XFS_HEALTHMON_SICK]		= XFS_HEALTH_MONITOR_TYPE_SICK,
+	[XFS_HEALTHMON_CORRUPT]		= XFS_HEALTH_MONITOR_TYPE_CORRUPT,
+	[XFS_HEALTHMON_HEALTHY]		= XFS_HEALTH_MONITOR_TYPE_HEALTHY,
+	[XFS_HEALTHMON_UNMOUNT]		= XFS_HEALTH_MONITOR_TYPE_UNMOUNT,
 };
 
 /* Render event as a V0 structure */
@@ -442,6 +592,22 @@ xfs_healthmon_format_v0(
 		default:
 			break;
 		}
+		break;
+	case XFS_HEALTHMON_FS:
+		hme.e.fs.mask = xfs_healthmon_fs_mask(event->fsmask);
+		break;
+	case XFS_HEALTHMON_RTGROUP:
+		hme.e.group.mask = xfs_healthmon_rtgroup_mask(event->grpmask);
+		hme.e.group.gno = event->group;
+		break;
+	case XFS_HEALTHMON_AG:
+		hme.e.group.mask = xfs_healthmon_perag_mask(event->grpmask);
+		hme.e.group.gno = event->group;
+		break;
+	case XFS_HEALTHMON_INODE:
+		hme.e.inode.mask = xfs_healthmon_inode_mask(event->imask);
+		hme.e.inode.ino = event->ino;
+		hme.e.inode.gen = event->gen;
 		break;
 	default:
 		break;
