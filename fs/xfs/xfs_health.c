@@ -23,6 +23,92 @@
 
 #include <linux/fserror.h>
 
+/* Call downstream hooks for a filesystem health update. */
+static inline void
+xfs_fs_report_health(
+	struct xfs_mount		*mp,
+	enum xfs_health_update_type	type,
+	unsigned int			old_mask,
+	unsigned int			new_mask)
+{
+	struct xfs_healthmon		*hm =
+		new_mask ? xfs_healthmon_get(mp) : NULL;
+
+	if (hm) {
+		struct xfs_health_update_params	p = {
+			.type		= type,
+			.domain		= XFS_HEALTHUP_FS,
+			.old_mask	= old_mask,
+			.new_mask	= new_mask,
+		};
+
+		xfs_healthmon_report_metadata(hm, &p);
+		xfs_healthmon_put(hm);
+	}
+}
+
+/* Call downstream hooks for a group health update. */
+static inline void
+xfs_group_report_health(
+	struct xfs_group		*xg,
+	enum xfs_health_update_type	type,
+	unsigned int			old_mask,
+	unsigned int			new_mask)
+{
+	struct xfs_healthmon		*hm =
+		new_mask ? xfs_healthmon_get(xg->xg_mount) : NULL;
+
+	if (hm) {
+		struct xfs_health_update_params	p = {
+			.type		= type,
+			.old_mask	= old_mask,
+			.new_mask	= new_mask,
+			.group		= xg->xg_gno,
+		};
+
+		switch (xg->xg_type) {
+		case XG_TYPE_AG:
+			p.domain = XFS_HEALTHUP_AG;
+			break;
+		case XG_TYPE_RTG:
+			p.domain = XFS_HEALTHUP_RTGROUP;
+			break;
+		default:
+			ASSERT(0);
+			return;
+		}
+
+		xfs_healthmon_report_metadata(hm, &p);
+		xfs_healthmon_put(hm);
+	}
+}
+
+/* Call downstream hooks for an inode health update. */
+static inline void
+xfs_inode_report_health(
+	struct xfs_inode		*ip,
+	enum xfs_health_update_type	type,
+	unsigned int			old_mask,
+	unsigned int			new_mask)
+{
+	struct xfs_healthmon		*hm =
+		new_mask ? xfs_healthmon_get(ip->i_mount) : NULL;
+
+	if (hm) {
+		struct xfs_health_update_params	p = {
+			.type		= type,
+			.domain		= XFS_HEALTHUP_INODE,
+			.old_mask	= old_mask,
+			.new_mask	= new_mask,
+			.ino		= ip->i_ino,
+			.gen		= VFS_I(ip)->i_generation,
+		};
+
+		xfs_healthmon_report_metadata(hm, &p);
+		xfs_healthmon_put(hm);
+	}
+}
+
 static void
 xfs_health_unmount_group(
 	struct xfs_group	*xg,
@@ -116,14 +202,18 @@ xfs_fs_mark_sick(
 	struct xfs_mount	*mp,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_FS_ALL));
 	trace_xfs_fs_mark_sick(mp, mask);
 
 	spin_lock(&mp->m_sb_lock);
+	old_mask = mp->m_fs_sick;
 	mp->m_fs_sick |= mask;
 	spin_unlock(&mp->m_sb_lock);
 
 	fserror_report_metadata(mp->m_super, -EFSCORRUPTED, GFP_NOFS);
+	xfs_fs_report_health(mp, XFS_HEALTHUP_SICK, old_mask, mask);
 }
 
 /* Mark per-fs metadata as having been checked and found unhealthy by fsck. */
@@ -132,15 +222,19 @@ xfs_fs_mark_corrupt(
 	struct xfs_mount	*mp,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_FS_ALL));
 	trace_xfs_fs_mark_corrupt(mp, mask);
 
 	spin_lock(&mp->m_sb_lock);
+	old_mask = mp->m_fs_sick;
 	mp->m_fs_sick |= mask;
 	mp->m_fs_checked |= mask;
 	spin_unlock(&mp->m_sb_lock);
 
 	fserror_report_metadata(mp->m_super, -EFSCORRUPTED, GFP_NOFS);
+	xfs_fs_report_health(mp, XFS_HEALTHUP_CORRUPT, old_mask, mask);
 }
 
 /* Mark a per-fs metadata healed. */
@@ -149,15 +243,20 @@ xfs_fs_mark_healthy(
 	struct xfs_mount	*mp,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_FS_ALL));
 	trace_xfs_fs_mark_healthy(mp, mask);
 
 	spin_lock(&mp->m_sb_lock);
+	old_mask = mp->m_fs_sick;
 	mp->m_fs_sick &= ~mask;
 	if (!(mp->m_fs_sick & XFS_SICK_FS_PRIMARY))
 		mp->m_fs_sick &= ~XFS_SICK_FS_SECONDARY;
 	mp->m_fs_checked |= mask;
 	spin_unlock(&mp->m_sb_lock);
+
+	xfs_fs_report_health(mp, XFS_HEALTHUP_HEALTHY, old_mask, mask);
 }
 
 /* Sample which per-fs metadata are unhealthy. */
@@ -207,14 +306,18 @@ xfs_group_mark_sick(
 	struct xfs_group	*xg,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	xfs_group_check_mask(xg, mask);
 	trace_xfs_group_mark_sick(xg, mask);
 
 	spin_lock(&xg->xg_state_lock);
+	old_mask = xg->xg_sick;
 	xg->xg_sick |= mask;
 	spin_unlock(&xg->xg_state_lock);
 
 	fserror_report_metadata(xg->xg_mount->m_super, -EFSCORRUPTED, GFP_NOFS);
+	xfs_group_report_health(xg, XFS_HEALTHUP_SICK, old_mask, mask);
 }
 
 /*
@@ -225,15 +328,19 @@ xfs_group_mark_corrupt(
 	struct xfs_group	*xg,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	xfs_group_check_mask(xg, mask);
 	trace_xfs_group_mark_corrupt(xg, mask);
 
 	spin_lock(&xg->xg_state_lock);
+	old_mask = xg->xg_sick;
 	xg->xg_sick |= mask;
 	xg->xg_checked |= mask;
 	spin_unlock(&xg->xg_state_lock);
 
 	fserror_report_metadata(xg->xg_mount->m_super, -EFSCORRUPTED, GFP_NOFS);
+	xfs_group_report_health(xg, XFS_HEALTHUP_CORRUPT, old_mask, mask);
 }
 
 /*
@@ -244,15 +351,20 @@ xfs_group_mark_healthy(
 	struct xfs_group	*xg,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	xfs_group_check_mask(xg, mask);
 	trace_xfs_group_mark_healthy(xg, mask);
 
 	spin_lock(&xg->xg_state_lock);
+	old_mask = xg->xg_sick;
 	xg->xg_sick &= ~mask;
 	if (!(xg->xg_sick & XFS_SICK_AG_PRIMARY))
 		xg->xg_sick &= ~XFS_SICK_AG_SECONDARY;
 	xg->xg_checked |= mask;
 	spin_unlock(&xg->xg_state_lock);
+
+	xfs_group_report_health(xg, XFS_HEALTHUP_HEALTHY, old_mask, mask);
 }
 
 /* Sample which per-ag metadata are unhealthy. */
@@ -291,10 +403,13 @@ xfs_inode_mark_sick(
 	struct xfs_inode	*ip,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_INO_ALL));
 	trace_xfs_inode_mark_sick(ip, mask);
 
 	spin_lock(&ip->i_flags_lock);
+	old_mask = ip->i_sick;
 	ip->i_sick |= mask;
 	spin_unlock(&ip->i_flags_lock);
 
@@ -308,6 +423,7 @@ xfs_inode_mark_sick(
 	spin_unlock(&VFS_I(ip)->i_lock);
 
 	fserror_report_file_metadata(VFS_I(ip), -EFSCORRUPTED, GFP_NOFS);
+	xfs_inode_report_health(ip, XFS_HEALTHUP_SICK, old_mask, mask);
 }
 
 /* Mark inode metadata as having been checked and found unhealthy by fsck. */
@@ -316,10 +432,13 @@ xfs_inode_mark_corrupt(
 	struct xfs_inode	*ip,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_INO_ALL));
 	trace_xfs_inode_mark_corrupt(ip, mask);
 
 	spin_lock(&ip->i_flags_lock);
+	old_mask = ip->i_sick;
 	ip->i_sick |= mask;
 	ip->i_checked |= mask;
 	spin_unlock(&ip->i_flags_lock);
@@ -334,6 +453,7 @@ xfs_inode_mark_corrupt(
 	spin_unlock(&VFS_I(ip)->i_lock);
 
 	fserror_report_file_metadata(VFS_I(ip), -EFSCORRUPTED, GFP_NOFS);
+	xfs_inode_report_health(ip, XFS_HEALTHUP_CORRUPT, old_mask, mask);
 }
 
 /* Mark parts of an inode healed. */
@@ -342,15 +462,20 @@ xfs_inode_mark_healthy(
 	struct xfs_inode	*ip,
 	unsigned int		mask)
 {
+	unsigned int		old_mask;
+
 	ASSERT(!(mask & ~XFS_SICK_INO_ALL));
 	trace_xfs_inode_mark_healthy(ip, mask);
 
 	spin_lock(&ip->i_flags_lock);
+	old_mask = ip->i_sick;
 	ip->i_sick &= ~mask;
 	if (!(ip->i_sick & XFS_SICK_INO_PRIMARY))
 		ip->i_sick &= ~XFS_SICK_INO_SECONDARY;
 	ip->i_checked |= mask;
 	spin_unlock(&ip->i_flags_lock);
+
+	xfs_inode_report_health(ip, XFS_HEALTHUP_HEALTHY, old_mask, mask);
 }
 
 /* Sample which parts of an inode are unhealthy. */
@@ -430,6 +555,25 @@ xfs_fsop_geom_health(
 	}
 }
 
+/*
+ * Translate XFS_SICK_FS_* into XFS_FSOP_GEOM_SICK_* except for the rt free
+ * space codes, which are sent via the rtgroup events.
+ */
+unsigned int
+xfs_healthmon_fs_mask(
+	unsigned int			sick_mask)
+{
+	const struct ioctl_sick_map	*m;
+	unsigned int			ioctl_mask = 0;
+
+	for_each_sick_map(fs_map, m) {
+		if (sick_mask & m->sick_mask)
+			ioctl_mask |= m->ioctl_mask;
+	}
+
+	return ioctl_mask;
+}
+
 static const struct ioctl_sick_map ag_map[] = {
 	{ XFS_SICK_AG_SB,	XFS_AG_GEOM_SICK_SB },
 	{ XFS_SICK_AG_AGF,	XFS_AG_GEOM_SICK_AGF },
@@ -466,6 +610,22 @@ xfs_ag_geom_health(
 	}
 }
 
+/* Translate XFS_SICK_AG_* into XFS_AG_GEOM_SICK_*. */
+unsigned int
+xfs_healthmon_perag_mask(
+	unsigned int			sick_mask)
+{
+	const struct ioctl_sick_map	*m;
+	unsigned int			ioctl_mask = 0;
+
+	for_each_sick_map(ag_map, m) {
+		if (sick_mask & m->sick_mask)
+			ioctl_mask |= m->ioctl_mask;
+	}
+
+	return ioctl_mask;
+}
+
 static const struct ioctl_sick_map rtgroup_map[] = {
 	{ XFS_SICK_RG_SUPER,	XFS_RTGROUP_GEOM_SICK_SUPER },
 	{ XFS_SICK_RG_BITMAP,	XFS_RTGROUP_GEOM_SICK_BITMAP },
@@ -494,6 +654,22 @@ xfs_rtgroup_geom_health(
 		if (sick & m->sick_mask)
 			rgeo->rg_sick |= m->ioctl_mask;
 	}
+}
+
+/* Translate XFS_SICK_RG_* into XFS_RTGROUP_GEOM_SICK_*. */
+unsigned int
+xfs_healthmon_rtgroup_mask(
+	unsigned int			sick_mask)
+{
+	const struct ioctl_sick_map	*m;
+	unsigned int			ioctl_mask = 0;
+
+	for_each_sick_map(rtgroup_map, m) {
+		if (sick_mask & m->sick_mask)
+			ioctl_mask |= m->ioctl_mask;
+	}
+
+	return ioctl_mask;
 }
 
 static const struct ioctl_sick_map ino_map[] = {
@@ -532,6 +708,22 @@ xfs_bulkstat_health(
 		if (sick & m->sick_mask)
 			bs->bs_sick |= m->ioctl_mask;
 	}
+}
+
+/* Translate XFS_SICK_INO_* into XFS_BS_SICK_*. */
+unsigned int
+xfs_healthmon_inode_mask(
+	unsigned int			sick_mask)
+{
+	const struct ioctl_sick_map	*m;
+	unsigned int			ioctl_mask = 0;
+
+	for_each_sick_map(ino_map, m) {
+		if (sick_mask & m->sick_mask)
+			ioctl_mask |= m->ioctl_mask;
+	}
+
+	return ioctl_mask;
 }
 
 /* Mark a block mapping sick. */
