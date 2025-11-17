@@ -19,6 +19,7 @@
 #include "xfs_da_btree.h"
 #include "xfs_quota_defs.h"
 #include "xfs_rtgroup.h"
+#include "xfs_healthmon.h"
 
 static void
 xfs_health_unmount_group(
@@ -51,7 +52,7 @@ xfs_health_unmount(
 	bool			warn = false;
 
 	if (xfs_is_shutdown(mp))
-		return;
+		goto out_healthmon;
 
 	/* Measure AG corruption levels. */
 	while ((pag = xfs_perag_next(mp, pag)))
@@ -97,6 +98,10 @@ xfs_health_unmount(
 		if (sick & XFS_SICK_FS_COUNTERS)
 			xfs_fs_mark_healthy(mp, XFS_SICK_FS_COUNTERS);
 	}
+
+out_healthmon:
+	with_xfs_healthmon(mp, hmon)
+		xfs_healthmon_unmount(mp, hmon);
 }
 
 /* Mark unhealthy per-fs metadata. */
