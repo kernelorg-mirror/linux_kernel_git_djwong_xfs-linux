@@ -72,6 +72,9 @@ enum xfs_healthmon_type {
 	XFS_HEALTHMON_LOST,	/* message lost */
 	XFS_HEALTHMON_UNMOUNT,	/* filesystem is unmounting */
 
+	/* filesystem shutdown */
+	XFS_HEALTHMON_SHUTDOWN,
+
 	/* metadata health events */
 	XFS_HEALTHMON_SICK,	/* runtime corruption observed */
 	XFS_HEALTHMON_CORRUPT,	/* fsck reported corruption */
@@ -101,7 +104,7 @@ struct xfs_healthmon_event {
 		struct {
 			uint64_t	lostcount;
 		};
-		/* mount */
+		/* shutdown */
 		struct {
 			unsigned int	flags;
 		};
@@ -129,6 +132,8 @@ struct xfs_healthmon_event {
 struct xfs_health_update_params;
 void xfs_healthmon_report_metadata(struct xfs_healthmon *hmon,
 		const struct xfs_health_update_params *p);
+
+void xfs_healthmon_report_shutdown(struct xfs_healthmon *hmon, uint32_t flags);
 
 long xfs_ioc_health_monitor(struct file *file,
 		struct xfs_health_monitor __user *arg);
