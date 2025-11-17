@@ -19,6 +19,7 @@
 #include "xfs_da_btree.h"
 #include "xfs_quota_defs.h"
 #include "xfs_rtgroup.h"
+#include "xfs_healthmon.h"
 
 #include <linux/fserror.h>
 
@@ -48,12 +49,13 @@ xfs_health_unmount(
 {
 	struct xfs_perag	*pag = NULL;
 	struct xfs_rtgroup	*rtg = NULL;
+	struct xfs_healthmon	*hm;
 	unsigned int		sick = 0;
 	unsigned int		checked = 0;
 	bool			warn = false;
 
 	if (xfs_is_shutdown(mp))
-		return;
+		goto out_healthmon;
 
 	/* Measure AG corruption levels. */
 	while ((pag = xfs_perag_next(mp, pag)))
@@ -98,6 +100,13 @@ xfs_health_unmount(
 		 */
 		if (sick & XFS_SICK_FS_COUNTERS)
 			xfs_fs_mark_healthy(mp, XFS_SICK_FS_COUNTERS);
+	}
+
+out_healthmon:
+	hm = xfs_healthmon_get(mp);
+	if (hm) {
+		xfs_healthmon_unmount(hm);
+		xfs_healthmon_put(hm);
 	}
 }
 
