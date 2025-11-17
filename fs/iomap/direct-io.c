@@ -7,6 +7,7 @@
 #include <linux/pagemap.h>
 #include <linux/iomap.h>
 #include <linux/task_io_accounting_ops.h>
+#include <linux/fserror.h>
 #include "internal.h"
 #include "trace.h"
 
@@ -95,6 +96,13 @@ ssize_t iomap_dio_complete(struct iomap_dio *dio)
 
 	if (dops && dops->end_io)
 		ret = dops->end_io(iocb, dio->size, ret, dio->flags);
+	if (dio->error) {
+		enum fserror_type type = (dio->flags & IOMAP_DIO_WRITE) ?
+			FSERR_DIRECTIO_WRITE : FSERR_DIRECTIO_READ;
+
+		fserror_report_fileio(file_inode(iocb->ki_filp), type, offset,
+				      dio->size, dio->error);
+	}
 
 	if (likely(!ret)) {
 		ret = dio->size;
