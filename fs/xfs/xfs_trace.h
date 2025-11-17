@@ -106,6 +106,7 @@ struct xfs_open_zone;
 struct xfs_healthmon_event;
 struct xfs_health_update_params;
 struct xfs_healthmon;
+struct xfs_media_error_params;
 
 #define XFS_ATTR_FILTER_FLAGS \
 	{ XFS_ATTR_ROOT,	"ROOT" }, \
@@ -6087,6 +6088,12 @@ DECLARE_EVENT_CLASS(xfs_healthmon_event_class,
 			__entry->ino = event->ino;
 			__entry->gen = event->gen;
 			break;
+		case XFS_HEALTHMON_DATADEV:
+		case XFS_HEALTHMON_LOGDEV:
+		case XFS_HEALTHMON_RTDEV:
+			__entry->offset = event->daddr;
+			__entry->length = event->bbcount;
+			break;
 		}
 	),
 	TP_printk("dev %d:%d type %s domain %s mask 0x%x ino 0x%llx gen 0x%x offset 0x%llx len 0x%llx group 0x%x lost %llu",
@@ -6183,6 +6190,41 @@ TRACE_EVENT(xfs_healthmon_report_shutdown,
 	TP_printk("dev %d:%d shutdown_flags %s",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __print_flags(__entry->shutdown_flags, "|", XFS_SHUTDOWN_STRINGS))
+);
+
+#define XFS_FAILED_DEVICE_STRINGS \
+	{ XFS_FAILED_DATADEV,		"datadev" }, \
+	{ XFS_FAILED_LOGDEV,		"logdev" }, \
+	{ XFS_FAILED_RTDEV,		"rtdev" }
+
+TRACE_DEFINE_ENUM(XFS_FAILED_DATADEV);
+TRACE_DEFINE_ENUM(XFS_FAILED_LOGDEV);
+TRACE_DEFINE_ENUM(XFS_FAILED_RTDEV);
+
+TRACE_EVENT(xfs_healthmon_report_media,
+	TP_PROTO(const struct xfs_healthmon *hm,
+		 const struct xfs_media_error_params *p),
+	TP_ARGS(hm, p),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned int, error_dev)
+		__field(uint64_t, daddr)
+		__field(uint64_t, bbcount)
+		__field(int, pre_remove)
+	),
+	TP_fast_assign(
+		__entry->dev = hm->dev;
+		__entry->error_dev = p->fdev;
+		__entry->daddr = p->daddr;
+		__entry->bbcount = p->bbcount;
+		__entry->pre_remove = p->pre_remove;
+	),
+	TP_printk("dev %d:%d %s daddr 0x%llx bbcount 0x%llx pre_remove? %d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __print_symbolic(__entry->error_dev, XFS_FAILED_DEVICE_STRINGS),
+		  __entry->daddr,
+		  __entry->bbcount,
+		  __entry->pre_remove)
 );
 
 #endif /* _TRACE_XFS_H */
