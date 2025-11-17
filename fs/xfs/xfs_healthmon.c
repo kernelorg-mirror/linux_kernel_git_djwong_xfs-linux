@@ -21,6 +21,7 @@
 #include "xfs_health.h"
 #include "xfs_healthmon.h"
 #include "xfs_fsops.h"
+#include "xfs_notify_failure.h"
 
 #include <linux/anon_inodes.h>
 #include <linux/eventpoll.h>
@@ -167,6 +168,19 @@ xfs_healthmon_merge_events(
 		/* yes, we can race to shutdown */
 		existing->flags |= new->flags;
 		return true;
+
+	case XFS_HEALTHMON_MEDIA_ERROR:
+		/* physically adjacent errors can merge */
+		if (existing->daddr + existing->bbcount == new->daddr) {
+			existing->bbcount += new->bbcount;
+			return true;
+		}
+		if (new->daddr + new->bbcount == existing->daddr) {
+			existing->daddr = new->daddr;
+			existing->bbcount += new->bbcount;
+			return true;
+		}
+		return false;
 	}
 
 	return false;
@@ -494,6 +508,43 @@ xfs_healthmon_shutdown_hook(
 	mutex_unlock(&hm->lock);
 }
 
+static inline enum xfs_healthmon_domain
+media_error_domain(
+	const struct xfs_media_error_params	*p)
+{
+	switch (p->fdev) {
+	case XFS_FAILED_LOGDEV:
+		return XFS_HEALTHMON_LOGDEV;
+	case XFS_FAILED_RTDEV:
+		return XFS_HEALTHMON_RTDEV;
+	case XFS_FAILED_DATADEV:
+		return XFS_HEALTHMON_DATADEV;
+	}
+
+	/* shut up gcc */
+	return 0;
+}
+
+/* Add a media error event to the reporting queue. */
+void
+xfs_healthmon_media_error_hook(
+	struct xfs_healthmon		*hm,
+	const struct xfs_media_error_params *p)
+{
+	struct xfs_healthmon_event	event = {
+		.type			= XFS_HEALTHMON_MEDIA_ERROR,
+		.domain			= media_error_domain(p),
+		.daddr			= p->daddr,
+		.bbcount		= p->bbcount,
+	};
+
+	trace_xfs_healthmon_media_error_hook(hm, p);
+
+	mutex_lock(&hm->lock);
+	xfs_healthmon_append(hm, &event);
+	mutex_unlock(&hm->lock);
+}
+
 static inline void
 xfs_healthmon_reset_outbuf(
 	struct xfs_healthmon		*hm)
@@ -546,6 +597,9 @@ static const unsigned int domain_map[] = {
 	[XFS_HEALTHMON_AG]		= XFS_HEALTH_MONITOR_DOMAIN_AG,
 	[XFS_HEALTHMON_INODE]		= XFS_HEALTH_MONITOR_DOMAIN_INODE,
 	[XFS_HEALTHMON_RTGROUP]		= XFS_HEALTH_MONITOR_DOMAIN_RTGROUP,
+	[XFS_HEALTHMON_DATADEV]		= XFS_HEALTH_MONITOR_DOMAIN_DATADEV,
+	[XFS_HEALTHMON_RTDEV]		= XFS_HEALTH_MONITOR_DOMAIN_RTDEV,
+	[XFS_HEALTHMON_LOGDEV]		= XFS_HEALTH_MONITOR_DOMAIN_LOGDEV,
 };
 
 static const unsigned int type_map[] = {
@@ -556,6 +610,7 @@ static const unsigned int type_map[] = {
 	[XFS_HEALTHMON_HEALTHY]		= XFS_HEALTH_MONITOR_TYPE_HEALTHY,
 	[XFS_HEALTHMON_UNMOUNT]		= XFS_HEALTH_MONITOR_TYPE_UNMOUNT,
 	[XFS_HEALTHMON_SHUTDOWN]	= XFS_HEALTH_MONITOR_TYPE_SHUTDOWN,
+	[XFS_HEALTHMON_MEDIA_ERROR]	= XFS_HEALTH_MONITOR_TYPE_MEDIA_ERROR,
 };
 
 /* Copy an event into the output buffer if there's room and advance the head. */
@@ -620,6 +675,12 @@ xfs_healthmon_format_v0(
 		hme.e.inode.mask = xfs_healthmon_inode_mask(event->imask);
 		hme.e.inode.ino = event->ino;
 		hme.e.inode.gen = event->gen;
+		break;
+	case XFS_HEALTHMON_DATADEV:
+	case XFS_HEALTHMON_LOGDEV:
+	case XFS_HEALTHMON_RTDEV:
+		hme.e.media.daddr = event->daddr;
+		hme.e.media.bbcount = event->bbcount;
 		break;
 	default:
 		break;
