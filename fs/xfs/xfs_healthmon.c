@@ -206,6 +206,7 @@ xfs_healthmon_merge_events(
 
 	switch (existing->type) {
 	case XFS_HEALTHMON_RUNNING:
+	case XFS_HEALTHMON_UNMOUNT:
 		/* should only ever be one of these events anyway */
 		return false;
 
@@ -355,15 +356,46 @@ out_unlock:
 	return error;
 }
 
-/* Detach the xfs mount from this healthmon instance. */
+/*
+ * Report that the filesystem is being unmounted, then detach the xfs mount
+ * from this healthmon instance.
+ */
 void
 xfs_healthmon_unmount(
 	struct xfs_mount		*mp)
 {
 	struct xfs_healthmon		*hm = xfs_healthmon_get(mp);
+	struct xfs_healthmon_event	*event;
 
 	if (!hm)
 		return;
+
+	event = kzalloc(sizeof(struct xfs_healthmon_event), GFP_NOFS);
+	mutex_lock(&hm->lock);
+
+	trace_xfs_healthmon_report_unmount(hm);
+
+	if (event) {
+		/*
+		 * Insert the unmount notification at the start of the event
+		 * queue so that userspace knows the filesystem went away as
+		 * soon as possible.  There's nothing actionable for userspace
+		 * after an unmount.
+		 */
+		event->type = XFS_HEALTHMON_UNMOUNT;
+		event->domain = XFS_HEALTHMON_MOUNT;
+
+		__xfs_healthmon_insert(hm, event);
+	} else {
+		/*
+		 * Wake up the reader directly in case we didn't have enough
+		 * memory to queue the unmount event.  The filesystem is about
+		 * to go away so we don't care about reporting previously lost
+		 * events.
+		 */
+		wake_up(&hm->wait);
+	}
+	mutex_unlock(&hm->lock);
 
 	xfs_healthmon_detach(hm);
 	xfs_healthmon_put(hm);
