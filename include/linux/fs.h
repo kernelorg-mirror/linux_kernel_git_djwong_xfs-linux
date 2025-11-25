@@ -80,6 +80,7 @@ struct fs_context;
 struct fs_parameter_spec;
 struct file_kattr;
 struct iomap_ops;
+struct fserror_event;
 
 extern void __init inode_init(void);
 extern void __init inode_init_early(void);
@@ -1583,6 +1584,9 @@ struct super_block {
 
 	spinlock_t		s_inode_wblist_lock;
 	struct list_head	s_inodes_wb;	/* writeback inodes */
+
+	/* number of fserrors that are being sent to fsnotify/filesystems */
+	refcount_t		s_pending_errors;
 } __randomize_layout;
 
 static inline struct user_namespace *i_user_ns(const struct inode *inode)
@@ -2495,6 +2499,9 @@ struct super_operations {
 	 */
 	int (*remove_bdev)(struct super_block *sb, struct block_device *bdev);
 	void (*shutdown)(struct super_block *sb);
+
+	/* Report a filesystem error */
+	void (*report_error)(const struct fserror_event *event);
 };
 
 /*
