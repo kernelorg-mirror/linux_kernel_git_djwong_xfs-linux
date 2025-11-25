@@ -28,6 +28,7 @@
 #include "xfs_healthmon.h"
 
 #include <linux/fserror.h>
+#include <linux/fsevent.h>
 
 /*
  * Write new AG headers to disk. Non-transactional, but need to be
@@ -543,6 +544,8 @@ xfs_do_force_shutdown(
 		"Please unmount the filesystem and rectify the problem(s)");
 	if (xfs_error_level >= XFS_ERRLEVEL_HIGH)
 		xfs_stack_trace();
+
+	fsevent_send_shutdown(mp->m_super, &mp->m_kobj.kobject);
 
 	hm = xfs_healthmon_get(mp);
 	if (hm) {
