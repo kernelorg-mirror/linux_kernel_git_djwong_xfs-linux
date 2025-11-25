@@ -55,6 +55,8 @@
 #include <linux/fs_context.h>
 #include <linux/fs_parser.h>
 #include <linux/fserror.h>
+#include <linux/uuid.h>
+#include <linux/fsuevent.h>
 
 static const struct super_operations xfs_super_operations;
 
@@ -1251,6 +1253,8 @@ xfs_fs_put_super(
 {
 	struct xfs_mount	*mp = XFS_M(sb);
 
+	fs_send_uevent(mp->m_super, &mp->m_kobj.kobject, FSU_UNMOUNT);
+
 	xfs_notice(mp, "Unmounting Filesystem %pU", &mp->m_sb.sb_uuid);
 	xfs_filestream_unmount(mp);
 	xfs_unmountfs(mp);
@@ -1987,6 +1991,11 @@ xfs_fs_fill_super(
 		goto out_unmount;
 	}
 
+	/*
+	 * Send a uevent signalling that the mount succeeded so we can use udev
+	 * rules to start background services.
+	 */
+	fs_send_mount_uevent(mp->m_super, &mp->m_kobj.kobject, fc);
 	return 0;
 
  out_filestream_unmount:
