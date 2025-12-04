@@ -85,4 +85,9 @@ static inline void fserror_report_metadata(struct super_block *sb, int error,
 	fserror_report(sb, NULL, FSERR_METADATA, 0, 0, error, gfp);
 }
 
+static inline void fserror_report_shutdown(struct super_block *sb, gfp_t gfp)
+{
+	fserror_report(sb, NULL, FSERR_METADATA, 0, 0, -ESHUTDOWN, gfp);
+}
+
 #endif /* _LINUX_FSERROR_H__ */
