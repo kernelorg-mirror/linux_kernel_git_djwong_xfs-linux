@@ -49,6 +49,7 @@
 #include <linux/fs_context.h>
 #include <linux/fs_parser.h>
 #include <linux/fserror.h>
+#include <linux/fsevent.h>
 
 #include "ext4.h"
 #include "ext4_extents.h"	/* Needed for trace points definition */
@@ -1283,6 +1284,8 @@ static void ext4_put_super(struct super_block *sb)
 	struct ext4_super_block *es = sbi->s_es;
 	int aborted = 0;
 	int err;
+
+	fsevent_send_unmount(sb, &sbi->s_kobj);
 
 	/*
 	 * Unregister sysfs before destroying jbd2 journal.
@@ -5698,6 +5701,7 @@ static int __ext4_fill_super(struct fs_context *fc, struct super_block *sb)
 	if (err)
 		goto failed_mount9;
 
+	fsevent_send_mount(sb, &sbi->s_kobj, fc);
 	return 0;
 
 failed_mount9:
@@ -6835,6 +6839,7 @@ restore_opts:
 static int ext4_reconfigure(struct fs_context *fc)
 {
 	struct super_block *sb = fc->root->d_sb;
+	struct ext4_sb_info *sbi = EXT4_SB(sb);
 	int ret;
 	bool old_ro = sb_rdonly(sb);
 
@@ -6852,6 +6857,7 @@ static int ext4_reconfigure(struct fs_context *fc)
 		 &sb->s_uuid,
 		 (old_ro != sb_rdonly(sb)) ? (sb_rdonly(sb) ? " ro" : " r/w") : "");
 
+	fsevent_send_remount(sb, &sbi->s_kobj);
 	return 0;
 }
 

@@ -335,6 +335,7 @@ EXT4_ATTR_FEATURE(encrypted_casefold);
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 EXT4_ATTR_FEATURE(blocksize_gt_pagesize);
 #endif
+EXT4_ATTR_FEATURE(uevents);
 
 static struct attribute *ext4_feat_attrs[] = {
 	ATTR_LIST(lazy_itable_init),
@@ -358,6 +359,7 @@ static struct attribute *ext4_feat_attrs[] = {
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 	ATTR_LIST(blocksize_gt_pagesize),
 #endif
+	ATTR_LIST(uevents),
 	NULL,
 };
 ATTRIBUTE_GROUPS(ext4_feat);
