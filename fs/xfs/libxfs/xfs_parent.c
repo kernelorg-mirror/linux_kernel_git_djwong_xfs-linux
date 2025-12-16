@@ -29,6 +29,7 @@
 #include "xfs_trans_space.h"
 #include "xfs_attr_item.h"
 #include "xfs_health.h"
+#include "xfs_attr_leaf.h"
 
 struct kmem_cache		*xfs_parent_args_cache;
 
@@ -184,6 +185,14 @@ xfs_parent_iread_extents(
 	return xfs_iread_extents(tp, child, XFS_ATTR_FORK);
 }
 
+/* Can we bypass the attr intent mechanism for better performance? */
+static inline bool
+xfs_parent_can_shortcut(
+	const struct xfs_inode	*ip)
+{
+	return xfs_inode_has_attr_fork(ip) && xfs_attr_is_shortform(ip);
+}
+
 /* Add a parent pointer to reflect a dirent addition. */
 int
 xfs_parent_addname(
@@ -202,6 +211,15 @@ xfs_parent_addname(
 	xfs_inode_to_parent_rec(&ppargs->rec, dp);
 	xfs_parent_da_args_init(&ppargs->args, tp, &ppargs->rec, child,
 			child->i_ino, parent_name);
+
+	if (xfs_parent_can_shortcut(child)) {
+		ppargs->args.op_flags |= XFS_DA_OP_ADDNAME;
+
+		error = xfs_attr_try_sf_addname(&ppargs->args);
+		if (error != -ENOSPC)
+			return error;
+	}
+
 	xfs_attr_defer_add(&ppargs->args, XFS_ATTR_DEFER_SET);
 	return 0;
 }
@@ -224,6 +242,10 @@ xfs_parent_removename(
 	xfs_inode_to_parent_rec(&ppargs->rec, dp);
 	xfs_parent_da_args_init(&ppargs->args, tp, &ppargs->rec, child,
 			child->i_ino, parent_name);
+
+	if (xfs_parent_can_shortcut(child))
+		return xfs_attr_sf_removename(&ppargs->args);
+
 	xfs_attr_defer_add(&ppargs->args, XFS_ATTR_DEFER_REMOVE);
 	return 0;
 }
@@ -250,6 +272,27 @@ xfs_parent_replacename(
 			child->i_ino, old_name);
 
 	xfs_inode_to_parent_rec(&ppargs->new_rec, new_dp);
+
+	if (xfs_parent_can_shortcut(child)) {
+		ppargs->args.op_flags |= XFS_DA_OP_ADDNAME | XFS_DA_OP_REPLACE;
+
+		error = xfs_attr_sf_removename(&ppargs->args);
+		if (error)
+			return error;
+
+		xfs_parent_da_args_init(&ppargs->args, tp, &ppargs->new_rec,
+				child, child->i_ino, new_name);
+		ppargs->args.op_flags |= XFS_DA_OP_ADDNAME;
+
+		error = xfs_attr_try_sf_addname(&ppargs->args);
+		if (error == -ENOSPC) {
+			xfs_attr_defer_add(&ppargs->args, XFS_ATTR_DEFER_SET);
+			return 0;
+		}
+
+		return error;
+	}
+
 	ppargs->args.new_name = new_name->name;
 	ppargs->args.new_namelen = new_name->len;
 	ppargs->args.new_value = &ppargs->new_rec;

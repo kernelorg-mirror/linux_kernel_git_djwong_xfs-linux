@@ -349,7 +349,7 @@ xfs_attr_set_resv(
  * xfs_attr_shortform_addname() will convert to leaf format and return -ENOSPC.
  * to use.
  */
-STATIC int
+int
 xfs_attr_try_sf_addname(
 	struct xfs_da_args	*args)
 {

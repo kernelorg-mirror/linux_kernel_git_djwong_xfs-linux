@@ -573,7 +573,7 @@ struct xfs_trans_res xfs_attr_set_resv(const struct xfs_da_args *args);
  */
 static inline bool
 xfs_attr_is_shortform(
-	struct xfs_inode    *ip)
+	const struct xfs_inode    *ip)
 {
 	return ip->i_af.if_format == XFS_DINODE_FMT_LOCAL ||
 	       (ip->i_af.if_format == XFS_DINODE_FMT_EXTENTS &&
