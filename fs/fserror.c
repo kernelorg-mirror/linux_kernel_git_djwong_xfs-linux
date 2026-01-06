@@ -79,6 +79,11 @@ static inline struct fserror_event *fserror_alloc_event(struct super_block *sb,
 	 * If pending_errors already reached zero or is no longer active,
 	 * the superblock is being deactivated so there's no point in
 	 * continuing.
+	 *
+	 * The order of the check of s_pending_errors and SB_ACTIVE are
+	 * mandated by order of accesses in generic_shutdown_super and
+	 * fserror_unmount.  Barriers are implicitly provided by the refcount
+	 * manipulations in this function and fserror_unmount.
 	 */
 	if (!refcount_inc_not_zero(&sb->s_pending_errors))
 		return NULL;
