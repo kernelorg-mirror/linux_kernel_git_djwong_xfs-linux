@@ -185,14 +185,6 @@ xfs_parent_iread_extents(
 	return xfs_iread_extents(tp, child, XFS_ATTR_FORK);
 }
 
-/* Can we bypass the attr intent mechanism for better performance? */
-static inline bool
-xfs_parent_can_shortcut(
-	const struct xfs_inode	*ip)
-{
-	return xfs_inode_has_attr_fork(ip) && xfs_attr_is_shortform(ip);
-}
-
 /* Add a parent pointer to reflect a dirent addition. */
 int
 xfs_parent_addname(
@@ -212,7 +204,7 @@ xfs_parent_addname(
 	xfs_parent_da_args_init(&ppargs->args, tp, &ppargs->rec, child,
 			child->i_ino, parent_name);
 
-	if (xfs_parent_can_shortcut(child)) {
+	if (xfs_attr_can_shortcut(child)) {
 		ppargs->args.op_flags |= XFS_DA_OP_ADDNAME;
 
 		error = xfs_attr_try_sf_addname(&ppargs->args);
@@ -243,7 +235,7 @@ xfs_parent_removename(
 	xfs_parent_da_args_init(&ppargs->args, tp, &ppargs->rec, child,
 			child->i_ino, parent_name);
 
-	if (xfs_parent_can_shortcut(child))
+	if (xfs_attr_can_shortcut(child))
 		return xfs_attr_sf_removename(&ppargs->args);
 
 	xfs_attr_defer_add(&ppargs->args, XFS_ATTR_DEFER_REMOVE);
@@ -273,7 +265,7 @@ xfs_parent_replacename(
 
 	xfs_inode_to_parent_rec(&ppargs->new_rec, new_dp);
 
-	if (xfs_parent_can_shortcut(child)) {
+	if (xfs_attr_can_shortcut(child)) {
 		ppargs->args.op_flags |= XFS_DA_OP_ADDNAME | XFS_DA_OP_REPLACE;
 
 		error = xfs_attr_sf_removename(&ppargs->args);
