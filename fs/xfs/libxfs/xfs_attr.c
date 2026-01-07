@@ -1127,6 +1127,12 @@ xfs_attr_set(
 
 		/* Try a shortcut if we're in short format. */
 		if (!rmt_blks && xfs_attr_can_shortcut(dp)) {
+			error = xfs_attr_shortform_replace(args);
+			if (!error)
+				break;
+			if (error != -ENOSPC)
+				goto out_trans_cancel;
+
 			args->op_flags |= XFS_DA_OP_ADDNAME | XFS_DA_OP_REPLACE;
 
 			error = xfs_attr_sf_removename(args);

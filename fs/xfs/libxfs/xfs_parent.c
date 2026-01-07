@@ -242,6 +242,33 @@ xfs_parent_removename(
 	return 0;
 }
 
+static int
+xfs_parent_shortform_replace(
+	struct xfs_parent_args		*ppargs,
+	const struct xfs_name		*new_name)
+{
+	struct xfs_da_args		*args = &ppargs->args;
+	struct xfs_attr_sf_entry	*sfe;
+
+	ASSERT(args->dp->i_af.if_format == XFS_DINODE_FMT_LOCAL);
+
+	trace_xfs_attr_sf_replace(args);
+
+	sfe = xfs_attr_sf_findname(args);
+	if (!sfe)
+		return -ENOATTR;
+
+	if (sfe->namelen != new_name->len ||
+	    sfe->valuelen != sizeof(struct xfs_parent_rec))
+		return -ENOSPC;
+
+	memcpy(sfe->nameval, new_name->name, sfe->namelen);
+	memcpy(&sfe->nameval[sfe->namelen], &ppargs->new_rec, sfe->valuelen);
+	xfs_trans_log_inode(args->trans, args->dp,
+			XFS_ILOG_CORE | XFS_ILOG_ADATA);
+	return 0;
+}
+
 /* Replace one parent pointer with another to reflect a rename. */
 int
 xfs_parent_replacename(
@@ -266,6 +293,10 @@ xfs_parent_replacename(
 	xfs_inode_to_parent_rec(&ppargs->new_rec, new_dp);
 
 	if (xfs_attr_can_shortcut(child)) {
+		error = xfs_parent_shortform_replace(ppargs, new_name);
+		if (error != -ENOSPC)
+			return error;
+
 		ppargs->args.op_flags |= XFS_DA_OP_ADDNAME | XFS_DA_OP_REPLACE;
 
 		error = xfs_attr_sf_removename(&ppargs->args);
