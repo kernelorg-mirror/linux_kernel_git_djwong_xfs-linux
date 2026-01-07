@@ -649,4 +649,12 @@ void xfs_attr_intent_destroy_cache(void);
 int xfs_attr_sf_totsize(struct xfs_inode *dp);
 int xfs_attr_add_fork(struct xfs_inode *ip, int size, int rsvd);
 
+/* Can we bypass the attr intent mechanism for better performance? */
+static inline bool
+xfs_attr_can_shortcut(
+	const struct xfs_inode	*ip)
+{
+	return xfs_inode_has_attr_fork(ip) && xfs_attr_is_shortform(ip);
+}
+
 #endif	/* __XFS_ATTR_H__ */

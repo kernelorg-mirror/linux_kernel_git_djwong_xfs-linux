@@ -1109,6 +1109,14 @@ xfs_attr_set(
 	case -EEXIST:
 		if (op == XFS_ATTRUPDATE_REMOVE) {
 			/* if no value, we are performing a remove operation */
+			if (xfs_attr_can_shortcut(dp)) {
+				error = xfs_attr_sf_removename(args);
+				if (!error)
+					break;
+				if (error)
+					goto out_trans_cancel;
+			}
+
 			xfs_attr_defer_add(args, XFS_ATTR_DEFER_REMOVE);
 			break;
 		}
@@ -1116,6 +1124,27 @@ xfs_attr_set(
 		/* Pure create fails if the attr already exists */
 		if (op == XFS_ATTRUPDATE_CREATE)
 			goto out_trans_cancel;
+
+		/* Try a shortcut if we're in short format. */
+		if (!rmt_blks && xfs_attr_can_shortcut(dp)) {
+			args->op_flags |= XFS_DA_OP_ADDNAME | XFS_DA_OP_REPLACE;
+
+			error = xfs_attr_sf_removename(args);
+			if (error)
+				goto out_trans_cancel;
+
+			args->op_flags &= ~XFS_DA_OP_REPLACE;
+
+			error = xfs_attr_try_sf_addname(args);
+			if (!error)
+				break;
+			if (error != -ENOSPC)
+				goto out_trans_cancel;
+
+			xfs_attr_defer_add(args, XFS_ATTR_DEFER_SET);
+			break;
+		}
+
 		xfs_attr_defer_add(args, XFS_ATTR_DEFER_REPLACE);
 		break;
 	case -ENOATTR:
@@ -1126,6 +1155,18 @@ xfs_attr_set(
 		/* Pure replace fails if no existing attr to replace. */
 		if (op == XFS_ATTRUPDATE_REPLACE)
 			goto out_trans_cancel;
+
+		/* Try a shortcut if we're in short format. */
+		if (!rmt_blks && xfs_attr_can_shortcut(dp)) {
+			args->op_flags |= XFS_DA_OP_ADDNAME;
+
+			error = xfs_attr_try_sf_addname(args);
+			if (!error)
+				break;
+			if (error != -ENOSPC)
+				goto out_trans_cancel;
+		}
+
 		xfs_attr_defer_add(args, XFS_ATTR_DEFER_SET);
 		break;
 	default:
