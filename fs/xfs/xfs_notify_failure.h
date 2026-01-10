@@ -8,4 +8,8 @@
 
 extern const struct dax_holder_operations xfs_dax_holder_operations;
 
+struct xfs_verify_media;
+int xfs_ioc_verify_media(struct file *file,
+		struct xfs_verify_media __user *arg);
+
 #endif /* __XFS_NOTIFY_FAILURE_H__ */

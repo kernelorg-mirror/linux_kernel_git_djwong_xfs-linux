@@ -23,12 +23,14 @@
 #include "xfs_rtgroup.h"
 #include "xfs_rtrmap_btree.h"
 #include "xfs_healthmon.h"
+#include "xfs_trace.h"
 
 #include <linux/mm.h>
 #include <linux/dax.h>
 #include <linux/fs.h>
 #include <linux/fserror.h>
 
+#if defined(CONFIG_MEMORY_FAILURE) && defined(CONFIG_FS_DAX)
 struct xfs_failure_info {
 	xfs_agblock_t		startblock;
 	xfs_extlen_t		blockcount;
@@ -395,3 +397,376 @@ xfs_dax_notify_failure(
 const struct dax_holder_operations xfs_dax_holder_operations = {
 	.notify_failure		= xfs_dax_notify_failure,
 };
+#endif /* CONFIG_MEMORY_FAILURE && CONFIG_FS_DAX */
+
+struct xfs_group_data_lost {
+	xfs_agblock_t		startblock;
+	xfs_extlen_t		blockcount;
+};
+
+static int
+xfs_report_one_data_lost(
+	struct xfs_btree_cur		*cur,
+	const struct xfs_rmap_irec	*rec,
+	void				*data)
+{
+	struct xfs_mount		*mp = cur->bc_mp;
+	struct xfs_inode		*ip;
+	struct xfs_group_data_lost	*lost = data;
+	xfs_fileoff_t			fileoff = rec->rm_offset;
+	xfs_extlen_t			blocks = rec->rm_blockcount;
+	const xfs_agblock_t		lost_end =
+			lost->startblock + lost->blockcount;
+	const xfs_agblock_t		rmap_end =
+			rec->rm_startblock + rec->rm_blockcount;
+	int				error = 0;
+
+	if (XFS_RMAP_NON_INODE_OWNER(rec->rm_owner) ||
+	    (rec->rm_flags & (XFS_RMAP_ATTR_FORK | XFS_RMAP_BMBT_BLOCK)))
+		return 0;
+
+	error = xfs_iget(mp, cur->bc_tp, rec->rm_owner, 0, 0, &ip);
+	if (error)
+		return 0;
+
+	if (lost->startblock > rec->rm_startblock) {
+		fileoff += lost->startblock - rec->rm_startblock;
+		blocks -= lost->startblock - rec->rm_startblock;
+	}
+	if (rmap_end > lost_end)
+		blocks -= rmap_end - lost_end;
+
+	fserror_report_data_lost(VFS_I(ip), XFS_FSB_TO_B(mp, fileoff),
+			XFS_FSB_TO_B(mp, blocks), GFP_NOFS);
+
+	xfs_irele(ip);
+	return 0;
+}
+
+static int
+xfs_report_data_lost(
+	struct xfs_mount	*mp,
+	enum xfs_group_type	type,
+	xfs_daddr_t		daddr,
+	u64			bblen)
+{
+	struct xfs_group	*xg = NULL;
+	struct xfs_trans	*tp;
+	xfs_fsblock_t		start_bno, end_bno;
+	uint32_t		start_gno, end_gno;
+	int			error;
+
+	if (type == XG_TYPE_RTG) {
+		start_bno = xfs_daddr_to_rtb(mp, daddr);
+		end_bno = xfs_daddr_to_rtb(mp, daddr + bblen - 1);
+	} else {
+		start_bno = XFS_DADDR_TO_FSB(mp, daddr);
+		end_bno = XFS_DADDR_TO_FSB(mp, daddr + bblen - 1);
+	}
+
+	tp = xfs_trans_alloc_empty(mp);
+	start_gno = xfs_fsb_to_gno(mp, start_bno, type);
+	end_gno = xfs_fsb_to_gno(mp, end_bno, type);
+	while ((xg = xfs_group_next_range(mp, xg, start_gno, end_gno, type))) {
+		struct xfs_buf		*agf_bp = NULL;
+		struct xfs_rtgroup	*rtg = NULL;
+		struct xfs_btree_cur	*cur;
+		struct xfs_rmap_irec	ri_low = { };
+		struct xfs_rmap_irec	ri_high;
+		struct xfs_group_data_lost lost;
+
+		if (type == XG_TYPE_AG) {
+			struct xfs_perag	*pag = to_perag(xg);
+
+			error = xfs_alloc_read_agf(pag, tp, 0, &agf_bp);
+			if (error) {
+				xfs_perag_put(pag);
+				break;
+			}
+
+			cur = xfs_rmapbt_init_cursor(mp, tp, agf_bp, pag);
+		} else {
+			rtg = to_rtg(xg);
+			xfs_rtgroup_lock(rtg, XFS_RTGLOCK_RMAP);
+			cur = xfs_rtrmapbt_init_cursor(tp, rtg);
+		}
+
+		/*
+		 * Set the rmap range from ri_low to ri_high, which represents
+		 * a [start, end] where we looking for the files or metadata.
+		 */
+		memset(&ri_high, 0xFF, sizeof(ri_high));
+		if (xg->xg_gno == start_gno)
+			ri_low.rm_startblock =
+				xfs_fsb_to_gbno(mp, start_bno, type);
+		if (xg->xg_gno == end_gno)
+			ri_high.rm_startblock =
+				xfs_fsb_to_gbno(mp, end_bno, type);
+
+		lost.startblock = ri_low.rm_startblock;
+		lost.blockcount = min(xg->xg_block_count,
+				      ri_high.rm_startblock + 1) -
+							ri_low.rm_startblock;
+
+		error = xfs_rmap_query_range(cur, &ri_low, &ri_high,
+				xfs_report_one_data_lost, &lost);
+		xfs_btree_del_cursor(cur, error);
+		if (agf_bp)
+			xfs_trans_brelse(tp, agf_bp);
+		if (rtg)
+			xfs_rtgroup_unlock(rtg, XFS_RTGLOCK_RMAP);
+		if (error) {
+			xfs_group_put(xg);
+			break;
+		}
+	}
+
+	xfs_trans_cancel(tp);
+	return 0;
+}
+
+/* Verify the media of an xfs device by submitting read requests to the disk. */
+static int
+xfs_verify_media(
+	struct xfs_mount	*mp,
+	enum xfs_device		fdev,
+	struct xfs_verify_media	*me)
+{
+	struct blk_plug		plug;
+	struct xfs_buftarg	*btp = NULL;
+	struct bio		*bio = NULL;
+	struct folio		*folio;
+	xfs_daddr_t		new_start_daddr = me->start_daddr;
+	xfs_daddr_t		bio_daddr;
+	uint64_t		bio_bbcount;
+	const unsigned int	iosize = BIO_MAX_VECS << PAGE_SHIFT;
+	unsigned int		bufsize = iosize;
+	unsigned int		bio_submitted = 0;
+	enum xfs_group_type	group;
+	int			error = 0;
+
+	me->ioerror = 0;
+
+	switch (fdev) {
+	case XFS_DEV_DATA:
+		btp = mp->m_ddev_targp;
+		break;
+	case XFS_DEV_LOG:
+		if (mp->m_logdev_targp->bt_bdev != mp->m_ddev_targp->bt_bdev)
+			btp = mp->m_logdev_targp;
+		break;
+	case XFS_DEV_RT:
+		btp = mp->m_rtdev_targp;
+		break;
+	}
+	if (!btp)
+		return -ENODEV;
+
+	/*
+	 * If the caller told us to verify to EOD, tell the user exactly where
+	 * that was.
+	 */
+	if (me->end_daddr == XFS_VERIFY_TO_EOD)
+		me->end_daddr = btp->bt_nr_sectors;
+
+	if (me->start_daddr > me->end_daddr)
+		return 0;
+
+	/* We've already hit EOD, so advance to the end */
+	if (me->start_daddr >= btp->bt_nr_sectors) {
+		me->start_daddr = me->end_daddr;
+		return 0;
+	}
+
+	bio_daddr = me->start_daddr;
+	bio_bbcount = min_t(sector_t, me->end_daddr, btp->bt_nr_sectors) -
+			  me->start_daddr;
+
+	/*
+	 * There are three ranges involved here:
+	 *
+	 *  - [me->start_daddr, me->end_daddr) is the range that the user wants
+	 *    to verify.  If me->end_daddr is XFS_VERIFY_TO_EOD then that means
+	 *    to verify to the end of the disk.
+	 *
+	 *  - [new_start_daddr, me->end_daddr) is the range that we have not
+	 *    yet verified.  We update new_start_daddr after each successful
+	 *    read.  me->start_daddr is set to new_start_daddr before
+	 *    returning.
+	 *
+	 *  - [bio_daddr, bio_daddr + bio_bbcount) is the range of the next
+	 *    read bio(s) that we'll submit.
+	 *
+	 * Try to create bios of maximal size, whether we allocate one large
+	 * folio of that size, or a single page.
+	 */
+	if ((bufsize >> SECTOR_SHIFT) > bio_bbcount)
+		bufsize = bio_bbcount << SECTOR_SHIFT;
+
+	folio = folio_alloc(GFP_KERNEL, get_order(bufsize));
+	if (!folio)
+		folio = folio_alloc(GFP_KERNEL, 0);
+	if (!folio)
+		return -ENOMEM;
+	bufsize = folio_size(folio);
+
+	trace_xfs_verify_media(mp, me, btp->bt_bdev->bd_dev, bio_daddr,
+			bio_bbcount, bufsize);
+
+	blk_start_plug(&plug);
+	while (bio_bbcount > 0) {
+		unsigned int		nr_sects =
+			min_t(sector_t, bio_bbcount, iosize >> SECTOR_SHIFT);
+		const unsigned int	nr_vecs =
+			howmany(nr_sects << SECTOR_SHIFT, bufsize);
+		unsigned int		i;
+
+		bio = blk_next_bio(bio, btp->bt_bdev, nr_vecs, REQ_OP_READ,
+				GFP_KERNEL);
+		if (!bio) {
+			error = -ENOMEM;
+			goto out_folio;
+		}
+		bio->bi_iter.bi_sector = bio_daddr;
+
+		for (i = 0; i < nr_vecs; i++) {
+			unsigned int	vec_sects =
+				min(nr_sects, bufsize >> SECTOR_SHIFT);
+
+			bio_add_folio_nofail(bio, folio,
+					vec_sects << SECTOR_SHIFT, 0);
+
+			bio_daddr += vec_sects;
+			bio_bbcount -= vec_sects;
+			bio_submitted += vec_sects;
+		}
+
+		/* Don't let too many IOs accumulate */
+		if (bio_submitted > SZ_256M >> SECTOR_SHIFT) {
+			blk_finish_plug(&plug);
+			error = submit_bio_wait(bio);
+			if (error)
+				goto media_error;
+			bio_put(bio);
+			bio = NULL;
+
+			if (fatal_signal_pending(current)) {
+				error = -EINTR;
+				goto out_folio;
+			}
+
+			cond_resched();
+			new_start_daddr += bio_submitted;
+			bio_submitted = 0;
+			blk_start_plug(&plug);
+		}
+
+	}
+	blk_finish_plug(&plug);
+
+	/* Finish up a partially constructed bio if there is one */
+	if (!bio)
+		goto out_folio;
+
+	error = submit_bio_wait(bio);
+	if (error)
+		goto media_error;
+
+	new_start_daddr += bio_submitted;
+
+out_bio:
+	bio_put(bio);
+out_folio:
+	folio_put(folio);
+	if (!error) {
+		/*
+		 * Advance start_daddr to the end of what we verified if there
+		 * wasn't an operational error; or to end_daddr if we reached
+		 * the end of the disk.
+		 */
+		me->start_daddr = new_start_daddr;
+		if (me->start_daddr >= btp->bt_nr_sectors)
+			me->start_daddr = me->end_daddr;
+	}
+
+	trace_xfs_verify_media_end(mp, me, btp->bt_bdev->bd_dev);
+	return error;
+
+media_error:
+	trace_xfs_verify_media_error(mp, me, btp->bt_bdev->bd_dev,
+			new_start_daddr, bio_submitted, error);
+
+	/* Only report the I/O error if we didn't verify any bytes at all. */
+	if (me->start_daddr == new_start_daddr)
+		me->ioerror = -error;
+	error = 0;
+
+	if (!(me->flags & XFS_VERIFY_REPORT_ERRORS))
+		goto out_bio;
+
+	xfs_healthmon_report_media(mp, fdev, new_start_daddr, bio_submitted);
+
+	if (!xfs_has_rmapbt(mp))
+		goto out_bio;
+
+	switch (fdev) {
+	case XFS_DEV_DATA:
+		group = XG_TYPE_AG;
+		break;
+	case XFS_DEV_RT:
+		group = XG_TYPE_RTG;
+		break;
+	default:
+		goto out_bio;
+	}
+
+	xfs_report_data_lost(mp, group, new_start_daddr, bio_submitted);
+	goto out_bio;
+}
+
+#define XFS_VALID_VERIFY_MEDIA_FLAGS	(XFS_VERIFY_REPORT_ERRORS)
+int
+xfs_ioc_verify_media(
+	struct file			*file,
+	struct xfs_verify_media __user	*arg)
+{
+	struct xfs_verify_media		me;
+	struct xfs_inode		*ip = XFS_I(file_inode(file));
+	struct xfs_mount		*mp = ip->i_mount;
+	enum xfs_device			fdev;
+	int				error;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	if (copy_from_user(&me, arg, sizeof(me)))
+		return -EFAULT;
+
+	if (me.pad)
+		return -EINVAL;
+	if (me.flags & ~XFS_VALID_VERIFY_MEDIA_FLAGS)
+		return -EINVAL;
+
+	switch (me.dev) {
+	case XFS_VERIFY_DATADEV:
+		fdev = XFS_DEV_DATA;
+		break;
+	case XFS_VERIFY_RTDEV:
+		fdev = XFS_DEV_RT;
+		break;
+	case XFS_VERIFY_LOGDEV:
+		fdev = XFS_DEV_LOG;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	error = xfs_verify_media(mp, fdev, &me);
+	if (error)
+		return error;
+
+	if (copy_to_user(arg, &me, sizeof(me)))
+		return -EFAULT;
+
+	return 0;
+}
