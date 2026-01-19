@@ -197,6 +197,7 @@ xfs-y				+= xfs_aops.o \
 				   xfs_symlink.o \
 				   xfs_sysfs.o \
 				   xfs_trans.o \
+				   xfs_verify_media.o \
 				   xfs_xattr.o
 
 # low-level transaction/log code
