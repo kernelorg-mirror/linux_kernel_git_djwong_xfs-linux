@@ -1234,6 +1234,74 @@ static struct dentry *fuse_get_parent(struct dentry *child)
 	return parent;
 }
 
+#ifdef CONFIG_FUSE_IOMAP
+/*
+ * Second stage of a freeze. The data is already frozen so we only
+ * need to take care of the fuse server.
+ */
+static int fuse_freeze_fs(struct super_block *sb)
+{
+	struct fuse_mount *fm = get_fuse_mount_super(sb);
+	struct fuse_conn *fc = get_fuse_conn_super(sb);
+	struct fuse_freezefs_in inarg = {
+		.unlinked = atomic_long_read(&sb->s_remove_count),
+	};
+	FUSE_ARGS(args);
+	int err;
+
+	if (!fc->iomap)
+		return -EOPNOTSUPP;
+
+	args.opcode = FUSE_FREEZE_FS;
+	args.nodeid = get_node_id(sb->s_root->d_inode);
+	args.in_numargs = 1;
+	args.in_args[0].size = sizeof(inarg);
+	args.in_args[0].value = &inarg;
+	err = fuse_simple_request(fm, &args);
+	if (err == -ENOSYS)
+		err = -EOPNOTSUPP;
+	return err;
+}
+
+static int fuse_unfreeze_fs(struct super_block *sb)
+{
+	struct fuse_mount *fm = get_fuse_mount_super(sb);
+	struct fuse_conn *fc = get_fuse_conn_super(sb);
+	FUSE_ARGS(args);
+	int err;
+
+	if (!fc->iomap)
+		return 0;
+
+	args.opcode = FUSE_UNFREEZE_FS;
+	args.nodeid = get_node_id(sb->s_root->d_inode);
+	err = fuse_simple_request(fm, &args);
+	if (err == -ENOSYS)
+		err = 0;
+	return err;
+}
+
+static void fuse_shutdown_fs(struct super_block *sb)
+{
+	struct fuse_mount *fm = get_fuse_mount_super(sb);
+	struct fuse_conn *fc = get_fuse_conn_super(sb);
+	struct fuse_shutdownfs_in inarg = {
+		.flags = 0,
+	};
+	FUSE_ARGS(args);
+
+	if (!fc->iomap)
+		return;
+
+	args.opcode = FUSE_SHUTDOWN_FS;
+	args.nodeid = get_node_id(sb->s_root->d_inode);
+	args.in_numargs = 1;
+	args.in_args[0].size = sizeof(inarg);
+	args.in_args[0].value = &inarg;
+	fuse_simple_request(fm, &args);
+}
+#endif /* CONFIG_FUSE_IOMAP */
+
 /* only for fid encoding; no support for file handle */
 static const struct export_operations fuse_export_fid_operations = {
 	.encode_fh	= fuse_encode_fh,
@@ -1256,6 +1324,11 @@ static const struct super_operations fuse_super_operations = {
 	.statfs		= fuse_statfs,
 	.sync_fs	= fuse_sync_fs,
 	.show_options	= fuse_show_options,
+#ifdef CONFIG_FUSE_IOMAP
+	.freeze_fs	= fuse_freeze_fs,
+	.unfreeze_fs	= fuse_unfreeze_fs,
+	.shutdown	= fuse_shutdown_fs,
+#endif
 };
 
 static void sanitize_global_limit(unsigned int *limit)
