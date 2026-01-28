@@ -2706,6 +2706,8 @@ int fuse_iomap_upsert(struct fuse_conn *fc,
 		goto out_sb;
 	}
 
+	trace_fuse_iomap_upsert(inode, outarg);
+
 	fi = get_fuse_inode(inode);
 	if (BAD_DATA(fi->orig_ino != outarg->attr_ino)) {
 		ret = -EINVAL;
@@ -2790,6 +2792,8 @@ int fuse_iomap_inval(struct fuse_conn *fc,
 		ret = -ESTALE;
 		goto out_sb;
 	}
+
+	trace_fuse_iomap_inval(inode, outarg);
 
 	fi = get_fuse_inode(inode);
 	if (BAD_DATA(fi->orig_ino != outarg->attr_ino)) {
