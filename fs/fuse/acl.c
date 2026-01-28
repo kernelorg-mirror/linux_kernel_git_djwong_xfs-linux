@@ -215,10 +215,16 @@ int fuse_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 	if (fc->posix_acl) {
 		/*
 		 * Fuse daemons without FUSE_POSIX_ACL never cached POSIX ACLs
-		 * and didn't invalidate attributes. Retain that behavior.
+		 * and didn't invalidate attributes. Retain that behavior
+		 * except for iomap, where we assume that only the source of
+		 * ACL changes is userspace.
 		 */
-		forget_all_cached_acls(inode);
-		fuse_invalidate_attr(inode);
+		if (!ret && is_iomap) {
+			set_cached_acl(inode, type, acl);
+		} else {
+			forget_all_cached_acls(inode);
+			fuse_invalidate_attr(inode);
+		}
 	}
 
 	return ret;
