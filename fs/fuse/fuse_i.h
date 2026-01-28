@@ -1826,6 +1826,7 @@ void fuse_iomap_open(struct inode *inode, struct file *file);
 int fuse_iomap_finish_open(const struct fuse_file *ff,
 			   const struct inode *inode);
 void fuse_iomap_open_truncate(struct inode *inode);
+void fuse_iomap_release(struct inode *inode);
 
 void fuse_iomap_set_disk_size(struct fuse_inode *fi, loff_t newsize);
 static inline loff_t fuse_iomap_get_disk_size(const struct fuse_inode *fi)
@@ -1843,6 +1844,8 @@ int fuse_iomap_fallocate(struct file *file, int mode, loff_t offset,
 			 loff_t length, loff_t new_size);
 int fuse_iomap_flush_unmap_range(struct inode *inode, loff_t pos,
 				 loff_t endpos);
+void fuse_iomap_copied_file_range(struct inode *inode, loff_t offset,
+				  size_t written);
 
 int fuse_dev_ioctl_iomap_support(struct file *file,
 				 struct fuse_iomap_support __user *argp);
@@ -1877,6 +1880,7 @@ enum fuse_iomap_iodir {
 # define fuse_iomap_open(...)			((void)0)
 # define fuse_iomap_finish_open(...)		(-ENOSYS)
 # define fuse_iomap_open_truncate(...)		((void)0)
+# define fuse_iomap_release(...)		((void)0)
 # define fuse_iomap_set_disk_size(...)		((void)0)
 # define fuse_iomap_get_disk_size(...)		((loff_t)0)
 # define fuse_iomap_setsize_finish(...)		(-ENOSYS)
@@ -1886,6 +1890,7 @@ enum fuse_iomap_iodir {
 # define fuse_iomap_setsize_start(...)		(-ENOSYS)
 # define fuse_iomap_fallocate(...)		(-ENOSYS)
 # define fuse_iomap_flush_unmap_range(...)	(-ENOSYS)
+# define fuse_iomap_copied_file_range(...)	((void)0)
 # define fuse_dev_ioctl_iomap_support(...)	(-EOPNOTSUPP)
 # define fuse_iomap_dev_inval(...)		(-ENOSYS)
 # define fuse_iomap_fadvise			NULL
