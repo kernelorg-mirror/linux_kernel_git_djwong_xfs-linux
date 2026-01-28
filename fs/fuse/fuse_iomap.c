@@ -579,6 +579,8 @@ fuse_iomap_setsize_finish(
 
 	ASSERT(fuse_inode_has_iomap(inode));
 
+	trace_fuse_iomap_setsize_finish(inode, newsize, 0);
+
 	fi->i_disk_size = newsize;
 	return 0;
 }
@@ -614,6 +616,8 @@ static int fuse_iomap_ioend(struct inode *inode, loff_t pos, size_t written,
 	if (fuse_ioend_is_append(fi, pos, written))
 		inarg.flags |= FUSE_IOMAP_IOEND_APPEND;
 
+	trace_fuse_iomap_ioend(inode, &inarg);
+
 	if (fuse_should_send_iomap_ioend(fm, &inarg)) {
 		FUSE_ARGS(args);
 		int iomap_error;
@@ -639,6 +643,9 @@ static int fuse_iomap_ioend(struct inode *inode, loff_t pos, size_t written,
 		case 0:
 			break;
 		default:
+			trace_fuse_iomap_ioend_error(inode, &inarg, &outarg,
+						     iomap_error);
+
 			/*
 			 * If the write IO failed, return the failure code to
 			 * the caller no matter what happens with the ioend.
@@ -928,6 +935,8 @@ static ssize_t fuse_iomap_direct_read(struct kiocb *iocb, struct iov_iter *to)
 	struct inode *inode = file_inode(iocb->ki_filp);
 	ssize_t ret;
 
+	trace_fuse_iomap_direct_read(iocb, to);
+
 	if (!iov_iter_count(to))
 		return 0; /* skip atime */
 
@@ -939,6 +948,7 @@ static ssize_t fuse_iomap_direct_read(struct kiocb *iocb, struct iov_iter *to)
 		file_accessed(iocb->ki_filp);
 	inode_unlock_shared(inode);
 
+	trace_fuse_iomap_direct_read_end(iocb, to, ret);
 	return ret;
 }
 
@@ -952,6 +962,9 @@ static int fuse_iomap_dio_write_end_io(struct kiocb *iocb, ssize_t written,
 		return -EIO;
 
 	ASSERT(fuse_inode_has_iomap(inode));
+
+	trace_fuse_iomap_dio_write_end_io(inode, iocb->ki_pos, written, error,
+					  dioflags);
 
 	if (dioflags & IOMAP_DIO_COW)
 		ioendflags |= FUSE_IOMAP_IOEND_SHARED;
@@ -989,6 +1002,8 @@ static ssize_t fuse_iomap_direct_write(struct kiocb *iocb,
 	unsigned int flags = IOMAP_DIO_COMP_WORK;
 	ssize_t ret;
 
+	trace_fuse_iomap_direct_write(iocb, from);
+
 	if (!count)
 		return 0;
 
@@ -1023,6 +1038,7 @@ static ssize_t fuse_iomap_direct_write(struct kiocb *iocb,
 out_unlock:
 	inode_unlock(inode);
 out_dsync:
+	trace_fuse_iomap_direct_write_end(iocb, from, ret);
 	return ret;
 }
 
@@ -1037,6 +1053,8 @@ void fuse_iomap_open_truncate(struct inode *inode)
 	struct fuse_inode *fi = get_fuse_inode(inode);
 
 	ASSERT(fuse_inode_has_iomap(inode));
+
+	trace_fuse_iomap_open_truncate(inode);
 
 	fi->i_disk_size = 0;
 }
