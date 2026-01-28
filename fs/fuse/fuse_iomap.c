@@ -650,15 +650,21 @@ void fuse_iomap_init_inode(struct inode *inode, struct fuse_attr *attr)
 		return;
 	}
 
-	if (!S_ISREG(inode->i_mode))
+	if (!S_ISREG(inode->i_mode)) {
+		trace_fuse_iomap_init_inode(inode);
 		return;
+	}
 
 	fuse_inode_set_iomap(inode);
+
+	trace_fuse_iomap_init_inode(inode);
 }
 
 void fuse_iomap_evict_inode(struct inode *inode)
 {
 	ASSERT(fuse_inode_has_iomap(inode));
+
+	trace_fuse_iomap_evict_inode(inode);
 
 	fuse_inode_clear_iomap(inode);
 }
