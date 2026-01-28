@@ -264,6 +264,8 @@ enum {
 	 * or the fuse server has an exclusive "lease" on distributed fs
 	 */
 	FUSE_I_EXCLUSIVE,
+	/* Use iomap for this inode */
+	FUSE_I_IOMAP,
 };
 
 struct fuse_conn;
@@ -1257,12 +1259,12 @@ void fuse_init_common(struct inode *inode);
 /**
  * Initialize inode and file operations on a directory
  */
-void fuse_init_dir(struct inode *inode);
+void fuse_init_dir(struct inode *inode, struct fuse_attr *attr);
 
 /**
  * Initialize inode operations on a symlink
  */
-void fuse_init_symlink(struct inode *inode);
+void fuse_init_symlink(struct inode *inode, struct fuse_attr *attr);
 
 /**
  * Change attributes of an inode
