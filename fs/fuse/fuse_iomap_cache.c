@@ -1600,6 +1600,7 @@ fuse_iomap_cache_cleanup(
 	if (!ifp || ifp->if_bytes <= fm->fc->iomap_conn.cache_maxbytes)
 		return;
 
+	trace_fuse_iomap_cache_cleanup(inode, iodir, ifp);
 	fuse_iext_destroy(ifp);
 }
 

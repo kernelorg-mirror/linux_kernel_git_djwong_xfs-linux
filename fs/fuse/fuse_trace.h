@@ -1159,6 +1159,8 @@ TRACE_EVENT(fuse_iomap_config,
 		__field(int64_t,		time_max)
 		__field(int64_t,		maxbytes)
 		__field(uint8_t,		uuid_len)
+
+		__field(uint32_t,		cache_maxbytes)
 	),
 
 	TP_fast_assign(
@@ -1172,14 +1174,15 @@ TRACE_EVENT(fuse_iomap_config,
 		__entry->time_max	=	outarg->s_time_max;
 		__entry->maxbytes	=	outarg->s_maxbytes;
 		__entry->uuid_len	=	outarg->s_uuid_len;
+		__entry->cache_maxbytes	=	outarg->cache_maxbytes;
 	),
 
-	TP_printk("connection %u root_ino 0x%llx flags (%s) blocksize 0x%x max_links %u time_gran %u time_min %lld time_max %lld maxbytes 0x%llx uuid_len %u",
+	TP_printk("connection %u root_ino 0x%llx flags (%s) blocksize 0x%x max_links %u time_gran %u time_min %lld time_max %lld maxbytes 0x%llx uuid_len %u cache_maxbytes %u",
 		  __entry->connection, __entry->root_nodeid,
 		  __print_flags(__entry->flags, "|", FUSE_IOMAP_CONFIG_STRINGS),
 		  __entry->blocksize, __entry->max_links, __entry->time_gran,
 		  __entry->time_min, __entry->time_max, __entry->maxbytes,
-		  __entry->uuid_len)
+		  __entry->uuid_len, __entry->cache_maxbytes)
 );
 
 TRACE_EVENT(fuse_iomap_dev_inval,
@@ -1396,6 +1399,29 @@ DEFINE_EVENT(fuse_iext_alt_update_class, name, \
 DEFINE_IEXT_ALT_UPDATE_EVENT(fuse_iext_del_mapping_got);
 DEFINE_IEXT_ALT_UPDATE_EVENT(fuse_iext_add_mapping_left);
 DEFINE_IEXT_ALT_UPDATE_EVENT(fuse_iext_add_mapping_right);
+
+TRACE_EVENT(fuse_iomap_cache_cleanup,
+	TP_PROTO(const struct inode *inode, enum fuse_iomap_iodir iodir,
+		 struct fuse_ifork *ifp),
+	TP_ARGS(inode, iodir, ifp),
+
+	TP_STRUCT__entry(
+		FUSE_IO_RANGE_FIELDS()
+		FUSE_IOMAP_IODIR_FIELD
+		__field(unsigned long long,	bytes)
+	),
+
+	TP_fast_assign(
+		FUSE_INODE_ASSIGN(inode, fi, fm);
+		__entry->iodir		=	iodir;
+		__entry->bytes		=	ifp->if_bytes;
+	),
+
+	TP_printk(FUSE_IO_RANGE_FMT() FUSE_IOMAP_IODIR_FMT " bytes 0x%llx",
+		  FUSE_IO_RANGE_PRINTK_ARGS(),
+		  FUSE_IOMAP_IODIR_PRINTK_ARGS,
+		  __entry->bytes)
+);
 
 TRACE_EVENT(fuse_iomap_cache_remove,
 	TP_PROTO(const struct inode *inode, enum fuse_iomap_iodir iodir,
