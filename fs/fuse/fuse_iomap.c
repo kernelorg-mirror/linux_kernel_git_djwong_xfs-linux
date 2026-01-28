@@ -1135,6 +1135,19 @@ static inline void fuse_inode_clear_atomic(struct inode *inode)
 	clear_bit(FUSE_I_ATOMIC, &fi->state);
 }
 
+static inline void fuse_iomap_clear_cache(struct inode *inode)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	clear_bit(FUSE_I_IOMAP_CACHE, &fi->state);
+
+	fuse_iext_destroy(&fi->cache.im_read);
+	if (fi->cache.im_write) {
+		fuse_iext_destroy(fi->cache.im_write);
+		kfree(fi->cache.im_write);
+	}
+}
+
 void fuse_iomap_init_inode(struct inode *inode, struct fuse_attr *attr)
 {
 	ASSERT(get_fuse_conn(inode)->iomap);
@@ -1179,6 +1192,8 @@ void fuse_iomap_evict_inode(struct inode *inode)
 
 	trace_fuse_iomap_evict_inode(inode);
 
+	if (fuse_inode_caches_iomaps(inode))
+		fuse_iomap_clear_cache(inode);
 	fuse_inode_clear_atomic(inode);
 	fuse_inode_clear_iomap(inode);
 }
@@ -1881,6 +1896,12 @@ static inline void fuse_inode_set_iomap(struct inode *inode)
 		min_order = inode->i_blkbits - PAGE_SHIFT;
 
 	mapping_set_folio_min_order(inode->i_mapping, min_order);
+
+	memset(&fi->cache.im_read, 0, sizeof(fi->cache.im_read));
+	fi->cache.im_seq = 0;
+	fi->cache.im_write = NULL;
+
+	init_rwsem(&fi->cache.im_lock);
 	set_bit(FUSE_I_IOMAP, &fi->state);
 }
 
