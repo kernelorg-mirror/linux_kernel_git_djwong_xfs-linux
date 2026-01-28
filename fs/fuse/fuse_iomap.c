@@ -8,6 +8,7 @@
 #include <linux/pagemap.h>
 #include <linux/falloc.h>
 #include <linux/fadvise.h>
+#include <linux/swap.h>
 #include "fuse_i.h"
 #include "fuse_trace.h"
 #include "fuse_iomap_i.h"
@@ -200,13 +201,16 @@ static inline uint16_t fuse_iomap_flags_from_server(uint16_t fuse_f_flags)
 #undef XMAP2
 #undef XMAP
 
+#define FUSE_IOMAP_PRIVATE_OPS	(FUSE_IOMAP_OP_WRITEBACK | \
+				 FUSE_IOMAP_OP_SWAPFILE)
+
 /* Convert IOMAP_* operation flags to FUSE_IOMAP_OP_* */
 #define XMAP(word) \
 	if (iomap_op_flags & IOMAP_##word) \
 		ret |= FUSE_IOMAP_OP_##word
 static inline uint32_t fuse_iomap_op_to_server(unsigned iomap_op_flags)
 {
-	uint32_t ret = iomap_op_flags & FUSE_IOMAP_OP_WRITEBACK;
+	uint32_t ret = iomap_op_flags & FUSE_IOMAP_PRIVATE_OPS;
 
 	XMAP(WRITE);
 	XMAP(ZERO);
@@ -743,6 +747,13 @@ fuse_should_send_iomap_ioend(const struct fuse_mount *fm,
 
 	/* Always send an ioend for errors. */
 	if (inarg->error)
+		return true;
+
+	/*
+	 * Always send an ioend for swapoff to let the fuse server know the
+	 * long term layout "lease" is over.
+	 */
+	if (inarg->flags & FUSE_IOMAP_IOEND_SWAPOFF)
 		return true;
 
 	/* Send an ioend if we performed an IO involving metadata changes. */
@@ -1787,6 +1798,43 @@ static void fuse_iomap_readahead(struct readahead_control *rac)
 	iomap_bio_readahead(rac, &fuse_iomap_ops);
 }
 
+#ifdef CONFIG_SWAP
+static int fuse_iomap_swapfile_begin(struct inode *inode, loff_t pos,
+				     loff_t count, unsigned opflags,
+				     struct iomap *iomap, struct iomap *srcmap)
+{
+	return fuse_iomap_begin(inode, pos, count,
+				FUSE_IOMAP_OP_SWAPFILE | opflags, iomap,
+				srcmap);
+}
+
+static const struct iomap_ops fuse_iomap_swapfile_ops = {
+	.iomap_begin		= fuse_iomap_swapfile_begin,
+};
+
+static int fuse_iomap_swap_activate(struct swap_info_struct *sis,
+				    struct file *swap_file, sector_t *span)
+{
+	int ret;
+
+	/* obtain the block device from the header iomapping */
+	sis->bdev = NULL;
+	ret = iomap_swapfile_activate(sis, swap_file, span,
+				      &fuse_iomap_swapfile_ops);
+	if (ret < 0)
+		fuse_iomap_ioend(file_inode(swap_file), 0, 0, ret,
+				 FUSE_IOMAP_IOEND_SWAPOFF, NULL,
+				 FUSE_IOMAP_NULL_ADDR);
+	return ret;
+}
+
+static void fuse_iomap_swap_deactivate(struct file *file)
+{
+	fuse_iomap_ioend(file_inode(file), 0, 0, 0, FUSE_IOMAP_IOEND_SWAPOFF,
+			 NULL, FUSE_IOMAP_NULL_ADDR);
+}
+#endif
+
 static const struct address_space_operations fuse_iomap_aops = {
 	.read_folio		= fuse_iomap_read_folio,
 	.readahead		= fuse_iomap_readahead,
@@ -1797,6 +1845,10 @@ static const struct address_space_operations fuse_iomap_aops = {
 	.migrate_folio		= filemap_migrate_folio,
 	.is_partially_uptodate  = iomap_is_partially_uptodate,
 	.error_remove_folio	= generic_error_remove_folio,
+#ifdef CONFIG_SWAP
+	.swap_activate		= fuse_iomap_swap_activate,
+	.swap_deactivate	= fuse_iomap_swap_deactivate,
+#endif
 
 	/* These aren't pagecache operations per se */
 	.bmap			= fuse_bmap,
