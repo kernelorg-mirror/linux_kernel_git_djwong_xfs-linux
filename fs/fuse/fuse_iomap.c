@@ -327,6 +327,8 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 	FUSE_ARGS(args);
 	int err;
 
+	trace_fuse_iomap_begin(inode, pos, count, opflags);
+
 	args.opcode = FUSE_IOMAP_BEGIN;
 	args.nodeid = get_node_id(inode);
 	args.in_numargs = 1;
@@ -336,8 +338,13 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 	args.out_args[0].size = sizeof(outarg);
 	args.out_args[0].value = &outarg;
 	err = fuse_simple_request(fm, &args);
-	if (err)
+	if (err) {
+		trace_fuse_iomap_begin_error(inode, pos, count, opflags, err);
 		return err;
+	}
+
+	trace_fuse_iomap_read_map(inode, &outarg.read);
+	trace_fuse_iomap_write_map(inode, &outarg.write);
 
 	err = fuse_iomap_begin_validate(inode, opflags, pos, &outarg);
 	if (err)
@@ -404,6 +411,8 @@ static int fuse_iomap_end(struct inode *inode, loff_t pos, loff_t count,
 
 		fuse_iomap_to_server(&inarg.map, iomap);
 
+		trace_fuse_iomap_end(inode, &inarg);
+
 		args.opcode = FUSE_IOMAP_END;
 		args.nodeid = get_node_id(inode);
 		args.in_numargs = 1;
@@ -417,8 +426,10 @@ static int fuse_iomap_end(struct inode *inode, loff_t pos, loff_t count,
 			 */
 			err = 0;
 		}
-		if (err)
+		if (err) {
+			trace_fuse_iomap_end_error(inode, &inarg, err);
 			return err;
+		}
 	}
 
 	return 0;
