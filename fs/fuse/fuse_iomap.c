@@ -1576,7 +1576,12 @@ static bool fuse_iomap_revalidate(struct inode *inode,
 		return true;
 
 	validity_cookie = fuse_iext_read_seq(fi->cache);
-	return iomap->validity_cookie == validity_cookie;
+	if (unlikely(iomap->validity_cookie != validity_cookie)) {
+		trace_fuse_iomap_invalid(inode, iomap, validity_cookie);
+		return false;
+	}
+
+	return true;
 }
 
 static const struct iomap_write_ops fuse_iomap_write_ops = {
