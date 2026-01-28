@@ -8,6 +8,7 @@
 #include "fuse_dev_i.h"
 #include "fuse_iomap.h"
 #include "fuse_iomap_i.h"
+#include "fuse_iomap_cache.h"
 
 #include <linux/pagemap.h>
 #include <linux/iomap.h>
