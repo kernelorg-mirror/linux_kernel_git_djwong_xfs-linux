@@ -197,6 +197,8 @@ static void fuse_evict_inode(struct inode *inode)
 		WARN_ON(!list_empty(&fi->write_files));
 		WARN_ON(!list_empty(&fi->queued_writes));
 	}
+
+	fuse_inode_clear_exclusive(inode);
 }
 
 static int fuse_reconfigure(struct fs_context *fsc)
@@ -435,6 +437,9 @@ static void fuse_init_inode(struct inode *inode, struct fuse_attr *attr,
 	inode->i_size = attr->size;
 	inode_set_mtime(inode, attr->mtime, attr->mtimensec);
 	inode_set_ctime(inode, attr->ctime, attr->ctimensec);
+
+	if (attr->flags & FUSE_ATTR_EXCLUSIVE)
+		fuse_inode_set_exclusive(fc, inode);
 
 	switch (inode->i_mode & S_IFMT) {
 	case S_IFREG:
