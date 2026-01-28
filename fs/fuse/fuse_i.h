@@ -188,6 +188,11 @@ struct fuse_inode {
 
 			/* waitq for direct-io completion */
 			wait_queue_head_t direct_io_waitq;
+
+#ifdef CONFIG_FUSE_IOMAP
+			/* file size as reported by fuse server */
+			loff_t i_disk_size;
+#endif
 		};
 
 		/* readdir cache (directory only) */
@@ -656,6 +661,16 @@ struct fuse_sync_bucket {
 	struct rcu_head rcu;
 };
 
+#ifdef CONFIG_FUSE_IOMAP
+struct fuse_iomap_conn {
+	/* fuse server doesn't implement iomap_end */
+	unsigned int no_end:1;
+
+	/* fuse server doesn't implement iomap_ioend */
+	unsigned int no_ioend:1;
+};
+#endif
+
 /**
  * A Fuse connection.
  *
@@ -1005,6 +1020,11 @@ struct fuse_conn {
 #ifdef CONFIG_FUSE_BACKING
 	/** IDR for backing files ids */
 	struct idr backing_files_map;
+#endif
+
+#ifdef CONFIG_FUSE_IOMAP
+	/** iomap information */
+	struct fuse_iomap_conn iomap_conn;
 #endif
 
 #ifdef CONFIG_FUSE_IO_URING
@@ -1748,6 +1768,17 @@ int fuse_iomap_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 		      u64 start, u64 length);
 loff_t fuse_iomap_lseek(struct file *file, loff_t offset, int whence);
 sector_t fuse_iomap_bmap(struct address_space *mapping, sector_t block);
+
+void fuse_iomap_open(struct inode *inode, struct file *file);
+int fuse_iomap_finish_open(const struct fuse_file *ff,
+			   const struct inode *inode);
+void fuse_iomap_open_truncate(struct inode *inode);
+
+void fuse_iomap_set_disk_size(struct fuse_inode *fi, loff_t newsize);
+int fuse_iomap_setsize_finish(struct inode *inode, loff_t newsize);
+
+ssize_t fuse_iomap_read_iter(struct kiocb *iocb, struct iov_iter *to);
+ssize_t fuse_iomap_write_iter(struct kiocb *iocb, struct iov_iter *from);
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
@@ -1759,6 +1790,13 @@ sector_t fuse_iomap_bmap(struct address_space *mapping, sector_t block);
 # define fuse_iomap_fiemap			NULL
 # define fuse_iomap_lseek(...)			(-ENOSYS)
 # define fuse_iomap_bmap(...)			(-ENOSYS)
+# define fuse_iomap_open(...)			((void)0)
+# define fuse_iomap_finish_open(...)		(-ENOSYS)
+# define fuse_iomap_open_truncate(...)		((void)0)
+# define fuse_iomap_set_disk_size(...)		((void)0)
+# define fuse_iomap_setsize_finish(...)		(-ENOSYS)
+# define fuse_iomap_read_iter(...)		(-ENOSYS)
+# define fuse_iomap_write_iter(...)		(-ENOSYS)
 #endif
 
 #endif /* _FS_FUSE_I_H */
