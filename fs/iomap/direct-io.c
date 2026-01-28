@@ -18,7 +18,6 @@
  * iomap.h:
  */
 #define IOMAP_DIO_NO_INVALIDATE	(1U << 26)
-#define IOMAP_DIO_COMP_WORK	(1U << 27)
 #define IOMAP_DIO_WRITE_THROUGH	(1U << 28)
 #define IOMAP_DIO_NEED_SYNC	(1U << 29)
 #define IOMAP_DIO_WRITE		(1U << 30)
@@ -677,6 +676,8 @@ __iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 
 	if (dio_flags & IOMAP_DIO_FSBLOCK_ALIGNED)
 		dio->flags |= IOMAP_DIO_FSBLOCK_ALIGNED;
+	if (dio_flags & IOMAP_DIO_COMP_WORK)
+		dio->flags |= IOMAP_DIO_COMP_WORK;
 
 	if (iov_iter_rw(iter) == READ) {
 		if (iomi.pos >= dio->i_size)
