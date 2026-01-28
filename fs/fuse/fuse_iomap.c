@@ -615,3 +615,50 @@ void fuse_iomap_unmount(struct fuse_mount *fm)
 	fuse_flush_requests(fc);
 	fuse_send_destroy(fm);
 }
+
+static inline void fuse_inode_set_iomap(struct inode *inode)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	set_bit(FUSE_I_IOMAP, &fi->state);
+}
+
+static inline void fuse_inode_clear_iomap(struct inode *inode)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	clear_bit(FUSE_I_IOMAP, &fi->state);
+}
+
+void fuse_iomap_init_inode(struct inode *inode, struct fuse_attr *attr)
+{
+	ASSERT(get_fuse_conn(inode)->iomap);
+
+	if (!(attr->flags & FUSE_ATTR_IOMAP))
+		return;
+
+	/*
+	 * Any file being used in conjunction with iomap must also have the
+	 * exclusive flag set because iomap requires cached file attributes to
+	 * be correct at any time.  This applies even to non-regular files
+	 * (e.g. directories) because we need to do ACL and attribute
+	 * inheritance the same way a local filesystem would do.  If exclusive
+	 * mode isn't set, then we won't use iomap.
+	 */
+	if (!fuse_inode_is_exclusive(inode)) {
+		ASSERT(fuse_inode_is_exclusive(inode));
+		return;
+	}
+
+	if (!S_ISREG(inode->i_mode))
+		return;
+
+	fuse_inode_set_iomap(inode);
+}
+
+void fuse_iomap_evict_inode(struct inode *inode)
+{
+	ASSERT(fuse_inode_has_iomap(inode));
+
+	fuse_inode_clear_iomap(inode);
+}
