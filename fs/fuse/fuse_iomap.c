@@ -1164,6 +1164,12 @@ void fuse_iomap_init_inode(struct inode *inode, struct fuse_attr *attr)
 	if (attr->flags & FUSE_ATTR_ATOMIC)
 		fuse_inode_set_atomic(inode);
 
+	/*
+	 * iomap caches atime too, so we must load it from the fuse server
+	 * at instantiation time.
+	 */
+	inode_set_atime(inode, attr->atime, attr->atimensec);
+
 	trace_fuse_iomap_init_inode(inode);
 }
 
