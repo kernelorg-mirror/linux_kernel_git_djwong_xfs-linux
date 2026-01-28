@@ -7,6 +7,7 @@
 */
 
 #include "fuse_i.h"
+#include "fuse_iomap.h"
 
 #include <linux/pagemap.h>
 #include <linux/file.h>
@@ -2506,9 +2507,10 @@ void fuse_init_common(struct inode *inode)
 	inode->i_op = &fuse_common_inode_operations;
 }
 
-void fuse_init_dir(struct inode *inode)
+void fuse_init_dir(struct inode *inode, struct fuse_attr *attr)
 {
 	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct fuse_conn *fc = get_fuse_conn(inode);
 
 	inode->i_op = &fuse_dir_inode_operations;
 	inode->i_fop = &fuse_dir_operations;
@@ -2518,6 +2520,9 @@ void fuse_init_dir(struct inode *inode)
 	fi->rdc.size = 0;
 	fi->rdc.pos = 0;
 	fi->rdc.version = 0;
+
+	if (fc->iomap)
+		fuse_iomap_init_inode(inode, attr);
 }
 
 static int fuse_symlink_read_folio(struct file *null, struct folio *folio)
@@ -2536,9 +2541,14 @@ static const struct address_space_operations fuse_symlink_aops = {
 	.read_folio	= fuse_symlink_read_folio,
 };
 
-void fuse_init_symlink(struct inode *inode)
+void fuse_init_symlink(struct inode *inode, struct fuse_attr *attr)
 {
+	struct fuse_conn *fc = get_fuse_conn(inode);
+
 	inode->i_op = &fuse_symlink_inode_operations;
 	inode->i_data.a_ops = &fuse_symlink_aops;
 	inode_nohighmem(inode);
+
+	if (fc->iomap)
+		fuse_iomap_init_inode(inode, attr);
 }
