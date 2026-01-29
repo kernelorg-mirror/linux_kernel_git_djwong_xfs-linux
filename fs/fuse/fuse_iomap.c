@@ -1821,8 +1821,6 @@ void fuse_iomap_release(struct inode *inode)
 	ASSERT(fuse_inode_has_iomap(inode));
 
 	trace_fuse_iomap_release(inode);
-
-	fuse_iomap_cache_invalidate(inode, 0);
 }
 
 struct fuse_writepage_ctx {
