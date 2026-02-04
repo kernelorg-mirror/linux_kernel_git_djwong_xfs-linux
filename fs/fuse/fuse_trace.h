@@ -1658,6 +1658,59 @@ TRACE_EVENT(fuse_iomap_inval,
 		  FUSE_FILE_RANGE_PRINTK_ARGS(read),
 		  FUSE_FILE_RANGE_PRINTK_ARGS(write))
 );
+
+#ifdef CONFIG_BPF_SYSCALL
+DECLARE_EVENT_CLASS(fuse_iomap_bpf_ops_class,
+	TP_PROTO(const struct fuse_conn *fc, struct fuse_iomap_bpf_ops *ops),
+
+	TP_ARGS(fc, ops),
+
+	TP_STRUCT__entry(
+		__field(dev_t,			connection)
+		__string(name,			ops->name)
+	),
+
+	TP_fast_assign(
+		__entry->connection	=	fc->dev;
+		__assign_str(name);
+	),
+
+	TP_printk("connection %u iomap_ops %s",
+		  __entry->connection,
+		  __get_str(name))
+);
+#define DEFINE_FUSE_IOMAP_BPF_OPS_EVENT(name) \
+DEFINE_EVENT(fuse_iomap_bpf_ops_class, name, \
+	TP_PROTO(const struct fuse_conn *fc, struct fuse_iomap_bpf_ops *ops), \
+	TP_ARGS(fc, ops))
+DEFINE_FUSE_IOMAP_BPF_OPS_EVENT(fuse_iomap_attach_bpf);
+DEFINE_FUSE_IOMAP_BPF_OPS_EVENT(fuse_iomap_detach_bpf);
+
+DECLARE_EVENT_CLASS(fuse_iomap_bpf_class,
+	TP_PROTO(const struct inode *inode),
+
+	TP_ARGS(inode),
+
+	TP_STRUCT__entry(
+		FUSE_INODE_FIELDS
+	),
+
+	TP_fast_assign(
+		FUSE_INODE_ASSIGN(inode, fi, fm);
+	),
+
+	TP_printk(FUSE_INODE_FMT,
+		  FUSE_INODE_PRINTK_ARGS)
+);
+#define DEFINE_FUSE_IOMAP_BPF_EVENT(name) \
+DEFINE_EVENT(fuse_iomap_bpf_class, name, \
+	TP_PROTO(const struct inode *inode), \
+	TP_ARGS(inode))
+DEFINE_FUSE_IOMAP_BPF_EVENT(fuse_iomap_begin_bpf);
+DEFINE_FUSE_IOMAP_BPF_EVENT(fuse_iomap_end_bpf);
+DEFINE_FUSE_IOMAP_BPF_EVENT(fuse_iomap_ioend_bpf);
+
+#endif /* CONFIG_BPF_SYSCALL */
 #endif /* CONFIG_FUSE_IOMAP */
 
 #endif /* _TRACE_FUSE_H */
