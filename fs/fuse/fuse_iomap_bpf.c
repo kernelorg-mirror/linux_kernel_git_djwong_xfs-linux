@@ -9,6 +9,7 @@
 #include "fuse_i.h"
 #include "fuse_dev_i.h"
 #include "fuse_iomap_bpf.h"
+#include "fuse_trace.h"
 
 static struct btf *fuse_iomap_bpf_ops_btf;
 
@@ -112,6 +113,8 @@ static int fuse_iomap_bpf_reg(void *kdata, struct bpf_link *link)
 		return -EBUSY;
 	}
 
+	trace_fuse_iomap_attach_bpf(fc, ops);
+
 	fc->iomap_conn.bpf_ops = ops;
 	ops->fc = fc;
 	spin_unlock(&fuse_iomap_bpf_ops_lock);
@@ -124,6 +127,8 @@ void fuse_iomap_detach_bpf(struct fuse_conn *fc)
 {
 	spin_lock(&fuse_iomap_bpf_ops_lock);
 	if (fc->iomap_conn.bpf_ops) {
+		trace_fuse_iomap_detach_bpf(fc, fc->iomap_conn.bpf_ops);
+
 		fc->iomap_conn.bpf_ops->fc = NULL;
 		fc->iomap_conn.bpf_ops = NULL;
 	}
@@ -137,6 +142,8 @@ static void fuse_iomap_bpf_unreg(void *kdata, struct bpf_link *link)
 
 	spin_lock(&fuse_iomap_bpf_ops_lock);
 	if (ops->fc && ops->fc->iomap_conn.bpf_ops == ops) {
+		trace_fuse_iomap_detach_bpf(ops->fc, ops);
+
 		ops->fc->iomap_conn.bpf_ops = NULL;
 		ops->fc = NULL;
 	}
@@ -216,6 +223,8 @@ int fuse_iomap_begin_bpf(struct inode *inode,
 	if (!bpf_ops || !bpf_ops->iomap_begin)
 		return -ENOSYS;
 
+	trace_fuse_iomap_begin_bpf(inode);
+
 	return bpf_ops->iomap_begin(fi->nodeid, inarg->pos, inarg->count,
 				   inarg->opflags, outarg);
 }
@@ -229,6 +238,8 @@ int fuse_iomap_end_bpf(struct inode *inode,
 
 	if (!bpf_ops || !bpf_ops->iomap_end)
 		return -ENOSYS;
+
+	trace_fuse_iomap_end_bpf(inode);
 
 	return bpf_ops->iomap_end(fi->nodeid, inarg->pos, inarg->count,
 				   inarg->written, inarg->opflags);
@@ -244,6 +255,8 @@ int fuse_iomap_ioend_bpf(struct inode *inode,
 
 	if (!bpf_ops || !bpf_ops->iomap_ioend)
 		return -ENOSYS;
+
+	trace_fuse_iomap_ioend_bpf(inode);
 
 	return bpf_ops->iomap_ioend(fi->nodeid, inarg->pos, inarg->written,
 				   inarg->flags, inarg->error, inarg->dev,
