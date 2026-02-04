@@ -115,6 +115,8 @@ static int fuse_iomap_bpf_reg(void *kdata, struct bpf_link *link)
 		return -EBUSY;
 	}
 
+	trace_fuse_iomap_attach_bpf(fc, ops);
+
 	/*
 	 * The initial ops user count bias is transferred to fc so that we only
 	 * initiate wakeup events when someone tries to unregister the BPF.
@@ -155,6 +157,8 @@ DEFINE_CLASS(iomap_bpf_ops, struct fuse_iomap_bpf_ops *,
 static void __fuse_iomap_detach_bpf(struct fuse_conn *fc,
 				    struct fuse_iomap_bpf_ops *ops)
 {
+	trace_fuse_iomap_detach_bpf(fc, ops);
+
 	ops->fc = NULL;
 	rcu_assign_pointer(fc->iomap_conn.bpf_ops, NULL);
 	fuse_iomap_put_bpf_ops(ops);
@@ -269,6 +273,8 @@ int fuse_iomap_begin_bpf(struct inode *inode,
 	if (!bpf_ops || !bpf_ops->iomap_begin)
 		return -ENOSYS;
 
+	trace_fuse_iomap_begin_bpf(inode);
+
 	ret = bpf_ops->iomap_begin(fi, inarg->pos, inarg->count,
 				   inarg->opflags, outarg);
 	return bpf_to_errno(ret);
@@ -284,6 +290,8 @@ int fuse_iomap_end_bpf(struct inode *inode,
 
 	if (!bpf_ops || !bpf_ops->iomap_end)
 		return -ENOSYS;
+
+	trace_fuse_iomap_end_bpf(inode);
 
 	ret = bpf_ops->iomap_end(fi, inarg->pos, inarg->count,
 				 inarg->written, inarg->opflags);
@@ -301,6 +309,8 @@ int fuse_iomap_ioend_bpf(struct inode *inode,
 
 	if (!bpf_ops || !bpf_ops->iomap_ioend)
 		return -ENOSYS;
+
+	trace_fuse_iomap_ioend_bpf(inode);
 
 	ret = bpf_ops->iomap_ioend(fi, inarg->pos, inarg->written,
 				   inarg->flags, inarg->error, inarg->dev,
