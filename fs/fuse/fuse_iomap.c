@@ -15,6 +15,7 @@
 #include "fuse_iomap.h"
 #include "fuse_iomap_i.h"
 #include "fuse_iomap_cache.h"
+#include "fuse_iomap_bpf.h"
 
 static bool __read_mostly enable_iomap =
 #if IS_ENABLED(CONFIG_FUSE_IOMAP_BY_DEFAULT)
@@ -781,7 +782,9 @@ retry:
 	args.out_numargs = 1;
 	args.out_args[0].size = sizeof(outarg);
 	args.out_args[0].value = &outarg;
-	err = fuse_simple_request(fm, &args);
+	err = fuse_iomap_begin_bpf(inode, &inarg, &outarg);
+	if (err == -ENOSYS)
+		err = fuse_simple_request(fm, &args);
 	if (err) {
 		trace_fuse_iomap_begin_error(inode, pos, count, opflags, err);
 		return err;
@@ -936,7 +939,9 @@ static int fuse_iomap_end(struct inode *inode, loff_t pos, loff_t count,
 		args.in_numargs = 1;
 		args.in_args[0].size = sizeof(inarg);
 		args.in_args[0].value = &inarg;
-		err = fuse_simple_request(fm, &args);
+		err = fuse_iomap_end_bpf(inode, &inarg);
+		if (err == -ENOSYS)
+			err = fuse_simple_request(fm, &args);
 		if (err == -ENOSYS) {
 			/*
 			 * libfuse returns ENOSYS for servers that don't
@@ -1043,7 +1048,9 @@ static int fuse_iomap_ioend(struct inode *inode, loff_t pos, size_t written,
 		args.out_numargs = 1;
 		args.out_args[0].size = sizeof(outarg);
 		args.out_args[0].value = &outarg;
-		iomap_error = fuse_simple_request(fm, &args);
+		iomap_error = fuse_iomap_ioend_bpf(inode, &inarg, &outarg);
+		if (iomap_error == -ENOSYS)
+			iomap_error = fuse_simple_request(fm, &args);
 		switch (iomap_error) {
 		case -ENOSYS:
 			/*
