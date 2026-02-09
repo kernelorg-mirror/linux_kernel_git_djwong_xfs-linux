@@ -5,12 +5,15 @@
  * Copied from: Joanne Koong <joannelkoong@gmail.com>
  */
 #include <linux/bpf.h>
+#include <linux/bpf_verifier.h>
 
 #include "fuse_i.h"
 #include "fuse_dev_i.h"
 #include "fuse_iomap_bpf.h"
 #include "fuse_iomap_i.h"
 #include "fuse_trace.h"
+
+static const struct btf_type *iomap_begin_out_type, *iomap_ioend_out_type;
 
 /* spinlock for atomically updating fuse_conn <-> bpf_ops pointers */
 static DEFINE_SPINLOCK(fuse_iomap_bpf_ops_lock);
@@ -38,6 +41,14 @@ static int fuse_iomap_bpf_ops_btf_struct_access(struct bpf_verifier_log *log,
 						const struct bpf_reg_state *reg,
 						int off, int size)
 {
+	const struct btf_type *t = btf_type_by_id(reg->btf, reg->btf_id);
+
+	if (t != iomap_begin_out_type && t != iomap_ioend_out_type) {
+		bpf_log(log,
+			"Cannot write to memory from a fuse-iomap program\n");
+		return -EACCES;
+	}
+
 	return 0;
 }
 
@@ -47,8 +58,46 @@ static const struct bpf_verifier_ops fuse_iomap_bpf_verifier_ops = {
 	.btf_struct_access	= fuse_iomap_bpf_ops_btf_struct_access,
 };
 
+static const struct btf_type *
+fuse_iomap_find_struct_type(struct btf *btf, const char *name)
+{
+	struct btf *some_btf;
+	const struct btf_type *ret;
+	s32 type_id;
+
+	type_id = bpf_find_btf_id(name, BTF_KIND_STRUCT, &some_btf);
+	if (type_id < 0)
+		return ERR_PTR(-ENOENT);
+
+	/*
+	 * It's only safe to alias a btf_type without a ref to the btf object
+	 * if the type is from the current module because the btf object won't
+	 * go away until the module unloads.
+	 */
+	if (some_btf == btf)
+		ret = btf_type_by_id(some_btf, type_id);
+	else
+		ret = ERR_PTR(-ENOENT);
+	btf_put(some_btf);
+
+	return ret;
+}
+
 static int fuse_iomap_bpf_ops_init(struct btf *btf)
 {
+	const struct btf_type *t1, *t2;
+
+	t1 = fuse_iomap_find_struct_type(btf, "fuse_iomap_begin_out");
+	if (IS_ERR(t1))
+		return PTR_ERR(t1);
+
+	t2 = fuse_iomap_find_struct_type(btf, "fuse_iomap_ioend_out");
+	if (IS_ERR(t2))
+		return PTR_ERR(t2);
+
+	iomap_begin_out_type = t1;
+	iomap_ioend_out_type = t2;
+
 	return 0;
 }
 
