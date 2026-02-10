@@ -40,6 +40,12 @@ while (static_branch_unlikely(&fuse_iomap_debug)) {			\
 	unlikely(__cond);						\
 })
 #endif /* CONFIG_FUSE_IOMAP_DEBUG */
+
+int fuse_iomap_inval_inode(struct inode *inode,
+		const struct fuse_iomap_inval_mappings_out *outarg);
+int fuse_iomap_upsert_inode(struct inode *inode,
+		const struct fuse_iomap_upsert_mappings_out *outarg);
+
 #endif /* CONFIG_FUSE_IOMAP */
 
 #endif /* _FS_FUSE_IOMAP_I_H */
