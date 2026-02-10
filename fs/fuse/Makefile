@@ -20,4 +20,8 @@ fuse-$(CONFIG_SYSCTL) += sysctl.o
 fuse-$(CONFIG_FUSE_IO_URING) += dev_uring.o
 fuse-$(CONFIG_FUSE_IOMAP) += fuse_iomap.o fuse_iomap_cache.o
 
+ifeq ($(CONFIG_BPF_SYSCALL),y)
+fuse-$(CONFIG_FUSE_IOMAP) += fuse_iomap_bpf.o
+endif
+
 virtiofs-y := virtio_fs.o
