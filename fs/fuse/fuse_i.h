@@ -119,9 +119,12 @@ struct fuse_backing_ops {
 
 /** Container for data related to mapping to backing file */
 struct fuse_backing {
+	struct fuse_conn *fc;
 	struct file *file;
 	struct cred *cred;
 	struct block_device *bdev;
+	struct dax_device *dax_dev;
+	u64 dax_part_off;
 	const struct fuse_backing_ops *ops;
 
 	/** refcount */

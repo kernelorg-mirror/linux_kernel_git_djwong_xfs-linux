@@ -9,6 +9,7 @@
 #include <linux/falloc.h>
 #include <linux/fadvise.h>
 #include <linux/swap.h>
+#include <linux/dax.h>
 #include "fuse_i.h"
 #include "fuse_dev_i.h"
 #include "fuse_trace.h"
@@ -333,7 +334,7 @@ static inline void fuse_iomap_from_server(struct iomap *iomap,
 	iomap->type = fuse_iomap_type_from_server(fmap->type);
 	iomap->flags = fuse_iomap_flags_from_server(fmap->flags);
 	iomap->bdev = fb ? fb->bdev : NULL;
-	iomap->dax_dev = NULL;
+	iomap->dax_dev = fb ? fb->dax_dev : NULL;
 }
 
 static bool fuse_iomap_matches_bdev(const struct fuse_backing *fb,
@@ -1121,6 +1122,10 @@ static int fuse_iomap_may_open(struct fuse_conn *fc, struct file *file)
 static int fuse_iomap_post_open(struct fuse_conn *fc, struct fuse_backing *fb)
 {
 	fb->bdev = I_BDEV(fb->file->f_mapping->host);
+
+	fb->dax_dev = fs_dax_get_by_bdev(fb->bdev, &fb->dax_part_off, fc,
+					 NULL);
+
 	return 0;
 }
 

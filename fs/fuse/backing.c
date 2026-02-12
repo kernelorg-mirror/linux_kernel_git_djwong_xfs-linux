@@ -10,6 +10,7 @@
 #include "fuse_trace.h"
 
 #include <linux/file.h>
+#include <linux/dax.h>
 
 struct fuse_backing *fuse_backing_get(struct fuse_backing *fb)
 {
@@ -22,6 +23,8 @@ static void fuse_backing_free(struct fuse_backing *fb)
 {
 	pr_debug("%s: fb=0x%p\n", __func__, fb);
 
+	if (fb->dax_dev)
+		fs_put_dax(fb->dax_dev, fb->fc);
 	if (fb->file)
 		fput(fb->file);
 	put_cred(fb->cred);
@@ -140,10 +143,13 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 	if (!fb)
 		goto out_fput;
 
+	fb->fc = fc;
 	fb->file = file;
 	fb->cred = prepare_creds();
 	fb->ops = ops;
 	fb->bdev = NULL;
+	fb->dax_dev = NULL;
+	fb->dax_part_off = 0;
 	refcount_set(&fb->count, 1);
 
 	res = ops->post_open ? ops->post_open(fc, fb) : 0;
