@@ -1454,6 +1454,8 @@ int fuse_iomap_cache_invalidate_range(struct inode *inode, loff_t offset,
 	if (!fuse_inode_caches_iomaps(inode))
 		return 0;
 
+	trace_fuse_iomap_cache_invalidate_range(inode, offset, length);
+
 	aligned_offset = round_down(offset, blocksize);
 	if (length != FUSE_IOMAP_INVAL_TO_EOF) {
 		length += offset - aligned_offset;
