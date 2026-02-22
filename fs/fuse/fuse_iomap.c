@@ -389,9 +389,9 @@ fuse_iomap_find_backing_id(struct fuse_conn *fc,
 }
 
 /* Convert a mapping from the kernel into something the server can use */
-static inline void fuse_iomap_to_server(struct fuse_conn *fc,
-					struct fuse_iomap_io *fmap,
-					const struct iomap *iomap)
+inline void fuse_iomap_to_server(struct fuse_conn *fc,
+				 struct fuse_iomap_io *fmap,
+				 const struct iomap *iomap)
 {
 	fmap->addr = iomap->addr;
 	fmap->offset = iomap->offset;
@@ -1820,7 +1820,12 @@ static bool fuse_iomap_valid(struct inode *inode, const struct iomap *iomap)
 		return true;
 
 	validity_cookie = fuse_iext_read_seq(fi->cache);
-	return iomap->validity_cookie == validity_cookie;
+	if (unlikely(iomap->validity_cookie != validity_cookie)) {
+		trace_fuse_iomap_invalid(inode, iomap, validity_cookie);
+		return false;
+	}
+
+	return true;
 }
 
 static const struct iomap_write_ops fuse_iomap_write_ops = {
