@@ -1245,6 +1245,26 @@ void fuse_iomap_mount_async(struct fuse_mount *fm)
 		fuse_iomap_config_reply(fm, &ia->args, -ENOTCONN);
 }
 
+void fuse_iomap_unmount(struct fuse_mount *fm)
+{
+	struct fuse_conn *fc = fm->fc;
+
+	/*
+	 * Flush all pending file release commands and send a destroy command.
+	 * This gives the fuse server a chance to process all the pending
+	 * releases, write the last bits of metadata changes to disk, and close
+	 * the iomap block devices before we return from the umount call.
+	 * iomap fuse servers are expected to release all exclusive access
+	 * resources before unmount completes.
+	 *
+	 * Note that multithreaded fuse servers will have to hold the destroy
+	 * command until all release requests have completed because the kernel
+	 * maintainers do not want to introduce waits in unmount.
+	 */
+	fuse_flush_requests(fc);
+	fuse_send_destroy(fm);
+}
+
 static inline void fuse_inode_set_iomap(struct inode *inode);
 
 static inline void fuse_inode_clear_iomap(struct inode *inode)
