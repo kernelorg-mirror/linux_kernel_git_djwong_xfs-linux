@@ -1673,6 +1673,8 @@ fuse_iomap_cache_cleanup(
 	struct fuse_iext_root	*ir = fuse_iext_root_ptr(fi->cache, iodir);
 
 	if (ir && ir->ir_bytes > fm->fc->iomap_conn.cache_maxbytes) {
+		trace_fuse_iomap_cache_cleanup(inode, iodir, ir);
+
 		fuse_iext_inc_seq(fi->cache);
 		fuse_iext_destroy(ir);
 	}
