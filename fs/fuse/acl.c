@@ -11,6 +11,18 @@
 #include <linux/posix_acl.h>
 #include <linux/posix_acl_xattr.h>
 
+/*
+ * If this fuse server behaves like a local filesystem, we can implement the
+ * kernel's optimizations for ACLs for local filesystems instead of passing
+ * the ACL requests straight through to another server.
+ */
+static inline bool fuse_inode_has_local_acls(const struct inode *inode)
+{
+	const struct fuse_conn *fc = get_fuse_conn(inode);
+
+	return fc->posix_acl && fuse_inode_is_exclusive(inode);
+}
+
 static struct posix_acl *__fuse_get_acl(struct fuse_conn *fc,
 					struct inode *inode, int type, bool rcu)
 {
@@ -98,6 +110,8 @@ int fuse_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 	struct inode *inode = d_inode(dentry);
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	const char *name;
+	umode_t mode = inode->i_mode;
+	const bool local_acls = fuse_inode_has_local_acls(inode);
 	int ret;
 
 	if (fuse_is_bad(inode))
@@ -113,14 +127,25 @@ int fuse_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 	else
 		return -EINVAL;
 
+	/*
+	 * If the ACL can be represented entirely with changes to the mode
+	 * bits, then most filesystems will update the mode bits and delete
+	 * the ACL xattr.
+	 */
+	if (acl && type == ACL_TYPE_ACCESS && local_acls) {
+		ret = posix_acl_update_mode(idmap, inode, &mode, &acl);
+		if (ret)
+			return ret;
+	}
+
 	if (acl) {
 		unsigned int extra_flags = 0;
 		/*
-		 * Fuse userspace is responsible for updating access
-		 * permissions in the inode, if needed. fuse_setxattr
-		 * invalidates the inode attributes, which will force
-		 * them to be refreshed the next time they are used,
-		 * and it also updates i_ctime.
+		 * For non-local filesystems, fuse userspace is responsible for
+		 * updating access permissions in the inode, if needed.
+		 * fuse_setxattr invalidates the inode attributes, which will
+		 * force them to be refreshed the next time they are used, and
+		 * it also updates i_ctime.
 		 */
 		size_t size;
 		void *value;
@@ -137,9 +162,10 @@ int fuse_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 		/*
 		 * Fuse daemons without FUSE_POSIX_ACL never changed the passed
 		 * through POSIX ACLs. Such daemons don't expect setgid bits to
-		 * be stripped.
+		 * be stripped, unless they've explicitly told the kernel to
+		 * take care of that.
 		 */
-		if (fc->posix_acl &&
+		if (fc->posix_acl && !local_acls &&
 		    !in_group_or_capable(idmap, inode,
 					 i_gid_into_vfsgid(idmap, inode)))
 			extra_flags |= FUSE_SETXATTR_ACL_KILL_SGID;
@@ -148,6 +174,30 @@ int fuse_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 		kfree(value);
 	} else {
 		ret = fuse_removexattr(inode, name);
+		/* If the acl didn't exist to start with that's fine. */
+		if (ret == -ENODATA)
+			ret = 0;
+	}
+
+	/*
+	 * If we scheduled a mode update above, push that to userspace now.  We
+	 * set the mode after successfully updating the ACL xattr because the
+	 * xattr update can fail at ENOSPC and we don't want to change the mode
+	 * if the ACL update hasn't been applied.
+	 */
+	if (!ret) {
+		struct iattr attr = { };
+
+		if (mode != inode->i_mode) {
+			attr.ia_valid |= ATTR_MODE;
+			attr.ia_mode = mode;
+		}
+
+		if (attr.ia_valid) {
+			ret = fuse_do_setattr(idmap, dentry, &attr, NULL);
+			if (!ret)
+				inode->i_mode = mode;
+		}
 	}
 
 	if (fc->posix_acl) {
