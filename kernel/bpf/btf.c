@@ -1905,6 +1905,7 @@ void btf_put(struct btf *btf)
 		call_rcu(&btf->rcu, btf_free_rcu);
 	}
 }
+EXPORT_SYMBOL_GPL(btf_put);
 
 struct btf *btf_base_btf(const struct btf *btf)
 {
