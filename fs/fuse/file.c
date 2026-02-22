@@ -222,7 +222,10 @@ int fuse_finish_open(struct inode *inode, struct file *file)
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	int err;
 
-	err = fuse_file_io_open(file, inode);
+	if (fuse_inode_has_iomap(inode))
+		err = fuse_iomap_finish_open(ff, inode);
+	else
+		err = fuse_file_io_open(file, inode);
 	if (err)
 		return err;
 
@@ -265,6 +268,9 @@ static int fuse_open(struct inode *inode, struct file *file)
 	if (fuse_is_bad(inode))
 		return -EIO;
 
+	if (is_iomap)
+		fuse_iomap_open(inode, file);
+
 	err = generic_file_open(inode, file);
 	if (err)
 		return err;
@@ -295,9 +301,11 @@ static int fuse_open(struct inode *inode, struct file *file)
 	if ((is_wb_truncate || dax_truncate) && !is_iomap)
 		fuse_release_nowrite(inode);
 	if (!err) {
-		if (is_truncate)
+		if (is_truncate) {
 			truncate_pagecache(inode, 0);
-		else if (!(ff->open_flags & FOPEN_KEEP_CACHE))
+			if (is_iomap)
+				fuse_iomap_open_truncate(inode);
+		} else if (!(ff->open_flags & FOPEN_KEEP_CACHE))
 			invalidate_inode_pages2(inode->i_mapping);
 	}
 	if (dax_truncate)
@@ -1827,6 +1835,9 @@ static ssize_t fuse_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
 	if (fuse_is_bad(inode))
 		return -EIO;
 
+	if (fuse_inode_has_iomap(inode))
+		return fuse_iomap_read_iter(iocb, to);
+
 	if (FUSE_IS_DAX(inode))
 		return fuse_dax_read_iter(iocb, to);
 
@@ -1847,6 +1858,9 @@ static ssize_t fuse_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 
 	if (fuse_is_bad(inode))
 		return -EIO;
+
+	if (fuse_inode_has_iomap(inode))
+		return fuse_iomap_write_iter(iocb, from);
 
 	if (FUSE_IS_DAX(inode))
 		return fuse_dax_write_iter(iocb, from);
@@ -2960,7 +2974,9 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 		.length = length,
 		.mode = mode
 	};
+	loff_t newsize = 0;
 	int err;
+	const bool is_iomap = fuse_inode_has_iomap(inode);
 	bool block_faults = FUSE_IS_DAX(inode) &&
 		(!(mode & FALLOC_FL_KEEP_SIZE) ||
 		 (mode & (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_ZERO_RANGE)));
@@ -2993,6 +3009,7 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 		err = inode_newsize_ok(inode, offset + length);
 		if (err)
 			goto out;
+		newsize = offset + length;
 	}
 
 	err = file_modified(file);
@@ -3017,6 +3034,12 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 
 	/* we could have extended the file */
 	if (!(mode & FALLOC_FL_KEEP_SIZE)) {
+		if (is_iomap && newsize > 0) {
+			err = fuse_iomap_setsize_finish(inode, newsize);
+			if (err)
+				goto out;
+		}
+
 		if (fuse_write_update_attr(inode, offset + length, length))
 			file_update_time(file);
 	}
