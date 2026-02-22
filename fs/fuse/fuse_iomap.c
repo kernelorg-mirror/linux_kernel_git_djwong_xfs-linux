@@ -1018,12 +1018,16 @@ static int fuse_iomap_process_config(struct fuse_mount *fm, int error,
 				     const struct fuse_iomap_config_out *outarg)
 {
 	struct super_block *sb = fm->sb;
+	struct fuse_conn *fc = fm->fc;
+	struct backing_dev_info *old_bdi = sb->s_bdi;
+	char *suffix = sb->s_bdev ? "-fuseblk" : "-fuse";
+	int ret;
 
 	switch (error) {
 	case 0:
 		break;
 	case -ENOSYS:
-		return 0;
+		goto sb_config;
 	default:
 		return error;
 	}
@@ -1099,6 +1103,25 @@ static int fuse_iomap_process_config(struct fuse_mount *fm, int error,
 
 	if (outarg->flags & FUSE_IOMAP_CONFIG_MAXBYTES)
 		sb->s_maxbytes = outarg->s_maxbytes;
+
+sb_config:
+	/*
+	 * sb->s_bdi points to the initial private bdi.  However, we want to
+	 * redirect it to a new private bdi with default dirty and readahead
+	 * settings because iomap writeback won't be pushing a ton of dirty
+	 * data through the fuse device.  If this fails we fall back to the
+	 * initial fuse bdi.
+	 */
+	sb->s_bdi = &noop_backing_dev_info;
+	ret = super_setup_bdi_name(sb, "%u:%u%s.iomap", MAJOR(fc->dev),
+				   MINOR(fc->dev), suffix);
+	if (ret) {
+		sb->s_bdi = old_bdi;
+	} else {
+		fc->iomap_conn.old_ra_pages = old_bdi->ra_pages;
+		bdi_unregister(old_bdi);
+		bdi_put(old_bdi);
+	}
 
 	return 0;
 }
@@ -1189,12 +1212,49 @@ static inline void fuse_inode_clear_iomap(struct inode *inode)
 	clear_bit(FUSE_I_IOMAP, &fi->state);
 }
 
+static void fuse_iomap_constrain_bdi(struct inode *inode)
+{
+	struct fuse_conn *fc = get_fuse_conn(inode);
+	struct super_block *sb = inode->i_sb;
+
+	sb->s_bdi->ra_pages = fc->iomap_conn.old_ra_pages;
+
+	bdi_set_strict_limit(sb->s_bdi, 1);
+
+	/*
+	 * For a single fuse filesystem use max 1% of dirty +
+	 * writeback threshold.
+	 *
+	 * This gives about 1M of write buffer for memory maps on a
+	 * machine with 1G and 10% dirty_ratio, which should be more
+	 * than enough.
+	 *
+	 * Privileged users can raise it by writing to
+	 *
+	 *    /sys/class/bdi/<bdi>/max_ratio
+	 */
+	bdi_set_max_ratio(sb->s_bdi, 1);
+}
+
 void fuse_iomap_init_inode(struct inode *inode, struct fuse_attr *attr)
 {
 	ASSERT(get_fuse_conn(inode)->iomap);
 
-	if (!(attr->flags & __FUSE_ATTR_IOMAP))
+	if (!(attr->flags & __FUSE_ATTR_IOMAP)) {
+		/*
+		 * If we allow a regular file to be stood up without iomap, it
+		 * will use the normal fuse pagecache IO paths.  The iomap
+		 * specific BDI has far fewer restrictions because iomap cannot
+		 * be enabled without CAP_SYS_RAWIO privilege, but in this odd
+		 * case we'll fall back to the same restrictions as a non-iomap
+		 * fuse server.
+		 */
+		if (S_ISREG(inode->i_mode) &&
+		    !(inode->i_sb->s_bdi->capabilities & BDI_CAP_STRICTLIMIT))
+			fuse_iomap_constrain_bdi(inode);
+
 		return;
+	}
 
 	/*
 	 * Any file being used in conjunction with iomap must also have the

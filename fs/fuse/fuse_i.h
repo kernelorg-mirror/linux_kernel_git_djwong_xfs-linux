@@ -675,6 +675,9 @@ struct fuse_iomap_conn {
 	/**  number of inodes that have iomap enabled */
 	atomic64_t inodes;
 
+	/* old ra_pages, in case we have to put things back */
+	unsigned long old_ra_pages;
+
 	/* fuse server doesn't implement iomap_end */
 	unsigned int no_end:1;
 
