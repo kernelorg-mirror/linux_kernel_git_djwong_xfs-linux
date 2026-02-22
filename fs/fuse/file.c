@@ -7,6 +7,7 @@
 */
 
 #include "fuse_i.h"
+#include "fuse_iomap.h"
 
 #include <linux/pagemap.h>
 #include <linux/slab.h>
@@ -3212,6 +3213,8 @@ void fuse_init_file_inode(struct inode *inode, struct fuse_attr *attr)
 	init_waitqueue_head(&fi->page_waitq);
 	init_waitqueue_head(&fi->direct_io_waitq);
 
+	if (fc->iomap)
+		fuse_iomap_init_inode(inode, attr);
 	if (IS_ENABLED(CONFIG_FUSE_DAX))
 		fuse_dax_inode_init(inode, attr->flags);
 }

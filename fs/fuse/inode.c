@@ -198,6 +198,8 @@ static void fuse_evict_inode(struct inode *inode)
 		WARN_ON(!list_empty(&fi->queued_writes));
 	}
 
+	if (fuse_inode_has_iomap(inode))
+		fuse_iomap_evict_inode(inode);
 	fuse_inode_clear_exclusive(inode);
 }
 
@@ -446,10 +448,10 @@ static void fuse_init_inode(struct inode *inode, struct fuse_attr *attr,
 		fuse_init_file_inode(inode, attr);
 		break;
 	case S_IFDIR:
-		fuse_init_dir(inode);
+		fuse_init_dir(inode, attr);
 		break;
 	case S_IFLNK:
-		fuse_init_symlink(inode);
+		fuse_init_symlink(inode, attr);
 		break;
 	case S_IFCHR:
 	case S_IFBLK:
