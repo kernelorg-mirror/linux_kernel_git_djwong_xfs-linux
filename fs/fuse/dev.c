@@ -9,6 +9,7 @@
 #include "dev_uring_i.h"
 #include "fuse_i.h"
 #include "fuse_dev_i.h"
+#include "fuse_iomap.h"
 
 #include <linux/init.h>
 #include <linux/module.h>
@@ -1794,6 +1795,12 @@ static int fuse_notify_store(struct fuse_conn *fc, unsigned int size,
 	if (!inode)
 		goto out_up_killsb;
 
+	/* no backchannels for messing with the pagecache */
+	if (fuse_inode_has_iomap(inode)) {
+		err = -EOPNOTSUPP;
+		goto out_iput;
+	}
+
 	mapping = inode->i_mapping;
 	file_size = i_size_read(inode);
 	end = pos + num;
@@ -1872,6 +1879,9 @@ static int fuse_retrieve(struct fuse_mount *fm, struct inode *inode,
 	struct fuse_args_pages *ap;
 	struct fuse_args *args;
 	loff_t pos = outarg->offset;
+
+	if (fuse_inode_has_iomap(inode))
+		return -EOPNOTSUPP;
 
 	offset = offset_in_page(pos);
 	file_size = i_size_read(inode);
