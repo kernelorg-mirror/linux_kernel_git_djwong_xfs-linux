@@ -1062,6 +1062,8 @@ static int fuse_iomap_end(struct inode *inode, loff_t pos, loff_t count,
 			fi->i_disk_size = max(fi->i_disk_size,
 					      pos + persisted);
 			spin_unlock(&fi->lock);
+
+			fuse_iomap_cache_invalidate_range(inode, pos, written);
 		} else {
 			fuse_iomap_inline_free(iomap);
 		}
@@ -1152,7 +1154,7 @@ fuse_iomap_setsize_finish(
 	spin_lock(&fi->lock);
 	fi->i_disk_size = newsize;
 	spin_unlock(&fi->lock);
-	return 0;
+	return fuse_iomap_cache_invalidate(inode, newsize);
 }
 
 static int fuse_iomap_ioend(struct inode *inode, loff_t pos, size_t written,
@@ -1230,12 +1232,14 @@ static int fuse_iomap_ioend(struct inode *inode, loff_t pos, size_t written,
 
 	/*
 	 * If there weren't any ioend errors, update the incore isize, which
-	 * confusingly takes the new i_size as "pos".
+	 * confusingly takes the new i_size as "pos".  Invalidate cached
+	 * mappings for the file range that we just completed.
 	 */
 	spin_lock(&fi->lock);
 	fi->i_disk_size = max_t(loff_t, fi->i_disk_size, outarg.newsize);
 	spin_unlock(&fi->lock);
 	fuse_write_update_attr(inode, pos + written, written);
+	fuse_iomap_cache_invalidate_range(inode, pos, written);
 	return 0;
 }
 
@@ -2020,6 +2024,8 @@ void fuse_iomap_open_truncate(struct inode *inode)
 	spin_lock(&fi->lock);
 	fi->i_disk_size = 0;
 	spin_unlock(&fi->lock);
+
+	fuse_iomap_cache_invalidate(inode, 0);
 }
 
 struct fuse_writepage_ctx {
@@ -2701,6 +2707,14 @@ fuse_iomap_fallocate(
 
 	trace_fuse_iomap_fallocate(inode, mode, offset, length, new_size);
 
+	if (mode & (FALLOC_FL_COLLAPSE_RANGE | FALLOC_FL_INSERT_RANGE))
+		error = fuse_iomap_cache_invalidate(inode, offset);
+	else
+		error = fuse_iomap_cache_invalidate_range(inode, offset,
+							  length);
+	if (error)
+		return error;
+
 	/*
 	 * If we unmapped blocks from the file range, then we zero the
 	 * pagecache for those regions and push them to disk rather than make
@@ -2720,6 +2734,8 @@ fuse_iomap_fallocate(
 	 */
 	if (new_size) {
 		error = fuse_iomap_setsize_start(inode, new_size);
+		if (!error)
+			error = fuse_iomap_setsize_finish(inode, new_size);
 		if (error)
 			return error;
 
@@ -2911,4 +2927,12 @@ int fuse_iomap_backing_set_blocksize(struct file *file,
 	ret = set_blocksize(fb->file, fbi.blocksize);
 	fuse_backing_put(fb);
 	return ret;
+}
+
+void fuse_iomap_copied_file_range(struct inode *inode, loff_t offset,
+				  u64 written)
+{
+	ASSERT(fuse_inode_has_iomap(inode));
+
+	fuse_iomap_cache_invalidate_range(inode, offset, written);
 }
