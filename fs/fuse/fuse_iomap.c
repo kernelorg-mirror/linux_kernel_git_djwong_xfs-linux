@@ -10,6 +10,7 @@
 #include <linux/fadvise.h>
 #include <linux/swap.h>
 #include "fuse_i.h"
+#include "fuse_dev_i.h"
 #include "fuse_trace.h"
 #include "fuse_iomap.h"
 #include "fuse_iomap_i.h"
@@ -78,6 +79,12 @@ bool fuse_iomap_enabled(void)
 	 * quite well even without our help.
 	 */
 	return enable_iomap && has_capability_noaudit(current, CAP_SYS_RAWIO);
+}
+
+static inline bool fuse_iomap_may_enable(void)
+{
+	/* Same as above, but this time we log the denial in audit log */
+	return enable_iomap && capable(CAP_SYS_RAWIO);
 }
 
 /* Convert IOMAP_* mapping types to FUSE_IOMAP_TYPE_* */
@@ -2537,14 +2544,35 @@ fuse_iomap_fallocate(
 	return 0;
 }
 
+int fuse_dev_ioctl_add_iomap(struct file *file)
+{
+	int err = -EINVAL;
+	struct fuse_dev *fud = fuse_file_to_fud(file);
+
+	mutex_lock(&fuse_mutex);
+	if (!fuse_dev_fc_get(fud)) {
+		fud->may_iomap = true;
+		err = 0;
+	}
+	mutex_unlock(&fuse_mutex);
+	return err;
+}
+
 int fuse_dev_ioctl_iomap_support(struct file *file,
 				 struct fuse_iomap_support __user *argp)
 {
 	struct fuse_iomap_support ios = { };
+	struct fuse_dev *fud = fuse_file_to_fud(file);
+	struct fuse_conn *fc;
 
-	if (fuse_iomap_enabled())
+	mutex_lock(&fuse_mutex);
+	fc = fuse_dev_fc_get(fud);
+	if ((fc && fc != FUSE_DEV_FC_DISCONNECTED && fc->may_iomap) ||
+	    (!fc && fud->may_iomap) ||
+	    fuse_iomap_enabled())
 		ios.flags = FUSE_IOMAP_SUPPORT_FILEIO |
 			    FUSE_IOMAP_SUPPORT_ATOMIC;
+	mutex_unlock(&fuse_mutex);
 
 	if (copy_to_user(argp, &ios, sizeof(ios)))
 		return -EFAULT;
@@ -2615,7 +2643,7 @@ out_killsb:
 
 static inline bool can_set_nofs(struct fuse_dev *fud)
 {
-	if (fud && fud->fc && fud->fc->iomap)
+	if (fud && fud->fc && (fud->fc->iomap || fud->fc->may_iomap))
 	       return true;
 
 	return capable(CAP_SYS_RESOURCE);
