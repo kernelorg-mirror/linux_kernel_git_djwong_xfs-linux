@@ -225,10 +225,16 @@ int fuse_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 	if (fc->posix_acl) {
 		/*
 		 * Fuse daemons without FUSE_POSIX_ACL never cached POSIX ACLs
-		 * and didn't invalidate attributes. Retain that behavior.
+		 * and didn't invalidate attributes. Retain that behavior
+		 * except for iomap, where we assume that only the source of
+		 * ACL changes is userspace.
 		 */
-		forget_all_cached_acls(inode);
-		fuse_invalidate_attr(inode);
+		if (!ret && is_iomap) {
+			set_cached_acl(inode, type, acl);
+		} else {
+			forget_all_cached_acls(inode);
+			fuse_invalidate_attr(inode);
+		}
 	}
 
 	return ret;
@@ -270,9 +276,10 @@ static int fuse_set_acl_xattr(struct inode *inode, const char *name,
 	return fuse_setxattr(inode, name, value, size, 0, 0);
 }
 
-int fuse_init_acls(struct inode *inode, const struct posix_acl *default_acl,
-		   const struct posix_acl *acl)
+int fuse_init_acls(struct inode *inode, struct posix_acl *default_acl,
+		   struct posix_acl *acl)
 {
+	const bool is_iomap = fuse_inode_has_iomap(inode);
 	int ret;
 
 	if (default_acl) {
@@ -280,6 +287,8 @@ int fuse_init_acls(struct inode *inode, const struct posix_acl *default_acl,
 					 default_acl);
 		if (ret)
 			return ret;
+		if (is_iomap)
+			set_cached_acl(inode, ACL_TYPE_DEFAULT, default_acl);
 	}
 
 	if (acl) {
@@ -287,6 +296,8 @@ int fuse_init_acls(struct inode *inode, const struct posix_acl *default_acl,
 					 acl);
 		if (ret)
 			return ret;
+		if (is_iomap)
+			set_cached_acl(inode, ACL_TYPE_ACCESS, acl);
 	}
 
 	return 0;
