@@ -437,6 +437,8 @@ static int fuse_iomap_inline_read(struct inode *inode, loff_t pos,
 		return -EFSCORRUPTED;
 	}
 
+	trace_fuse_iomap_inline_read(inode, pos, count, iomap);
+
 	args.opcode = FUSE_READ;
 	args.nodeid = fi->nodeid;
 	args.in_numargs = 1;
@@ -483,6 +485,8 @@ static int fuse_iomap_inline_write(struct inode *inode, loff_t pos,
 
 	if (BAD_DATA(!iomap_inline_data_valid(iomap)))
 		return -EFSCORRUPTED;
+
+	trace_fuse_iomap_inline_write(inode, pos, count, iomap);
 
 	args.opcode = FUSE_WRITE;
 	args.nodeid = fi->nodeid;
@@ -555,6 +559,9 @@ static int fuse_iomap_set_inline(struct inode *inode, unsigned opflags,
 			return err;
 		}
 	}
+
+	trace_fuse_iomap_set_inline_iomap(inode, pos, count, iomap);
+	trace_fuse_iomap_set_inline_srcmap(inode, pos, count, srcmap);
 
 	return 0;
 }
