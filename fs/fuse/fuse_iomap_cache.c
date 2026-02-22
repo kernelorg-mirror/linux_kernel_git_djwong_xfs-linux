@@ -763,6 +763,7 @@ fuse_iext_insert(
 	struct fuse_iext_root		*ir = fuse_iext_state_to_fork(ic, state);
 
 	fuse_iext_insert_raw(ic, ir, cur, irec);
+	trace_fuse_iext_insert(ic->ic_inode, cur, state, _RET_IP_);
 }
 
 static struct fuse_iext_node *
@@ -970,6 +971,8 @@ fuse_iext_remove(
 	ASSERT(ir->ir_data != NULL);
 	ASSERT(fuse_iext_valid(ir, cur));
 
+	trace_fuse_iext_remove(ic->ic_inode, cur, state, _RET_IP_);
+
 	fuse_iext_inc_seq(ic);
 
 	nr_entries = fuse_iext_leaf_nr_entries(ir, leaf, cur->pos) - 1;
@@ -1088,7 +1091,9 @@ fuse_iext_update_extent(
 		}
 	}
 
+	trace_fuse_iext_pre_update(ic->ic_inode, cur, state, _RET_IP_);
 	fuse_iext_set(cur_rec(cur), new);
+	trace_fuse_iext_post_update(ic->ic_inode, cur, state, _RET_IP_);
 }
 
 /*
@@ -1180,17 +1185,26 @@ static void fuse_iext_check_mappings(struct fuse_iomap_cache *ic,
 	struct inode		*inode = ic->ic_inode;
 	struct fuse_inode	*fi = get_fuse_inode(inode);
 	unsigned long long	nr = 0;
+	enum fuse_iomap_iodir	iodir;
 
 	if (ir->ir_bytes < 0 || !static_branch_unlikely(&fuse_iomap_debug))
 		return;
 
+	if (ir == &ic->ic_write)
+		iodir = WRITE_MAPPING;
+	else
+		iodir = READ_MAPPING;
+
 	fuse_iext_first(ir, &icur);
 	if (!fuse_iext_get_extent(ir, &icur, &prev))
 		return;
+	trace_fuse_iext_check_mapping(ic->ic_inode, iodir, &prev, _RET_IP_);
 	nr++;
 
 	fuse_iext_next(ir, &icur);
 	while (fuse_iext_get_extent(ir, &icur, &got)) {
+		trace_fuse_iext_check_mapping(ic->ic_inode, iodir, &got,
+					      _RET_IP_);
 		if (got.length == 0 ||
 		    got.offset < prev.offset + prev.length ||
 		    fuse_iomap_can_merge(&prev, &got)) {
@@ -1248,6 +1262,9 @@ fuse_iext_del_mapping(
 		state |= FUSE_IEXT_LEFT_FILLING;
 	if (got_endoff == del_endoff)
 		state |= FUSE_IEXT_RIGHT_FILLING;
+
+	trace_fuse_iext_del_mapping(ic->ic_inode, state, del);
+	trace_fuse_iext_del_mapping_got(ic->ic_inode, got);
 
 	switch (state & (FUSE_IEXT_LEFT_FILLING | FUSE_IEXT_RIGHT_FILLING)) {
 	case FUSE_IEXT_LEFT_FILLING | FUSE_IEXT_RIGHT_FILLING:
@@ -1312,6 +1329,8 @@ fuse_iomap_cache_remove(
 	int			ret = 0;
 
 	assert_cache_locked(ic);
+
+	trace_fuse_iomap_cache_remove(&fi->inode, iodir, start, len, _RET_IP_);
 
 	/* Fork is not active or has zero mappings */
 	if (ir->ir_bytes < 0 || fuse_iext_count(ir) == 0)
@@ -1458,6 +1477,12 @@ fuse_iext_add_mapping(
 	     fuse_iomap_can_merge3(&left, new, &right)))
 		state |= FUSE_IEXT_RIGHT_CONTIG;
 
+	trace_fuse_iext_add_mapping(ic->ic_inode, state, new);
+	if (state & FUSE_IEXT_LEFT_VALID)
+		trace_fuse_iext_add_mapping_left(ic->ic_inode, &left);
+	if (state & FUSE_IEXT_RIGHT_VALID)
+		trace_fuse_iext_add_mapping_right(ic->ic_inode, &right);
+
 	/*
 	 * Select which case we're in here, and implement it.
 	 */
@@ -1526,6 +1551,8 @@ fuse_iomap_cache_add(
 	ASSERT(new->length > 0);
 	ASSERT(new->offset < inode->i_sb->s_maxbytes);
 
+	trace_fuse_iomap_cache_add(&fi->inode, iodir, new, _RET_IP_);
+
 	/* Mark this fork as being in use */
 	if (ir->ir_bytes < 0)
 		ir->ir_bytes = 0;
@@ -1563,8 +1590,10 @@ int fuse_iomap_cache_alloc(struct inode *inode)
 	if (!try_cmpxchg(&fi->cache, &old, ic)) {
 		/* Someone created mapping cache before us? Free ours... */
 		kfree(ic);
+		return 0;
 	}
 
+	trace_fuse_iomap_cache_alloc(inode);
 	return 0;
 }
 
@@ -1578,6 +1607,8 @@ void fuse_iomap_cache_free(struct inode *inode)
 {
 	struct fuse_inode *fi = get_fuse_inode(inode);
 	struct fuse_iomap_cache *ic = fi->cache;
+
+	trace_fuse_iomap_cache_free(inode);
 
 	/*
 	 * This is only called from eviction, so we cannot be racing to set or
@@ -1665,6 +1696,8 @@ fuse_iomap_cache_lookup(
 
 	assert_cache_locked_shared(ic);
 
+	trace_fuse_iomap_cache_lookup(ic->ic_inode, iodir, off, len, _RET_IP_);
+
 	if (ir->ir_bytes < 0) {
 		/*
 		 * No write fork at all means this filesystem doesn't do out of
@@ -1691,5 +1724,8 @@ fuse_iomap_cache_lookup(
 
 	/* Found a mapping in the cache, return it */
 	fuse_iomap_trim(fi, mval, &got, off, len);
+
+	trace_fuse_iomap_cache_lookup_result(inode, iodir, off, len, &got,
+					     mval);
 	return LOOKUP_HIT;
 }
