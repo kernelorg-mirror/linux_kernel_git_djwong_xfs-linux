@@ -1873,6 +1873,48 @@ err:
 	return err;
 }
 
+static int fuse_notify_iomap_upsert_mappings(struct fuse_conn *fc,
+					     unsigned int size,
+					     struct fuse_copy_state *cs)
+{
+	struct fuse_iomap_upsert_mappings_out outarg;
+	int err = -EINVAL;
+
+	if (size != sizeof(outarg))
+		goto err;
+
+	err = fuse_copy_one(cs, &outarg, sizeof(outarg));
+	if (err)
+		goto err;
+	fuse_copy_finish(cs);
+
+	return fuse_iomap_upsert_mappings(fc, &outarg);
+err:
+	fuse_copy_finish(cs);
+	return err;
+}
+
+static int fuse_notify_iomap_inval_mappings(struct fuse_conn *fc,
+					    unsigned int size,
+					    struct fuse_copy_state *cs)
+{
+	struct fuse_iomap_inval_mappings_out outarg;
+	int err = -EINVAL;
+
+	if (size != sizeof(outarg))
+		goto err;
+
+	err = fuse_copy_one(cs, &outarg, sizeof(outarg));
+	if (err)
+		goto err;
+	fuse_copy_finish(cs);
+
+	return fuse_iomap_inval_mappings(fc, &outarg);
+err:
+	fuse_copy_finish(cs);
+	return err;
+}
+
 struct fuse_retrieve_args {
 	struct fuse_args_pages ap;
 	struct fuse_notify_retrieve_in inarg;
@@ -2165,6 +2207,10 @@ static int fuse_notify(struct fuse_conn *fc, enum fuse_notify_code code,
 
 	case FUSE_NOTIFY_IOMAP_BACKING_INVAL:
 		return fuse_notify_iomap_backing_inval(fc, size, cs);
+	case FUSE_NOTIFY_IOMAP_UPSERT_MAPPINGS:
+		return fuse_notify_iomap_upsert_mappings(fc, size, cs);
+	case FUSE_NOTIFY_IOMAP_INVAL_MAPPINGS:
+		return fuse_notify_iomap_inval_mappings(fc, size, cs);
 
 	default:
 		return -EINVAL;

@@ -81,6 +81,11 @@ int fuse_iomap_backing_inval(struct fuse_conn *fc,
 			     const struct fuse_iomap_backing_inval_out *arg);
 int fuse_iomap_backing_set_blocksize(struct file *file,
 				     struct fuse_iomap_backing_info __user *argp);
+
+int fuse_iomap_upsert_mappings(struct fuse_conn *fc,
+			       const struct fuse_iomap_upsert_mappings_out *outarg);
+int fuse_iomap_inval_mappings(struct fuse_conn *fc,
+			      const struct fuse_iomap_inval_mappings_out *outarg);
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
@@ -112,6 +117,8 @@ int fuse_iomap_backing_set_blocksize(struct file *file,
 # define fuse_dev_ioctl_iomap_set_nofs(...)	(-EOPNOTSUPP)
 # define fuse_iomap_backing_inval(...)		(-ENOSYS)
 # define fuse_iomap_backing_set_blocksize(...)	(-EOPNOTSUPP)
+# define fuse_iomap_upsert_mappings(...)	(-ENOSYS)
+# define fuse_iomap_inval_mappings(...)		(-ENOSYS)
 #endif /* CONFIG_FUSE_IOMAP */
 
 #endif /* _FS_FUSE_IOMAP_H */

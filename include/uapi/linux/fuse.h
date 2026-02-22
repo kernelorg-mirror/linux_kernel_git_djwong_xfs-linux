@@ -251,6 +251,8 @@
  *  - add FUSE_ATTR_ATOMIC for single-fsblock atomic write support
  *  - add FUSE_ATTR_{SYNC,IMMUTABLE,APPEND} for VFS enforcement of file
  *    attributes
+ *  - add FUSE_NOTIFY_IOMAP_{UPSERT,INVAL}_MAPPINGS so fuse servers can cache
+ *    file range mappings in the kernel for iomap
  */
 
 #ifndef _LINUX_FUSE_H
@@ -739,6 +741,8 @@ enum fuse_notify_code {
 	FUSE_NOTIFY_INC_EPOCH = 8,
 	FUSE_NOTIFY_PRUNE = 9,
 	FUSE_NOTIFY_IOMAP_BACKING_INVAL = 99,
+	FUSE_NOTIFY_IOMAP_UPSERT_MAPPINGS = 100,
+	FUSE_NOTIFY_IOMAP_INVAL_MAPPINGS = 101,
 	FUSE_NOTIFY_CODE_MAX,
 };
 
@@ -1413,6 +1417,8 @@ struct fuse_uring_cmd_req {
 #define FUSE_IOMAP_TYPE_PURE_OVERWRITE	(65535)
 /* fuse-specific mapping type saying the server has populated the cache */
 #define FUSE_IOMAP_TYPE_RETRY_CACHE	(65534)
+/* do not upsert this mapping */
+#define FUSE_IOMAP_TYPE_NOCACHE		(65533)
 
 #define FUSE_IOMAP_DEV_NULL		(0U)	/* null device cookie */
 
@@ -1596,5 +1602,28 @@ struct fuse_iomap_backing_inval_out {
 
 /* invalidate all cached iomap mappings up to EOF */
 #define FUSE_IOMAP_INVAL_TO_EOF		(~0ULL)
+
+struct fuse_iomap_inval_mappings_out {
+	uint64_t nodeid;	/* Inode ID */
+	uint64_t attr_ino;	/* matches fuse_attr:ino */
+
+	/*
+	 * Range of read and mappings to invalidate.  Zero length means ignore
+	 * the range; and FUSE_IOMAP_INVAL_TO_EOF can be used for length.
+	 */
+	struct fuse_range read;
+	struct fuse_range write;
+};
+
+struct fuse_iomap_upsert_mappings_out {
+	uint64_t nodeid;	/* Inode ID */
+	uint64_t attr_ino;	/* matches fuse_attr:ino */
+
+	/* read file data from here */
+	struct fuse_iomap_io	read;
+
+	/* write file data to here, if applicable */
+	struct fuse_iomap_io	write;
+};
 
 #endif /* _LINUX_FUSE_H */
