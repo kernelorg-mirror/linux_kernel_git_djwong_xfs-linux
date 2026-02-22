@@ -8,6 +8,7 @@
 
 #include "fuse_i.h"
 #include "fuse_iomap.h"
+#include "fuse_trace.h"
 
 #include <linux/pagemap.h>
 #include <linux/file.h>
@@ -2211,6 +2212,8 @@ static void fuse_setattr_fill(struct fuse_conn *fc, struct fuse_args *args,
 			      struct fuse_setattr_in *inarg_p,
 			      struct fuse_attr_out *outarg_p)
 {
+	trace_fuse_setattr_fill(inode, inarg_p);
+
 	args->opcode = FUSE_SETATTR;
 	args->nodeid = get_node_id(inode);
 	args->in_numargs = 1;
@@ -2491,6 +2494,8 @@ static int fuse_setattr(struct mnt_idmap *idmap, struct dentry *entry,
 
 	if (!fuse_allow_current_process(get_fuse_conn(inode)))
 		return -EACCES;
+
+	trace_fuse_setattr(inode, attr);
 
 	if (!is_iomap &&
 	    (attr->ia_valid & (ATTR_KILL_SUID | ATTR_KILL_SGID))) {
