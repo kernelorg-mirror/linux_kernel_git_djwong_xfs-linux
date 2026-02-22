@@ -266,6 +266,8 @@ enum {
 	 * or the fuse server has an exclusive "lease" on distributed fs
 	 */
 	FUSE_I_EXCLUSIVE,
+	/* Use iomap for this inode */
+	FUSE_I_IOMAP,
 };
 
 struct fuse_conn;
@@ -658,6 +660,13 @@ struct fuse_sync_bucket {
 	struct rcu_head rcu;
 };
 
+#ifdef CONFIG_FUSE_IOMAP
+struct fuse_iomap_conn {
+	/**  number of inodes that have iomap enabled */
+	atomic64_t inodes;
+};
+#endif
+
 /**
  * A Fuse connection.
  *
@@ -1019,6 +1028,11 @@ struct fuse_conn {
 		/* Request timeout (in jiffies). 0 = no timeout */
 		unsigned int req_timeout;
 	} timeout;
+
+#ifdef CONFIG_FUSE_IOMAP
+	/** iomap information */
+	struct fuse_iomap_conn iomap_conn;
+#endif
 };
 
 /*
@@ -1258,12 +1272,12 @@ void fuse_init_common(struct inode *inode);
 /**
  * Initialize inode and file operations on a directory
  */
-void fuse_init_dir(struct inode *inode);
+void fuse_init_dir(struct inode *inode, struct fuse_attr *attr);
 
 /**
  * Initialize inode operations on a symlink
  */
-void fuse_init_symlink(struct inode *inode);
+void fuse_init_symlink(struct inode *inode, struct fuse_attr *attr);
 
 /**
  * Change attributes of an inode
