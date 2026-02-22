@@ -9,6 +9,7 @@
 #include "fuse_i.h"
 #include "fuse_dev_i.h"
 #include "dev_uring_i.h"
+#include "fuse_iomap.h"
 
 #include <linux/dax.h>
 #include <linux/pagemap.h>
@@ -1503,6 +1504,12 @@ static void process_init_reply(struct fuse_mount *fm, struct fuse_args *args,
 
 			if (flags & FUSE_REQUEST_TIMEOUT)
 				timeout = arg->request_timeout;
+
+			if ((flags & FUSE_IOMAP) && fuse_iomap_enabled()) {
+				fc->iomap = 1;
+				pr_warn(
+ "EXPERIMENTAL iomap feature enabled.  Use at your own risk!");
+			}
 		} else {
 			ra_pages = fc->max_read / PAGE_SIZE;
 			fc->no_lock = 1;
@@ -1571,6 +1578,14 @@ static struct fuse_init_args *fuse_new_init(struct fuse_mount *fm)
 	 */
 	if (fuse_uring_enabled())
 		flags |= FUSE_OVER_IO_URING;
+
+	/*
+	 * iomap requires that all nodeids share the same struct inode so that
+	 * locking works correctly.  This is not compatible with creating
+	 * shadow inode objects for a submount.
+	 */
+	if (fuse_iomap_enabled() && !(flags & FUSE_SUBMOUNTS))
+		flags |= FUSE_IOMAP;
 
 	ia->in.flags = flags;
 	ia->in.flags2 = flags >> 32;

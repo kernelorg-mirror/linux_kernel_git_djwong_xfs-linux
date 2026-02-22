@@ -940,6 +940,9 @@ struct fuse_conn {
 	/* Is synchronous FUSE_INIT allowed? */
 	unsigned int sync_init:1;
 
+	/* Enable fs/iomap for file operations */
+	unsigned int iomap:1;
+
 	/* Use io_uring for communication */
 	unsigned int io_uring;
 
@@ -1061,7 +1064,7 @@ static inline struct fuse_conn *get_fuse_conn_super(struct super_block *sb)
 	return get_fuse_mount_super(sb)->fc;
 }
 
-static inline struct fuse_mount *get_fuse_mount(struct inode *inode)
+static inline struct fuse_mount *get_fuse_mount(const struct inode *inode)
 {
 	return get_fuse_mount_super(inode->i_sb);
 }
