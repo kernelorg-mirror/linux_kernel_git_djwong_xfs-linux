@@ -6,6 +6,7 @@
  */
 
 #include "fuse_i.h"
+#include "fuse_iomap.h"
 #include "fuse_trace.h"
 
 #include <linux/file.h>
@@ -91,6 +92,10 @@ fuse_backing_ops_from_map(const struct fuse_backing_map *map)
 	case FUSE_BACKING_TYPE_PASSTHROUGH:
 		return &fuse_passthrough_backing_ops;
 #endif
+#ifdef CONFIG_FUSE_IOMAP
+	case FUSE_BACKING_TYPE_IOMAP:
+		return &fuse_iomap_backing_ops;
+#endif
 	default:
 		break;
 	}
@@ -138,7 +143,15 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 	fb->file = file;
 	fb->cred = prepare_creds();
 	fb->ops = ops;
+	fb->bdev = NULL;
 	refcount_set(&fb->count, 1);
+
+	res = ops->post_open ? ops->post_open(fc, fb) : 0;
+	if (res) {
+		fuse_backing_free(fb);
+		fb = NULL;
+		goto out;
+	}
 
 	res = fuse_backing_id_alloc(fc, fb);
 	if (res < 0) {
@@ -229,4 +242,42 @@ struct fuse_backing *fuse_backing_lookup(struct fuse_conn *fc,
 	rcu_read_unlock();
 
 	return fb;
+}
+
+struct fuse_backing_match {
+	fuse_match_backing_fn match_fn;
+	const struct fuse_backing_ops *ops;
+	const void *data;
+};
+
+static int fuse_backing_matches(int id, void *p, void *data)
+{
+	struct fuse_backing *fb = p;
+	struct fuse_backing_match *fbm = data;
+
+	if (!fb)
+		return 0;
+	if (fbm->ops && fb->ops != fbm->ops)
+		return 0;
+
+	/* backing ids are always greater than zero */
+	return fbm->match_fn(fb, fbm->data) ? id : 0;
+}
+
+int fuse_backing_lookup_id(struct fuse_conn *fc,
+			   const struct fuse_backing_ops *ops,
+			   fuse_match_backing_fn match_fn, const void *data)
+{
+	struct fuse_backing_match fbm = {
+		.ops = ops,
+		.match_fn = match_fn,
+		.data = data,
+	};
+	int ret;
+
+	rcu_read_lock();
+	ret = idr_for_each(&fc->backing_files_map, fuse_backing_matches, &fbm);
+	rcu_read_unlock();
+
+	return ret;
 }

@@ -111,6 +111,7 @@ struct fuse_backing_ops {
 	int (*may_admin)(struct fuse_conn *fc, uint32_t flags);
 	int (*may_open)(struct fuse_conn *fc, struct file *file);
 	int (*may_close)(struct fuse_conn *fc, const struct fuse_backing *fb);
+	int (*post_open)(struct fuse_conn *fc, struct fuse_backing *fb);
 	unsigned int type;
 	int id_start;
 	int id_end;
@@ -120,6 +121,7 @@ struct fuse_backing_ops {
 struct fuse_backing {
 	struct file *file;
 	struct cred *cred;
+	struct block_device *bdev;
 	const struct fuse_backing_ops *ops;
 
 	/** refcount */
@@ -1614,6 +1616,11 @@ void fuse_backing_put(struct fuse_backing *fb);
 struct fuse_backing *fuse_backing_lookup(struct fuse_conn *fc,
 					 const struct fuse_backing_ops *ops,
 					 int backing_id);
+typedef bool (*fuse_match_backing_fn)(const struct fuse_backing *fb,
+				      const void *data);
+int fuse_backing_lookup_id(struct fuse_conn *fc,
+			   const struct fuse_backing_ops *ops,
+			   fuse_match_backing_fn match_fn, const void *data);
 #else
 
 static inline struct fuse_backing *fuse_backing_get(struct fuse_backing *fb)
