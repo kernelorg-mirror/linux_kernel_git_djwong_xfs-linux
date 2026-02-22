@@ -21,6 +21,9 @@ static inline bool fuse_has_iomap(const struct inode *inode)
 
 extern const struct fuse_backing_ops fuse_iomap_backing_ops;
 
+int fuse_iomap_mount_sync(struct fuse_mount *fm);
+void fuse_iomap_mount_async(struct fuse_mount *fm);
+
 void fuse_iomap_init_inode(struct inode *inode, struct fuse_attr *attr);
 void fuse_iomap_evict_inode(struct inode *inode);
 
@@ -65,6 +68,8 @@ int fuse_dev_ioctl_iomap_support(struct file *file,
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
+# define fuse_iomap_mount_sync(...)		(0)
+# define fuse_iomap_mount_async(...)		((void)0)
 # define fuse_iomap_init_inode(...)		((void)0)
 # define fuse_iomap_evict_inode(...)		((void)0)
 # define fuse_inode_has_iomap(...)		(false)

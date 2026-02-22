@@ -1001,6 +1001,181 @@ const struct fuse_backing_ops fuse_iomap_backing_ops = {
 	.post_open = fuse_iomap_post_open,
 };
 
+struct fuse_iomap_config_args {
+	struct fuse_args args;
+	struct fuse_iomap_config_in inarg;
+	struct fuse_iomap_config_out outarg;
+};
+
+#define FUSE_IOMAP_CONFIG_ALL (FUSE_IOMAP_CONFIG_SID | \
+			       FUSE_IOMAP_CONFIG_UUID | \
+			       FUSE_IOMAP_CONFIG_BLOCKSIZE | \
+			       FUSE_IOMAP_CONFIG_MAX_LINKS | \
+			       FUSE_IOMAP_CONFIG_TIME | \
+			       FUSE_IOMAP_CONFIG_MAXBYTES)
+
+static int fuse_iomap_process_config(struct fuse_mount *fm, int error,
+				     const struct fuse_iomap_config_out *outarg)
+{
+	struct super_block *sb = fm->sb;
+
+	switch (error) {
+	case 0:
+		break;
+	case -ENOSYS:
+		return 0;
+	default:
+		return error;
+	}
+
+	if (BAD_DATA(outarg->flags & ~FUSE_IOMAP_CONFIG_ALL))
+		return -EINVAL;
+
+	if (BAD_DATA(outarg->s_uuid_len > sizeof(outarg->s_uuid)))
+		return -EINVAL;
+
+	if (BAD_DATA(memchr_inv(outarg->s_pad, 0, sizeof(outarg->s_pad))))
+		return -EINVAL;
+
+	if (outarg->flags & FUSE_IOMAP_CONFIG_TIME) {
+		if (BAD_DATA(outarg->s_time_gran == 0) ||
+		    BAD_DATA(outarg->s_time_gran > NSEC_PER_SEC))
+			return -EINVAL;
+	}
+
+	if (outarg->flags & FUSE_IOMAP_CONFIG_MAXBYTES) {
+		if (BAD_DATA(outarg->s_maxbytes < 0) ||
+		    BAD_DATA(outarg->s_maxbytes > MAX_LFS_FILESIZE))
+			return -EINVAL;
+	}
+
+	if (outarg->flags & FUSE_IOMAP_CONFIG_BLOCKSIZE) {
+		if (BAD_DATA(outarg->s_blocksize > PAGE_SIZE))
+			return -EINVAL;
+
+		if (BAD_DATA(blk_validate_block_size(outarg->s_blocksize) != 0))
+			return -EINVAL;
+
+		if (sb->s_bdev) {
+#ifdef CONFIG_BLOCK
+			if (BAD_DATA(sb_set_blocksize(sb, outarg->s_blocksize) !=
+				     outarg->s_blocksize))
+				return -EINVAL;
+#else
+			/*
+			 * It's not possible to have a bdev filesystem without
+			 * CONFIG_BLOCK, but we'll prevent this weird situation
+			 * anyway.
+			 */
+			BAD_DATA(1);
+			return -EINVAL;
+#endif
+		} else {
+			sb->s_blocksize = outarg->s_blocksize;
+			sb->s_blocksize_bits = blksize_bits(outarg->s_blocksize);
+		}
+	}
+
+	if (outarg->flags & FUSE_IOMAP_CONFIG_SID) {
+		memcpy(sb->s_id, outarg->s_id, sizeof(sb->s_id));
+		sb->s_id[sizeof(sb->s_id) - 1] = 0;
+	}
+
+	if (outarg->flags & FUSE_IOMAP_CONFIG_UUID) {
+		memcpy(&sb->s_uuid, outarg->s_uuid, outarg->s_uuid_len);
+		sb->s_uuid_len = outarg->s_uuid_len;
+	}
+
+	if (outarg->flags & FUSE_IOMAP_CONFIG_MAX_LINKS)
+		sb->s_max_links = outarg->s_max_links;
+
+	if (outarg->flags & FUSE_IOMAP_CONFIG_TIME) {
+		sb->s_time_gran = outarg->s_time_gran;
+		sb->s_time_min = outarg->s_time_min;
+		sb->s_time_max = outarg->s_time_max;
+	}
+
+	if (outarg->flags & FUSE_IOMAP_CONFIG_MAXBYTES)
+		sb->s_maxbytes = outarg->s_maxbytes;
+
+	return 0;
+}
+
+static void fuse_iomap_config_reply(struct fuse_mount *fm,
+				    struct fuse_args *args, int error)
+{
+	struct fuse_iomap_config_args *ia =
+		container_of(args, struct fuse_iomap_config_args, args);
+	int res;
+
+	res = fuse_iomap_process_config(fm, error, &ia->outarg);
+	if (res)
+		printk(KERN_ERR "%s: could not configure iomap, err=%d",
+		       fm->sb->s_id, res);
+
+	kfree(ia);
+	fuse_finish_init(fm->fc, !res);
+}
+
+static struct fuse_iomap_config_args *
+fuse_iomap_new_mount(struct fuse_mount *fm)
+{
+	struct fuse_iomap_config_args *ia;
+
+	ia = kzalloc(sizeof(*ia), GFP_KERNEL | __GFP_NOFAIL);
+	ia->inarg.maxbytes = MAX_LFS_FILESIZE;
+	ia->inarg.flags = FUSE_IOMAP_CONFIG_ALL;
+
+	ia->args.opcode = FUSE_IOMAP_CONFIG;
+	ia->args.nodeid = 0;
+	ia->args.in_numargs = 1;
+	ia->args.in_args[0].size = sizeof(ia->inarg);
+	ia->args.in_args[0].value = &ia->inarg;
+	ia->args.out_argvar = true;
+	ia->args.out_numargs = 1;
+	ia->args.out_args[0].size = sizeof(ia->outarg);
+	ia->args.out_args[0].value = &ia->outarg;
+	ia->args.force = true;
+	ia->args.nocreds = true;
+
+	return ia;
+}
+
+int fuse_iomap_mount_sync(struct fuse_mount *fm)
+{
+	struct fuse_iomap_config_args *ia = fuse_iomap_new_mount(fm);
+	int err;
+
+	ASSERT(fm->fc->sync_init);
+
+	err = fuse_simple_request(fm, &ia->args);
+	/* Ignore size of iomap_config reply */
+	if (err > 0)
+		err = 0;
+
+	err = fuse_iomap_process_config(fm, err, &ia->outarg);
+	if (err)
+		printk(KERN_ERR "%s: could not configure iomap, err=%d",
+		       fm->sb->s_id, err);
+
+	kfree(ia);
+	fuse_finish_init(fm->fc, !err);
+	return err;
+}
+
+void fuse_iomap_mount_async(struct fuse_mount *fm)
+{
+	struct fuse_iomap_config_args *ia = fuse_iomap_new_mount(fm);
+	int err;
+
+	ASSERT(!fm->fc->sync_init);
+
+	ia->args.end = fuse_iomap_config_reply;
+	err = fuse_simple_background(fm, &ia->args, GFP_KERNEL);
+	if (err)
+		fuse_iomap_config_reply(fm, &ia->args, -ENOTCONN);
+}
+
 static inline void fuse_inode_set_iomap(struct inode *inode);
 
 static inline void fuse_inode_clear_iomap(struct inode *inode)
