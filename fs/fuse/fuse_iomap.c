@@ -8,6 +8,7 @@
 #include <linux/pagemap.h>
 #include <linux/falloc.h>
 #include <linux/fadvise.h>
+#include <linux/fserror.h>
 #include "fuse_i.h"
 #include "fuse_trace.h"
 #include "fuse_iomap.h"
@@ -424,6 +425,178 @@ fuse_iomap_validate_bdev_access(const struct fuse_backing *fb,
 	return (!fb || (fb->file->f_mode & fmode) == fmode) ? 0 : -EACCES;
 }
 
+static inline int fuse_iomap_inline_alloc(const struct inode *inode,
+					  struct iomap *iomap)
+{
+	ASSERT(iomap->inline_data == NULL);
+	ASSERT(iomap->length > 0);
+
+	if (iomap->length > i_blocksize(inode))
+		return -ENOMEM;
+
+	iomap->inline_data = kvzalloc(iomap->length, GFP_KERNEL);
+	return iomap->inline_data ? 0 : -ENOMEM;
+}
+
+static inline void fuse_iomap_inline_free(struct iomap *iomap)
+{
+	kvfree(iomap->inline_data);
+	iomap->inline_data = NULL;
+}
+
+/*
+ * Use the FUSE_READ command to read inline file data from the fuse server.
+ * Note that there's no file handle attached, so the fuse server must be able
+ * to reconnect to the inode via the nodeid.  Read all of the inline data every
+ * time so that iomap->inline_data is always uptodate.  This is safe (though
+ * not maximally efficient) because iomap_write_begin_inline doesn't handle
+ * inline mappings with nonzero offset.
+ */
+static int fuse_iomap_inline_read(struct inode *inode, loff_t pos,
+				  loff_t count, struct iomap *iomap)
+{
+	struct fuse_read_in in = {
+		.offset = iomap->offset,
+		.size = iomap->length,
+	};
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct fuse_mount *fm = get_fuse_mount(inode);
+	FUSE_ARGS(args);
+	ssize_t ret;
+
+	args.opcode = FUSE_READ;
+	args.nodeid = fi->nodeid;
+	args.in_numargs = 1;
+	args.in_args[0].size = sizeof(in);
+	args.in_args[0].value = &in;
+	args.out_argvar = true;
+	args.out_numargs = 1;
+	args.out_args[0].size = in.size;
+	args.out_args[0].value = iomap_inline_data(iomap, in.offset);
+
+	ret = fuse_simple_request(fm, &args);
+	if (ret == -ENOSYS)
+		ret = 0;
+	if (ret < 0)
+		return ret;
+
+	/* no readahead means something bad happened */
+	if (ret == 0)
+		return -EIO;
+
+	return 0;
+}
+
+/*
+ * Use the FUSE_WRITE command to write inline file data from the fuse server.
+ * Note that there's no file handle attached, so the fuse server must be able
+ * to reconnect to the inode via the nodeid.  Note that we only send the
+ * written range to the server.
+ */
+static ssize_t fuse_iomap_inline_write(struct inode *inode, loff_t pos,
+				       ssize_t written, struct iomap *iomap)
+{
+	struct fuse_write_in in = {
+		.offset = pos,
+		.size = written,
+	};
+	struct fuse_write_out out = { };
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct fuse_mount *fm = get_fuse_mount(inode);
+	FUSE_ARGS(args);
+	ssize_t persisted = 0;
+	ssize_t ret = 0;
+
+	if (BAD_DATA(pos + written > iomap->offset + iomap->length))
+		return -EIO;
+
+	while (in.size > 0) {
+		args.opcode = FUSE_WRITE;
+		args.nodeid = fi->nodeid;
+		args.in_numargs = 2;
+		args.in_args[0].size = sizeof(in);
+		args.in_args[0].value = &in;
+		args.in_args[1].size = in.size;
+		args.in_args[1].value = iomap_inline_data(iomap, in.offset);
+		args.out_numargs = 1;
+		args.out_args[0].size = sizeof(out);
+		args.out_args[0].value = &out;
+
+		ret = fuse_simple_request(fm, &args);
+		if (ret == -ENOSYS)
+			ret = 0;
+		if (ret < 0)
+			break;
+
+		/* zero or excessive length write means something bad happened */
+		if (out.size == 0 || BAD_DATA(out.size > in.size)) {
+			ret = -EIO;
+			break;
+		}
+
+		in.offset += out.size;
+		in.size -= out.size;
+		persisted += out.size;
+	}
+
+	return persisted ? persisted : ret;
+}
+
+/* Set up inline data buffers for iomap_begin */
+static int fuse_iomap_set_inline(struct inode *inode, unsigned opflags,
+				 loff_t pos, loff_t count,
+				 struct iomap *iomap, struct iomap *srcmap)
+{
+	int err;
+
+	if (opflags & IOMAP_REPORT)
+		return 0;
+
+	if (fuse_is_iomap_file_write(opflags)) {
+		if (iomap->type == IOMAP_INLINE) {
+			err = fuse_iomap_inline_alloc(inode, iomap);
+			if (err)
+				return err;
+		}
+
+		if (srcmap->type == IOMAP_INLINE) {
+			/* inline data read in preparation for write */
+			err = fuse_iomap_inline_alloc(inode, srcmap);
+			if (err)
+				goto out_iomap;
+
+			err = fuse_iomap_inline_read(inode, pos, count,
+						     srcmap);
+			if (err)
+				goto out_srcmap;
+		} else if (iomap->type == IOMAP_INLINE &&
+			   srcmap->type == IOMAP_HOLE) {
+			/* pure overwrite of inline data */
+			err = fuse_iomap_inline_read(inode, pos, count,
+						     iomap);
+			if (err)
+				goto out_iomap;
+		}
+	} else if (iomap->type == IOMAP_INLINE) {
+		/* inline data read */
+		err = fuse_iomap_inline_alloc(inode, iomap);
+		if (err)
+			return err;
+
+		err = fuse_iomap_inline_read(inode, pos, count, iomap);
+		if (err)
+			goto out_iomap;
+	}
+
+	return 0;
+
+out_srcmap:
+	fuse_iomap_inline_free(srcmap);
+out_iomap:
+	fuse_iomap_inline_free(iomap);
+	return err;
+}
+
 static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 			    unsigned opflags, struct iomap *iomap,
 			    struct iomap *srcmap)
@@ -510,6 +683,13 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 		fuse_iomap_from_server(iomap, read_dev, &outarg.read);
 	}
 
+	if (iomap->type == IOMAP_INLINE || srcmap->type == IOMAP_INLINE) {
+		err = fuse_iomap_set_inline(inode, opflags, pos, count, iomap,
+					    srcmap);
+		if (err)
+			goto out_write_dev;
+	}
+
 	/*
 	 * It's ok to put the refcount here because you can't remove an iomap
 	 * device unless there are zero iomap inodes.
@@ -547,13 +727,60 @@ static bool fuse_should_send_iomap_end(const struct fuse_mount *fm,
 	return written < count;
 }
 
+static void fuse_iomap_write_error(struct inode *inode, loff_t pos,
+				    loff_t count, unsigned opflags, int error)
+{
+	const enum fserror_type f =
+		(opflags & IOMAP_DIRECT) ? FSERR_DIRECTIO_WRITE :
+					   FSERR_BUFFERED_WRITE;
+
+	mapping_set_error(inode->i_mapping, error);
+	fserror_report_io(inode, f, pos, count, error, GFP_NOFS);
+}
+
 static int fuse_iomap_end(struct inode *inode, loff_t pos, loff_t count,
 			  ssize_t written, unsigned opflags,
 			  struct iomap *iomap)
 {
 	struct fuse_inode *fi = get_fuse_inode(inode);
 	struct fuse_mount *fm = get_fuse_mount(inode);
+	struct iomap_iter *iter = container_of(iomap, struct iomap_iter, iomap);
+	struct iomap *srcmap = &iter->srcmap;
 	int err;
+
+	if (srcmap->inline_data)
+		fuse_iomap_inline_free(srcmap);
+
+	if (iomap->inline_data) {
+		if (fuse_is_iomap_file_write(opflags) && written > 0) {
+			ssize_t persisted =
+				fuse_iomap_inline_write(inode, pos, written,
+							iomap);
+
+			fuse_iomap_inline_free(iomap);
+			if (persisted < 0) {
+				fuse_iomap_write_error(inode, pos, written,
+						       opflags, persisted);
+				return persisted;
+			}
+
+			if (persisted < written)
+				fuse_iomap_write_error(inode,
+						       pos + persisted,
+						       written - persisted,
+						       opflags, -EIO);
+
+			spin_lock(&fi->lock);
+			fi->i_disk_size = max(fi->i_disk_size,
+					      pos + persisted);
+			spin_unlock(&fi->lock);
+		} else {
+			fuse_iomap_inline_free(iomap);
+		}
+
+		/* fuse server should already be aware of what happened */
+		return 0;
+	}
 
 	if (fuse_should_send_iomap_end(fm, iomap, opflags, count, written)) {
 		struct fuse_iomap_end_in inarg = {
