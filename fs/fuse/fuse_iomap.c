@@ -407,6 +407,23 @@ fuse_iomap_begin_validate(const struct inode *inode,
 	if (BAD_DATA(outarg->write.offset + outarg->write.length <= pos))
 		return -EFSCORRUPTED;
 
+	/* atomic writes require the server to tell us to use atomic bio */
+	if (opflags & IOMAP_ATOMIC) {
+		const struct fuse_iomap_io *write_map = &outarg->write;
+
+		if (write_map->type == FUSE_IOMAP_TYPE_PURE_OVERWRITE)
+			write_map = &outarg->read;
+
+		/* only to disk storage devices */
+		if (BAD_DATA(write_map->type != FUSE_IOMAP_TYPE_MAPPED &&
+		             write_map->type != FUSE_IOMAP_TYPE_UNWRITTEN))
+			return -EIO;
+
+		/* and only if you set the magic flag */
+		if (BAD_DATA(!(write_map->flags & FUSE_IOMAP_F_ATOMIC_BIO)))
+			return -EIO;
+	}
+
 	return 0;
 }
 
@@ -1232,6 +1249,20 @@ static inline void fuse_inode_clear_iomap(struct inode *inode)
 	clear_bit(FUSE_I_IOMAP, &fi->state);
 }
 
+static inline void fuse_inode_set_atomic(struct inode *inode)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	set_bit(FUSE_I_ATOMIC, &fi->state);
+}
+
+static inline void fuse_inode_clear_atomic(struct inode *inode)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	clear_bit(FUSE_I_ATOMIC, &fi->state);
+}
+
 static void fuse_iomap_constrain_bdi(struct inode *inode)
 {
 	struct fuse_conn *fc = get_fuse_conn(inode);
@@ -1295,6 +1326,8 @@ void fuse_iomap_init_inode(struct inode *inode, struct fuse_attr *attr)
 	}
 
 	fuse_inode_set_iomap(inode);
+	if (attr->flags & FUSE_ATTR_ATOMIC)
+		fuse_inode_set_atomic(inode);
 
 	trace_fuse_iomap_init_inode(inode);
 }
@@ -1305,6 +1338,7 @@ void fuse_iomap_evict_inode(struct inode *inode)
 
 	trace_fuse_iomap_evict_inode(inode);
 
+	fuse_inode_clear_atomic(inode);
 	fuse_inode_clear_iomap(inode);
 }
 
@@ -1383,6 +1417,8 @@ void fuse_iomap_open(struct inode *inode, struct file *file)
 	ASSERT(fuse_inode_has_iomap(inode));
 
 	file->f_mode |= FMODE_NOWAIT | FMODE_CAN_ODIRECT;
+	if (fuse_inode_has_atomic(inode))
+		file->f_mode |= FMODE_CAN_ATOMIC_WRITE;
 }
 
 int fuse_iomap_finish_open(const struct fuse_file *ff,
@@ -1596,6 +1632,17 @@ restart:
 	return kiocb_modified(iocb);
 }
 
+static inline ssize_t fuse_iomap_atomic_write_valid(struct kiocb *iocb,
+						    struct iov_iter *from)
+{
+	struct inode *inode = file_inode(iocb->ki_filp);
+
+	if (iov_iter_count(from) != i_blocksize(inode))
+		return -EINVAL;
+
+	return generic_atomic_write_valid(iocb, from);
+}
+
 static ssize_t fuse_iomap_direct_write(struct kiocb *iocb,
 				       struct iov_iter *from)
 {
@@ -1609,6 +1656,12 @@ static ssize_t fuse_iomap_direct_write(struct kiocb *iocb,
 
 	if (!count)
 		goto out;
+
+	if (iocb->ki_flags & IOCB_ATOMIC) {
+		ret = fuse_iomap_atomic_write_valid(iocb, from);
+		if (ret)
+			return ret;
+	}
 
 	/*
 	 * Unaligned direct writes require zeroing of unwritten head and tail
@@ -2053,6 +2106,9 @@ static ssize_t fuse_iomap_buffered_write(struct kiocb *iocb,
 	if (!iov_iter_count(from))
 		goto out;
 
+	if (iocb->ki_flags & IOCB_ATOMIC)
+		return -EOPNOTSUPP;
+
 	ret = fuse_iomap_ilock_iocb(iocb, EXCL);
 	if (ret)
 		goto out;
@@ -2402,7 +2458,8 @@ int fuse_dev_ioctl_iomap_support(struct file *file,
 	if ((fc && fc != FUSE_DEV_FC_DISCONNECTED && fc->may_iomap) ||
 	    (!fc && fud->may_iomap) ||
 	    fuse_iomap_enabled())
-		ios.flags = FUSE_IOMAP_SUPPORT_FILEIO;
+		ios.flags = FUSE_IOMAP_SUPPORT_FILEIO |
+			    FUSE_IOMAP_SUPPORT_ATOMIC;
 	mutex_unlock(&fuse_mutex);
 
 	if (copy_to_user(argp, &ios, sizeof(ios)))
