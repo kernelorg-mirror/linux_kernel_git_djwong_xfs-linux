@@ -248,21 +248,21 @@ static void fuse_iomap_bpf_unreg(void *kdata, struct bpf_link *link)
 
 /* Dummy function stubs for control flow integrity hashes */
 static enum fuse_iomap_bpf_ret
-__iomap_begin(struct fuse_inode *fi, uint64_t pos, uint64_t count,
+__iomap_begin(struct fuse_bpf_inode *fbi, uint64_t pos, uint64_t count,
 	      uint32_t opflags, struct fuse_iomap_begin_out *outarg)
 {
 	return FIB_FALLBACK;
 }
 
 static enum fuse_iomap_bpf_ret
-__iomap_end(struct fuse_inode *fi, uint64_t pos, uint64_t count,
+__iomap_end(struct fuse_bpf_inode *fbi, uint64_t pos, uint64_t count,
 	    int64_t written, uint32_t opflags)
 {
 	return FIB_FALLBACK;
 }
 
 static enum fuse_iomap_bpf_ret
-__iomap_ioend(struct fuse_inode *fi, uint64_t pos, int64_t written,
+__iomap_ioend(struct fuse_bpf_inode *fbi, uint64_t pos, int64_t written,
 	      uint32_t ioendflags, int error, uint32_t dev, uint64_t new_addr,
 	      struct fuse_iomap_ioend_out *outarg)
 {
@@ -290,10 +290,11 @@ static struct bpf_struct_ops fuse_iomap_bpf_struct_ops = {
 __bpf_kfunc_start_defs();
 
 __bpf_kfunc int
-fuse_bpf_iomap_inval_mappings(struct fuse_inode *fi,
+fuse_bpf_iomap_inval_mappings(struct fuse_bpf_inode *fbi,
 			      const struct fuse_range *read__nullable,
 			      const struct fuse_range *write__nullable)
 {
+	struct fuse_inode *fi = fuse_inode_from_bpf(fbi);
 	struct fuse_iomap_inval_mappings_out outarg = {
 		.nodeid = fi->nodeid,
 		.attr_ino = fi->orig_ino,
@@ -315,10 +316,11 @@ fuse_bpf_iomap_inval_mappings(struct fuse_inode *fi,
 }
 
 __bpf_kfunc int
-fuse_bpf_iomap_upsert_mappings(struct fuse_inode *fi,
+fuse_bpf_iomap_upsert_mappings(struct fuse_bpf_inode *fbi,
 			       const struct fuse_iomap_io *read__nullable,
 			       const struct fuse_iomap_io *write__nullable)
 {
+	struct fuse_inode *fi = fuse_inode_from_bpf(fbi);
 	struct fuse_iomap_upsert_mappings_out outarg = {
 		.nodeid = fi->nodeid,
 		.attr_ino = fi->orig_ino,
@@ -341,6 +343,22 @@ fuse_bpf_iomap_upsert_mappings(struct fuse_inode *fi,
 	return fuse_iomap_upsert_inode(inode, &outarg);
 }
 
+__bpf_kfunc uint64_t
+fuse_bpf_inode_nodeid(const struct fuse_bpf_inode *fbi)
+{
+	const struct fuse_inode *fi = fuse_inode_from_bpf(fbi);
+
+	return fi->nodeid;
+}
+
+__bpf_kfunc uint64_t
+fuse_bpf_inode_orig_ino(const struct fuse_bpf_inode *fbi)
+{
+	const struct fuse_inode *fi = fuse_inode_from_bpf(fbi);
+
+	return fi->orig_ino;
+}
+
 __bpf_kfunc_end_defs();
 
 BTF_KFUNCS_START(fuse_iomap_kfunc_ids)
@@ -348,6 +366,8 @@ BTF_ID_FLAGS(func, fuse_bpf_iomap_inval_mappings,
 	     KF_SLEEPABLE | KF_TRUSTED_ARGS)
 BTF_ID_FLAGS(func, fuse_bpf_iomap_upsert_mappings,
 	     KF_SLEEPABLE | KF_TRUSTED_ARGS)
+BTF_ID_FLAGS(func, fuse_bpf_inode_nodeid, KF_TRUSTED_ARGS)
+BTF_ID_FLAGS(func, fuse_bpf_inode_orig_ino, KF_TRUSTED_ARGS)
 BTF_KFUNCS_END(fuse_iomap_kfunc_ids)
 
 static const struct btf_kfunc_id_set fuse_iomap_kfunc_set = {
@@ -400,8 +420,8 @@ int fuse_iomap_begin_bpf(struct inode *inode,
 
 	trace_fuse_iomap_begin_bpf(inode);
 
-	ret = bpf_ops->iomap_begin(fi, inarg->pos, inarg->count,
-				   inarg->opflags, outarg);
+	ret = bpf_ops->iomap_begin(fuse_inode_to_bpf(fi), inarg->pos,
+				   inarg->count, inarg->opflags, outarg);
 	return bpf_to_errno(ret);
 }
 
@@ -418,7 +438,7 @@ int fuse_iomap_end_bpf(struct inode *inode,
 
 	trace_fuse_iomap_end_bpf(inode);
 
-	ret = bpf_ops->iomap_end(fi, inarg->pos, inarg->count,
+	ret = bpf_ops->iomap_end(fuse_inode_to_bpf(fi), inarg->pos, inarg->count,
 				 inarg->written, inarg->opflags);
 	return bpf_to_errno(ret);
 }
@@ -437,8 +457,8 @@ int fuse_iomap_ioend_bpf(struct inode *inode,
 
 	trace_fuse_iomap_ioend_bpf(inode);
 
-	ret = bpf_ops->iomap_ioend(fi, inarg->pos, inarg->written,
-				   inarg->flags, inarg->error, inarg->dev,
-				   inarg->new_addr, outarg);
+	ret = bpf_ops->iomap_ioend(fuse_inode_to_bpf(fi), inarg->pos,
+				   inarg->written, inarg->flags, inarg->error,
+				   inarg->dev, inarg->new_addr, outarg);
 	return bpf_to_errno(ret);
 }
