@@ -18,8 +18,7 @@
  * Private flags for iomap_dio, must not overlap with the public ones in
  * iomap.h:
  */
-#define IOMAP_DIO_NO_INVALIDATE	(1U << 26)
-#define IOMAP_DIO_COMP_WORK	(1U << 27)
+#define IOMAP_DIO_NO_INVALIDATE	(1U << 27)
 #define IOMAP_DIO_WRITE_THROUGH	(1U << 28)
 #define IOMAP_DIO_NEED_SYNC	(1U << 29)
 #define IOMAP_DIO_WRITE		(1U << 30)
@@ -700,7 +699,9 @@ __iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 	dio->i_size = i_size_read(inode);
 	dio->dops = dops;
 	dio->error = 0;
-	dio->flags = dio_flags & (IOMAP_DIO_FSBLOCK_ALIGNED | IOMAP_DIO_BOUNCE);
+	dio->flags = dio_flags & (IOMAP_DIO_FSBLOCK_ALIGNED |
+				  IOMAP_DIO_BOUNCE |
+				  IOMAP_DIO_COMP_WORK);
 	dio->done_before = done_before;
 
 	dio->submit.iter = iter;
