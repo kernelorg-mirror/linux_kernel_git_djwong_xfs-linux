@@ -75,6 +75,7 @@ config FUSE_IOMAP
 	depends on FUSE_FS
 	depends on BLOCK
 	select FS_IOMAP
+	select FUSE_BACKING
 	help
 	  Enable fuse servers to operate the regular file I/O path through
 	  the fs-iomap library in the kernel.  This enables higher performance
