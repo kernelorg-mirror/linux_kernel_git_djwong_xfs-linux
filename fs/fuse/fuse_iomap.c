@@ -1028,6 +1028,8 @@ static int fuse_iomap_process_config(struct fuse_mount *fm, int error,
 		return error;
 	}
 
+	trace_fuse_iomap_config(fm, outarg);
+
 	if (BAD_DATA(outarg->flags & ~FUSE_IOMAP_CONFIG_ALL))
 		return -EINVAL;
 
