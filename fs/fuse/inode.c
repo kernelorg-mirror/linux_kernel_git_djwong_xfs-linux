@@ -10,6 +10,7 @@
 #include "fuse_dev_i.h"
 #include "dev_uring_i.h"
 #include "fuse_iomap.h"
+#include "fuse_iomap_bpf.h"
 
 #include <linux/dax.h>
 #include <linux/pagemap.h>
@@ -1718,6 +1719,8 @@ EXPORT_SYMBOL_GPL(fuse_send_init);
 void fuse_free_conn(struct fuse_conn *fc)
 {
 	WARN_ON(!list_empty(&fc->devices));
+
+	fuse_iomap_unmount_bpf(fc);
 	kfree(fc);
 }
 EXPORT_SYMBOL_GPL(fuse_free_conn);
@@ -2371,6 +2374,10 @@ static int __init fuse_fs_init(void)
 	err = -ENOMEM;
 	if (!fuse_inode_cachep)
 		goto out;
+
+	err = fuse_iomap_init_bpf();
+	if (err)
+		goto out2;
 
 	err = register_fuseblk();
 	if (err)
