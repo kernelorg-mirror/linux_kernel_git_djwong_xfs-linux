@@ -331,9 +331,11 @@ void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 	 * to FUSE_INIT, so this is the only way that the fuse server can set
 	 * the attribute on the root directory after the fact.
 	 */
-	if (get_node_id(inode) == fc->root_nodeid &&
-	    (attr->flags & FUSE_ATTR_EXCLUSIVE))
-		fuse_inode_set_exclusive(fc, inode);
+	if (get_node_id(inode) == fc->root_nodeid) {
+		if (attr->flags & FUSE_ATTR_EXCLUSIVE)
+			fuse_inode_set_exclusive(fc, inode);
+		fuse_fileattr_init(inode, attr);
+	}
 }
 
 u32 fuse_get_cache_mask(struct inode *inode)
@@ -552,6 +554,7 @@ retry:
 			inode->i_flags |= S_NOCMTIME;
 		inode->i_generation = generation;
 		fuse_init_inode(inode, attr, fc);
+		fuse_fileattr_init(inode, attr);
 	} else if (fuse_stale_inode(inode, generation, attr)) {
 		/* nodeid was reused, any I/O on the old inode should fail */
 		fuse_make_bad(inode);

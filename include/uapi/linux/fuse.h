@@ -249,6 +249,8 @@
  *  - add FUSE_IOMAP_CONFIG so the fuse server can configure more fs geometry
  *  - add FUSE_NOTIFY_IOMAP_BACKING_INVAL to invalidate iomap bdev ranges
  *  - add FUSE_ATTR_ATOMIC for single-fsblock atomic write support
+ *  - add FUSE_ATTR_{SYNC,IMMUTABLE,APPEND} for VFS enforcement of file
+ *    attributes
  */
 
 #ifndef _LINUX_FUSE_H
@@ -611,6 +613,11 @@ struct fuse_file_lock {
  *     This flag supplies FUSE_ATTR_EXCLUSIVE.
  * FUSE_ATTR_ATOMIC: Enable untorn writes.  Currently only usable with iomap.
  *     Cannot be cleared.
+ *
+ * File attributes that are only enforced when exclusive mode is enabled:
+ *     FUSE_ATTR_SYNC: File writes are synchronous.
+ *     FUSE_ATTR_IMMUTABLE: File is immutable
+ *     FUSE_ATTR_APPEND: File is append-only
  */
 #define FUSE_ATTR_SUBMOUNT      (1 << 0)
 #define FUSE_ATTR_DAX		(1 << 1)
@@ -618,6 +625,9 @@ struct fuse_file_lock {
 #define __FUSE_ATTR_IOMAP	(1 << 3)
 #define FUSE_ATTR_IOMAP		(FUSE_ATTR_EXCLUSIVE | __FUSE_ATTR_IOMAP)
 #define FUSE_ATTR_ATOMIC	(1 << 4)
+#define FUSE_ATTR_SYNC		(1 << 5)
+#define FUSE_ATTR_IMMUTABLE	(1 << 6)
+#define FUSE_ATTR_APPEND	(1 << 7)
 
 /**
  * Open flags
