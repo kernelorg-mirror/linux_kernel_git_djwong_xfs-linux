@@ -141,6 +141,7 @@ static inline bool fuse_iomap_check_type(uint16_t fuse_type)
 	case FUSE_IOMAP_TYPE_UNWRITTEN:
 	case FUSE_IOMAP_TYPE_INLINE:
 	case FUSE_IOMAP_TYPE_PURE_OVERWRITE:
+	case FUSE_IOMAP_TYPE_RETRY_CACHE:
 		return true;
 	}
 
@@ -248,6 +249,11 @@ static inline bool fuse_is_iomap_file_write(unsigned opflags)
 	return opflags & FUSE_IOMAP_OP_WRITE_MASK;
 }
 
+static inline bool fuse_iomap_can_cache(uint32_t opflags)
+{
+	return (opflags & FUSE_IOMAP_OP_NOCACHE_MASK) == 0;
+}
+
 /* Validate an iomap mapping. */
 static inline bool fuse_iomap_check_mapping(const struct inode *inode,
 					    const struct fuse_iomap_io *map,
@@ -304,6 +310,26 @@ static inline bool fuse_iomap_check_mapping(const struct inode *inode,
 			return false;
 		/*
 		 * This mapping is really a pointer to the read mapping; it
+		 * should not have any state or point to a device.
+		 */
+		if (BAD_DATA(map->flags != 0))
+			return false;
+		if (BAD_DATA(map->dev != FUSE_IOMAP_DEV_NULL))
+			return false;
+		if (BAD_DATA(map->addr != FUSE_IOMAP_NULL_ADDR))
+			return false;
+		break;
+	case FUSE_IOMAP_TYPE_RETRY_CACHE:
+		/*
+		 * We only accept cache retries if we have a cache to query.
+		 * There must not be a device addr (checked later) or any
+		 * mapping state flags.
+		 */
+		if (BAD_DATA(!fuse_inode_caches_iomaps(inode)))
+			return false;
+
+		/*
+		 * This mapping is really an instruction to the iomap code; it
 		 * should not have any state or point to a device.
 		 */
 		if (BAD_DATA(map->flags != 0))
@@ -407,6 +433,14 @@ fuse_iomap_begin_validate(const struct inode *inode,
 		return -EFSCORRUPTED;
 	if (BAD_DATA(outarg->write.offset + outarg->write.length <= pos))
 		return -EFSCORRUPTED;
+
+	/* no retrying from the cache for uncached operations */
+	if (!fuse_iomap_can_cache(opflags)) {
+		if (BAD_DATA(outarg->read.type == FUSE_IOMAP_TYPE_RETRY_CACHE))
+			return -EFSCORRUPTED;
+		if (BAD_DATA(outarg->read.type == FUSE_IOMAP_TYPE_RETRY_CACHE))
+			return -EFSCORRUPTED;
+	}
 
 	/* atomic writes require the server to tell us to use atomic bio */
 	if (opflags & IOMAP_ATOMIC) {
@@ -638,6 +672,184 @@ out_iomap:
 	return err;
 }
 
+/* Convert a mapping from the cache into something the kernel can use */
+static int fuse_iomap_from_cache(struct inode *inode, struct iomap *iomap,
+				 enum fuse_iomap_iodir dir,
+				 const struct fuse_iomap_lookup *lmap)
+{
+	struct fuse_mount *fm = get_fuse_mount(inode);
+	struct fuse_backing *fb;
+	int err;
+
+	fb = fuse_iomap_find_bdev(fm->fc, &lmap->map);
+	if (IS_ERR(fb))
+		return PTR_ERR(fb);
+
+	err = fuse_iomap_validate_bdev_access(fb, dir);
+	if (err)
+		goto out_backing;
+
+	fuse_iomap_from_server(iomap, fb, &lmap->map);
+	iomap->validity_cookie = lmap->validity_cookie;
+
+out_backing:
+	fuse_backing_put(fb);
+	return err;
+}
+
+#if IS_ENABLED(CONFIG_FUSE_IOMAP_DEBUG)
+static inline int
+fuse_iomap_cached_validate(const struct inode *inode,
+			   enum fuse_iomap_iodir dir, loff_t pos,
+			   const struct fuse_iomap_lookup *lmap)
+{
+	if (!static_branch_unlikely(&fuse_iomap_debug))
+		return 0;
+
+	/* Make sure the mappings aren't garbage */
+	if (!fuse_iomap_check_mapping(inode, &lmap->map, dir))
+		return -EFSCORRUPTED;
+
+	/* The cache should not be storing "retry cache" mappings */
+	if (BAD_DATA(lmap->map.type == FUSE_IOMAP_TYPE_RETRY_CACHE))
+		return -EFSCORRUPTED;
+
+	/*
+	 * Must have returned a mapping for at least the first byte in the
+	 * range.  The main mapping check already validated that the length
+	 * is nonzero and there is no overflow in computing end.
+	 */
+	if (BAD_DATA(lmap->map.offset > pos))
+		return -EFSCORRUPTED;
+	if (BAD_DATA(lmap->map.offset + lmap->map.length <= pos))
+		return -EFSCORRUPTED;
+
+	return 0;
+}
+#else
+# define fuse_iomap_cached_validate(...)	(0)
+#endif
+
+/*
+ * Look up iomappings from the cache.  Returns 1 if iomap and srcmap were
+ * satisfied from cache; 0 if not; or a negative errno.
+ */
+static int fuse_iomap_try_cache(struct inode *inode, loff_t pos, loff_t count,
+				unsigned opflags, struct iomap *iomap,
+				struct iomap *srcmap)
+{
+	struct fuse_iomap_lookup lmap;
+	struct iomap *dest = iomap;
+	enum fuse_iomap_lookup_result res;
+	enum fuse_iomap_iodir backing_dir = READ_MAPPING;
+	int ret;
+
+	if (!fuse_inode_caches_iomaps(inode))
+		return 0;
+
+	fuse_iomap_cache_lock_shared(inode);
+
+	if (fuse_is_iomap_file_write(opflags)) {
+		res = fuse_iomap_cache_lookup(inode, WRITE_MAPPING, pos, count,
+					      &lmap);
+		switch (res) {
+		case LOOKUP_HIT:
+			ret = fuse_iomap_cached_validate(inode, WRITE_MAPPING,
+							 pos, &lmap);
+			if (ret)
+				goto out_unlock;
+
+			if (lmap.map.type != FUSE_IOMAP_TYPE_PURE_OVERWRITE) {
+				ret = fuse_iomap_from_cache(inode, dest,
+							    WRITE_MAPPING,
+							    &lmap);
+				if (ret)
+					goto out_unlock;
+
+				/*
+				 * We found a write mapping and filled dest
+				 * with it.  Next we'll fill the srcmap with
+				 * the read mapping for this file range.  The
+				 * backing_dir is already set for reads so we
+				 * leave it alone.
+				 */
+				dest = srcmap;
+				break;
+			}
+
+			fallthrough;
+		case LOOKUP_NOFORK:
+			/*
+			 * No cached write mapping at all.  This is a pure
+			 * overwrite, which will be fed with a mapping from the
+			 * read cache.  The backing_dir should require write
+			 * access.
+			 */
+			backing_dir = WRITE_MAPPING;
+			break;
+		case LOOKUP_MISS:
+			ret = 0;
+			goto out_unlock;
+		}
+	}
+
+	res = fuse_iomap_cache_lookup(inode, READ_MAPPING, pos, count, &lmap);
+	switch (res) {
+	case LOOKUP_HIT:
+		break;
+	case LOOKUP_NOFORK:
+		ASSERT(res != LOOKUP_NOFORK);
+		ret = -EFSCORRUPTED;
+		goto out_unlock;
+	case LOOKUP_MISS:
+		ret = 0;
+		goto out_unlock;
+	}
+
+	ret = fuse_iomap_cached_validate(inode, READ_MAPPING, pos, &lmap);
+	if (ret)
+		goto out_unlock;
+
+	ret = fuse_iomap_from_cache(inode, dest, backing_dir, &lmap);
+	if (ret)
+		goto out_unlock;
+
+	if (fuse_is_iomap_file_write(opflags)) {
+		switch (iomap->type) {
+		case IOMAP_HOLE:
+			if (opflags & (IOMAP_ZERO | IOMAP_UNSHARE))
+				ret = 1;
+			else
+				ret = 0;
+			break;
+		case IOMAP_DELALLOC:
+			if (opflags & (IOMAP_DIRECT | IOMAP_WRITEBACK))
+				ret = 0;
+			else
+				ret = 1;
+			break;
+		default:
+			ret = 1;
+			break;
+		}
+	} else {
+		ret = 1;
+	}
+
+out_unlock:
+	fuse_iomap_cache_unlock_shared(inode);
+	if (ret < 1)
+		return ret;
+
+	if (iomap->type == IOMAP_INLINE || srcmap->type == IOMAP_INLINE) {
+		ret = fuse_iomap_set_inline(inode, opflags, pos, count, iomap,
+					    srcmap);
+		if (ret)
+			return ret;
+	}
+	return 1;
+}
+
 static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 			    unsigned opflags, struct iomap *iomap,
 			    struct iomap *srcmap)
@@ -659,10 +871,24 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 
 	trace_fuse_iomap_begin(inode, pos, count, opflags);
 
-	/* Not very useful until we can cache mappings in the kernel */
+	/*
+	 * Try to read mappings from the cache; if we find something then use
+	 * it; otherwise we upcall the fuse server.
+	 */
+	if (fuse_iomap_can_cache(opflags)) {
+		err = fuse_iomap_try_cache(inode, pos, count, opflags, iomap,
+					   srcmap);
+		if (err < 0)
+			return err;
+		if (err == 1)
+			return 0;
+	}
+
+	/* No waiting for the fuse server */
 	if (opflags & IOMAP_NOWAIT)
 		return -EAGAIN;
 
+retry:
 	args.opcode = FUSE_IOMAP_BEGIN;
 	args.nodeid = get_node_id(inode);
 	args.in_numargs = 1;
@@ -683,6 +909,25 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 	err = fuse_iomap_begin_validate(inode, opflags, pos, &outarg);
 	if (err)
 		return err;
+
+	/*
+	 * If the fuse server tells us it populated the cache, we'll try the
+	 * cache lookup again.  Note that we dropped the cache lock, so it's
+	 * entirely possible that another thread could have invalidated the
+	 * cache -- if the cache misses, we'll call the server again.
+	 */
+	if (outarg.read.type  == FUSE_IOMAP_TYPE_RETRY_CACHE ||
+	    outarg.write.type == FUSE_IOMAP_TYPE_RETRY_CACHE) {
+		err = fuse_iomap_try_cache(inode, pos, count, opflags, iomap,
+					   srcmap);
+		if (err < 0)
+			return err;
+		if (err == 1)
+			return 0;
+		if (signal_pending(current))
+			return -EINTR;
+		goto retry;
+	}
 
 	read_dev = fuse_iomap_find_bdev(fm->fc, &outarg.read);
 	if (IS_ERR(read_dev))
@@ -723,6 +968,8 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 		 */
 		fuse_iomap_from_server(iomap, read_dev, &outarg.read);
 	}
+	iomap->validity_cookie = FUSE_IOMAP_ALWAYS_VALID;
+	srcmap->validity_cookie = FUSE_IOMAP_ALWAYS_VALID;
 
 	if (iomap->type == IOMAP_INLINE || srcmap->type == IOMAP_INLINE) {
 		err = fuse_iomap_set_inline(inode, opflags, pos, count, iomap,
@@ -1564,7 +1811,20 @@ static const struct iomap_dio_ops fuse_iomap_dio_write_ops = {
 	.end_io		= fuse_iomap_dio_write_end_io,
 };
 
+static bool fuse_iomap_valid(struct inode *inode, const struct iomap *iomap)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	uint64_t validity_cookie;
+
+	if (iomap->validity_cookie == FUSE_IOMAP_ALWAYS_VALID)
+		return true;
+
+	validity_cookie = fuse_iext_read_seq(fi->cache);
+	return iomap->validity_cookie == validity_cookie;
+}
+
 static const struct iomap_write_ops fuse_iomap_write_ops = {
+	.iomap_valid		= fuse_iomap_valid,
 };
 
 static int
@@ -1859,6 +2119,17 @@ static void fuse_iomap_end_bio(struct bio *bio)
 }
 
 /*
+ * Fast revalidation of the cached writeback mapping. Return true if the
+ * current mapping is valid, false otherwise.
+ */
+static inline bool
+fuse_iomap_writeback_map_valid(struct iomap_writepage_ctx *wpc, loff_t offset)
+{
+	return iomap_writeback_map_valid(wpc, offset) &&
+	       fuse_iomap_valid(wpc->inode, &wpc->iomap);
+}
+
+/*
  * If the folio has delalloc blocks on it, the caller is asking us to punch them
  * out. If we don't, we can leave a stale delalloc mapping covered by a clean
  * page that needs to be dirtied again before the delalloc mapping can be
@@ -1908,7 +2179,7 @@ static ssize_t fuse_iomap_writeback_range(struct iomap_writepage_ctx *wpc,
 
 	trace_fuse_iomap_writeback_range(wpc->inode, offset, len, end_pos);
 
-	if (!iomap_writeback_map_valid(wpc, offset))
+	if (!fuse_iomap_writeback_map_valid(wpc, offset))
 		ret = iomap_writeback_map(wpc, folio, offset, len, end_pos,
 					  &fuse_iomap_ops);
 	else
