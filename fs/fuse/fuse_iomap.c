@@ -71,9 +71,6 @@ MODULE_PARM_DESC(debug_iomap, "Enable debugging of fuse iomap");
 
 bool fuse_iomap_enabled(void)
 {
-	/* Don't let anyone touch iomap until the end of the patchset. */
-	return false;
-
 	/*
 	 * There are fears that a fuse+iomap server could somehow DoS the
 	 * system by doing things like going out to lunch during a writeback
@@ -86,9 +83,6 @@ bool fuse_iomap_enabled(void)
 
 static inline bool fuse_iomap_may_enable(void)
 {
-	/* Don't let anyone touch iomap until the end of the patchset. */
-	return false;
-
 	/* Same as above, but this time we log the denial in audit log */
 	return enable_iomap && capable(CAP_SYS_RAWIO);
 }
