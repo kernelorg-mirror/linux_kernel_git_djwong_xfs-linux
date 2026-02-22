@@ -286,6 +286,10 @@ void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 			fi->i_btime.tv_sec = sx->btime.tv_sec;
 			fi->i_btime.tv_nsec = sx->btime.tv_nsec;
 		}
+
+		fi->statx_attributes = fuse_statx_attributes(inode, sx);
+		fi->statx_attributes_mask = fuse_statx_attributes_mask(inode,
+								       sx);
 	}
 
 	if (attr->blksize)
