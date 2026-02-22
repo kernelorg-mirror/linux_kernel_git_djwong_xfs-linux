@@ -1060,6 +1060,8 @@ fuse_iomap_write_zero_eof(
 		return 1;
 	}
 
+	trace_fuse_iomap_write_zero_eof(iocb, from);
+
 	filemap_invalidate_lock(mapping);
 	error = fuse_iomap_zero_range(inode, isize, iocb->ki_pos - isize, NULL);
 	filemap_invalidate_unlock(mapping);
@@ -1191,6 +1193,8 @@ static void fuse_iomap_end_ioend(struct iomap_ioend *ioend)
 	if (!error && fuse_is_bad(inode))
 		error = -EIO;
 
+	trace_fuse_iomap_end_ioend(ioend, error);
+
 	if (ioend->io_flags & IOMAP_IOEND_SHARED)
 		ioendflags |= FUSE_IOMAP_IOEND_SHARED;
 	if (ioend->io_flags & IOMAP_IOEND_UNWRITTEN)
@@ -1296,6 +1300,8 @@ static void fuse_iomap_discard_folio(struct folio *folio, loff_t pos, int error)
 
 	ASSERT(fuse_inode_has_iomap(inode));
 
+	trace_fuse_iomap_discard_folio(inode, pos, end - pos);
+
 	printk_ratelimited(KERN_ERR
 		"page discard on page %px, inode 0x%llx, pos %llu.",
 			folio, fi->orig_ino, pos);
@@ -1318,6 +1324,8 @@ static ssize_t fuse_iomap_writeback_range(struct iomap_writepage_ctx *wpc,
 
 	ASSERT(fuse_inode_has_iomap(wpc->inode));
 
+	trace_fuse_iomap_writeback_range(wpc->inode, offset, len, end_pos);
+
 	if (!iomap_writeback_map_valid(wpc, offset))
 		ret = iomap_writeback_map(wpc, folio, offset, len, end_pos,
 					  &fuse_iomap_ops);
@@ -1327,6 +1335,9 @@ static ssize_t fuse_iomap_writeback_range(struct iomap_writepage_ctx *wpc,
 discard_folio:
 	if (ret < 0)
 		fuse_iomap_discard_folio(folio, offset, ret);
+
+	trace_fuse_iomap_writeback_range_end(wpc->inode, offset, len, end_pos,
+					     ret);
 	return ret;
 }
 
@@ -1336,6 +1347,8 @@ static int fuse_iomap_writeback_submit(struct iomap_writepage_ctx *wpc,
 	struct iomap_ioend *ioend = wpc->wb_ctx;
 
 	ASSERT(fuse_inode_has_iomap(ioend->io_inode));
+
+	trace_fuse_iomap_writeback_submit(wpc, error);
 
 	/* always call our ioend function, even if we cancel the bio */
 	ioend->io_bio.bi_end_io = fuse_iomap_end_bio;
@@ -1360,12 +1373,16 @@ static int fuse_iomap_writepages(struct address_space *mapping,
 
 	ASSERT(fuse_inode_has_iomap(mapping->host));
 
+	trace_fuse_iomap_writepages(mapping->host, wbc);
+
 	return iomap_writepages(&wpc.ctx);
 }
 
 static int fuse_iomap_read_folio(struct file *file, struct folio *folio)
 {
 	ASSERT(fuse_inode_has_iomap(file_inode(file)));
+
+	trace_fuse_iomap_read_folio(folio);
 
 	iomap_bio_read_folio(folio, &fuse_iomap_ops);
 	return 0;
@@ -1374,6 +1391,8 @@ static int fuse_iomap_read_folio(struct file *file, struct folio *folio)
 static void fuse_iomap_readahead(struct readahead_control *rac)
 {
 	ASSERT(fuse_inode_has_iomap(file_inode(rac->file)));
+
+	trace_fuse_iomap_readahead(rac);
 
 	iomap_bio_readahead(rac, &fuse_iomap_ops);
 }
@@ -1425,6 +1444,8 @@ static vm_fault_t fuse_iomap_page_mkwrite(struct vm_fault *vmf)
 
 	ASSERT(fuse_inode_has_iomap(inode));
 
+	trace_fuse_iomap_page_mkwrite(vmf);
+
 	sb_start_pagefault(inode->i_sb);
 	file_update_time(vmf->vma->vm_file);
 
@@ -1458,6 +1479,8 @@ static ssize_t fuse_iomap_buffered_read(struct kiocb *iocb, struct iov_iter *to)
 
 	ASSERT(fuse_inode_has_iomap(inode));
 
+	trace_fuse_iomap_buffered_read(iocb, to);
+
 	if (!iov_iter_count(to))
 		goto out; /* skip atime */
 
@@ -1471,6 +1494,7 @@ static ssize_t fuse_iomap_buffered_read(struct kiocb *iocb, struct iov_iter *to)
 	inode_unlock_shared(inode);
 
 out:
+	trace_fuse_iomap_buffered_read_end(iocb, to, ret);
 	return ret;
 }
 
@@ -1483,6 +1507,8 @@ static ssize_t fuse_iomap_buffered_write(struct kiocb *iocb,
 	ssize_t ret = 0;
 
 	ASSERT(fuse_inode_has_iomap(inode));
+
+	trace_fuse_iomap_buffered_write(iocb, from);
 
 	if (!iov_iter_count(from))
 		goto out;
@@ -1513,6 +1539,7 @@ out_unlock:
 		ret = generic_write_sync(iocb, ret);
 	}
 out:
+	trace_fuse_iomap_buffered_write_end(iocb, from, ret);
 	return ret;
 }
 
@@ -1635,11 +1662,17 @@ fuse_iomap_setsize_start(
 	 * extension, or zeroing out the rest of the block on a downward
 	 * truncate.
 	 */
-	if (newsize > oldsize)
+	if (newsize > oldsize) {
+		trace_fuse_iomap_truncate_up(inode, oldsize, newsize - oldsize);
+
 		error = fuse_iomap_zero_range(inode, oldsize, newsize - oldsize,
 					      &did_zeroing);
-	else
+	} else {
+		trace_fuse_iomap_truncate_down(inode, newsize,
+					       oldsize - newsize);
+
 		error = fuse_iomap_truncate_page(inode, newsize, &did_zeroing);
+	}
 	if (error)
 		return error;
 
@@ -1688,6 +1721,8 @@ int fuse_iomap_flush_unmap_range(struct inode *inode, loff_t pos,
 	start = round_down(pos, rounding);
 	end = round_up(endpos + 1, rounding) - 1;
 
+	trace_fuse_iomap_flush_unmap_range(inode, start, end + 1 - start);
+
 	error = filemap_write_and_wait_range(inode->i_mapping, start, end);
 	if (error)
 		return error;
@@ -1700,6 +1735,8 @@ static int fuse_iomap_punch_range(struct inode *inode, loff_t offset,
 {
 	loff_t isize = i_size_read(inode);
 	int error;
+
+	trace_fuse_iomap_punch_range(inode, offset, length);
 
 	/*
 	 * Now that we've unmap all full blocks we'll have to zero out any
@@ -1743,6 +1780,8 @@ fuse_iomap_fallocate(
 	int error;
 
 	ASSERT(fuse_inode_has_iomap(inode));
+
+	trace_fuse_iomap_fallocate(inode, mode, offset, length, new_size);
 
 	/*
 	 * If we unmapped blocks from the file range, then we zero the
