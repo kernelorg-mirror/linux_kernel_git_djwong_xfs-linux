@@ -1147,7 +1147,8 @@ struct fuse_iomap_config_args {
 			       FUSE_IOMAP_CONFIG_BLOCKSIZE | \
 			       FUSE_IOMAP_CONFIG_MAX_LINKS | \
 			       FUSE_IOMAP_CONFIG_TIME | \
-			       FUSE_IOMAP_CONFIG_MAXBYTES)
+			       FUSE_IOMAP_CONFIG_MAXBYTES | \
+			       FUSE_IOMAP_CONFIG_CACHE_MAXBYTES)
 
 static int fuse_iomap_process_config(struct fuse_mount *fm, int error,
 				     const struct fuse_iomap_config_out *outarg)
@@ -1212,6 +1213,9 @@ static int fuse_iomap_process_config(struct fuse_mount *fm, int error,
 	if (outarg->flags & FUSE_IOMAP_CONFIG_MAXBYTES)
 		sb->s_maxbytes = outarg->s_maxbytes;
 
+	if (outarg->flags & FUSE_IOMAP_CONFIG_CACHE_MAXBYTES)
+		fuse_iomap_cache_set_maxbytes(fm->fc, outarg->cache_maxbytes);
+
 	return 0;
 }
 
@@ -1272,6 +1276,9 @@ fuse_iomap_new_mount(struct fuse_mount *fm)
 	ia = kzalloc(sizeof(*ia), GFP_KERNEL | __GFP_NOFAIL);
 	ia->inarg.maxbytes = MAX_LFS_FILESIZE;
 	ia->inarg.flags = FUSE_IOMAP_CONFIG_ALL;
+
+	fm->fc->iomap_conn.cache_maxbytes = FUSE_IOMAP_CACHE_DEFAULT_MAXBYTES;
+	ia->inarg.cache_maxbytes = fm->fc->iomap_conn.cache_maxbytes;
 
 	ia->args.opcode = FUSE_IOMAP_CONFIG;
 	ia->args.nodeid = 0;
