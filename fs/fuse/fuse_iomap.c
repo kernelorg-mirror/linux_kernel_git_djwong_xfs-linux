@@ -1356,6 +1356,14 @@ void fuse_iomap_init_inode(struct inode *inode, struct fuse_attr *attr)
 	if (attr->flags & FUSE_ATTR_ATOMIC)
 		fuse_inode_set_atomic(inode);
 
+	/*
+	 * iomap caches atime too, so we must load it from the fuse server
+	 * at instantiation time.  This is the truncation strategy fuse uses,
+	 * though you'd think we would simply increment the atime.
+	 */
+	inode_set_atime(inode, attr->atime,
+			min_t(u32, attr->atimensec, NSEC_PER_SEC - 1));
+
 	trace_fuse_iomap_init_inode(inode);
 }
 
@@ -2037,6 +2045,7 @@ static inline void fuse_inode_set_iomap(struct inode *inode)
 	 * is critical for mtime updates to work correctly with page_mkwrite.
 	 */
 	inode->i_flags &= ~S_NOCMTIME;
+	inode->i_flags &= ~S_NOATIME;
 	inode->i_data.a_ops = &fuse_iomap_aops;
 
 	INIT_WORK(&fi->ioend_work, fuse_iomap_end_io);
