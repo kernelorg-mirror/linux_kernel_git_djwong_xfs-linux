@@ -2390,3 +2390,59 @@ int fuse_dev_ioctl_iomap_set_nofs(struct file *file, uint32_t __user *argp)
 		return -EINVAL;
 	}
 }
+
+int fuse_iomap_backing_inval(struct fuse_conn *fc,
+			     const struct fuse_iomap_backing_inval_out *arg)
+{
+	struct fuse_backing *fb;
+	struct block_device *bdev;
+	loff_t end;
+	int ret = 0;
+
+	if (!fc->iomap || arg->dev == FUSE_IOMAP_DEV_NULL)
+		return -EINVAL;
+
+	down_read(&fc->killsb);
+	fb = fuse_backing_lookup(fc, &fuse_iomap_backing_ops, arg->dev);
+	if (!fb) {
+		ret = -ENODEV;
+		goto out_killsb;
+	}
+	bdev = fb->bdev;
+
+	inode_lock(bdev->bd_mapping->host);
+	filemap_invalidate_lock(bdev->bd_mapping);
+
+	if (arg->range.offset >= bdev_nr_bytes(bdev)) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	if (arg->range.length == 0) {
+		ret = 0;
+		goto out_unlock;
+	}
+
+	if (check_add_overflow(arg->range.offset, arg->range.length, &end)) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	/*
+	 * Removes page cache for full base pages within the requested range,
+	 * and zeroes and cleans unaligned edges.  We don't care about this
+	 * distinction; all we care about is not having dirty bufferheads that
+	 * would get written out after iomap starts issuing writes directly to
+	 * the block device.
+	 */
+	end = min(end, bdev_nr_bytes(bdev)) - 1;
+	truncate_inode_pages_range(bdev->bd_mapping, arg->range.offset, end);
+
+out_unlock:
+	filemap_invalidate_unlock(bdev->bd_mapping);
+	inode_unlock(bdev->bd_mapping->host);
+	fuse_backing_put(fb);
+out_killsb:
+	up_read(&fc->killsb);
+	return ret;
+}
