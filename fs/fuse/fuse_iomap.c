@@ -132,6 +132,7 @@ static inline bool fuse_iomap_check_type(uint16_t fuse_type)
 	case FUSE_IOMAP_TYPE_INLINE:
 	case FUSE_IOMAP_TYPE_PURE_OVERWRITE:
 	case FUSE_IOMAP_TYPE_RETRY_CACHE:
+	case FUSE_IOMAP_TYPE_NOCACHE:
 		return true;
 	}
 
@@ -241,8 +242,8 @@ static inline bool fuse_iomap_check_mapping(const struct inode *inode,
 	uint64_t end;
 
 	/*
-	 * Type and flags must be known.  Mapping type "retry cache" doesn't
-	 * use any of the other fields.
+	 * Type and flags must be known.  Mapping types "retry cache" and "do
+	 * not insert in cache" don't use any of the other fields.
 	 */
 	if (BAD_DATA(!fuse_iomap_check_type(map->type)))
 		return false;
@@ -255,6 +256,8 @@ static inline bool fuse_iomap_check_mapping(const struct inode *inode,
 			return false;
 		return true;
 	}
+	if (map->type == FUSE_IOMAP_TYPE_NOCACHE)
+		return true;
 	if (BAD_DATA(!fuse_iomap_check_flags(map->flags)))
 		return false;
 
@@ -299,6 +302,7 @@ static inline bool fuse_iomap_check_mapping(const struct inode *inode,
 		if (BAD_DATA(iodir != WRITE_MAPPING))
 			return false;
 		break;
+	case FUSE_IOMAP_TYPE_NOCACHE:
 	case FUSE_IOMAP_TYPE_RETRY_CACHE:
 	default:
 		/* should have been caught already */
@@ -373,6 +377,15 @@ fuse_iomap_begin_validate(const struct inode *inode,
 		return -EFSCORRUPTED;
 
 	if (!fuse_iomap_check_mapping(inode, &outarg->write, WRITE_MAPPING))
+		return -EFSCORRUPTED;
+
+	/*
+	 * ->iomap_begin requires real mappings or "retry from cache"; "do not
+	 * add to cache" does not apply here.
+	 */
+	if (BAD_DATA(outarg->read.type == FUSE_IOMAP_TYPE_NOCACHE))
+		return -EFSCORRUPTED;
+	if (BAD_DATA(outarg->write.type == FUSE_IOMAP_TYPE_NOCACHE))
 		return -EFSCORRUPTED;
 
 	/*
@@ -599,6 +612,7 @@ static int fuse_iomap_from_cache(struct inode *inode, struct iomap *iomap,
 
 	fuse_iomap_from_server(iomap, fb, &lmap->map);
 	iomap->validity_cookie = lmap->validity_cookie;
+	fuse_backing_put(fb);
 	return 0;
 }
 
@@ -615,8 +629,10 @@ fuse_iomap_cached_validate(const struct inode *inode,
 	if (!fuse_iomap_check_mapping(inode, &lmap->map, dir))
 		return -EFSCORRUPTED;
 
-	/* The cache should not be storing "retry cache" mappings */
+	/* The cache should not be storing cache management mappings */
 	if (BAD_DATA(lmap->map.type == FUSE_IOMAP_TYPE_RETRY_CACHE))
+		return -EFSCORRUPTED;
+	if (BAD_DATA(lmap->map.type == FUSE_IOMAP_TYPE_NOCACHE))
 		return -EFSCORRUPTED;
 
 	return 0;
@@ -2658,4 +2674,255 @@ void fuse_iomap_copied_file_range(struct inode *inode, loff_t offset,
 	trace_fuse_iomap_copied_file_range(inode, offset, written);
 
 	fuse_iomap_cache_invalidate_range(inode, offset, written);
+}
+
+static inline int
+fuse_iomap_upsert_validate_dev(
+	const struct fuse_backing	*fb,
+	const struct fuse_iomap_io	*map)
+{
+	uint64_t			map_end;
+	sector_t			device_bytes;
+
+	if (!fb) {
+		if (BAD_DATA(map->addr != FUSE_IOMAP_NULL_ADDR))
+			return -EFSCORRUPTED;
+
+		return 0;
+	}
+
+	if (BAD_DATA(map->addr == FUSE_IOMAP_NULL_ADDR))
+		return -EFSCORRUPTED;
+
+	if (BAD_DATA(check_add_overflow(map->addr, map->length, &map_end)))
+		return -EFSCORRUPTED;
+
+	/*
+	 * bdev_nr_sectors() == 0 usually means the device has gone away from
+	 * underneath us.  We won't cache this mapping, but we'll return
+	 * -EINVAL to signal a softer error to the fuse server than "your fs
+	 * metadata are corrupt".  If the fuse server persists anyway, then
+	 * the worst that happens is that the IO will fail.
+	 */
+	device_bytes = bdev_nr_sectors(fb->bdev) << SECTOR_SHIFT;
+	if (!device_bytes)
+		return -EINVAL;
+
+	if (BAD_DATA(map_end > device_bytes))
+		return -EFSCORRUPTED;
+
+	return 0;
+}
+
+/* Validate one of the incoming upsert mappings */
+static inline int
+fuse_iomap_upsert_validate_mapping(struct inode *inode,
+				   enum fuse_iomap_iodir iodir,
+				   const struct fuse_iomap_io *map)
+{
+	struct fuse_conn *fc = get_fuse_conn(inode);
+	struct fuse_backing *fb;
+	int ret;
+
+	if (!fuse_iomap_check_mapping(inode, map, iodir))
+		return -EFSCORRUPTED;
+
+	/*
+	 * A "retry cache" instruction makes no sense when we're adding to
+	 * the mapping cache.
+	 */
+	if (BAD_DATA(map->type == FUSE_IOMAP_TYPE_RETRY_CACHE))
+		return -EFSCORRUPTED;
+
+	/* nocache is allowed, because we ignore it later */
+	if (map->type == FUSE_IOMAP_TYPE_NOCACHE)
+		return 0;
+
+	/* Make sure we can find the device */
+	fb = fuse_iomap_find_dev(fc, map);
+	if (BAD_DATA(IS_ERR(fb)))
+		return PTR_ERR(fb);
+
+	ret = fuse_iomap_upsert_validate_dev(fb, map);
+	fuse_backing_put(fb);
+	return ret;
+}
+
+/* Check the incoming upsert mappings to make sure they're not nonsense */
+static inline int
+fuse_iomap_upsert_validate_mappings(struct inode *inode,
+		const struct fuse_iomap_upsert_mappings_out *outarg)
+{
+	int ret;
+
+	if (!fuse_inode_has_iomap(inode))
+		return -EINVAL;
+
+	ret = fuse_iomap_upsert_validate_mapping(inode, READ_MAPPING,
+						 &outarg->read);
+	if (ret)
+		return ret;
+
+	return fuse_iomap_upsert_validate_mapping(inode, WRITE_MAPPING,
+						  &outarg->write);
+}
+
+static int fuse_iomap_upsert_inode(struct inode *inode,
+		const struct fuse_iomap_upsert_mappings_out *outarg)
+{
+	int ret = fuse_iomap_upsert_validate_mappings(inode, outarg);
+	if (ret)
+		return ret;
+
+	if (!fuse_inode_caches_iomaps(inode)) {
+		ret = fuse_iomap_cache_alloc(inode);
+		if (ret)
+			return ret;
+	}
+
+	fuse_iomap_cache_lock(inode);
+
+	if (outarg->read.type != FUSE_IOMAP_TYPE_NOCACHE) {
+		ret = fuse_iomap_cache_upsert(inode, READ_MAPPING,
+					      &outarg->read);
+		if (ret)
+			goto out_unlock;
+	}
+
+	if (outarg->write.type != FUSE_IOMAP_TYPE_NOCACHE) {
+		ret = fuse_iomap_cache_upsert(inode, WRITE_MAPPING,
+					      &outarg->write);
+		if (ret)
+			goto out_unlock;
+	}
+
+out_unlock:
+	fuse_iomap_cache_unlock(inode);
+	return ret;
+}
+
+int fuse_iomap_upsert_mappings(struct fuse_conn *fc,
+		const struct fuse_iomap_upsert_mappings_out *outarg)
+{
+	struct inode *inode;
+	struct fuse_inode *fi;
+	int ret;
+
+	if (!fc->iomap)
+		return -EINVAL;
+
+	down_read(&fc->killsb);
+	inode = fuse_ilookup(fc, outarg->nodeid, NULL);
+	if (!inode) {
+		ret = -ESTALE;
+		goto out_sb;
+	}
+
+	fi = get_fuse_inode(inode);
+	if (BAD_DATA(fi->orig_ino != outarg->attr_ino)) {
+		ret = -EINVAL;
+		goto out_inode;
+	}
+
+	if (fuse_is_bad(inode)) {
+		ret = -EIO;
+		goto out_inode;
+	}
+
+	ret = fuse_iomap_upsert_inode(inode, outarg);
+out_inode:
+	iput(inode);
+out_sb:
+	up_read(&fc->killsb);
+	return ret;
+}
+
+static inline bool
+fuse_iomap_inval_validate_range(const struct inode *inode,
+				const struct fuse_range *range)
+{
+	const unsigned int blocksize = i_blocksize(inode);
+
+	if (range->length == 0)
+		return true;
+
+	/* Range can't start beyond maxbytes */
+	if (BAD_DATA(range->offset >= inode->i_sb->s_maxbytes))
+		return false;
+
+	/* File range must be aligned to blocksize */
+	if (BAD_DATA(!IS_ALIGNED(range->offset, blocksize)))
+		return false;
+	if (range->length != FUSE_IOMAP_INVAL_TO_EOF &&
+	    BAD_DATA(!IS_ALIGNED(range->length, blocksize)))
+		return false;
+
+	return true;
+}
+
+static int fuse_iomap_inval_inode(struct inode *inode,
+		const struct fuse_iomap_inval_mappings_out *outarg)
+{
+	int ret = 0, ret2 = 0;
+
+	if (!fuse_inode_has_iomap(inode))
+		return -EINVAL;
+
+	if (!fuse_iomap_inval_validate_range(inode, &outarg->write))
+		return -EFSCORRUPTED;
+
+	if (!fuse_iomap_inval_validate_range(inode, &outarg->read))
+		return -EFSCORRUPTED;
+
+	if (!fuse_inode_caches_iomaps(inode))
+		return 0;
+
+	fuse_iomap_cache_lock(inode);
+	if (outarg->read.length)
+		ret2 = fuse_iomap_cache_remove(inode, READ_MAPPING,
+					       outarg->read.offset,
+					       outarg->read.length);
+	if (outarg->write.length)
+		ret = fuse_iomap_cache_remove(inode, WRITE_MAPPING,
+					      outarg->write.offset,
+					      outarg->write.length);
+	fuse_iomap_cache_unlock(inode);
+
+	return ret ? ret : ret2;
+}
+
+int fuse_iomap_inval_mappings(struct fuse_conn *fc,
+		const struct fuse_iomap_inval_mappings_out *outarg)
+{
+	struct inode *inode;
+	struct fuse_inode *fi;
+	int ret;
+
+	if (!fc->iomap)
+		return -EINVAL;
+
+	down_read(&fc->killsb);
+	inode = fuse_ilookup(fc, outarg->nodeid, NULL);
+	if (!inode) {
+		ret = -ESTALE;
+		goto out_sb;
+	}
+
+	fi = get_fuse_inode(inode);
+	if (BAD_DATA(fi->orig_ino != outarg->attr_ino)) {
+		ret = -EINVAL;
+		goto out_inode;
+	}
+
+	if (fuse_is_bad(inode)) {
+		ret = -EIO;
+		goto out_inode;
+	}
+
+	ret = fuse_iomap_inval_inode(inode, outarg);
+out_inode:
+	iput(inode);
+out_sb:
+	up_read(&fc->killsb);
+	return ret;
 }
