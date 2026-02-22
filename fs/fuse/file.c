@@ -402,7 +402,7 @@ static int fuse_release(struct inode *inode, struct file *file)
 	 * Dirty pages might remain despite write_inode_now() call from
 	 * fuse_flush() due to writes racing with the close.
 	 */
-	if (fc->writeback_cache)
+	if (fc->writeback_cache || fuse_inode_has_iomap(inode))
 		write_inode_now(inode, 1);
 
 	fuse_release_common(file, false);
@@ -2395,6 +2395,9 @@ static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 	struct inode *inode = file_inode(file);
 	int rc;
 
+	if (fuse_inode_has_iomap(inode))
+		return fuse_iomap_mmap(file, vma);
+
 	/* DAX mmap is superior to direct_io mmap */
 	if (FUSE_IS_DAX(inode))
 		return fuse_dax_mmap(file, vma);
@@ -2593,7 +2596,7 @@ static int fuse_file_flock(struct file *file, int cmd, struct file_lock *fl)
 	return err;
 }
 
-static sector_t fuse_bmap(struct address_space *mapping, sector_t block)
+sector_t fuse_bmap(struct address_space *mapping, sector_t block)
 {
 	struct inode *inode = mapping->host;
 	struct fuse_mount *fm = get_fuse_mount(inode);
@@ -2947,8 +2950,12 @@ fuse_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 
 static int fuse_writeback_range(struct inode *inode, loff_t start, loff_t end)
 {
-	int err = filemap_write_and_wait_range(inode->i_mapping, start, LLONG_MAX);
+	int err;
 
+	if (fuse_inode_has_iomap(inode))
+		return fuse_iomap_flush_unmap_range(inode, start, end);
+
+	err = filemap_write_and_wait_range(inode->i_mapping, start, LLONG_MAX);
 	if (!err)
 		fuse_sync_writes(inode);
 
@@ -2984,7 +2991,10 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 		return -EOPNOTSUPP;
 
 	inode_lock(inode);
-	if (block_faults) {
+	if (is_iomap) {
+		filemap_invalidate_lock(inode->i_mapping);
+		block_faults = true;
+	} else if (block_faults) {
 		filemap_invalidate_lock(inode->i_mapping);
 		err = fuse_dax_break_layouts(inode, 0, -1);
 		if (err)
@@ -2998,6 +3008,17 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 		if (err)
 			goto out;
 	}
+
+	/*
+	 * If we are using iomap for file IO, fallocate must wait for all AIO
+	 * to complete before we continue as AIO can change the file size on
+	 * completion without holding any locks we currently hold. We must do
+	 * this first because AIO can update the in-memory inode size, and the
+	 * operations that follow require the in-memory size to be fully
+	 * up-to-date.
+	 */
+	if (is_iomap)
+		inode_dio_wait(inode);
 
 	if (!(mode & FALLOC_FL_KEEP_SIZE) &&
 	    offset + length > i_size_read(inode)) {
@@ -3027,20 +3048,22 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 	if (err)
 		goto out;
 
-	/* we could have extended the file */
-	if (!(mode & FALLOC_FL_KEEP_SIZE)) {
-		if (is_iomap && newsize > 0) {
-			err = fuse_iomap_setsize_finish(inode, newsize);
-			if (err)
-				goto out;
+	if (is_iomap) {
+		err = fuse_iomap_fallocate(file, mode, offset, length,
+					   newsize);
+		if (err)
+			goto out;
+	} else {
+		/* we could have extended the file */
+		if (!(mode & FALLOC_FL_KEEP_SIZE)) {
+			if (fuse_write_update_attr(inode, newsize, length))
+				file_update_time(file);
 		}
 
-		if (fuse_write_update_attr(inode, offset + length, length))
-			file_update_time(file);
+		if (mode & (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_ZERO_RANGE))
+			truncate_pagecache_range(inode, offset,
+						 offset + length - 1);
 	}
-
-	if (mode & (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_ZERO_RANGE))
-		truncate_pagecache_range(inode, offset, offset + length - 1);
 
 	fuse_invalidate_attr_mask(inode, FUSE_STATX_MODSIZE);
 
@@ -3085,6 +3108,7 @@ static ssize_t __fuse_copy_file_range(struct file *file_in, loff_t pos_in,
 	ssize_t err;
 	/* mark unstable when write-back is not used, and file_out gets
 	 * extended */
+	const bool is_iomap = fuse_inode_has_iomap(inode_out);
 	bool is_unstable = (!fc->writeback_cache) &&
 			   ((pos_out + len) > inode_out->i_size);
 
@@ -3128,6 +3152,10 @@ static ssize_t __fuse_copy_file_range(struct file *file_in, loff_t pos_in,
 	if (err)
 		goto out;
 
+	/* See inode_dio_wait comment in fuse_file_fallocate */
+	if (is_iomap)
+		inode_dio_wait(inode_out);
+
 	if (is_unstable)
 		set_bit(FUSE_I_SIZE_UNSTABLE, &fi_out->state);
 
@@ -3168,7 +3196,8 @@ fallback:
 		goto out;
 	}
 
-	truncate_inode_pages_range(inode_out->i_mapping,
+	if (!is_iomap)
+		truncate_inode_pages_range(inode_out->i_mapping,
 				   ALIGN_DOWN(pos_out, PAGE_SIZE),
 				   ALIGN(pos_out + bytes_copied, PAGE_SIZE) - 1);
 
