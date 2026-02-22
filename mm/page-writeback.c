@@ -809,6 +809,7 @@ int bdi_set_strict_limit(struct backing_dev_info *bdi, unsigned int strict_limit
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(bdi_set_strict_limit);
 
 static unsigned long dirty_freerun_ceiling(unsigned long thresh,
 					   unsigned long bg_thresh)
