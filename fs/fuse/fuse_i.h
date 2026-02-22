@@ -691,6 +691,11 @@ struct fuse_iomap_conn {
 
 	/* maximum mapping cache size */
 	unsigned int cache_maxbytes;
+
+#ifdef CONFIG_BPF_SYSCALL
+	/* bpf iomap overrides for this fs */
+	struct fuse_iomap_bpf_ops __rcu *bpf_ops;
+#endif
 };
 #endif
 
