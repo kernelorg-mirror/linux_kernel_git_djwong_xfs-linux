@@ -1403,11 +1403,15 @@ struct fuse_uring_cmd_req {
 #define FUSE_IOMAP_OP_DONTCACHE		(1U << 10)
 #define FUSE_IOMAP_OP_WRITEBACK		(1U << 11)
 
+/* swapfile config operation */
+#define FUSE_IOMAP_OP_SWAPFILE		(1U << 31)
+
 /* file write operations */
 #define FUSE_IOMAP_OP_WRITE_MASK	(FUSE_IOMAP_OP_WRITE | \
 					 FUSE_IOMAP_OP_ZERO | \
 					 FUSE_IOMAP_OP_UNSHARE | \
-					 FUSE_IOMAP_OP_WRITEBACK)
+					 FUSE_IOMAP_OP_WRITEBACK | \
+					 FUSE_IOMAP_OP_SWAPFILE)
 
 #define FUSE_IOMAP_NULL_ADDR		(-1ULL)	/* addr is not valid */
 
@@ -1467,6 +1471,8 @@ struct fuse_iomap_end_in {
 #define FUSE_IOMAP_IOEND_APPEND		(1U << 4)
 /* is pagecache writeback */
 #define FUSE_IOMAP_IOEND_WRITEBACK	(1U << 5)
+/* swapfile deactivation */
+#define FUSE_IOMAP_IOEND_SWAPOFF	(1U << 6)
 
 struct fuse_iomap_ioend_in {
 	uint32_t flags;		/* FUSE_IOMAP_IOEND_* */
