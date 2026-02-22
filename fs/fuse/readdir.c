@@ -189,12 +189,12 @@ static int fuse_direntplus_link(struct file *file,
 			return 0;
 	}
 
-	if (invalid_nodeid(o->nodeid))
+	fc = get_fuse_conn(dir);
+	if (invalid_nodeid(fc, o->nodeid))
 		return -EIO;
 	if (fuse_invalid_attr(&o->attr))
 		return -EIO;
 
-	fc = get_fuse_conn(dir);
 	epoch = atomic_read(&fc->epoch);
 
 	name.hash = full_name_hash(parent, name.name, name.len);
