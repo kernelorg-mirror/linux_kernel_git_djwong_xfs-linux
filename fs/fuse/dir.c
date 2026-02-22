@@ -2380,7 +2380,7 @@ int fuse_do_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 
 	/* Kill suid/sgid for non-directory chown unconditionally */
 	if (fc->handle_killpriv_v2 && !S_ISDIR(inode->i_mode) &&
-	    attr->ia_valid & (ATTR_UID | ATTR_GID))
+	    attr->ia_valid & (ATTR_UID | ATTR_GID) && !is_iomap)
 		inarg.valid |= FATTR_KILL_SUIDGID;
 
 	if (attr->ia_valid & ATTR_SIZE) {
@@ -2389,7 +2389,7 @@ int fuse_do_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		inarg.lock_owner = fuse_lock_owner_id(fc, current->files);
 
 		/* Kill suid/sgid for truncate only if no CAP_FSETID */
-		if (fc->handle_killpriv_v2 && !capable(CAP_FSETID))
+		if (fc->handle_killpriv_v2 && !is_iomap && !capable(CAP_FSETID))
 			inarg.valid |= FATTR_KILL_SUIDGID;
 	}
 
@@ -2483,6 +2483,7 @@ static int fuse_setattr(struct mnt_idmap *idmap, struct dentry *entry,
 	struct inode *inode = d_inode(entry);
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct file *file = (attr->ia_valid & ATTR_FILE) ? attr->ia_file : NULL;
+	const bool is_iomap = fuse_inode_has_iomap(inode);
 	int ret;
 
 	if (fuse_is_bad(inode))
@@ -2491,15 +2492,19 @@ static int fuse_setattr(struct mnt_idmap *idmap, struct dentry *entry,
 	if (!fuse_allow_current_process(get_fuse_conn(inode)))
 		return -EACCES;
 
-	if (attr->ia_valid & (ATTR_KILL_SUID | ATTR_KILL_SGID)) {
+	if (!is_iomap &&
+	    (attr->ia_valid & (ATTR_KILL_SUID | ATTR_KILL_SGID))) {
 		attr->ia_valid &= ~(ATTR_KILL_SUID | ATTR_KILL_SGID |
 				    ATTR_MODE);
 
 		/*
 		 * The only sane way to reliably kill suid/sgid is to do it in
-		 * the userspace filesystem
+		 * the userspace filesystem if this isn't an iomap file.  For
+		 * iomap filesystems we let the kernel kill the setuid/setgid
+		 * bits.
 		 *
-		 * This should be done on write(), truncate() and chown().
+		 * This should be done on write(), truncate(), chown(), and
+		 * fallocate().
 		 */
 		if (!fc->handle_killpriv && !fc->handle_killpriv_v2) {
 			/*
