@@ -1468,6 +1468,8 @@ static int fuse_do_statx(struct mnt_idmap *idmap, struct inode *inode,
 		stat->result_mask = sx->mask & (STATX_BASIC_STATS | STATX_BTIME);
 		stat->btime.tv_sec = sx->btime.tv_sec;
 		stat->btime.tv_nsec = min_t(u32, sx->btime.tv_nsec, NSEC_PER_SEC - 1);
+		stat->attributes |= fuse_statx_attributes(inode, sx);
+		stat->attributes_mask |= fuse_statx_attributes_mask(inode, sx);
 		fuse_fillattr(idmap, inode, &attr, stat);
 		stat->result_mask |= STATX_TYPE;
 	}
@@ -1572,6 +1574,8 @@ retry:
 			stat->btime = fi->i_btime;
 			stat->result_mask |= STATX_BTIME;
 		}
+		stat->attributes |= fi->statx_attributes;
+		stat->attributes_mask |= fi->statx_attributes_mask;
 	}
 
 	return err;
