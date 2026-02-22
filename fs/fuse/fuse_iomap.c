@@ -18,6 +18,49 @@ static bool __read_mostly enable_iomap =
 module_param(enable_iomap, bool, 0644);
 MODULE_PARM_DESC(enable_iomap, "Enable file I/O through iomap");
 
+#if IS_ENABLED(CONFIG_FUSE_IOMAP_DEBUG)
+#if IS_ENABLED(CONFIG_FUSE_IOMAP_DEBUG_BY_DEFAULT)
+DEFINE_STATIC_KEY_TRUE(fuse_iomap_debug);
+#else
+DEFINE_STATIC_KEY_FALSE(fuse_iomap_debug);
+#endif /* FUSE_IOMAP_DEBUG_BY_DEFAULT */
+
+static int iomap_debug_set(const char *val, const struct kernel_param *kp)
+{
+	bool now;
+	int ret;
+
+	if (!val)
+		return -EINVAL;
+
+	ret = kstrtobool(val, &now);
+	if (ret)
+		return ret;
+
+	if (now)
+		static_branch_enable(&fuse_iomap_debug);
+	else
+		static_branch_disable(&fuse_iomap_debug);
+
+	return 0;
+}
+
+static int iomap_debug_get(char *buffer, const struct kernel_param *kp)
+{
+	return sprintf(buffer, "%c\n",
+		       static_branch_unlikely(&fuse_iomap_debug) ? 'Y' : 'N');
+}
+
+static const struct kernel_param_ops iomap_debug_ops = {
+	.set = iomap_debug_set,
+	.get = iomap_debug_get,
+};
+
+module_param_cb(debug_iomap, &iomap_debug_ops, NULL, 0644);
+__MODULE_PARM_TYPE(debug_iomap, "bool");
+MODULE_PARM_DESC(debug_iomap, "Enable debugging of fuse iomap");
+#endif /* IS_ENABLED(CONFIG_FUSE_IOMAP_DEBUG) */
+
 bool fuse_iomap_enabled(void)
 {
 	/* Don't let anyone touch iomap until the end of the patchset. */
