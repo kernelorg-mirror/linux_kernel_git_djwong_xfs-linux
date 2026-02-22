@@ -63,6 +63,7 @@ int fuse_iomap_flush_unmap_range(struct inode *inode, loff_t pos,
 				 loff_t endpos);
 int fuse_iomap_fadvise(struct file *file, loff_t start, loff_t end, int advice);
 
+int fuse_dev_ioctl_add_iomap(struct file *file);
 int fuse_dev_ioctl_iomap_support(struct file *file,
 				 struct fuse_iomap_support __user *argp);
 int fuse_dev_ioctl_iomap_set_nofs(struct file *file, uint32_t __user *argp);
@@ -90,6 +91,7 @@ int fuse_dev_ioctl_iomap_set_nofs(struct file *file, uint32_t __user *argp);
 # define fuse_iomap_fallocate(...)		(-ENOSYS)
 # define fuse_iomap_flush_unmap_range(...)	(-ENOSYS)
 # define fuse_iomap_fadvise			NULL
+# define fuse_dev_ioctl_add_iomap(...)		(-EOPNOTSUPP)
 # define fuse_dev_ioctl_iomap_support(...)	(-EOPNOTSUPP)
 # define fuse_dev_ioctl_iomap_set_nofs(...)	(-EOPNOTSUPP)
 #endif /* CONFIG_FUSE_IOMAP */

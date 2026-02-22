@@ -1067,6 +1067,7 @@ void fuse_conn_init(struct fuse_conn *fc, struct fuse_mount *fm,
 	fc->max_pages_limit = fuse_max_pages_limit;
 	fc->name_max = FUSE_NAME_LOW_MAX;
 	fc->timeout.req_timeout = 0;
+	fc->may_iomap = fuse_iomap_enabled();
 
 	if (IS_ENABLED(CONFIG_FUSE_BACKING))
 		fuse_backing_files_init(fc);
@@ -1526,7 +1527,7 @@ static void process_init_reply(struct fuse_mount *fm, struct fuse_args *args,
 			if (flags & FUSE_REQUEST_TIMEOUT)
 				timeout = arg->request_timeout;
 
-			if ((flags & FUSE_IOMAP) && fuse_iomap_enabled()) {
+			if ((flags & FUSE_IOMAP) && fc->may_iomap) {
 				fc->iomap = 1;
 				pr_warn(
  "EXPERIMENTAL iomap feature enabled.  Use at your own risk!");
@@ -1619,7 +1620,7 @@ static struct fuse_init_args *fuse_new_init(struct fuse_mount *fm)
 	 * locking works correctly.  This is not compatible with creating
 	 * shadow inode objects for a submount.
 	 */
-	if (fuse_iomap_enabled() && !(flags & FUSE_SUBMOUNTS))
+	if (fm->fc->may_iomap && !(flags & FUSE_SUBMOUNTS))
 		flags |= FUSE_IOMAP;
 
 	ia->in.flags = flags;
@@ -2016,6 +2017,8 @@ int fuse_fill_super_common(struct super_block *sb, struct fuse_fs_context *ctx)
 			goto err_unlock;
 		if (fud->sync_init)
 			fc->sync_init = 1;
+		if (fud->may_iomap)
+			fc->may_iomap = 1;
 	}
 
 	err = fuse_ctl_add_conn(fc);
