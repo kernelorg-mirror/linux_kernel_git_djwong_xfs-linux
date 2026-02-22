@@ -908,6 +908,10 @@ static int fuse_create_open(struct mnt_idmap *idmap, struct inode *dir,
 	entry->d_time = epoch;
 	fuse_change_entry_timeout(entry, &outentry);
 	fuse_dir_changed(dir);
+
+	if (fuse_inode_has_iomap(inode))
+		fuse_iomap_open(inode, file);
+
 	err = generic_file_open(inode, file);
 	if (!err) {
 		file->private_data = ff;
@@ -1955,6 +1959,9 @@ static int fuse_dir_open(struct inode *inode, struct file *file)
 	if (fuse_is_bad(inode))
 		return -EIO;
 
+	if (fuse_inode_has_iomap(inode))
+		fuse_iomap_open(inode, file);
+
 	err = generic_file_open(inode, file);
 	if (err)
 		return err;
@@ -2313,6 +2320,12 @@ int fuse_do_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		fuse_make_bad(inode);
 		err = -EIO;
 		goto error;
+	}
+
+	if (is_iomap && is_truncate) {
+		err = fuse_iomap_setsize_finish(inode, outarg.attr.size);
+		if (err)
+			goto error;
 	}
 
 	spin_lock(&fi->lock);

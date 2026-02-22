@@ -188,6 +188,11 @@ struct fuse_inode {
 
 			/* waitq for direct-io completion */
 			wait_queue_head_t direct_io_waitq;
+
+#ifdef CONFIG_FUSE_IOMAP
+			/* file size as reported by fuse server */
+			loff_t i_disk_size;
+#endif
 		};
 
 		/* readdir cache (directory only) */
@@ -662,6 +667,12 @@ struct fuse_sync_bucket {
 struct fuse_iomap_conn {
 	/**  number of inodes that have iomap enabled */
 	atomic64_t inodes;
+
+	/* fuse server doesn't implement iomap_end */
+	unsigned int no_end:1;
+
+	/* fuse server doesn't implement iomap_ioend */
+	unsigned int no_ioend:1;
 };
 #endif
 
