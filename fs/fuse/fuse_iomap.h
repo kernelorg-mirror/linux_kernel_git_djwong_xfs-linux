@@ -35,6 +35,17 @@ int fuse_iomap_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 		      u64 start, u64 length);
 loff_t fuse_iomap_lseek(struct file *file, loff_t offset, int whence);
 sector_t fuse_iomap_bmap(struct address_space *mapping, sector_t block);
+
+void fuse_iomap_open(struct inode *inode, struct file *file);
+int fuse_iomap_finish_open(const struct fuse_file *ff,
+			   const struct inode *inode);
+void fuse_iomap_open_truncate(struct inode *inode);
+
+void fuse_iomap_set_disk_size(struct fuse_inode *fi, loff_t newsize);
+int fuse_iomap_setsize_finish(struct inode *inode, loff_t newsize);
+
+ssize_t fuse_iomap_read_iter(struct kiocb *iocb, struct iov_iter *to);
+ssize_t fuse_iomap_write_iter(struct kiocb *iocb, struct iov_iter *from);
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
@@ -44,6 +55,13 @@ sector_t fuse_iomap_bmap(struct address_space *mapping, sector_t block);
 # define fuse_iomap_fiemap			NULL
 # define fuse_iomap_lseek(...)			(-ENOSYS)
 # define fuse_iomap_bmap(...)			(-ENOSYS)
+# define fuse_iomap_open(...)			((void)0)
+# define fuse_iomap_finish_open(...)		(-ENOSYS)
+# define fuse_iomap_open_truncate(...)		((void)0)
+# define fuse_iomap_set_disk_size(...)		((void)0)
+# define fuse_iomap_setsize_finish(...)		(-ENOSYS)
+# define fuse_iomap_read_iter(...)		(-ENOSYS)
+# define fuse_iomap_write_iter(...)		(-ENOSYS)
 #endif /* CONFIG_FUSE_IOMAP */
 
 #endif /* _FS_FUSE_IOMAP_H */
