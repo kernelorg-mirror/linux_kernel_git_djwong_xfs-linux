@@ -10,6 +10,7 @@
 
 #include <linux/posix_acl.h>
 #include <linux/posix_acl_xattr.h>
+#include <linux/fs_struct.h>
 
 /*
  * If this fuse server behaves like a local filesystem, we can implement the
@@ -210,4 +211,62 @@ int fuse_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 	}
 
 	return ret;
+}
+
+int fuse_acl_create(struct inode *dir, umode_t *mode,
+		    struct posix_acl **default_acl, struct posix_acl **acl)
+{
+	struct fuse_conn *fc = get_fuse_conn(dir);
+
+	if (fuse_is_bad(dir))
+		return -EIO;
+
+	if (IS_POSIXACL(dir) && fuse_inode_has_local_acls(dir))
+		return posix_acl_create(dir, mode, default_acl, acl);
+
+	if (!fc->dont_mask)
+		*mode &= ~current_umask();
+
+	*default_acl = NULL;
+	*acl = NULL;
+	return 0;
+}
+
+static int fuse_set_acl_xattr(struct inode *inode, const char *name,
+			      const struct posix_acl *acl)
+{
+	struct fuse_conn *fc = get_fuse_conn(inode);
+	void *value __free(kfree) = NULL;
+	size_t size;
+
+	value = posix_acl_to_xattr(fc->user_ns, acl, &size, GFP_KERNEL);
+	if (!value)
+		return -ENOMEM;
+
+	if (size > PAGE_SIZE)
+		return -E2BIG;
+
+	return fuse_setxattr(inode, name, value, size, 0, 0);
+}
+
+int fuse_init_acls(struct inode *inode, const struct posix_acl *default_acl,
+		   const struct posix_acl *acl)
+{
+	int ret;
+
+	if (default_acl) {
+		ret = fuse_set_acl_xattr(inode, XATTR_NAME_POSIX_ACL_DEFAULT,
+					 default_acl);
+		if (ret)
+			return ret;
+	}
+
+	if (acl) {
+		ret = fuse_set_acl_xattr(inode, XATTR_NAME_POSIX_ACL_ACCESS,
+					 acl);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
 }
