@@ -12,6 +12,7 @@
 #include "fuse_trace.h"
 #include "fuse_iomap.h"
 #include "fuse_iomap_i.h"
+#include "fuse_dev_i.h"
 
 static bool __read_mostly enable_iomap =
 #if IS_ENABLED(CONFIG_FUSE_IOMAP_BY_DEFAULT)
@@ -2288,4 +2289,40 @@ out_unlock:
 out_killsb:
 	up_read(&fc->killsb);
 	return ret;
+}
+
+static inline bool can_set_nofs(struct fuse_dev *fud)
+{
+	if (fud && fud->fc && fud->fc->iomap)
+	       return true;
+
+	return capable(CAP_SYS_RESOURCE);
+}
+
+int fuse_dev_ioctl_iomap_set_nofs(struct file *file, uint32_t __user *argp)
+{
+	struct fuse_dev *fud = fuse_get_dev(file);
+	uint32_t flags;
+
+	if (!can_set_nofs(fud))
+		return -EPERM;
+
+	if (copy_from_user(&flags, argp, sizeof(flags)))
+		return -EFAULT;
+
+	/*
+	 * The fuse server could be asked to perform a substantial amount of
+	 * writeback, so prohibit reclaim from recursing into fuse or the
+	 * kernel from throttling any bdis that the fuse server might write to.
+	 */
+	switch (flags) {
+	case 1:
+		current->flags |= PF_MEMALLOC_NOFS | PF_LOCAL_THROTTLE;
+		return 0;
+	case 0:
+		current->flags &= ~(PF_MEMALLOC_NOFS | PF_LOCAL_THROTTLE);
+		return 0;
+	default:
+		return -EINVAL;
+	}
 }
