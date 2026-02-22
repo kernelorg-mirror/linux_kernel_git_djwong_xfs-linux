@@ -112,6 +112,17 @@ static int iomap_swapfile_iter(struct iomap_iter *iter,
 	if (iomap->flags & IOMAP_F_SHARED)
 		return iomap_swapfile_fail(isi, "has shared extents");
 
+	/* Swapfiles must be backed by a block device */
+	if (!iomap->bdev)
+		return iomap_swapfile_fail(isi, "is not on a block device");
+
+	/*
+	 * Not all filesystems can set sis->bdev before calling
+	 * iomap_swapfile_activate, so we allow setting it for pos 0.
+	 */
+	if (iter->pos == 0 && !isi->sis->bdev)
+		isi->sis->bdev = iomap->bdev;
+
 	/* Only one bdev per swap file. */
 	if (iomap->bdev != isi->sis->bdev)
 		return iomap_swapfile_fail(isi, "outside the main device");
@@ -181,6 +192,16 @@ int iomap_swapfile_activate(struct swap_info_struct *sis,
 	 */
 	if (isi.nr_pages == 0) {
 		pr_warn("swapon: Cannot find a single usable page in file.\n");
+		return -EINVAL;
+	}
+
+	/*
+	 * If this swapfile doesn't have a block device, reject this useless
+	 * swapfile to prevent confusion later on.
+	 */
+	if (!sis->bdev) {
+		pr_warn(
+"swapon: No block device for swap file but we configured swap pages?!\n");
 		return -EINVAL;
 	}
 
