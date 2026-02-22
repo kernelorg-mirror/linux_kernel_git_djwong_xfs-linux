@@ -1512,7 +1512,9 @@ struct fuse_iomap_ioend_out {
 struct fuse_iomap_config_in {
 	uint64_t flags;		/* supported FUSE_IOMAP_CONFIG_* flags */
 	int64_t maxbytes;	/* maximum supported file size */
-	uint64_t padding[6];	/* zero */
+	uint32_t cache_maxbytes; /* mapping cache maxbytes */
+	uint32_t zero;		/* zero */
+	uint64_t padding[5];	/* zero */
 };
 
 /* Which fields are set in fuse_iomap_config_out? */
@@ -1522,6 +1524,7 @@ struct fuse_iomap_config_in {
 #define FUSE_IOMAP_CONFIG_MAX_LINKS	(1 << 3ULL)
 #define FUSE_IOMAP_CONFIG_TIME		(1 << 4ULL)
 #define FUSE_IOMAP_CONFIG_MAXBYTES	(1 << 5ULL)
+#define FUSE_IOMAP_CONFIG_CACHE_MAXBYTES (1 << 6ULL)
 
 struct fuse_iomap_config_out {
 	uint64_t flags;		/* FUSE_IOMAP_CONFIG_* */
@@ -1544,6 +1547,8 @@ struct fuse_iomap_config_out {
 	int64_t s_time_max;
 
 	int64_t s_maxbytes;	/* max file size */
+
+	uint32_t cache_maxbytes; /* mapping cache maximum size */
 };
 
 struct fuse_range {

@@ -108,6 +108,14 @@ static inline int fuse_iomap_cache_invalidate(struct inode *inode,
 	return fuse_iomap_cache_invalidate_range(inode, offset,
 						 FUSE_IOMAP_INVAL_TO_EOF);
 }
+
+/* absolute maximum memory consumption per iomap mapping cache */
+#define FUSE_IOMAP_CACHE_MAX_MAXBYTES		(SZ_2M)
+
+/* default maximum memory consumption per iomap mapping cache */
+#define FUSE_IOMAP_CACHE_DEFAULT_MAXBYTES	(SZ_256K)
+
+void fuse_iomap_cache_set_maxbytes(struct fuse_conn *fc, unsigned int maxbytes);
 #endif /* CONFIG_FUSE_IOMAP */
 
 #endif /* _FS_FUSE_IOMAP_CACHE_H */
