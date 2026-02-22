@@ -16,6 +16,7 @@
 #include "fuse_iomap.h"
 #include "fuse_iomap_i.h"
 #include "fuse_dev_i.h"
+#include "fuse_iomap_cache.h"
 
 static bool __read_mostly enable_iomap =
 #if IS_ENABLED(CONFIG_FUSE_IOMAP_BY_DEFAULT)
@@ -1373,6 +1374,8 @@ void fuse_iomap_evict_inode(struct inode *inode)
 
 	trace_fuse_iomap_evict_inode(inode);
 
+	if (fuse_inode_caches_iomaps(inode))
+		fuse_iomap_cache_free(inode);
 	fuse_inode_clear_atomic(inode);
 	fuse_inode_clear_iomap(inode);
 }
@@ -2056,6 +2059,8 @@ static inline void fuse_inode_set_iomap(struct inode *inode)
 		min_order = inode->i_blkbits - PAGE_SHIFT;
 
 	mapping_set_folio_min_order(inode->i_mapping, min_order);
+
+	fuse_iomap_cache_init(fi);
 	set_bit(FUSE_I_IOMAP, &fi->state);
 	atomic64_inc(&fm->fc->iomap_conn.inodes);
 }

@@ -199,6 +199,9 @@ struct fuse_inode {
 			spinlock_t ioend_lock;
 			struct work_struct ioend_work;
 			struct list_head ioend_list;
+
+			/* cached iomap mappings */
+			struct fuse_iomap_cache *cache;
 #endif
 		};
 

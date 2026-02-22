@@ -12,6 +12,7 @@
 
 #include "fuse_iomap.h"
 #include "fuse_iomap_i.h"
+#include "fuse_iomap_cache.h"
 
 #define CREATE_TRACE_POINTS
 #include "fuse_trace.h"
