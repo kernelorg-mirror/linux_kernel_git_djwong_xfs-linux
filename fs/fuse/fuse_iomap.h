@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Copyright (C) 2025-2026 Oracle.  All Rights Reserved.
+ * Author: Darrick J. Wong <djwong@kernel.org>
+ */
+#ifndef _FS_FUSE_IOMAP_H
+#define _FS_FUSE_IOMAP_H
+
+#if IS_ENABLED(CONFIG_FUSE_IOMAP)
+enum fuse_iomap_iodir {
+	READ_MAPPING,
+	WRITE_MAPPING,
+};
+
+bool fuse_iomap_enabled(void);
+
+static inline bool fuse_has_iomap(const struct inode *inode)
+{
+	return get_fuse_conn(inode)->iomap;
+}
+#else
+# define fuse_iomap_enabled(...)		(false)
+# define fuse_has_iomap(...)			(false)
+#endif /* CONFIG_FUSE_IOMAP */
+
+#endif /* _FS_FUSE_IOMAP_H */
