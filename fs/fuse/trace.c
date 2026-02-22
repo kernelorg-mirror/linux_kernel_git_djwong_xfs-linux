@@ -8,7 +8,9 @@
 #include "fuse_dev_i.h"
 
 #include <linux/pagemap.h>
+#include <linux/iomap.h>
 
+#include "fuse_iomap.h"
 #include "fuse_iomap_i.h"
 
 #define CREATE_TRACE_POINTS
