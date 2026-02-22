@@ -1118,6 +1118,23 @@ static inline bool fuse_is_bad(struct inode *inode)
 	return unlikely(test_bit(FUSE_I_BAD, &get_fuse_inode(inode)->state));
 }
 
+static inline void fuse_inode_set_exclusive(const struct fuse_conn *fc,
+					    struct inode *inode)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	/* This flag wasn't added until kernel API 7.99 */
+	if (fc->minor >= 99)
+		set_bit(FUSE_I_EXCLUSIVE, &fi->state);
+}
+
+static inline void fuse_inode_clear_exclusive(struct inode *inode)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	clear_bit(FUSE_I_EXCLUSIVE, &fi->state);
+}
+
 static inline bool fuse_inode_is_exclusive(const struct inode *inode)
 {
 	const struct fuse_inode *fi = get_fuse_inode(inode);

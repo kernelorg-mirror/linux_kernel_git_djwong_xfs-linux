@@ -197,6 +197,8 @@ static void fuse_evict_inode(struct inode *inode)
 		WARN_ON(!list_empty(&fi->write_files));
 		WARN_ON(!list_empty(&fi->queued_writes));
 	}
+
+	fuse_inode_clear_exclusive(inode);
 }
 
 static int fuse_reconfigure(struct fs_context *fsc)
@@ -318,6 +320,15 @@ void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 	 * anyway. Its less efficient but should be safe.
 	 */
 	inode->i_flags &= ~S_NOSEC;
+
+	/*
+	 * The root inode is created with attr->flags == 0 at mount time prior
+	 * to FUSE_INIT, so this is the only way that the fuse server can set
+	 * the attribute on the root directory after the fact.
+	 */
+	if (get_node_id(inode) == FUSE_ROOT_ID &&
+	    (attr->flags & FUSE_ATTR_EXCLUSIVE))
+		fuse_inode_set_exclusive(fc, inode);
 }
 
 u32 fuse_get_cache_mask(struct inode *inode)
@@ -435,6 +446,9 @@ static void fuse_init_inode(struct inode *inode, struct fuse_attr *attr,
 	inode->i_size = attr->size;
 	inode_set_mtime(inode, attr->mtime, attr->mtimensec);
 	inode_set_ctime(inode, attr->ctime, attr->ctimensec);
+
+	if (attr->flags & FUSE_ATTR_EXCLUSIVE)
+		fuse_inode_set_exclusive(fc, inode);
 
 	switch (inode->i_mode & S_IFMT) {
 	case S_IFREG:
@@ -1783,6 +1797,9 @@ static void fuse_fill_attr_from_inode(struct fuse_attr *attr,
 		.rdev		= fi->inode.i_rdev,
 		.blksize	= 1u << fi->inode.i_blkbits,
 	};
+
+	if (fuse_inode_is_exclusive(&fi->inode))
+		attr->flags |= FUSE_ATTR_EXCLUSIVE;
 }
 
 static void fuse_sb_defaults(struct super_block *sb)
