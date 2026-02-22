@@ -2806,7 +2806,7 @@ fuse_iomap_upsert_validate_mappings(struct inode *inode,
 						  &outarg->write);
 }
 
-static int fuse_iomap_upsert_inode(struct inode *inode,
+int fuse_iomap_upsert_inode(struct inode *inode,
 		const struct fuse_iomap_upsert_mappings_out *outarg)
 {
 	int ret = fuse_iomap_upsert_validate_mappings(inode, outarg);
@@ -2901,7 +2901,7 @@ fuse_iomap_inval_validate_range(const struct inode *inode,
 	return true;
 }
 
-static int fuse_iomap_inval_inode(struct inode *inode,
+int fuse_iomap_inval_inode(struct inode *inode,
 		const struct fuse_iomap_inval_mappings_out *outarg)
 {
 	int ret = 0, ret2 = 0;
