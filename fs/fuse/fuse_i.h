@@ -190,8 +190,11 @@ struct fuse_inode {
 
 			/* waitq for direct-io completion */
 			wait_queue_head_t direct_io_waitq;
+		};
 
 #ifdef CONFIG_FUSE_IOMAP
+		/* regular file iomap mode */
+		struct {
 			/* file size as reported by fuse server */
 			loff_t i_disk_size;
 
@@ -202,8 +205,8 @@ struct fuse_inode {
 
 			/* cached iomap mappings */
 			struct fuse_iomap_cache *cache;
-#endif
 		};
+#endif
 
 		/* readdir cache (directory only) */
 		struct {
