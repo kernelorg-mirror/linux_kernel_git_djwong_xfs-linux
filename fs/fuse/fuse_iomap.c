@@ -464,6 +464,8 @@ static int fuse_iomap_inline_read(struct inode *inode, loff_t pos,
 	FUSE_ARGS(args);
 	ssize_t ret;
 
+	trace_fuse_iomap_inline_read(inode, pos, count, iomap);
+
 	args.opcode = FUSE_READ;
 	args.nodeid = fi->nodeid;
 	args.in_numargs = 1;
@@ -521,6 +523,8 @@ static ssize_t fuse_iomap_inline_write(struct inode *inode, loff_t pos,
 		args.out_numargs = 1;
 		args.out_args[0].size = sizeof(out);
 		args.out_args[0].value = &out;
+
+		trace_fuse_iomap_inline_write(inode, pos, written, iomap);
 
 		ret = fuse_simple_request(fm, &args);
 		if (ret == -ENOSYS)
@@ -587,6 +591,9 @@ static int fuse_iomap_set_inline(struct inode *inode, unsigned opflags,
 		if (err)
 			goto out_iomap;
 	}
+
+	trace_fuse_iomap_set_inline_iomap(inode, pos, count, iomap);
+	trace_fuse_iomap_set_inline_srcmap(inode, pos, count, srcmap);
 
 	return 0;
 
