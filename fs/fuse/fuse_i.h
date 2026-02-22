@@ -192,6 +192,11 @@ struct fuse_inode {
 #ifdef CONFIG_FUSE_IOMAP
 			/* file size as reported by fuse server */
 			loff_t i_disk_size;
+
+			/* pending io completions */
+			spinlock_t ioend_lock;
+			struct work_struct ioend_work;
+			struct list_head ioend_list;
 #endif
 		};
 
@@ -1741,5 +1746,7 @@ extern void fuse_sysctl_unregister(void);
 #define fuse_sysctl_register()		(0)
 #define fuse_sysctl_unregister()	do { } while (0)
 #endif /* CONFIG_SYSCTL */
+
+sector_t fuse_bmap(struct address_space *mapping, sector_t block);
 
 #endif /* _FS_FUSE_I_H */
