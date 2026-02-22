@@ -7,6 +7,7 @@
  */
 
 #include "fuse_i.h"
+#include "fuse_iomap.h"
 
 #include <linux/posix_acl.h>
 #include <linux/posix_acl_xattr.h>
@@ -113,6 +114,8 @@ int fuse_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 	const char *name;
 	umode_t mode = inode->i_mode;
 	const bool local_acls = fuse_inode_has_local_acls(inode);
+	const bool is_iomap = fuse_inode_has_iomap(inode);
+	bool did_work = false;
 	int ret;
 
 	if (fuse_is_bad(inode))
@@ -173,30 +176,48 @@ int fuse_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 
 		ret = fuse_setxattr(inode, name, value, size, 0, extra_flags);
 		kfree(value);
+		if (!ret)
+			did_work = true;
 	} else {
 		ret = fuse_removexattr(inode, name);
+		if (!ret)
+			did_work = true;
 		/* If the acl didn't exist to start with that's fine. */
 		if (ret == -ENODATA)
 			ret = 0;
 	}
 
-	/*
-	 * If we scheduled a mode update above, push that to userspace now.  We
-	 * set the mode after successfully updating the ACL xattr because the
-	 * xattr update can fail at ENOSPC and we don't want to change the mode
-	 * if the ACL update hasn't been applied.
-	 */
 	if (!ret) {
 		struct iattr attr = { };
 
+		/*
+		 * If we scheduled a mode update above, push that to userspace
+		 * now.  We set the mode after successfully updating the ACL
+		 * xattr because the xattr update can fail at ENOSPC and we
+		 * don't want to change the mode if the ACL update hasn't been
+		 * applied.
+		 */
 		if (mode != inode->i_mode) {
 			attr.ia_valid |= ATTR_MODE;
 			attr.ia_mode = mode;
+			did_work = true;
 		}
+
+		/*
+		 * When we're running in iomap mode, we need to update mode and
+		 * ctime ourselves instead of letting the fuse server figure
+		 * that out.
+		 */
+		if (is_iomap && did_work) {
+			attr.ia_valid |= ATTR_CTIME;
+			inode_set_ctime_current(inode);
+			attr.ia_ctime = inode_get_ctime(inode);
+		}
+
 
 		if (attr.ia_valid) {
 			ret = fuse_do_setattr(idmap, dentry, &attr, NULL);
-			if (!ret)
+			if (!ret && (attr.ia_valid & ATTR_MODE))
 				inode->i_mode = mode;
 		}
 	}

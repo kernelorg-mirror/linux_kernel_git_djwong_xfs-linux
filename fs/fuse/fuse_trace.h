@@ -254,11 +254,11 @@ TRACE_EVENT(fuse_setattr,
 		FUSE_INODE_ASSIGN(inode, fi, fm);
 		__entry->mode			=	inode->i_mode;
 		__entry->valid			=	inarg->ia_valid;
-		if (attr->ia_valid & ATTR_MODE)
+		if (inarg->ia_valid & ATTR_MODE)
 			__entry->new_mode	=	inarg->ia_mode;
 		else
 			__entry->new_mode	=	0;
-		if (attr->ia_valid & ATTR_SIZE)
+		if (inarg->ia_valid & ATTR_SIZE)
 			__entry->new_size	=	inarg->ia_size;
 		else
 			__entry->new_size	=	0;
