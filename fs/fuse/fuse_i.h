@@ -696,6 +696,9 @@ struct fuse_iomap_conn {
 
 	/* fuse server doesn't implement iomap_ioend */
 	unsigned int no_ioend:1;
+
+	/* maximum mapping cache size */
+	unsigned int cache_maxbytes;
 };
 #endif
 

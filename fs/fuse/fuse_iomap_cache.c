@@ -1654,6 +1654,30 @@ void fuse_iomap_cache_free(struct inode *inode)
 	kfree(ic);
 }
 
+void fuse_iomap_cache_set_maxbytes(struct fuse_conn *fc, unsigned int maxbytes)
+{
+	if (!maxbytes)
+		return;
+
+	fc->iomap_conn.cache_maxbytes = clamp(maxbytes, NODE_SIZE,
+					      FUSE_IOMAP_CACHE_MAX_MAXBYTES);
+}
+
+static void
+fuse_iomap_cache_cleanup(
+	struct inode		*inode,
+	enum fuse_iomap_iodir	iodir)
+{
+	struct fuse_inode	*fi = get_fuse_inode(inode);
+	struct fuse_mount	*fm = get_fuse_mount(inode);
+	struct fuse_iext_root	*ir = fuse_iext_root_ptr(fi->cache, iodir);
+
+	if (ir && ir->ir_bytes > fm->fc->iomap_conn.cache_maxbytes) {
+		fuse_iext_inc_seq(fi->cache);
+		fuse_iext_destroy(ir);
+	}
+}
+
 int
 fuse_iomap_cache_upsert(
 	struct inode			*inode,
@@ -1679,6 +1703,8 @@ fuse_iomap_cache_upsert(
 	err = fuse_iomap_cache_remove(inode, iodir, map->offset, map->length);
 	if (err)
 		return err;
+
+	fuse_iomap_cache_cleanup(inode, iodir);
 
 	return fuse_iomap_cache_add(inode, iodir, map);
 }
