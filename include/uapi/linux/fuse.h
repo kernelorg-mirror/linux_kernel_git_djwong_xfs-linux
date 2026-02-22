@@ -1456,6 +1456,14 @@ struct fuse_uring_cmd_req {
 					 FUSE_IOMAP_OP_WRITEBACK | \
 					 FUSE_IOMAP_OP_SWAPFILE)
 
+/*
+ * Mapping operations that don't like caching, or where we want the server to
+ * affirm to the kernel that it actually supports doing a complex IO operation.
+ */
+#define FUSE_IOMAP_OP_NOCACHE_MASK	(FUSE_IOMAP_OP_REPORT | \
+					 FUSE_IOMAP_OP_ATOMIC | \
+					 FUSE_IOMAP_OP_SWAPFILE)
+
 #define FUSE_IOMAP_NULL_ADDR		(-1ULL)	/* addr is not valid */
 
 struct fuse_iomap_io {

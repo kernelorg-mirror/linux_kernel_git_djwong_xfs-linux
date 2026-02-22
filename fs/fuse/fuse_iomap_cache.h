@@ -53,6 +53,11 @@ bool fuse_iext_get_extent(const struct fuse_iext_root *ir,
 			  const struct fuse_iext_cursor *cur,
 			  struct fuse_iomap_io *gotp);
 
+/* iomaps that come direct from the fuse server are presumed to be valid */
+#define FUSE_IOMAP_ALWAYS_VALID	((uint64_t)0)
+/* set initial iomap cookie value to avoid ALWAYS_VALID */
+#define FUSE_IOMAP_INIT_COOKIE	((uint64_t)1)
+
 static inline uint64_t fuse_iext_read_seq(struct fuse_iomap_cache *ic)
 {
 	return (uint64_t)READ_ONCE(ic->ic_seq);

@@ -706,7 +706,11 @@ fuse_iext_realloc_root(
  */
 static inline void fuse_iext_inc_seq(struct fuse_iomap_cache *ic)
 {
-	WRITE_ONCE(ic->ic_seq, READ_ONCE(ic->ic_seq) + 1);
+	uint64_t new_val = READ_ONCE(ic->ic_seq) + 1;
+
+	if (new_val == FUSE_IOMAP_ALWAYS_VALID)
+		new_val++;
+	WRITE_ONCE(ic->ic_seq, new_val);
 }
 
 static void
@@ -1584,6 +1588,7 @@ int fuse_iomap_cache_alloc(struct inode *inode)
 
 	/* Only the write mapping cache can return NOFORK */
 	ic->ic_write.ir_bytes = -1;
+	ic->ic_seq = FUSE_IOMAP_INIT_COOKIE;
 	ic->ic_inode = inode;
 	init_rwsem(&ic->ic_lock);
 
