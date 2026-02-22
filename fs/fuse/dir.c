@@ -447,7 +447,8 @@ static int fuse_dentry_revalidate(struct inode *dir, const struct qstr *name,
 		    fuse_stale_inode(inode, outarg.generation, &outarg.attr))
 			goto invalid;
 
-		forget_all_cached_acls(inode);
+		if (!fuse_inode_has_iomap(inode))
+			forget_all_cached_acls(inode);
 		fuse_change_attributes(inode, &outarg.attr, NULL,
 				       ATTR_TIMEOUT(&outarg),
 				       attr_version);
@@ -1672,7 +1673,8 @@ retry:
 		sync = time_before64(fi->i_time, get_jiffies_64());
 
 	if (sync) {
-		forget_all_cached_acls(inode);
+		if (!fuse_inode_has_iomap(inode))
+			forget_all_cached_acls(inode);
 		/* Try statx if a field not covered by regular stat is wanted */
 		if (!fc->no_statx && (request_mask & ~STATX_BASIC_STATS)) {
 			err = fuse_do_statx(idmap, inode, file, stat);
@@ -1861,6 +1863,11 @@ static int fuse_perm_getattr(struct inode *inode, int mask)
 		return -ECHILD;
 
 	forget_all_cached_acls(inode);
+
+	/* Only the kernel can decide to update the mode */
+	if (fuse_inode_has_iomap(inode))
+		return 0;
+
 	return fuse_do_getattr(&nop_mnt_idmap, inode, NULL, NULL);
 }
 
@@ -2537,10 +2544,15 @@ static int fuse_setattr(struct mnt_idmap *idmap, struct dentry *entry,
 	ret = fuse_do_setattr(idmap, entry, attr, file);
 	if (!ret) {
 		/*
-		 * If filesystem supports acls it may have updated acl xattrs in
-		 * the filesystem, so forget cached acls for the inode.
+		 * If filesystem supports acls it may have updated acl xattrs
+		 * in the filesystem, so forget cached acls for the inode.
+		 *
+		 * If iomap mode is enabled and we didn't just turn the ACL
+		 * change into a mode update, we can skip the cached ACL
+		 * invalidation because the kernel already updated the cached
+		 * ACL.
 		 */
-		if (fc->posix_acl)
+		if (fc->posix_acl && (!is_iomap || (attr->ia_valid & ATTR_MODE)))
 			forget_all_cached_acls(inode);
 
 		/* Directory mode changed, may need to revalidate access */
