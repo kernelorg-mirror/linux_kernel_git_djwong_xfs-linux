@@ -465,10 +465,8 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t count,
 	}
 
 	/*
-	 * XXX: if we ever want to support closing devices, we need a way to
-	 * track the fuse_backing refcount all the way through bio endios.
-	 * For now we put the refcount here because you can't remove an iomap
-	 * device until unmount time.
+	 * It's ok to put the refcount here because you can't remove an iomap
+	 * device unless there are zero iomap inodes.
 	 */
 	fuse_backing_put(write_dev);
 out_read_dev:
@@ -574,8 +572,13 @@ static int fuse_iomap_post_open(struct fuse_conn *fc, struct fuse_backing *fb)
 static int fuse_iomap_may_close(struct fuse_conn *fc,
 				const struct fuse_backing *fb)
 {
-	/* We only support closing iomap block devices at unmount */
-	return -EBUSY;
+	/*
+	 * It's only safe to close the iomap backing device if there are no
+	 * iomap inodes that might be using it or have IO in progress.
+	 */
+	if (atomic64_read(&fc->iomap_conn.inodes) > 0)
+		return -EBUSY;
+	return 0;
 }
 
 const struct fuse_backing_ops fuse_iomap_backing_ops = {
@@ -618,4 +621,55 @@ void fuse_iomap_unmount(struct fuse_mount *fm)
 	 */
 	fuse_flush_requests(fc);
 	fuse_send_destroy(fm);
+}
+
+static inline void fuse_inode_set_iomap(struct inode *inode)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct fuse_mount *fm = get_fuse_mount(inode);
+
+	set_bit(FUSE_I_IOMAP, &fi->state);
+	atomic64_inc(&fm->fc->iomap_conn.inodes);
+}
+
+static inline void fuse_inode_clear_iomap(struct inode *inode)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct fuse_mount *fm = get_fuse_mount(inode);
+
+	atomic64_dec(&fm->fc->iomap_conn.inodes);
+	clear_bit(FUSE_I_IOMAP, &fi->state);
+}
+
+void fuse_iomap_init_inode(struct inode *inode, struct fuse_attr *attr)
+{
+	ASSERT(get_fuse_conn(inode)->iomap);
+
+	if (!(attr->flags & FUSE_ATTR_IOMAP))
+		return;
+
+	/*
+	 * Any file being used in conjunction with iomap must also have the
+	 * exclusive flag set because iomap requires cached file attributes to
+	 * be correct at any time.  This applies even to non-regular files
+	 * (e.g. directories) because we need to do ACL and attribute
+	 * inheritance the same way a local filesystem would do.  If exclusive
+	 * mode isn't set, then we won't use iomap.
+	 */
+	if (!fuse_inode_is_exclusive(inode)) {
+		ASSERT(fuse_inode_is_exclusive(inode));
+		return;
+	}
+
+	if (!S_ISREG(inode->i_mode))
+		return;
+
+	fuse_inode_set_iomap(inode);
+}
+
+void fuse_iomap_evict_inode(struct inode *inode)
+{
+	ASSERT(fuse_inode_has_iomap(inode));
+
+	fuse_inode_clear_iomap(inode);
 }
