@@ -6,9 +6,12 @@
  */
 #include <linux/bpf.h>
 #include <linux/bpf_verifier.h>
+#include <linux/btf.h>
+#include <linux/btf_ids.h>
 
 #include "fuse_i.h"
 #include "fuse_dev_i.h"
+#include "fuse_iomap.h"
 #include "fuse_iomap_bpf.h"
 #include "fuse_iomap_i.h"
 #include "fuse_trace.h"
@@ -284,9 +287,82 @@ static struct bpf_struct_ops fuse_iomap_bpf_struct_ops = {
 	.owner		= THIS_MODULE,
 };
 
+__bpf_kfunc_start_defs();
+
+__bpf_kfunc int
+fuse_bpf_iomap_inval_mappings(struct fuse_inode *fi,
+			      const struct fuse_range *read__nullable,
+			      const struct fuse_range *write__nullable)
+{
+	struct fuse_iomap_inval_mappings_out outarg = {
+		.nodeid = fi->nodeid,
+		.attr_ino = fi->orig_ino,
+	};
+	struct inode *inode = &fi->inode;
+	struct fuse_conn *fc = get_fuse_conn(inode);
+
+	if (!fc->iomap)
+		return -EOPNOTSUPP;
+
+	if (read__nullable)
+		memcpy(&outarg.read, read__nullable, sizeof(outarg.read));
+	if (write__nullable)
+		memcpy(&outarg.write, write__nullable, sizeof(outarg.write));
+
+	trace_fuse_iomap_inval_mappings(inode, &outarg);
+
+	return fuse_iomap_inval_inode(inode, &outarg);
+}
+
+__bpf_kfunc int
+fuse_bpf_iomap_upsert_mappings(struct fuse_inode *fi,
+			       const struct fuse_iomap_io *read__nullable,
+			       const struct fuse_iomap_io *write__nullable)
+{
+	struct fuse_iomap_upsert_mappings_out outarg = {
+		.nodeid = fi->nodeid,
+		.attr_ino = fi->orig_ino,
+		.read.type = FUSE_IOMAP_TYPE_NOCACHE,
+		.write.type = FUSE_IOMAP_TYPE_NOCACHE,
+	};
+	struct inode *inode = &fi->inode;
+	struct fuse_conn *fc = get_fuse_conn(inode);
+
+	if (!fc->iomap)
+		return -EOPNOTSUPP;
+
+	if (read__nullable)
+		memcpy(&outarg.read, read__nullable, sizeof(outarg.read));
+	if (write__nullable)
+		memcpy(&outarg.write, write__nullable, sizeof(outarg.write));
+
+	trace_fuse_iomap_upsert_mappings(inode, &outarg);
+
+	return fuse_iomap_upsert_inode(inode, &outarg);
+}
+
+__bpf_kfunc_end_defs();
+
+BTF_KFUNCS_START(fuse_iomap_kfunc_ids)
+BTF_ID_FLAGS(func, fuse_bpf_iomap_inval_mappings,
+	     KF_SLEEPABLE | KF_TRUSTED_ARGS)
+BTF_ID_FLAGS(func, fuse_bpf_iomap_upsert_mappings,
+	     KF_SLEEPABLE | KF_TRUSTED_ARGS)
+BTF_KFUNCS_END(fuse_iomap_kfunc_ids)
+
+static const struct btf_kfunc_id_set fuse_iomap_kfunc_set = {
+	.owner = THIS_MODULE,
+	.set   = &fuse_iomap_kfunc_ids,
+};
+
 /* Register the iomap bpf ops so that fuse servers can attach to it */
 int __init fuse_iomap_init_bpf(void)
 {
+	int ret = register_btf_kfunc_id_set(BPF_PROG_TYPE_STRUCT_OPS,
+			&fuse_iomap_kfunc_set);
+	if (ret)
+		return ret;
+
 	return register_bpf_struct_ops(&fuse_iomap_bpf_struct_ops,
 				       fuse_iomap_bpf_ops);
 }
