@@ -617,6 +617,9 @@ struct fuse_dev {
 	/** Issue FUSE_INIT synchronously */
 	bool sync_init;
 
+	/** Allow fuse server to ask for IOMAP */
+	bool may_iomap;
+
 	/** Fuse connection for this device */
 	struct fuse_conn *fc;
 
@@ -972,6 +975,13 @@ struct fuse_conn {
 
 	/* Enable fs/iomap for file operations */
 	unsigned int iomap:1;
+
+	/*
+	 * Are filesystems using this connection allowed to use iomap?  This is
+	 * determined by the privilege level of the process that initiated the
+	 * mount() call.
+	 */
+	unsigned int may_iomap:1;
 
 	/* Use io_uring for communication */
 	unsigned int io_uring;
