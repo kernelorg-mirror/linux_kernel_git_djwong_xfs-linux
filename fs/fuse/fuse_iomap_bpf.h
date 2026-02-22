@@ -15,12 +15,47 @@ enum fuse_iomap_bpf_ret {
 	FIB_HANDLED = 1,
 };
 
+/* opaque structure so that bpf programs cannot see inside a fuse inode */
+struct fuse_bpf_inode { };
+
+static inline const struct fuse_inode *
+__fuse_inode_from_bpf_c(const struct fuse_bpf_inode *fbi)
+{
+	return (const struct fuse_inode *)fbi;
+}
+
+static inline struct fuse_inode *
+__fuse_inode_from_bpf(struct fuse_bpf_inode *fbi)
+{
+	return (struct fuse_inode *)fbi;
+}
+
+#define fuse_inode_from_bpf(x) _Generic((x), \
+	struct fuse_bpf_inode * :	__fuse_inode_from_bpf, \
+	const struct fuse_bpf_inode * :	__fuse_inode_from_bpf_c)(x)
+
+static inline const struct fuse_bpf_inode *
+__fuse_inode_to_bpf_c(const struct fuse_inode *fi)
+{
+	return (const struct fuse_bpf_inode *)fi;
+}
+
+static inline struct fuse_bpf_inode *
+__fuse_inode_to_bpf(struct fuse_inode *fi)
+{
+	return (struct fuse_bpf_inode *)fi;
+}
+
+#define fuse_inode_to_bpf(x) _Generic((x), \
+	struct fuse_inode * :		__fuse_inode_to_bpf, \
+	const struct fuse_inode * :	__fuse_inode_to_bpf_c)(x)
+
 struct fuse_iomap_bpf_ops {
 	/**
 	 * @iomap_begin: override iomap_begin.  See FUSE_IOMAP_BEGIN for
 	 * details.
 	 */
-	enum fuse_iomap_bpf_ret (*iomap_begin)(struct fuse_inode *fi,
+	enum fuse_iomap_bpf_ret (*iomap_begin)(struct fuse_bpf_inode *fbi,
 			uint64_t pos, uint64_t count, uint32_t opflags,
 			struct fuse_iomap_begin_out *outarg);
 
@@ -28,7 +63,7 @@ struct fuse_iomap_bpf_ops {
 	 * @iomap_end: override iomap_end.  See FUSE_IOMAP_END for
 	 * details.
 	 */
-	enum fuse_iomap_bpf_ret (*iomap_end)(struct fuse_inode *fi,
+	enum fuse_iomap_bpf_ret (*iomap_end)(struct fuse_bpf_inode *fbi,
 			uint64_t pos, uint64_t count, int64_t written,
 			uint32_t opflags);
 
@@ -36,7 +71,7 @@ struct fuse_iomap_bpf_ops {
 	 * @iomap_ioend: override iomap_ioend.  See FUSE_IOMAP_IOEND for
 	 * details.
 	 */
-	enum fuse_iomap_bpf_ret (*iomap_ioend)(struct fuse_inode *fi,
+	enum fuse_iomap_bpf_ret (*iomap_ioend)(struct fuse_bpf_inode *fbi,
 			uint64_t pos, int64_t written, uint32_t ioendflags,
 			int error, uint32_t dev, uint64_t new_addr,
 			struct fuse_iomap_ioend_out *outarg);
