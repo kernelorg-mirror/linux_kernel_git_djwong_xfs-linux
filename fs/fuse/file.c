@@ -2597,7 +2597,13 @@ static sector_t fuse_bmap(struct address_space *mapping, sector_t block)
 	struct fuse_bmap_out outarg;
 	int err;
 
-	if (!inode->i_sb->s_bdev || fm->fc->no_bmap)
+	if (!inode->i_sb->s_bdev)
+		return 0;
+
+	if (fuse_inode_has_iomap(inode))
+		return fuse_iomap_bmap(mapping, block);
+
+	if (fm->fc->no_bmap)
 		return 0;
 
 	memset(&inarg, 0, sizeof(inarg));
@@ -2631,6 +2637,13 @@ static loff_t fuse_lseek(struct file *file, loff_t offset, int whence)
 	};
 	struct fuse_lseek_out outarg;
 	int err;
+
+	if (fuse_inode_has_iomap(inode)) {
+		loff_t alt_pos = fuse_iomap_lseek(file, offset, whence);
+
+		if (alt_pos != -ENOSYS)
+			return alt_pos;
+	}
 
 	if (fm->fc->no_lseek)
 		goto fallback;
