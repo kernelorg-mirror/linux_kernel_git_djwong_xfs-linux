@@ -2225,7 +2225,10 @@ int fuse_do_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		is_truncate = true;
 	}
 
-	if (FUSE_IS_DAX(inode) && is_truncate) {
+	if (is_iomap && is_truncate) {
+		filemap_invalidate_lock(mapping);
+		fault_blocked = true;
+	} else if (FUSE_IS_DAX(inode) && is_truncate) {
 		filemap_invalidate_lock(mapping);
 		fault_blocked = true;
 		err = fuse_dax_break_layouts(inode, 0, -1);
@@ -2240,6 +2243,18 @@ int fuse_do_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		WARN_ON(!(attr->ia_valid & ATTR_SIZE));
 		WARN_ON(attr->ia_size != 0);
 		if (fc->atomic_o_trunc) {
+			if (is_iomap) {
+				/*
+				 * fuse_open already set the size to zero and
+				 * truncated the pagecache, and we've since
+				 * cycled the inode locks.  Another thread
+				 * could have performed an appending write, so
+				 * we don't want to touch the file further.
+				 */
+				filemap_invalidate_unlock(mapping);
+				return 0;
+			}
+
 			/*
 			 * No need to send request to userspace, since actual
 			 * truncation has already been done by OPEN.  But still
@@ -2273,6 +2288,12 @@ int fuse_do_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		set_bit(FUSE_I_SIZE_UNSTABLE, &fi->state);
 		if (trust_local_cmtime && attr->ia_size != inode->i_size)
 			attr->ia_valid |= ATTR_MTIME | ATTR_CTIME;
+
+		if (is_iomap) {
+			err = fuse_iomap_setsize_start(inode, attr->ia_size);
+			if (err)
+				goto error;
+		}
 	}
 
 	memset(&inarg, 0, sizeof(inarg));
