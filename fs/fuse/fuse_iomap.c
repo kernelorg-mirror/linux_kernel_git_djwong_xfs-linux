@@ -137,6 +137,19 @@ static inline bool fuse_iomap_check_type(uint16_t fuse_type)
 	case FUSE_IOMAP_TYPE_PURE_OVERWRITE:
 	case FUSE_IOMAP_TYPE_RETRY_CACHE:
 	case FUSE_IOMAP_TYPE_NOCACHE:
+	case FUSE_IOMAP_TYPE_MAPPED_STRIPE:
+	case FUSE_IOMAP_TYPE_UNWRITTEN_STRIPE:
+		return true;
+	}
+
+	return false;
+}
+
+static inline bool fuse_iomap_is_striped(const struct fuse_iomap_io *fmap)
+{
+	switch (fmap->type) {
+	case FUSE_IOMAP_TYPE_MAPPED_STRIPE:
+	case FUSE_IOMAP_TYPE_UNWRITTEN_STRIPE:
 		return true;
 	}
 
@@ -284,6 +297,8 @@ static inline bool fuse_iomap_check_mapping(const struct inode *inode,
 	switch (map->type) {
 	case FUSE_IOMAP_TYPE_MAPPED:
 	case FUSE_IOMAP_TYPE_UNWRITTEN:
+	case FUSE_IOMAP_TYPE_MAPPED_STRIPE:
+	case FUSE_IOMAP_TYPE_UNWRITTEN_STRIPE:
 		/* Mappings backed by space must have a device/addr */
 		if (BAD_DATA(map->dev == FUSE_IOMAP_DEV_NULL))
 			return false;
@@ -347,6 +362,130 @@ static inline bool fuse_iomap_check_mapping(const struct inode *inode,
 		return false;
 
 	return true;
+}
+
+/* Compute the block device geometry for a stripe */
+static inline int fuse_iomap_adjust_stripe(struct inode *inode,
+					   loff_t pos,
+					   struct fuse_iomap_io *fmap,
+					   struct fuse_backing **fbp)
+{
+	struct fuse_backing *stripe_fb = *fbp;
+	const struct fuse_backing_stripe *bstripe = stripe_fb->data;
+	const struct fuse_backing_strip *bstrip;
+	const unsigned int blocksize = i_blocksize(inode);
+	const loff_t start = round_down(pos, blocksize);
+	uint64_t strip_num;
+	uint64_t strides;
+	uint64_t strip_addr;
+	uint64_t addr_in_strip;
+	uint32_t strip_idx;
+
+	/* Caller should never give us a block device */
+	if (BAD_DATA(stripe_fb->bdev != NULL))
+		return -EFSCORRUPTED;
+
+	/* Strip width must be aligned to fsblock size */
+	if (BAD_DATA(!IS_ALIGNED(bstripe->strip_width, blocksize)))
+		return -EFSCORRUPTED;
+
+	/*
+	 * Maps to stripes are either written or not; they can't be holes,
+	 * reservations, or anything that doesn't have a device range.
+	 */
+	if (BAD_DATA(fmap->type != FUSE_IOMAP_TYPE_MAPPED_STRIPE &&
+	             fmap->type != FUSE_IOMAP_TYPE_UNWRITTEN_STRIPE))
+		return -EFSCORRUPTED;
+	if (BAD_DATA(fmap->addr == FUSE_IOMAP_NULL_ADDR))
+		return -EFSCORRUPTED;
+
+	/* No appending or atomic writes to the device itself */
+	if (BAD_DATA(fmap->flags & (FUSE_IOMAP_F_ANON_WRITE |
+				    FUSE_IOMAP_F_ATOMIC_BIO)))
+		return -EFSCORRUPTED;
+
+	/*
+	 * A striped backing device effectively creates a virtual device with
+	 * its own LBA range, just like any software raid0.  The filesystem
+	 * mapping points to a range within the virtual device.  Our goal is to
+	 * adjust the fmap so that it points to a range on the underlying block
+	 * device.
+	 *
+	 * Adjust the start of the fmap upward to the fsblock containing pos,
+	 * so that the fmap addr tells us where within the backing device we
+	 * want to perform IO.
+	 */
+	if (fmap->offset < start) {
+		loff_t delta = start - fmap->offset;
+
+		if (BAD_DATA(fmap->length <= delta))
+			return -EFSCORRUPTED;
+
+		fmap->length -= delta;
+		fmap->addr += delta;
+		fmap->offset += delta;
+	}
+
+	/*
+	 * Use the fmap addr to compute the strip number within the virtual
+	 * striped device's address range.  The adjustment will set fmap to the
+	 * full strip because iomap can handle mappings that start before and
+	 * end after the requested range.
+	 */
+	strip_num = div64_u64_rem(fmap->addr, bstripe->strip_width,
+				  &addr_in_strip);
+
+	/*
+	 * Use the strip number to compute the number of times that we've gone
+	 * around the strip array (the number of strides), and the strip index
+	 * within a particular stride.
+	 */
+	strides = div_u64_rem(strip_num, bstripe->nr_strips, &strip_idx);
+	bstrip = &bstripe->strips[strip_idx];
+
+	/* Strip must be a real bdev, aligned to the fsblock size */
+	if (BAD_DATA(bstrip->fb == NULL) ||
+	    BAD_DATA(bstrip->fb->bdev == NULL) ||
+	    BAD_DATA(!IS_ALIGNED(bstrip->addr, blocksize)))
+		return -EFSCORRUPTED;
+
+	/*
+	 * Set the fmap to the entire strip that backs pos.
+	 *
+	 * The final disk address is the sum of:
+	 * (a) the disk address of the start of the stripe
+	 * (b) the number of strides we've walked across on just this disk
+	 * (c) the byte address within the strip
+	 *
+	 * The fmap length is shortened to the end of the strip, if necessary.
+	 */
+	fmap->addr = bstrip->addr;
+	if (BAD_DATA(check_mul_overflow(strides, bstripe->strip_width,
+					&strip_addr)) ||
+	    BAD_DATA(check_add_overflow(fmap->addr, strip_addr,
+					&fmap->addr)) ||
+	    BAD_DATA(check_add_overflow(fmap->addr, addr_in_strip,
+					&fmap->addr)))
+		return -EFSCORRUPTED;
+
+	fmap->dev = bstrip->dev;
+	switch (fmap->type) {
+	case FUSE_IOMAP_TYPE_MAPPED_STRIPE:
+		fmap->type = FUSE_IOMAP_TYPE_MAPPED;
+		break;
+	case FUSE_IOMAP_TYPE_UNWRITTEN_STRIPE:
+		fmap->type = FUSE_IOMAP_TYPE_UNWRITTEN;
+		break;
+	default:
+		/* should have been caught earlier */
+		ASSERT(0);
+		return -EFSCORRUPTED;
+	}
+	fmap->length = min(fmap->length, bstripe->strip_width - addr_in_strip);
+
+	*fbp = fuse_backing_get(bstrip->fb);
+	fuse_backing_put(stripe_fb);
+	return 0;
 }
 
 /* Convert a mapping from the server into something the kernel can use */
@@ -471,6 +610,19 @@ static inline struct fuse_backing *
 fuse_iomap_find_bdev(struct fuse_conn *fc, const struct fuse_iomap_io *map)
 {
 	struct fuse_backing *ret = NULL;
+
+	if (fuse_iomap_is_striped(map)) {
+		if (BAD_DATA(map->dev == FUSE_IOMAP_DEV_NULL))
+			return ERR_PTR(-EFSCORRUPTED);
+
+		ret = fuse_backing_lookup(fc, &fuse_iomap_stripe_backing_ops,
+					  map->dev);
+		/* Stripes must have a device/addr */
+		if (BAD_DATA(ret == NULL))
+			return ERR_PTR(-EFSCORRUPTED);
+
+		return ret;
+	}
 
 	if (map->dev != FUSE_IOMAP_DEV_NULL && map->dev < INT_MAX)
 		ret = fuse_backing_lookup(fc, &fuse_iomap_backing_ops,
@@ -678,9 +830,10 @@ out_iomap:
 }
 
 /* Convert a mapping from the cache into something the kernel can use */
-static int fuse_iomap_from_cache(struct inode *inode, struct iomap *iomap,
+static int fuse_iomap_from_cache(struct inode *inode, loff_t pos,
+				 struct iomap *iomap,
 				 enum fuse_iomap_iodir dir,
-				 const struct fuse_iomap_lookup *lmap)
+				 struct fuse_iomap_lookup *lmap)
 {
 	struct fuse_mount *fm = get_fuse_mount(inode);
 	struct fuse_backing *fb;
@@ -689,6 +842,12 @@ static int fuse_iomap_from_cache(struct inode *inode, struct iomap *iomap,
 	fb = fuse_iomap_find_bdev(fm->fc, &lmap->map);
 	if (IS_ERR(fb))
 		return PTR_ERR(fb);
+
+	if (fuse_iomap_is_striped(&lmap->map)) {
+		err = fuse_iomap_adjust_stripe(inode, pos, &lmap->map, &fb);
+		if (err)
+			goto out_backing;
+	}
 
 	err = fuse_iomap_validate_bdev_access(fb, dir);
 	if (err)
@@ -767,7 +926,7 @@ static int fuse_iomap_try_cache(struct inode *inode, loff_t pos, loff_t count,
 				goto out_unlock;
 
 			if (lmap.map.type != FUSE_IOMAP_TYPE_PURE_OVERWRITE) {
-				ret = fuse_iomap_from_cache(inode, dest,
+				ret = fuse_iomap_from_cache(inode, pos, dest,
 							    WRITE_MAPPING,
 							    &lmap);
 				if (ret)
@@ -817,7 +976,7 @@ static int fuse_iomap_try_cache(struct inode *inode, loff_t pos, loff_t count,
 	if (ret)
 		goto out_unlock;
 
-	ret = fuse_iomap_from_cache(inode, dest, backing_dir, &lmap);
+	ret = fuse_iomap_from_cache(inode, pos, dest, backing_dir, &lmap);
 	if (ret)
 		goto out_unlock;
 
@@ -948,6 +1107,20 @@ retry:
 			goto out_read_dev;
 		}
 
+		if (fuse_iomap_is_striped(&outarg.write)) {
+			err = fuse_iomap_adjust_stripe(inode, pos, &outarg.write,
+						       &write_dev);
+			if (err)
+				goto out_write_dev;
+		}
+
+		if (fuse_iomap_is_striped(&outarg.read)) {
+			err = fuse_iomap_adjust_stripe(inode, pos, &outarg.read,
+						       &read_dev);
+			if (err)
+				goto out_write_dev;
+		}
+
 		err = fuse_iomap_validate_bdev_access(read_dev, READ_MAPPING);
 		if (err)
 			goto out_write_dev;
@@ -963,6 +1136,13 @@ retry:
 		fuse_iomap_from_server(iomap, write_dev, &outarg.write);
 		fuse_iomap_from_server(srcmap, read_dev, &outarg.read);
 	} else {
+		if (fuse_iomap_is_striped(&outarg.read)) {
+			err = fuse_iomap_adjust_stripe(inode, pos, &outarg.read,
+						       &read_dev);
+			if (err)
+				goto out_read_dev;
+		}
+
 		err = fuse_iomap_validate_bdev_access(read_dev,
 				is_write ? WRITE_MAPPING : READ_MAPPING);
 		if (err)
@@ -2980,6 +3160,18 @@ fuse_iomap_upsert_validate_dev(
 {
 	uint64_t			map_end;
 	uint64_t			device_bytes;
+
+	if (fuse_iomap_is_striped(map)) {
+		if (BAD_DATA(!fb))
+			return -EFSCORRUPTED;
+		if (BAD_DATA(map->addr == FUSE_IOMAP_NULL_ADDR))
+			return -EFSCORRUPTED;
+		if (BAD_DATA(check_add_overflow(map->addr, map->length,
+						&map_end)))
+			return -EFSCORRUPTED;
+
+		return 0;
+	}
 
 	if (!fb) {
 		if (BAD_DATA(map->addr != FUSE_IOMAP_NULL_ADDR))

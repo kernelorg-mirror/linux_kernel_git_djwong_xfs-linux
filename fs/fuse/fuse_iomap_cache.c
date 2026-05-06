@@ -1155,6 +1155,8 @@ static inline bool fuse_iomap_addrs_adjacent(const struct fuse_iomap_io *left,
 	switch (left->type) {
 	case FUSE_IOMAP_TYPE_MAPPED:
 	case FUSE_IOMAP_TYPE_UNWRITTEN:
+	case FUSE_IOMAP_TYPE_MAPPED_STRIPE:
+	case FUSE_IOMAP_TYPE_UNWRITTEN_STRIPE:
 		return left->addr + left->length == right->addr;
 	default:
 		return left->addr  == FUSE_IOMAP_NULL_ADDR &&
@@ -1255,6 +1257,8 @@ fuse_iext_del_mapping(
 	switch (del->type) {
 	case FUSE_IOMAP_TYPE_MAPPED:
 	case FUSE_IOMAP_TYPE_UNWRITTEN:
+	case FUSE_IOMAP_TYPE_MAPPED_STRIPE:
+	case FUSE_IOMAP_TYPE_UNWRITTEN_STRIPE:
 		del_endaddr = del->addr + del->length;
 		break;
 	default:
@@ -1400,6 +1404,8 @@ fuse_iomap_cache_remove(
 			break;
 		case FUSE_IOMAP_TYPE_MAPPED:
 		case FUSE_IOMAP_TYPE_UNWRITTEN:
+		case FUSE_IOMAP_TYPE_MAPPED_STRIPE:
+		case FUSE_IOMAP_TYPE_UNWRITTEN_STRIPE:
 			wasreal = true;
 			break;
 		default:
@@ -1727,6 +1733,8 @@ fuse_iomap_trim(
 	switch (got->type) {
 	case FUSE_IOMAP_TYPE_MAPPED:
 	case FUSE_IOMAP_TYPE_UNWRITTEN:
+	case FUSE_IOMAP_TYPE_MAPPED_STRIPE:
+	case FUSE_IOMAP_TYPE_UNWRITTEN_STRIPE:
 		mval->map.addr = got->addr;
 		break;
 	default:
