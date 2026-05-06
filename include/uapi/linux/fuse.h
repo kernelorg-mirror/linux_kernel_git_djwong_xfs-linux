@@ -253,6 +253,8 @@
  *    attributes
  *  - add FUSE_NOTIFY_IOMAP_{UPSERT,INVAL}_MAPPINGS so fuse servers can cache
  *    file range mappings in the kernel for iomap
+ *  - add FUSE_IOMAP_TYPE_STRIPE and FUSE_IOC_DEV_IOMAP_BACKING_STRIPE_CONFIG
+ *    so that fuse servers can tell teh kernel about filesystem striping
  */
 
 #ifndef _LINUX_FUSE_H
@@ -1422,6 +1424,9 @@ struct fuse_uring_cmd_req {
 #define FUSE_IOMAP_TYPE_RETRY_CACHE	(65534)
 /* do not upsert this mapping */
 #define FUSE_IOMAP_TYPE_NOCACHE		(65533)
+/* fuse-specific mapping type meaning stripe */
+#define FUSE_IOMAP_TYPE_MAPPED_STRIPE	(65532)
+#define FUSE_IOMAP_TYPE_UNWRITTEN_STRIPE (65531)
 
 #define FUSE_IOMAP_DEV_NULL		(0U)	/* null device cookie */
 
