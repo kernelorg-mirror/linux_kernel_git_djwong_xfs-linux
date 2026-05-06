@@ -1400,6 +1400,7 @@ fuse_iomap_cache_remove(
 			break;
 		case FUSE_IOMAP_TYPE_MAPPED:
 		case FUSE_IOMAP_TYPE_UNWRITTEN:
+		case FUSE_IOMAP_TYPE_STRIPE:
 			wasreal = true;
 			break;
 		default:
@@ -1725,6 +1726,7 @@ fuse_iomap_trim(
 	switch (got->type) {
 	case FUSE_IOMAP_TYPE_MAPPED:
 	case FUSE_IOMAP_TYPE_UNWRITTEN:
+	case FUSE_IOMAP_TYPE_STRIPE:
 		mval->map.addr = got->addr;
 		break;
 	default:

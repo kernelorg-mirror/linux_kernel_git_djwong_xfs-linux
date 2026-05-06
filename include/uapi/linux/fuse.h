@@ -1412,6 +1412,8 @@ struct fuse_uring_cmd_req {
 #define FUSE_IOMAP_TYPE_RETRY_CACHE	(254)
 /* do not upsert this mapping */
 #define FUSE_IOMAP_TYPE_NOCACHE		(253)
+/* fuse-specific mapping type meaning stripe */
+#define FUSE_IOMAP_TYPE_STRIPE		(252)
 
 #define FUSE_IOMAP_DEV_NULL		(0U)	/* null device cookie */
 

@@ -19,6 +19,7 @@ static inline bool fuse_has_iomap(const struct inode *inode)
 	return get_fuse_conn(inode)->iomap;
 }
 
+extern const struct fuse_backing_ops fuse_iomap_stripe_backing_ops;
 extern const struct fuse_backing_ops fuse_iomap_backing_ops;
 
 int fuse_iomap_mount(struct fuse_mount *fm);
