@@ -291,14 +291,14 @@ DECLARE_EVENT_CLASS(fuse_backing_class,
 	),
 
 	TP_fast_assign(
-		struct inode *inode = file_inode(fb->file);
+		struct inode *inode = fb->file ? file_inode(fb->file) : NULL;
 
 		__entry->connection	=	fc->dev;
 		__entry->id		=	fb->id;
-		__entry->ino		=	inode->i_ino;
+		__entry->ino		=	inode ? inode->i_ino : 0;
 		__entry->type		=	fb->ops->type;
 		if (fb->ops->type == FUSE_BACKING_TYPE_IOMAP)
-			__entry->rdev	=	inode->i_rdev;
+			__entry->rdev	=	inode ? inode->i_rdev : 0;
 		else
 			__entry->rdev	=	0;
 	),

@@ -20,6 +20,7 @@ static inline bool fuse_has_iomap(const struct inode *inode)
 }
 
 extern const struct fuse_backing_ops fuse_iomap_backing_ops;
+extern const struct fuse_backing_ops fuse_iomap_stripe_backing_ops;
 
 int fuse_iomap_mount_sync(struct fuse_mount *fm);
 void fuse_iomap_mount_async(struct fuse_mount *fm);
@@ -81,11 +82,15 @@ int fuse_iomap_backing_inval(struct fuse_conn *fc,
 			     const struct fuse_iomap_backing_inval_out *arg);
 int fuse_iomap_backing_set_blocksize(struct file *file,
 				     struct fuse_iomap_backing_info __user *argp);
+int fuse_iomap_backing_stripe_config(struct file *file,
+				     struct fuse_iomap_backing_stripe __user *argp);
 
 int fuse_iomap_upsert_mappings(struct fuse_conn *fc,
 			       const struct fuse_iomap_upsert_mappings_out *outarg);
 int fuse_iomap_inval_mappings(struct fuse_conn *fc,
 			      const struct fuse_iomap_inval_mappings_out *outarg);
+
+void fuse_iomap_conn_free(struct fuse_conn *fc);
 #else
 # define fuse_iomap_enabled(...)		(false)
 # define fuse_has_iomap(...)			(false)
@@ -117,8 +122,10 @@ int fuse_iomap_inval_mappings(struct fuse_conn *fc,
 # define fuse_dev_ioctl_iomap_set_nofs(...)	(-EOPNOTSUPP)
 # define fuse_iomap_backing_inval(...)		(-ENOSYS)
 # define fuse_iomap_backing_set_blocksize(...)	(-EOPNOTSUPP)
+# define fuse_iomap_backing_stripe_config(...)	(-EOPNOTSUPP)
 # define fuse_iomap_upsert_mappings(...)	(-ENOSYS)
 # define fuse_iomap_inval_mappings(...)		(-ENOSYS)
+# define fuse_iomap_conn_free(...)		((void)0)
 #endif /* CONFIG_FUSE_IOMAP */
 
 #endif /* _FS_FUSE_IOMAP_H */
