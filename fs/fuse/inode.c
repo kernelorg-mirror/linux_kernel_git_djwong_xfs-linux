@@ -1119,6 +1119,7 @@ void fuse_conn_put(struct fuse_conn *fc)
 		WARN_ON(atomic_read(&bucket->count) != 1);
 		kfree(bucket);
 	}
+	fuse_iomap_conn_free(fc);
 	if (IS_ENABLED(CONFIG_FUSE_BACKING))
 		fuse_backing_files_free(fc);
 	call_rcu(&fc->rcu, delayed_release);

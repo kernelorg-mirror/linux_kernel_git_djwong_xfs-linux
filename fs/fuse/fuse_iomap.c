@@ -1161,6 +1161,26 @@ const struct fuse_backing_ops fuse_iomap_backing_ops = {
 	.post_open = fuse_iomap_post_open,
 };
 
+static void fuse_iomap_stripe_free_data(const void *fbdata)
+{
+	const struct fuse_backing_stripe *bstripe = fbdata;
+	const struct fuse_backing_strip *bstrip = &bstripe->strips[0];
+	unsigned int i;
+
+	for (i = 0; i < bstripe->nr_strips; i++, bstrip++)
+		fuse_backing_put(bstrip->fb);
+
+	kfree(fbdata);
+}
+
+const struct fuse_backing_ops fuse_iomap_stripe_backing_ops = {
+	.type = FUSE_BACKING_TYPE_IOMAP_STRIPE,
+	.id_start = 2048,
+	.id_end = 3073,		/* maximum 1024 stripe devices */
+	.may_close = fuse_iomap_may_close,
+	.free_data = fuse_iomap_stripe_free_data,
+};
+
 struct fuse_iomap_config_args {
 	struct fuse_args args;
 	struct fuse_iomap_config_in inarg;
@@ -2995,4 +3015,84 @@ int fuse_dev_ioctl_iomap_set_blocksize(struct file *file,
 	ret = set_blocksize(fb->file, fbi.blocksize);
 	fuse_backing_put(fb);
 	return ret;
+}
+
+int fuse_dev_ioctl_iomap_stripe_config(struct file *file,
+				       struct fuse_iomap_stripe __user *argp)
+{
+	struct fuse_backing_stripe *bstripe __free(kfree) = NULL;
+	struct fuse_backing_strip *bstrip;
+	struct fuse_dev *fud = fuse_get_dev(file);
+	struct fuse_iomap_stripe stripe;
+	struct fuse_iomap_strip strip;
+	size_t bstripe_len;
+	unsigned int i;
+
+	if (IS_ERR(fud))
+		return PTR_ERR(fud);
+
+	if (!IS_ENABLED(CONFIG_FUSE_BACKING))
+		return -EOPNOTSUPP;
+
+	if (copy_from_user(&stripe, argp, sizeof(stripe)))
+		return -EFAULT;
+
+	if (memchr_inv(&stripe.reserved, 0, sizeof(stripe.reserved)))
+		return -EINVAL;
+
+	if (stripe.nr_strips == 0)
+		return -EINVAL;
+
+	bstripe_len = sizeof_fuse_backing_stripe(stripe.nr_strips);
+	if (bstripe_len > PAGE_SIZE)
+		return -ENOMEM;
+
+	bstripe = kzalloc_flex(*bstripe, strips, stripe.nr_strips);
+	if (!bstripe)
+		return -ENOMEM;
+
+	bstripe->nr_strips = stripe.nr_strips;
+	bstripe->strip_width = stripe.strip_width;
+
+	bstrip = &bstripe->strips[0];
+	for (i = 0; i < stripe.nr_strips; i++, bstrip++) {
+		if (copy_from_user(&strip, &argp->strips[i], sizeof(strip)))
+			return -EFAULT;
+
+		if (strip.reserved)
+			return -EINVAL;
+
+		bstrip->fb = fuse_backing_lookup(fud->fc,
+						 &fuse_iomap_backing_ops,
+						 strip.dev);
+		if (!bstrip->fb)
+			return -ENODEV;
+
+		bstrip->dev = strip.dev;
+		bstrip->addr = strip.addr;
+	}
+
+	return fuse_backing_create(fud->fc, &fuse_iomap_stripe_backing_ops,
+				   no_free_ptr(bstripe));
+}
+
+static int fuse_iomap_free_stripe(struct fuse_backing *fb, void *data)
+{
+	struct fuse_backing_stripe *bstripe = fb->data;
+	struct fuse_backing_strip *bstrip = &bstripe->strips[0];
+	unsigned int i;
+
+	for (i = 0; i < bstripe->nr_strips; i++, bstrip++) {
+		fuse_backing_put(bstrip->fb);
+		bstrip->fb = NULL;
+	}
+
+	return 0;
+}
+
+void fuse_iomap_conn_free(struct fuse_conn *fc)
+{
+	/* release the lower layer backing devices before we free the data */
+	fuse_backing_foreach(fc, &fuse_iomap_stripe_backing_ops,
+			     fuse_iomap_free_stripe, NULL);
 }

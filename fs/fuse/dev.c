@@ -2793,6 +2793,8 @@ static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 		return fuse_dev_ioctl_add_iomap(file);
 	case FUSE_DEV_IOC_IOMAP_SET_BLOCKSIZE:
 		return fuse_dev_ioctl_iomap_set_blocksize(file, argp);
+	case FUSE_DEV_IOC_IOMAP_STRIPE_CONFIG:
+		return fuse_dev_ioctl_iomap_stripe_config(file, argp);
 
 	default:
 		return -ENOTTY;

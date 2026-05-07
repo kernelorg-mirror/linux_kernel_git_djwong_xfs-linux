@@ -106,20 +106,45 @@ struct fuse_submount_lookup {
 struct fuse_conn;
 struct fuse_backing;
 
+/* internal backing device type, much larger than userspace can pass in */
+#define FUSE_BACKING_TYPE_IOMAP_STRIPE	(INT_MAX)
+
 /** Operations for subsystems that want to use a backing file */
 struct fuse_backing_ops {
 	int (*may_admin)(struct fuse_conn *fc, uint32_t flags);
 	int (*may_open)(struct fuse_conn *fc, struct file *file);
 	int (*may_close)(struct fuse_conn *fc, const struct fuse_backing *fb);
 	int (*post_open)(struct fuse_conn *fc, struct fuse_backing *fb);
+	void (*free_data)(const void *fbdata);
 	unsigned int type;
 	int id_start;
 	int id_end;
 };
 
+struct fuse_backing_strip {
+	struct fuse_backing *fb;
+	uint64_t addr;		/* disk offset of strip, bytes */
+	uint32_t dev;
+};
+
+struct fuse_backing_stripe {
+	unsigned int nr_strips;
+	uint64_t strip_width;	/* strip width, bytes */
+
+	struct fuse_backing_strip strips[] __counted_by(nr_strips);
+};
+
+static inline size_t sizeof_fuse_backing_stripe(unsigned int nr)
+{
+	return flex_array_size((struct fuse_backing_stripe *)NULL, strips, nr);
+}
+
 /** Container for data related to mapping to backing file */
 struct fuse_backing {
-	struct file *file;
+	union {
+		struct file *file;
+		void *data;
+	};
 	struct cred *cred;
 	struct block_device *bdev;
 	const struct fuse_backing_ops *ops;
@@ -1707,6 +1732,11 @@ typedef bool (*fuse_match_backing_fn)(const struct fuse_backing *fb,
 int fuse_backing_lookup_id(struct fuse_conn *fc,
 			   const struct fuse_backing_ops *ops,
 			   fuse_match_backing_fn match_fn, const void *data);
+
+typedef int (*fuse_backing_iter_fn)(struct fuse_backing *fb, void *data);
+int fuse_backing_foreach(struct fuse_conn *fc,
+			 const struct fuse_backing_ops *ops,
+			 fuse_backing_iter_fn iter_fn, void *data);
 #else
 
 static inline struct fuse_backing *fuse_backing_get(struct fuse_backing *fb)
@@ -1727,6 +1757,8 @@ static inline struct fuse_backing *fuse_backing_lookup(struct fuse_conn *fc,
 void fuse_backing_files_init(struct fuse_conn *fc);
 void fuse_backing_files_free(struct fuse_conn *fc);
 int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map);
+int fuse_backing_create(struct fuse_conn *fc,
+			const struct fuse_backing_ops *ops, void *data);
 int fuse_backing_close(struct fuse_conn *fc, int backing_id);
 
 /* passthrough.c */

@@ -22,7 +22,9 @@ static void fuse_backing_free(struct fuse_backing *fb)
 {
 	pr_debug("%s: fb=0x%p\n", __func__, fb);
 
-	if (fb->file)
+	if (fb->ops->free_data)
+		fb->ops->free_data(fb->data);
+	else if (fb->file)
 		fput(fb->file);
 	put_cred(fb->cred);
 	kfree_rcu(fb, rcu);
@@ -171,6 +173,48 @@ out_fput:
 	goto out;
 }
 
+int fuse_backing_create(struct fuse_conn *fc,
+			const struct fuse_backing_ops *ops, void *data)
+{
+	struct fuse_backing *fb = NULL;
+	int res;
+
+	pr_debug("%s: data=%p\n", __func__, data);
+
+	res = ops->may_admin ? ops->may_admin(fc, 0) : 0;
+	if (res)
+		goto out;
+
+	fb = kmalloc_obj(struct fuse_backing);
+	res = -ENOMEM;
+	if (!fb)
+		goto out;
+
+	fb->data = data;
+	fb->cred = prepare_creds();
+	fb->ops = ops;
+	fb->bdev = NULL;
+	refcount_set(&fb->count, 1);
+
+	res = ops->post_open ? ops->post_open(fc, fb) : 0;
+	if (res) {
+		fuse_backing_free(fb);
+		fb = NULL;
+		goto out;
+	}
+
+	res = fuse_backing_id_alloc(fc, fb);
+	if (res < 0) {
+		fuse_backing_free(fb);
+		fb = NULL;
+		goto out;
+	}
+
+out:
+	pr_debug("%s: fb=0x%p, ret=%i\n", __func__, fb, res);
+	return res;
+}
+
 static struct fuse_backing *__fuse_backing_lookup(struct fuse_conn *fc,
 						  int backing_id)
 {
@@ -277,6 +321,43 @@ int fuse_backing_lookup_id(struct fuse_conn *fc,
 
 	rcu_read_lock();
 	ret = idr_for_each(&fc->backing_files_map, fuse_backing_matches, &fbm);
+	rcu_read_unlock();
+
+	return ret;
+}
+
+struct fuse_backing_iter {
+	fuse_backing_iter_fn iter_fn;
+	const struct fuse_backing_ops *ops;
+	void *data;
+};
+
+static int fuse_backing_iter(int id, void *p, void *data)
+{
+	struct fuse_backing *fb = p;
+	struct fuse_backing_iter *fbi = data;
+
+	if (!fb)
+		return 0;
+	if (fbi->ops && fb->ops != fbi->ops)
+		return 0;
+
+	return fbi->iter_fn(fb, fbi->data);
+}
+
+int fuse_backing_foreach(struct fuse_conn *fc,
+			 const struct fuse_backing_ops *ops,
+			 fuse_backing_iter_fn iter_fn, void *data)
+{
+	struct fuse_backing_iter fbi = {
+		.ops = ops,
+		.iter_fn = iter_fn,
+		.data = data,
+	};
+	int ret;
+
+	rcu_read_lock();
+	ret = idr_for_each(&fc->backing_files_map, fuse_backing_iter, &fbi);
 	rcu_read_unlock();
 
 	return ret;
