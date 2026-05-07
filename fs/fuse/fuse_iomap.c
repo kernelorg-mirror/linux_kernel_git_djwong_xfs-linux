@@ -3309,6 +3309,8 @@ int fuse_iomap_backing_stripe_config(struct file *file,
 
 		bstrip->dev = strip.dev;
 		bstrip->addr = strip.addr;
+
+		trace_fuse_backing_strip_config(fud->fc, bstripe, i, bstrip);
 	}
 
 	ret = fuse_backing_create(fud->fc, &fuse_iomap_stripe_backing_ops,
