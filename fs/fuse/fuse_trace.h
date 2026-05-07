@@ -413,7 +413,8 @@ struct fuse_iext_root;
 	{ FUSE_IOMAP_TYPE_DELALLOC,		"delalloc" }, \
 	{ FUSE_IOMAP_TYPE_MAPPED,		"mapped" }, \
 	{ FUSE_IOMAP_TYPE_UNWRITTEN,		"unwritten" }, \
-	{ FUSE_IOMAP_TYPE_INLINE,		"inline" }
+	{ FUSE_IOMAP_TYPE_INLINE,		"inline" }, \
+	{ FUSE_IOMAP_TYPE_STRIPE,		"stripe" }
 
 #define FUSE_IOMAP_IOEND_STRINGS \
 	{ FUSE_IOMAP_IOEND_SHARED,		"shared" }, \
@@ -582,6 +583,9 @@ DEFINE_EVENT(fuse_iomap_mapping_class, name,	\
 	TP_ARGS(inode, map))
 DEFINE_FUSE_IOMAP_MAPPING_EVENT(fuse_iomap_read_map);
 DEFINE_FUSE_IOMAP_MAPPING_EVENT(fuse_iomap_write_map);
+DEFINE_FUSE_IOMAP_MAPPING_EVENT(fuse_iomap_read_stripe_map);
+DEFINE_FUSE_IOMAP_MAPPING_EVENT(fuse_iomap_write_stripe_map);
+DEFINE_FUSE_IOMAP_MAPPING_EVENT(fuse_iomap_cache_stripe_map);
 
 TRACE_EVENT(fuse_iomap_end,
 	TP_PROTO(const struct inode *inode,
