@@ -269,7 +269,8 @@ TRACE_EVENT(fuse_setattr,
 #ifdef CONFIG_FUSE_BACKING
 #define FUSE_BACKING_FLAG_STRINGS \
 	{ FUSE_BACKING_TYPE_PASSTHROUGH,	"pass" }, \
-	{ FUSE_BACKING_TYPE_IOMAP,		"iomap" }
+	{ FUSE_BACKING_TYPE_IOMAP,		"iomap" }, \
+	{ FUSE_BACKING_TYPE_IOMAP_STRIPE,	"stripe" }
 
 TRACE_EVENT(fuse_backing_class,
 	TP_PROTO(const struct fuse_conn *fc, unsigned int idx,
@@ -312,6 +313,7 @@ DEFINE_EVENT(fuse_backing_class, name,		\
 	TP_ARGS(fc, idx, fb))
 DEFINE_FUSE_BACKING_EVENT(fuse_backing_open);
 DEFINE_FUSE_BACKING_EVENT(fuse_backing_close);
+DEFINE_FUSE_BACKING_EVENT(fuse_backing_create);
 #endif /* CONFIG_FUSE_BACKING */
 
 #if IS_ENABLED(CONFIG_FUSE_IOMAP)

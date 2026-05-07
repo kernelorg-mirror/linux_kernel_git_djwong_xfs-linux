@@ -210,6 +210,7 @@ int fuse_backing_create(struct fuse_conn *fc,
 		goto out;
 	}
 
+	trace_fuse_backing_create(fc, res, fb);
 out:
 	pr_debug("%s: fb=0x%p, ret=%i\n", __func__, fb, res);
 	return res;
