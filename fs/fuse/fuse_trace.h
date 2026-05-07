@@ -275,7 +275,8 @@ TRACE_EVENT(fuse_setattr,
 #ifdef CONFIG_FUSE_BACKING
 #define FUSE_BACKING_FLAG_STRINGS \
 	{ FUSE_BACKING_TYPE_PASSTHROUGH,	"pass" }, \
-	{ FUSE_BACKING_TYPE_IOMAP,		"iomap" }
+	{ FUSE_BACKING_TYPE_IOMAP,		"iomap" }, \
+	{ FUSE_BACKING_TYPE_IOMAP_STRIPE,	"stripe" }
 
 DECLARE_EVENT_CLASS(fuse_backing_class,
 	TP_PROTO(const struct fuse_conn *fc, const struct fuse_backing *fb),
@@ -316,6 +317,47 @@ DEFINE_EVENT(fuse_backing_class, name,		\
 	TP_ARGS(fc, fb))
 DEFINE_FUSE_BACKING_EVENT(fuse_backing_open);
 DEFINE_FUSE_BACKING_EVENT(fuse_backing_close);
+DEFINE_FUSE_BACKING_EVENT(fuse_backing_create);
+
+DECLARE_EVENT_CLASS(fuse_backing_strip_class,
+	TP_PROTO(const struct fuse_conn *fc,
+		 const struct fuse_backing_stripe *bstripe,
+		 unsigned int strip_nr,
+		 const struct fuse_backing_strip *bstrip),
+
+	TP_ARGS(fc, bstripe, strip_nr, bstrip),
+
+	TP_STRUCT__entry(
+		__field(dev_t,			connection)
+		__field(unsigned int,		strip_nr)
+		__field(int,			strip_id)
+		__field(unsigned long long,	strip_width)
+		__field(unsigned long long,	strip_addr)
+	),
+
+	TP_fast_assign(
+		__entry->connection	=	fc->dev;
+		__entry->strip_nr	=	strip_nr;
+		__entry->strip_id	=	bstrip->fb->id;
+		__entry->strip_width	=	bstripe->strip_width;
+		__entry->strip_addr	=	bstrip->addr;
+	),
+
+	TP_printk("connection %u strip nr %u id %u width 0x%llx addr 0x%llx",
+		  __entry->connection,
+		  __entry->strip_nr,
+		  __entry->strip_id,
+		  __entry->strip_width,
+		  __entry->strip_addr)
+);
+#define DEFINE_FUSE_BACKING_STRIP_EVENT(name)			\
+DEFINE_EVENT(fuse_backing_strip_class, name, 			\
+	TP_PROTO(const struct fuse_conn *fc,	 		\
+		 const struct fuse_backing_stripe *bstripe,	\
+		 unsigned int strip_nr,				\
+		 const struct fuse_backing_strip *bstrip),	\
+	TP_ARGS(fc, bstripe, strip_nr, bstrip))
+DEFINE_FUSE_BACKING_STRIP_EVENT(fuse_backing_strip_config);
 #endif /* CONFIG_FUSE_BACKING */
 
 #if IS_ENABLED(CONFIG_FUSE_IOMAP)

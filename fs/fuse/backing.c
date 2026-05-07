@@ -231,6 +231,7 @@ bad:
 	fuse_backing_free(fb);
 	fb = NULL;
 
+	trace_fuse_backing_create(fc, fb);
 out:
 	pr_debug("%s: fb=0x%p, ret=%i\n", __func__, fb, res);
 	return res;
