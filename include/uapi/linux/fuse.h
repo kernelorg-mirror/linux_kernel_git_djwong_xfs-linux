@@ -1229,6 +1229,9 @@ struct fuse_iomap_backing_info {
 #define FUSE_DEV_IOC_IOMAP_BACKING_SET_BLOCKSIZE \
 					_IOW(FUSE_DEV_IOC_MAGIC, 102, \
 					     struct fuse_iomap_backing_info)
+#define FUSE_DEV_IOC_IOMAP_BACKING_STRIPE_CONFIG \
+					_IOW(FUSE_DEV_IOC_MAGIC, 103, \
+					     struct fuse_iomap_backing_stripe)
 
 struct fuse_lseek_in {
 	uint64_t	fh;
@@ -1629,6 +1632,22 @@ struct fuse_iomap_upsert_mappings_out {
 
 	/* write file data to here, if applicable */
 	struct fuse_iomap_io	write;
+};
+
+struct fuse_iomap_backing_strip {
+	uint32_t dev;		/* device cookie */
+	uint32_t reserved;	/* zero */
+	uint64_t addr;		/* disk offset of strip, bytes */
+};
+
+#define FUSE_IOMAP_BACKING_MAX_STRIPS	(256)
+
+struct fuse_iomap_backing_stripe {
+	uint16_t nr_strips;	/* strip count */
+	uint8_t reserved[6];	/* zero */
+	uint64_t strip_width;	/* stripe width, bytes */
+
+	struct fuse_iomap_backing_strip strips[] __counted_by(nr_strips);
 };
 
 #endif /* _LINUX_FUSE_H */
