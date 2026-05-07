@@ -848,6 +848,8 @@ static int fuse_iomap_from_cache(struct inode *inode, loff_t pos,
 		err = fuse_iomap_adjust_stripe(inode, pos, &lmap->map, &fb);
 		if (err)
 			goto out_backing;
+
+		trace_fuse_iomap_cache_stripe_map(inode, &lmap->map);
 	}
 
 	err = fuse_iomap_validate_bdev_access(fb, dir);
@@ -1113,6 +1115,8 @@ retry:
 						       &write_dev);
 			if (err)
 				goto out_write_dev;
+
+			trace_fuse_iomap_write_stripe_map(inode, &outarg.write);
 		}
 
 		if (fuse_iomap_is_striped(&outarg.read)) {
@@ -1120,6 +1124,8 @@ retry:
 						       &read_dev);
 			if (err)
 				goto out_write_dev;
+
+			trace_fuse_iomap_read_stripe_map(inode, &outarg.read);
 		}
 
 		err = fuse_iomap_validate_bdev_access(read_dev, READ_MAPPING);
@@ -1142,6 +1148,8 @@ retry:
 						       &read_dev);
 			if (err)
 				goto out_read_dev;
+
+			trace_fuse_iomap_read_stripe_map(inode, &outarg.read);
 		}
 
 		err = fuse_iomap_validate_bdev_access(read_dev,
