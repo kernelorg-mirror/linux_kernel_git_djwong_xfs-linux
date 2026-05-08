@@ -1160,6 +1160,13 @@ sb_config:
 		bdi_put(old_bdi);
 	}
 
+	/*
+	 * Enable syncfs for iomap fuse servers so that we can send a final
+	 * flush at unmount time.  This also means that we can support
+	 * freeze/thaw properly.
+	 */
+	fc->sync_fs = true;
+
 	return 0;
 }
 
