@@ -1441,6 +1441,8 @@ struct fuse_iomap_end_in {
 #define FUSE_IOMAP_IOEND_DIRECT		(1U << 3)
 /* is append ioend */
 #define FUSE_IOMAP_IOEND_APPEND		(1U << 4)
+/* is pagecache writeback */
+#define FUSE_IOMAP_IOEND_WRITEBACK	(1U << 5)
 
 struct fuse_iomap_ioend_in {
 	uint32_t flags;		/* FUSE_IOMAP_IOEND_* */
