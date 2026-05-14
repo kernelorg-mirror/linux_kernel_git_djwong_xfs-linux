@@ -116,11 +116,19 @@ struct fuse_backing_ops {
 	int id_end;
 };
 
+/* backing has never been exposed via index */
+#define FUSE_BACKING_ID_UNSEEN	(-1)
+
+/* backing was removed from index */
+#define FUSE_BACKING_ID_REMOVED	(0)
+
 /** Container for data related to mapping to backing file */
 struct fuse_backing {
 	struct file *file;
 	struct cred *cred;
 	const struct fuse_backing_ops *ops;
+
+	int id;
 
 	/** refcount */
 	refcount_t count;
