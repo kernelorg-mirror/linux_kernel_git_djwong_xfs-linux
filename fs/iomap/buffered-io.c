@@ -1082,7 +1082,7 @@ static bool iomap_write_end(struct iomap_iter *iter, size_t len, size_t copied,
 	const struct iomap *srcmap = iomap_iter_srcmap(iter);
 	loff_t pos = iter->pos;
 
-	if (srcmap->type == IOMAP_INLINE)
+	if (iter->iomap.type == IOMAP_INLINE)
 		return iomap_write_end_inline(iter, folio, pos, copied);
 
 	if (srcmap->flags & IOMAP_F_BUFFER_HEAD) {
