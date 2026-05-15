@@ -1974,3 +1974,44 @@ iomap_writepages(struct iomap_writepage_ctx *wpc)
 	return error;
 }
 EXPORT_SYMBOL_GPL(iomap_writepages);
+
+static int iomap_writeback_map_iter(struct iomap_iter *iter,
+		struct iomap_writepage_ctx *wpc)
+{
+	struct iomap *iomap = &iter->iomap;
+
+	if (WARN_ON_ONCE(iomap->type == IOMAP_INLINE)) {
+		/*
+		 * iomap assumes that inline data writes are completed by the
+		 * time ->iomap_end completes, so it should never mark a
+		 * pagecache folio dirty, let alone try to writeback one.
+		 */
+		return -EIO;
+	}
+
+	memcpy(&wpc->iomap, iomap, sizeof(struct iomap));
+
+	/* only want to go around the loop once */
+	return -ECANCELED;
+}
+
+ssize_t iomap_writeback_map(struct iomap_writepage_ctx *wpc,
+		struct folio *folio, u64 offset, unsigned int len, u64 end_pos,
+		const struct iomap_ops *ops)
+{
+	struct iomap_iter iter = {
+		.inode		= wpc->inode,
+		.pos		= offset,
+		.len		= len,
+		.flags		= IOMAP_WRITEBACK,
+	};
+	ssize_t ret;
+
+	while ((ret = iomap_iter(&iter, ops)) > 0)
+		iter.status = iomap_writeback_map_iter(&iter, wpc);
+	if (ret < 0 && ret != -ECANCELED)
+		return ret;
+
+	return iomap_add_to_ioend(wpc, folio, offset, end_pos, len);
+}
+EXPORT_SYMBOL_GPL(iomap_writeback_map);

@@ -209,6 +209,7 @@ struct iomap_write_ops {
 #endif /* CONFIG_FS_DAX */
 #define IOMAP_ATOMIC		(1 << 9) /* torn-write protection */
 #define IOMAP_DONTCACHE		(1 << 10)
+#define IOMAP_WRITEBACK		(1 << 11) /* pagecache writeback */
 
 struct iomap_ops {
 	/*
@@ -494,6 +495,20 @@ void iomap_finish_folio_write(struct inode *inode, struct folio *folio,
 
 int iomap_writeback_folio(struct iomap_writepage_ctx *wpc, struct folio *folio);
 int iomap_writepages(struct iomap_writepage_ctx *wpc);
+
+static inline bool
+iomap_writeback_map_valid(struct iomap_writepage_ctx *wpc, loff_t offset)
+{
+	if (offset < wpc->iomap.offset ||
+	    offset >= wpc->iomap.offset + wpc->iomap.length)
+		return false;
+
+	return true;
+}
+
+ssize_t iomap_writeback_map(struct iomap_writepage_ctx *wpc,
+		struct folio *folio, u64 offset, unsigned int len,
+		u64 end_pos, const struct iomap_ops *ops);
 
 struct iomap_read_folio_ctx {
 	const struct iomap_read_ops *ops;
