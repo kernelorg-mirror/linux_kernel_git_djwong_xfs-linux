@@ -2448,6 +2448,24 @@ static void end_polls(struct fuse_conn *fc)
 }
 
 /*
+ * Flush all pending requests but do not wait for them.  Only call this
+ * function when it is no longer possible for other threads to add requests.
+ */
+void fuse_flush_requests(struct fuse_conn *fc)
+{
+	spin_lock(&fc->lock);
+	spin_lock(&fc->bg_lock);
+	if (fc->connected) {
+		/* Push all the background requests to the queue. */
+		fc->blocked = 0;
+		fc->max_background = UINT_MAX;
+		flush_bg_queue(fc);
+	}
+	spin_unlock(&fc->bg_lock);
+	spin_unlock(&fc->lock);
+}
+
+/*
  * Abort all requests.
  *
  * Emergency exit in case of a malicious or accidental deadlock, or just a hung
