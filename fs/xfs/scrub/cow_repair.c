@@ -482,13 +482,21 @@ xrep_cow_find_mapping(
 	if (got->br_startoff > startoff)
 		goto bad;
 
-	if (got->br_blockcount == 0)
-		goto bad;
-
 	if (isnullstartblock(got->br_startblock))
 		goto bad;
 
 	if (xfs_bmap_is_written_extent(got))
+		goto bad;
+
+	if (got->br_startoff < startoff) {
+		const int64_t	delta = startoff - got->br_startoff;
+
+		got->br_blockcount -= delta;
+		got->br_startoff += delta;
+		got->br_startblock += delta;
+	}
+
+	if (got->br_blockcount == 0)
 		goto bad;
 
 	return 0;
