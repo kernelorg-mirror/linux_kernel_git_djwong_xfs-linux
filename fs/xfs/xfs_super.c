@@ -552,10 +552,19 @@ STATIC int
 xfs_setup_devices(
 	struct xfs_mount	*mp)
 {
+	xfs_rfsblock_t		dblocks = mp->m_sb.sb_dblocks;
 	int			error;
 
+	/*
+	 * Internal rt volumes are placed immediately after the data device,
+	 * so set the buftarg sector count to the end of the rt volume so that
+	 * we can do media scans and handle media failure reports.
+	 */
+	if (mp->m_sb.sb_rtstart)
+		dblocks = mp->m_sb.sb_rtstart + mp->m_sb.sb_rblocks;
+
 	error = xfs_configure_buftarg(mp->m_ddev_targp, mp->m_sb.sb_sectsize,
-			mp->m_sb.sb_dblocks);
+			dblocks);
 	if (error)
 		return error;
 
