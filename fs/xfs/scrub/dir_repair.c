@@ -355,17 +355,25 @@ STATIC int
 xrep_dir_stash_removename(
 	struct xrep_dir		*rd,
 	const struct xfs_name	*name,
-	xfs_ino_t		ino)
+	const struct xfs_inode	*ip)
 {
 	struct xrep_dirent	dirent = {
 		.action		= XREP_DIRENT_REMOVE,
-		.ino		= ino,
+		.ino		= ip->i_ino,
 		.namelen	= name->len,
 		.ftype		= name->type,
 	};
 	int			error;
 
-	trace_xrep_dir_stash_removename(rd->sc->tempip, name, ino);
+	trace_xrep_dir_stash_removename(rd->sc->tempip, name, ip->i_ino);
+
+	/*
+	 * xfs_dentry_to_name can pass us names with FT_UNKNOWN, but we really
+	 * must know the ftype of the child that is being removed so that we
+	 * can do nlink updates correctly.
+	 */
+	if (dirent.ftype == XFS_DIR3_FT_UNKNOWN)
+		dirent.ftype = xfs_mode_to_ftype(VFS_IC(ip)->i_mode);
 
 	error = xfblob_storename(rd->dir_names, &dirent.name_cookie, name);
 	if (error)
@@ -1382,8 +1390,7 @@ xrep_dir_live_update(
 			error = xrep_dir_stash_createname(rd, p->name,
 					p->ip->i_ino);
 		else
-			error = xrep_dir_stash_removename(rd, p->name,
-					p->ip->i_ino);
+			error = xrep_dir_stash_removename(rd, p->name, p->ip);
 		mutex_unlock(&rd->pscan.lock);
 		if (error)
 			goto out_abort;
