@@ -372,8 +372,19 @@ xchk_dirpath_step_up(
 
 	/* Grab and lock the parent directory. */
 	error = xchk_iget(sc, parent_ino, &dp);
-	if (error)
+	switch (error) {
+	case -EINVAL:
+	case -ENOENT:
+		/* inode doesn't exist */
+		trace_xchk_dirpath_badino(dl->sc, path->path_nr,
+				path->nr_steps, &dl->xname, &dl->pptr_rec);
+		return -EFSCORRUPTED;
+	case 0:
+		/* keep going */
+		break;
+	default:
 		return error;
+	}
 
 	lock_mode = xfs_ilock_attr_map_shared(dp);
 	mutex_lock(&dl->lock);
