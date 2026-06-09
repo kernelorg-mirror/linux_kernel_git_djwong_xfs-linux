@@ -474,6 +474,9 @@ xrep_findparent_from_dcache(
 	pip = igrab(d_inode(parent));
 	dput(parent);
 
+	if (!pip)
+		goto out_dput;
+
 	if (S_ISDIR(pip->i_mode)) {
 		trace_xrep_findparent_from_dcache(sc->ip, XFS_I(pip)->i_ino);
 		ret = XFS_I(pip)->i_ino;
