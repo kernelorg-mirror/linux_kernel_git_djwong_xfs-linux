@@ -480,8 +480,10 @@ xfs_dqinode_metadir_link(
 		return error;
 
 	error = xfs_metadir_link(&upd);
-	if (error)
+	if (error) {
+		xfs_metadir_cancel(&upd, error);
 		return error;
+	}
 
 	xfs_trans_log_inode(upd.tp, upd.ip, XFS_ILOG_CORE);
 
