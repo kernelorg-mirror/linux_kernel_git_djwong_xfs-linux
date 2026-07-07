@@ -630,6 +630,8 @@ xrep_metapath_try_unlink(
 	error = xchk_metapath_ilock_parent_and_child(mpath, ip);
 	if (error) {
 		xchk_trans_cancel(sc);
+		if (ip)
+			xfs_irele(ip);
 		return error;
 	}
 	xfs_trans_ijoin(sc->tp, mpath->dp, 0);
