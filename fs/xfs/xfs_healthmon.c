@@ -345,8 +345,10 @@ xfs_healthmon_clear_lost_prev(
 
 	if (hm->events < XFS_HEALTHMON_MAX_EVENTS)
 		event = xfs_healthmon_dup_event(&lost_event);
-	if (!event)
+	if (!event) {
+		xfs_healthmon_bump_lost(hm);
 		return -ENOMEM;
+	}
 
 	__xfs_healthmon_insert(hm, INSERT_TAIL, event);
 cleared:
