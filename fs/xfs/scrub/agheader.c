@@ -48,7 +48,7 @@ xchk_superblock_xref(
 
 	agbno = XFS_SB_BLOCK(mp);
 
-	error = xchk_ag_init_existing(sc, agno, &sc->sa);
+	error = xchk_ag_init_existing(sc, agno);
 	if (!xchk_xref_process_error(sc, agno, agbno, &error))
 		return;
 
@@ -578,7 +578,7 @@ xchk_agf_xref(
 
 	agbno = XFS_AGF_BLOCK(mp);
 
-	xchk_ag_btcur_init(sc, &sc->sa);
+	xchk_ag_btcur_init(sc);
 
 	xchk_xref_is_used_space(sc, agbno, 1);
 	xchk_agf_xref_freeblks(sc);
@@ -611,7 +611,7 @@ xchk_agf(
 	int			level;
 	int			error = 0;
 
-	error = xchk_ag_read_headers(sc, agno, &sc->sa);
+	error = xchk_ag_read_headers(sc, agno);
 	if (!xchk_process_error(sc, agno, XFS_AGF_BLOCK(sc->mp), &error))
 		goto out;
 	xchk_buffer_recheck(sc, sc->sa.agf_bp);
@@ -766,7 +766,7 @@ xchk_agfl_xref(
 
 	agbno = XFS_AGFL_BLOCK(mp);
 
-	xchk_ag_btcur_init(sc, &sc->sa);
+	xchk_ag_btcur_init(sc);
 
 	xchk_xref_is_used_space(sc, agbno, 1);
 	xchk_xref_is_not_inode_chunk(sc, agbno, 1);
@@ -794,7 +794,7 @@ xchk_agfl(
 	int			error;
 
 	/* Lock the AGF and AGI so that nobody can touch this AG. */
-	error = xchk_ag_read_headers(sc, agno, &sc->sa);
+	error = xchk_ag_read_headers(sc, agno);
 	if (!xchk_process_error(sc, agno, XFS_AGFL_BLOCK(sc->mp), &error))
 		return error;
 	if (!sc->sa.agf_bp)
@@ -921,7 +921,7 @@ xchk_agi_xref(
 
 	agbno = XFS_AGI_BLOCK(mp);
 
-	xchk_ag_btcur_init(sc, &sc->sa);
+	xchk_ag_btcur_init(sc);
 
 	xchk_xref_is_used_space(sc, agbno, 1);
 	xchk_xref_is_not_inode_chunk(sc, agbno, 1);
@@ -1035,7 +1035,7 @@ xchk_agi(
 	int			level;
 	int			error = 0;
 
-	error = xchk_ag_read_headers(sc, agno, &sc->sa);
+	error = xchk_ag_read_headers(sc, agno);
 	if (!xchk_process_error(sc, agno, XFS_AGI_BLOCK(sc->mp), &error))
 		goto out;
 	xchk_buffer_recheck(sc, sc->sa.agi_bp);
