@@ -701,6 +701,9 @@ xfs_exchrange_contents(
 	if (error)
 		goto out_unlock;
 
+	if (fxr->flags & XFS_EXCHANGE_RANGE_DRY_RUN)
+		goto out_unlock;
+
 	/*
 	 * Finish the exchange by removing special file privileges like any
 	 * other file write would do.  This may involve turning on support for
@@ -782,6 +785,9 @@ xfs_exchange_range(
 	file_end_write(fxr->file2);
 	if (ret)
 		return ret;
+
+	if (fxr->flags & XFS_EXCHANGE_RANGE_DRY_RUN)
+		return 0;
 
 	fsnotify_modify(fxr->file1);
 	if (fxr->file2 != fxr->file1)
