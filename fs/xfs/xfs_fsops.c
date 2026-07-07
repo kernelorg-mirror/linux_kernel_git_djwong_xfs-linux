@@ -26,6 +26,7 @@
 #include "xfs_rtrefcount_btree.h"
 #include "xfs_metafile.h"
 #include "xfs_healthmon.h"
+#include "xfs_inode.h"
 
 #include <linux/fserror.h>
 
@@ -587,4 +588,95 @@ xfs_fs_unreserve_ag_blocks(
 	xfs_metafile_resv_free(mp);
 	while ((pag = xfs_perag_next(mp, pag)))
 		xfs_ag_resv_free(pag);
+}
+
+#define XFS_ADDFEATURE_SUPPORTED	(XFS_FSOP_GEOM_FLAGS_INOBTCNT | \
+					 XFS_FSOP_GEOM_FLAGS_BIGTIME | \
+					 XFS_FSOP_GEOM_FLAGS_NREXT64 | \
+					 XFS_FSOP_GEOM_FLAGS_EXCHANGE_RANGE)
+
+/* Add features to live filesystems. */
+long
+xfs_ioc_addfeature(
+	struct file		*file,
+	__u64			__user *uflags)
+{
+	struct xfs_mount	*mp = XFS_I(file_inode(file))->i_mount;
+	struct xfs_sb		*sbp = &mp->m_sb;
+	__u64			flags;
+	bool			dirty = false;
+	int			error = 0;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	if (copy_from_user(&flags, uflags, sizeof(__u64)))
+		return -EFAULT;
+
+	if (flags & ~XFS_ADDFEATURE_SUPPORTED)
+		return -EINVAL;
+
+	error = mnt_want_write_file(file);
+	if (error)
+		return error;
+
+	spin_lock(&mp->m_sb_lock);
+	if ((flags & XFS_FSOP_GEOM_FLAGS_BIGTIME) && !xfs_has_bigtime(mp)) {
+		xfs_info(mp, "Adding bigtime feature.");
+		sbp->sb_features_incompat |= XFS_SB_FEAT_INCOMPAT_BIGTIME;
+		mp->m_features |= XFS_FEAT_BIGTIME;
+		dirty = true;
+	}
+	if ((flags & XFS_FSOP_GEOM_FLAGS_INOBTCNT) &&
+	    !xfs_has_inobtcounts(mp)) {
+		xfs_info(mp, "Adding inobtcount feature.");
+		sbp->sb_features_ro_compat |= XFS_SB_FEAT_RO_COMPAT_INOBTCNT;
+		mp->m_features |= XFS_FEAT_INOBTCNT;
+		dirty = true;
+	}
+	if ((flags & XFS_FSOP_GEOM_FLAGS_NREXT64) &&
+	    !xfs_has_large_extent_counts(mp)) {
+		xfs_info(mp, "Adding nrext64 feature.");
+		sbp->sb_features_incompat |= XFS_SB_FEAT_INCOMPAT_NREXT64;
+		mp->m_features |= XFS_FEAT_NREXT64;
+		dirty = true;
+	}
+	if ((flags & XFS_FSOP_GEOM_FLAGS_EXCHANGE_RANGE) &&
+	    !xfs_has_exchange_range(mp)) {
+		xfs_info(mp, "Adding exchange-range feature.");
+		sbp->sb_features_incompat |= XFS_SB_FEAT_INCOMPAT_EXCHRANGE;
+		mp->m_features |= XFS_FEAT_EXCHANGE_RANGE;
+		dirty = true;
+	}
+	spin_unlock(&mp->m_sb_lock);
+
+	if (!dirty)
+		goto out;
+
+	/*
+	 * Now we do several things to satisfy userspace.  In addition to
+	 * normal logging of the primary superblock, we also immediately write
+	 * these changes to sector zero for the primary, then update all backup
+	 * supers (as xfs_db does for a label change), then invalidate the
+	 * block device page cache.  This is so that any prior buffered reads
+	 * from userspace (i.e. from blkid) are invalidated, and userspace will
+	 * see the newly-written label.
+	 */
+	error = xfs_sync_sb_buf(mp, false);
+	if (error)
+		goto out;
+	/*
+	 * growfs also updates backup supers so lock against that.
+	 */
+	mutex_lock(&mp->m_growlock);
+	error = xfs_update_secondary_sbs(mp);
+	mutex_unlock(&mp->m_growlock);
+
+	invalidate_bdev(mp->m_ddev_targp->bt_bdev);
+
+out:
+	if (error)
+		xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_INCORE);
+	mnt_drop_write_file(file);
+	return error;
 }
