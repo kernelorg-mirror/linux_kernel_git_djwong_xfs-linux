@@ -1234,6 +1234,7 @@ struct xfs_verify_media {
 #define XFS_IOC_HEALTH_FD_ON_MONITORED_FS \
 				_IOW ('X', 69, struct xfs_health_file_on_monitored_fs)
 #define XFS_IOC_VERIFY_MEDIA	_IOWR('X', 70, struct xfs_verify_media)
+#define XFS_IOC_ADDFEATURE	_IOW ('X', 71, __u64)
 
 /*
  * ioctl commands that replace IRIX syssgi()'s
