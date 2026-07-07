@@ -15,4 +15,6 @@ int xfs_fs_goingdown(struct xfs_mount *mp, uint32_t inflags);
 int xfs_fs_reserve_ag_blocks(struct xfs_mount *mp);
 void xfs_fs_unreserve_ag_blocks(struct xfs_mount *mp);
 
+long xfs_ioc_addfeature(struct file *file, __u64 __user *uflags);
+
 #endif	/* __XFS_FSOPS_H__ */
