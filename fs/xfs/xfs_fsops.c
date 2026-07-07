@@ -26,6 +26,7 @@
 #include "xfs_rtrefcount_btree.h"
 #include "xfs_metafile.h"
 #include "xfs_healthmon.h"
+#include "xfs_inode.h"
 
 #include <linux/fserror.h>
 
