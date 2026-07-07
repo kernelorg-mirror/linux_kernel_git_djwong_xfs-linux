@@ -194,6 +194,14 @@ xfs_verify_rgbext(
 }
 
 static inline xfs_rtblock_t
+xfs_rgno_to_rtb(
+	struct xfs_mount	*mp,
+	xfs_rgnumber_t		rgno)
+{
+	return (xfs_rtblock_t)rgno << mp->m_sb.sb_rgblklog;
+}
+
+static inline xfs_rtblock_t
 xfs_rgbno_to_rtb(
 	struct xfs_rtgroup	*rtg,
 	xfs_rgblock_t		rgbno)
