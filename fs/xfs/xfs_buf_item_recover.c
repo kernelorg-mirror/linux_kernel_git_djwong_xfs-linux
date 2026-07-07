@@ -720,6 +720,7 @@ xlog_recover_do_primary_sb_buffer(
 	xfs_lsn_t			current_lsn)
 {
 	struct xfs_dsb			*dsb = bp->b_addr;
+	xfs_rfsblock_t			dblocks;
 	xfs_agnumber_t			orig_agcount = mp->m_sb.sb_agcount;
 	xfs_rgnumber_t			orig_rgcount = mp->m_sb.sb_rgcount;
 	int				error;
@@ -738,9 +739,16 @@ xlog_recover_do_primary_sb_buffer(
 
 	/*
 	 * Grow can change the device size.  Mirror that into the buftarg.
+	 *
+	 * Internal rt volumes are placed immediately after the data device,
+	 * so set the buftarg sector count to the end of the rt volume so that
+	 * we can do media scans and handle media failure reports.
 	 */
-	mp->m_ddev_targp->bt_nr_sectors =
-		XFS_FSB_TO_BB(mp, mp->m_sb.sb_dblocks);
+	if (mp->m_sb.sb_rtstart)
+		dblocks = mp->m_sb.sb_rtstart + mp->m_sb.sb_rblocks;
+	else
+		dblocks = mp->m_sb.sb_dblocks;
+	mp->m_ddev_targp->bt_nr_sectors = XFS_FSB_TO_BB(mp, dblocks);
 	if (mp->m_rtdev_targp && mp->m_rtdev_targp != mp->m_ddev_targp) {
 		mp->m_rtdev_targp->bt_nr_sectors =
 			XFS_FSB_TO_BB(mp, mp->m_sb.sb_rblocks);
