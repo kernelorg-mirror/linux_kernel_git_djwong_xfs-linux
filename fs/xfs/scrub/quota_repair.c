@@ -364,10 +364,10 @@ xrep_quota_block(
 				defq->rtb.time);
 
 		/* We only support v5 filesystems so always set these. */
+		dqblk->dd_lsn = 0;
 		uuid_copy(&dqblk->dd_uuid, &sc->mp->m_sb.sb_meta_uuid);
 		xfs_update_cksum((char *)dqblk, sizeof(struct xfs_dqblk),
 				 XFS_DQUOT_CRC_OFF);
-		dqblk->dd_lsn = 0;
 	}
 	switch (dqtype) {
 	case XFS_DQTYPE_USER:
