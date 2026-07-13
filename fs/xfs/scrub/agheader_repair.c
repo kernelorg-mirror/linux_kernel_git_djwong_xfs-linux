@@ -46,10 +46,29 @@ xrep_superblock(
 	xfs_agnumber_t		agno;
 	int			error;
 
-	/* Don't try to repair AG 0's sb; let xfs_repair deal with it. */
 	agno = sc->sm->sm_agno;
-	if (agno == 0)
-		return -EOPNOTSUPP;
+	if (agno == 0) {
+		bp = xfs_trans_getsb(sc->tp);
+
+		/* Format the incore superblock into the primary sb buffer */
+		xfs_buf_zero(bp, 0, BBTOB(bp->b_length));
+		xfs_sb_to_disk(bp->b_addr, &mp->m_sb);
+
+		xfs_log_sb(sc->tp);
+
+		/* synchronous transaction to flush/release the buffer log item */
+		xfs_trans_set_sync(sc->tp);
+		error = xrep_trans_commit(sc);
+		if (error)
+			return error;
+
+		/* write the super out immediately */
+		xfs_buf_lock(bp);
+		xfs_buf_hold(bp);
+		error = xfs_bwrite(bp);
+		xfs_buf_relse(bp);
+		return error;
+	}
 
 	error = xfs_sb_get_secondary(mp, sc->tp, agno, &bp);
 	if (error)
