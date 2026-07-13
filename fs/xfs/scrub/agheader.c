@@ -119,8 +119,30 @@ xchk_superblock(
 	if (!pag)
 		return -ENOENT;
 
-	if (agno == 0)
+	if (agno == 0) {
+		/*
+		 * Read the primary super from disk in case it's been corrupted
+		 * since mount time.  Crashing with a bad primary super will
+		 * prevent remount, so we want to fix these things ASAP.
+		 */
+		error = xfs_buf_read_uncached(sc->mp->m_ddev_targp,
+				XFS_SB_DADDR, BTOBB(mp->m_sb.sb_sectsize), &bp,
+				&xfs_sb_buf_ops);
+		switch (error) {
+		case -EINVAL:	/* also -EWRONGFS */
+		case -ENOSYS:
+		case -EFBIG:
+			error = -EFSCORRUPTED;
+			fallthrough;
+		default:
+			break;
+		}
+		if (!xchk_process_error(sc, agno, XFS_SB_BLOCK(mp), &error))
+			goto out_pag;
+
+		xfs_buf_relse(bp);
 		goto out_xref;
+	}
 
 	error = xfs_sb_read_secondary(mp, sc->tp, agno, &bp);
 	/*
