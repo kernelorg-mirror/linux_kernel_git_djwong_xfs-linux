@@ -157,6 +157,11 @@ xfs_zoned_reserve_available(
 		if (error != -ENOSPC)
 			break;
 
+		if (signal_pending(current)) {
+			error = -ERESTARTSYS;
+			break;
+		}
+
 		/*
 		 * Make sure to start GC if it is not running already. As we
 		 * check the rtavailable count when filling up zones, GC is
