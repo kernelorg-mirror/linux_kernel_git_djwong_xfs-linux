@@ -489,13 +489,23 @@ xrep_dir_recover_data(
 		if (xchk_should_terminate(rd->sc, &error))
 			return error;
 
+		/* must have freetag */
+		if (offset + offsetof(struct xfs_dir2_data_unused, length) >= end)
+			break;
+
 		/* Skip unused entries. */
 		if (be16_to_cpu(dup->freetag) == XFS_DIR2_DATA_FREE_TAG) {
+			if (offset + sizeof(*dup) > end)
+				break;
 			if (!dup->length)
 				break;
 			offset += be16_to_cpu(dup->length);
 			continue;
 		}
+
+		/* must have namelen */
+		if (offset + offsetof(struct xfs_dir2_data_entry, name) >= end)
+			break;
 
 		/* Don't walk off the end of the block. */
 		advance = xfs_dir2_data_entsize(rd->sc->mp, dep->namelen);
