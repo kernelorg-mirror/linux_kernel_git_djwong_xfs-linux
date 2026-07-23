@@ -394,17 +394,30 @@ xchk_dir_rec(
 		struct xfs_dir2_data_entry	*dep = bp->b_addr + iter_off;
 		struct xfs_dir2_data_unused	*dup = bp->b_addr + iter_off;
 
-		if (iter_off >= end) {
+		/* must have freetag */
+		if (iter_off + offsetof(struct xfs_dir2_data_unused, length) >= end) {
 			xchk_fblock_set_corrupt(ds->sc, XFS_DATA_FORK, rec_bno);
-			goto out_relse;
+			break;
 		}
 
 		if (be16_to_cpu(dup->freetag) == XFS_DIR2_DATA_FREE_TAG) {
+			if (iter_off + sizeof(*dup) > end) {
+				xchk_fblock_set_corrupt(ds->sc, XFS_DATA_FORK,
+						rec_bno);
+				break;
+			}
 			iter_off += be16_to_cpu(dup->length);
 			continue;
 		}
 		if (dep == dent)
 			break;
+
+		/* must have namelen */
+		if (iter_off + offsetof(struct xfs_dir2_data_entry, name) >= end) {
+			xchk_fblock_set_corrupt(ds->sc, XFS_DATA_FORK, rec_bno);
+			break;
+		}
+
 		iter_off += xfs_dir2_data_entsize(mp, dep->namelen);
 	}
 
