@@ -751,9 +751,7 @@ xrep_dir_replay_update(
 	const struct xrep_dirent	*dirent)
 {
 	struct xfs_mount		*mp = rd->sc->mp;
-#ifdef DEBUG
 	xfs_ino_t			ino;
-#endif
 	uint				resblks;
 	int				error;
 
@@ -774,13 +772,12 @@ xrep_dir_replay_update(
 		 * There shouldn't be any in the temporary dir, but we'll
 		 * verify this in debug mode.
 		 */
-#ifdef DEBUG
 		error = xchk_dir_lookup(rd->sc, rd->sc->tempip, xname, &ino);
 		if (error != -ENOENT) {
 			ASSERT(error != -ENOENT);
+			error = -EIO;
 			goto out_cancel;
 		}
-#endif
 
 		error = xrep_dir_replay_createname(rd, xname, dirent->ino,
 				resblks);
@@ -798,10 +795,10 @@ xrep_dir_replay_update(
 		 * entry.  There should be a perfect match in the temporary
 		 * dir, but we'll verify this in debug mode.
 		 */
-#ifdef DEBUG
 		error = xchk_dir_lookup(rd->sc, rd->sc->tempip, xname, &ino);
 		if (error) {
 			ASSERT(error != 0);
+			error = -EIO;
 			goto out_cancel;
 		}
 		if (ino != dirent->ino) {
@@ -809,7 +806,6 @@ xrep_dir_replay_update(
 			error = -EIO;
 			goto out_cancel;
 		}
-#endif
 
 		error = xrep_dir_replay_removename(rd, xname, resblks);
 		if (error)
