@@ -314,7 +314,7 @@ xchk_metapath(
 		return 0;
 
 	/* Parent required to do anything else. */
-	if (mpath->dp == NULL) {
+	if (mpath->dp == NULL || mpath->dp == sc->ip) {
 		xchk_ip_set_corrupt(sc, sc->ip);
 		return 0;
 	}
@@ -504,6 +504,10 @@ xrep_metapath_try_link(
 	struct xfs_scrub	*sc = mpath->sc;
 	xfs_ino_t		ino;
 	int			error;
+
+	/* Can't link a file to itself; we should unlink this. */
+	if (mpath->dp == sc->ip)
+		return -EEXIST;
 
 	/* Allocate transaction, lock inodes, join to transaction. */
 	error = xchk_trans_alloc(sc, mpath->link_resblks);
