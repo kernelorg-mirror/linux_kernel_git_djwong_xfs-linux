@@ -272,6 +272,8 @@ xchk_metapath_ilock_both(
 
 	while (true) {
 		xfs_ilock(mpath->dp, XFS_ILOCK_EXCL);
+		if (mpath->dp == sc->ip)
+			return 0;
 		if (xchk_ilock_nowait(sc, XFS_ILOCK_EXCL)) {
 			mpath->dp_ilock_flags |= XFS_ILOCK_EXCL;
 			return 0;
