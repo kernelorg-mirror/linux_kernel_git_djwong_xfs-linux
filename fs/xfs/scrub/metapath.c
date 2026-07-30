@@ -508,7 +508,7 @@ xrep_metapath_try_link(
 	xfs_ino_t		*alleged_child)
 {
 	struct xfs_scrub	*sc = mpath->sc;
-	xfs_ino_t		ino;
+	xfs_ino_t		ino = NULLFSINO;
 	int			error;
 
 	/* Can't link a file to itself; we should unlink this. */
