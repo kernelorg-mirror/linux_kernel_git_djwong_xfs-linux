@@ -515,7 +515,7 @@ xrep_metapath_try_link(
 	xfs_ino_t		*alleged_child)
 {
 	struct xfs_scrub	*sc = mpath->sc;
-	xfs_ino_t		ino;
+	xfs_ino_t		ino = NULLFSINO;
 	int			error;
 
 	/* Allocate transaction, lock inodes, join to transaction. */
@@ -614,7 +614,7 @@ xrep_metapath_try_unlink(
 {
 	struct xfs_scrub	*sc = mpath->sc;
 	struct xfs_inode	*ip = NULL;
-	xfs_ino_t		ino;
+	xfs_ino_t		ino = NULLFSINO;
 	int			error;
 
 	ASSERT(*alleged_child != I_INO(sc->ip));
