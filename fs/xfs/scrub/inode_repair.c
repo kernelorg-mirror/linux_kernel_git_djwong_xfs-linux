@@ -1779,8 +1779,17 @@ xrep_inode_ids(
 	}
 
 	/* strip setuid/setgid if we touched any of the ids */
-	if (dirty)
+	if (dirty) {
 		VFS_I(sc->ip)->i_mode &= ~(S_ISUID | S_ISGID);
+
+		/*
+		 * Try to reattach dquots for the new ids, but as we've already
+		 * scheduled a quotacheck it doesn't matter if we fail to
+		 * attach them.
+		 */
+		xfs_qm_dqdetach(sc->ip);
+		(void)xfs_qm_dqattach_locked(sc->ip, false);
+	}
 }
 
 static inline void
