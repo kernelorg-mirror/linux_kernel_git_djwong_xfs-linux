@@ -1779,8 +1779,17 @@ xrep_inode_ids(
 	}
 
 	/* strip setuid/setgid if we touched any of the ids */
-	if (dirty)
+	if (dirty) {
 		VFS_I(sc->ip)->i_mode &= ~(S_ISUID | S_ISGID);
+
+		/*
+		 * We changed one of the file IDs, so we must detach the dquots
+		 * to prevent further changes from being accounted to them.
+		 * We've already scheduled a quotacheck so the accounting
+		 * discrepancies will get fixed eventually.
+		 */
+		xfs_qm_dqdetach(sc->ip);
+	}
 }
 
 static inline void
