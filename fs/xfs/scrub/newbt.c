@@ -56,7 +56,7 @@ xrep_newbt_estimate_slack(
 {
 	struct xfs_scrub	*sc = xnr->sc;
 	struct xfs_btree_bload	*bload = &xnr->bload;
-	uint64_t		free;
+	int64_t			free;
 	uint64_t		sz;
 
 	/*
@@ -72,6 +72,8 @@ xrep_newbt_estimate_slack(
 		sz = xfs_ag_block_count(sc->mp, pag_agno(sc->sa.pag));
 	} else {
 		free = xfs_sum_freecounter_raw(sc->mp, XC_FREE_BLOCKS);
+		if (free < 0)
+			free = 0;
 		sz = sc->mp->m_sb.sb_dblocks;
 	}
 
