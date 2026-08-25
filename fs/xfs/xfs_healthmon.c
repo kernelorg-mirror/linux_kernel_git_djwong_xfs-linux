@@ -87,12 +87,10 @@ xfs_healthmon_put(
 	struct xfs_healthmon		*hm)
 {
 	if (refcount_dec_and_test(&hm->ref)) {
-		struct xfs_healthmon_event	*event;
-		struct xfs_healthmon_event	*next = hm->first_event;
+		struct xfs_healthmon_event	*event, *s;
 
-		while ((event = next) != NULL) {
+		list_for_each_entry_safe(event, s, &hm->event_list, list) {
 			trace_xfs_healthmon_drop(hm, event);
-			next = event->next;
 			kfree(event);
 		}
 
@@ -173,9 +171,13 @@ static inline void xfs_healthmon_bump_lost(struct xfs_healthmon *hm)
  */
 static bool
 xfs_healthmon_merge_events(
-	struct xfs_healthmon_event		*existing,
+	struct xfs_healthmon			*hm,
 	const struct xfs_healthmon_event	*new)
 {
+	struct xfs_healthmon_event		*existing =
+		list_last_entry_or_null(&hm->event_list, struct
+				xfs_healthmon_event, list);
+
 	if (!existing)
 		return false;
 
@@ -277,10 +279,7 @@ __xfs_healthmon_insert(
 	ktime_get_coarse_real_ts64(&now);
 	event->time_ns = (now.tv_sec * NSEC_PER_SEC) + now.tv_nsec;
 
-	event->next = hm->first_event;
-	hm->first_event = event;
-	if (!hm->last_event)
-		hm->last_event = event;
+	list_add(&event->list, &hm->event_list);
 	xfs_healthmon_bump_events(hm);
 	wake_up(&hm->wait);
 
@@ -300,16 +299,34 @@ __xfs_healthmon_push(
 	ktime_get_coarse_real_ts64(&now);
 	event->time_ns = (now.tv_sec * NSEC_PER_SEC) + now.tv_nsec;
 
-	if (!hm->first_event)
-		hm->first_event = event;
-	if (hm->last_event)
-		hm->last_event->next = event;
-	hm->last_event = event;
-	event->next = NULL;
+	list_add_tail(&event->list, &hm->event_list);
 	xfs_healthmon_bump_events(hm);
 	wake_up(&hm->wait);
 
 	trace_xfs_healthmon_push(hm, event);
+}
+
+static inline struct xfs_healthmon_event *xfs_healthmon_alloc_event(void)
+{
+	struct xfs_healthmon_event		*event =
+		kzalloc_obj(struct xfs_healthmon_event, GFP_NOFS);
+
+	if (event)
+		INIT_LIST_HEAD(&event->list);
+	return event;
+}
+
+static inline struct xfs_healthmon_event *
+xfs_healthmon_dup_event(
+	const struct xfs_healthmon_event	*template)
+{
+	struct xfs_healthmon_event		*event =
+		kmemdup(template, sizeof(struct xfs_healthmon_event),
+				GFP_NOFS);
+
+	if (event)
+		INIT_LIST_HEAD(&event->list);
+	return event;
 }
 
 /* Deal with any previously lost events */
@@ -324,15 +341,14 @@ xfs_healthmon_clear_lost_prev(
 	};
 	struct xfs_healthmon_event	*event = NULL;
 
-	if (xfs_healthmon_merge_events(hm->last_event, &lost_event)) {
-		trace_xfs_healthmon_merge(hm, hm->last_event);
+	if (xfs_healthmon_merge_events(hm, &lost_event)) {
+		trace_xfs_healthmon_merge(hm, &lost_event);
 		wake_up(&hm->wait);
 		goto cleared;
 	}
 
 	if (hm->events < XFS_HEALTHMON_MAX_EVENTS)
-		event = kmemdup(&lost_event, sizeof(struct xfs_healthmon_event),
-				GFP_NOFS);
+		event = xfs_healthmon_dup_event(&lost_event);
 	if (!event)
 		return -ENOMEM;
 
@@ -372,16 +388,15 @@ xfs_healthmon_push(
 	}
 
 	/* Try to merge with the newest event */
-	if (xfs_healthmon_merge_events(hm->last_event, template)) {
-		trace_xfs_healthmon_merge(hm, hm->last_event);
+	if (xfs_healthmon_merge_events(hm, template)) {
+		trace_xfs_healthmon_merge(hm, template);
 		wake_up(&hm->wait);
 		goto out_unlock;
 	}
 
 	/* Only create a heap event object if we're not already at capacity. */
 	if (hm->events < XFS_HEALTHMON_MAX_EVENTS)
-		event = kmemdup(template, sizeof(struct xfs_healthmon_event),
-				GFP_NOFS);
+		event = xfs_healthmon_dup_event(template);
 	if (!event) {
 		/* No memory means we lose the event */
 		trace_xfs_healthmon_lost_event(hm);
@@ -899,11 +914,10 @@ xfs_healthmon_format_pop(
 		return NULL;
 
 	mutex_lock(&hm->lock);
-	event = hm->first_event;
+	event = list_first_entry_or_null(&hm->event_list,
+			struct xfs_healthmon_event, list);
 	if (event) {
-		if (hm->last_event == event)
-			hm->last_event = NULL;
-		hm->first_event = event->next;
+		list_del_init(&event->list);
 		hm->events--;
 
 		trace_xfs_healthmon_pop(hm, event);
@@ -1203,6 +1217,7 @@ xfs_ioc_health_monitor(
 		return -ENOMEM;
 	hm->dev = mp->m_super->s_dev;
 	refcount_set(&hm->ref, 1);
+	INIT_LIST_HEAD(&hm->event_list);
 
 	mutex_init(&hm->lock);
 	init_waitqueue_head(&hm->wait);
@@ -1211,7 +1226,7 @@ xfs_ioc_health_monitor(
 		hm->verbose = true;
 
 	/* Queue up the first event that lets the client know we're running. */
-	running_event = kzalloc_obj(struct xfs_healthmon_event, GFP_NOFS);
+	running_event = xfs_healthmon_alloc_event();
 	if (!running_event) {
 		ret = -ENOMEM;
 		goto out_hm;
@@ -1225,7 +1240,7 @@ xfs_ioc_health_monitor(
 	 * filesystem later.  This is key for triggering fast exit of the
 	 * xfs_healer daemon.
 	 */
-	hm->unmount_event = kzalloc_obj(struct xfs_healthmon_event, GFP_NOFS);
+	hm->unmount_event = xfs_healthmon_alloc_event();
 	if (!hm->unmount_event) {
 		ret = -ENOMEM;
 		goto out_hm;
