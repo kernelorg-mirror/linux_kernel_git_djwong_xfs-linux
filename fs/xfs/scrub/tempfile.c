@@ -649,6 +649,18 @@ xrep_tempexch_prep_request(
 	return 0;
 }
 
+static inline unsigned int
+xrep_tempexch_estimate_sf_resblks(
+	struct xfs_scrub	*sc,
+	int			whichfork)
+{
+	if (whichfork == XFS_ATTR_FORK)
+		return sc->mp->m_attr_geo->fsbcount;
+	if (S_ISDIR(VFS_I(sc->ip)->i_mode))
+		return sc->mp->m_dir_geo->fsbcount;
+	return 1;
+}
+
 /*
  * Fill out the mapping exchange resource estimation structures in preparation
  * for exchanging the contents of a metadata file that we've rebuilt in the
@@ -663,6 +675,8 @@ xrep_tempexch_estimate(
 	struct xfs_ifork	*ifp;
 	struct xfs_ifork	*tifp;
 	int			whichfork = xfs_exchmaps_reqfork(req);
+	unsigned int		sf_resblks =
+		xrep_tempexch_estimate_sf_resblks(sc, whichfork);
 	int			state = 0;
 
 	/*
@@ -693,9 +707,9 @@ xrep_tempexch_estimate(
 		 * plus the block we converted.
 		 */
 		req->ip1_bcount = sc->tempip->i_nblocks;
-		req->ip2_bcount = 1;
+		req->ip2_bcount = sf_resblks;
 		req->nr_exchanges = 1 + tifp->if_nextents;
-		req->resblks = 1;
+		req->resblks = sf_resblks;
 		break;
 	case 2:
 		/*
@@ -707,10 +721,10 @@ xrep_tempexch_estimate(
 		 * is (worst case) the extent count of the file being repaired
 		 * plus the block we converted.
 		 */
-		req->ip1_bcount = 1;
+		req->ip1_bcount = sf_resblks;
 		req->ip2_bcount = sc->ip->i_nblocks;
 		req->nr_exchanges = 1 + ifp->if_nextents;
-		req->resblks = 1;
+		req->resblks = sf_resblks;
 		break;
 	case 3:
 		/*
@@ -722,10 +736,10 @@ xrep_tempexch_estimate(
 		 * fileoff 0.  Presumably, the caller could not exchange the
 		 * two inode fork areas directly.
 		 */
-		req->ip1_bcount = 1;
-		req->ip2_bcount = 1;
+		req->ip1_bcount = sf_resblks;
+		req->ip2_bcount = sf_resblks;
 		req->nr_exchanges = 1;
-		req->resblks = 2;
+		req->resblks = 2 * sf_resblks;
 		break;
 	}
 

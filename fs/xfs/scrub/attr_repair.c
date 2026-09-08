@@ -1294,7 +1294,7 @@ xrep_xattr_swap_prep(
 			.geo		= sc->mp->m_attr_geo,
 			.whichfork	= XFS_ATTR_FORK,
 			.trans		= sc->tp,
-			.total		= 1,
+			.total		= sc->mp->m_attr_geo->fsbcount,
 			.owner		= I_INO(sc->ip),
 		};
 
